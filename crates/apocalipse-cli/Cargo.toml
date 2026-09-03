@@ -1,0 +1,11 @@
+[package]
+name = "apocalipse-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+apocalipse-core = { path = "../apocalipse-core" }
+tokio.workspace = true
+
