@@ -53,7 +53,7 @@ impl DownloadEngine {
         let accepts_ranges = head.as_ref().and_then(|response| response.headers().get(header::ACCEPT_RANGES))
             .and_then(|value| value.to_str().ok()).is_some_and(|value| value.eq_ignore_ascii_case("bytes"));
         let requested = request.connections.clamp(1, 32);
-        let useful_connections = total.map(|size| requested.min(((size + 4_194_303) / 4_194_304) as usize)).unwrap_or(1);
+        let useful_connections = total.map(|size| requested.min(size.div_ceil(4_194_304) as usize)).unwrap_or(1);
         if accepts_ranges && useful_connections > 1 {
             let probe = self.client.get(&request.url).header(header::RANGE, "bytes=0-0").send().await?;
             if probe.status() == StatusCode::PARTIAL_CONTENT {

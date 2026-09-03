@@ -370,8 +370,8 @@ fn start_download(app: &tauri::AppHandle, state: &AppState, task: DownloadTask, 
 
 fn start_next_queued(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
-    let available = state.settings.lock().map(|settings| settings.max_active_downloads.clamp(1, 20))
-        .and_then(|maximum| state.workers.lock().map(|workers| maximum.saturating_sub(workers.len()))).unwrap_or(0);
+    let maximum = state.settings.lock().map(|settings| settings.max_active_downloads.clamp(1, 20)).unwrap_or(0);
+    let available = state.workers.lock().map(|workers| maximum.saturating_sub(workers.len())).unwrap_or(0);
     if available == 0 { return; }
     let queued = state.queue.lock().map(|queue| queue.iter().filter(|task| task.state == DownloadState::Queued).take(available).cloned().collect::<Vec<_>>()).unwrap_or_default();
     for task in queued {
