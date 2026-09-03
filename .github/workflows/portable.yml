@@ -1,0 +1,101 @@
+name: Portable builds
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: portable-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64 portable
+            os: windows-latest
+            artifact: apocalipse-download-manager-windows-x64-portable
+          - name: Linux x64 portable
+            os: ubuntu-latest
+            artifact: apocalipse-download-manager-linux-x64-portable
+          - name: macOS portable
+            os: macos-latest
+            artifact: apocalipse-download-manager-macos-portable
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build desktop
+        run: cargo build --release --locked -p apocalipse-desktop
+
+      - name: Stage Windows portable package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $package = "dist/Apocalipse Download Manager"
+          New-Item -ItemType Directory -Force "$package/browser extensions" | Out-Null
+          Copy-Item "target/release/apocalipse-desktop.exe" "$package/Apocalipse Download Manager.exe"
+          Copy-Item "browser-extension" "$package/browser extensions/unpacked-development-extension" -Recurse
+          Copy-Item "README.md","LICENSE" $package
+          Compress-Archive -Path $package -DestinationPath "dist/${{ matrix.artifact }}.zip"
+
+      - name: Stage Linux portable package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          package="dist/Apocalipse Download Manager"
+          mkdir -p "$package/browser extensions"
+          install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
+          cp -R browser-extension "$package/browser extensions/unpacked-development-extension"
+          cp README.md LICENSE "$package/"
+          tar -C dist -czf "dist/${{ matrix.artifact }}.tar.gz" "Apocalipse Download Manager"
+
+      - name: Stage macOS portable app
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app="dist/Apocalipse Download Manager.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/browser extensions"
+          cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
+          chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
+          cp packaging/macos/Info.plist "$app/Contents/Info.plist"
+          cp -R browser-extension "$app/Contents/Resources/browser extensions/unpacked-development-extension"
+          cp README.md LICENSE "$app/Contents/Resources/"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "dist/${{ matrix.artifact }}.zip"
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach package to tagged Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          generate_release_notes: true
+          files: |
+            dist/*.zip
+            dist/*.tar.gz

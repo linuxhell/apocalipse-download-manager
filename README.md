@@ -7,7 +7,7 @@
 <p align="center"><strong>A powerful, intelligent and open-source download manager for Windows, Linux and macOS.</strong></p>
 
 > [!IMPORTANT]
-> Apocalipse is being built from scratch. The repository currently contains the tested core foundation and browser-extension prototype; it is not yet a production release.
+> Apocalipse is being built from scratch. The repository currently contains the tested core foundation, first desktop interface and browser-extension prototype; it is not yet a production release.
 
 ## Vision
 
@@ -41,8 +41,20 @@ Sites protected by DRM or access controls are intentionally not bypassed. Users 
 | --- | --- |
 | `apocalipse-core` | Task model, URL classification, resumable HTTP engine and tool abstractions |
 | `apocalipse-cli` | Headless development client and core integration testing |
-| `apps/desktop` | Tauri desktop interface (next milestone) |
+| `apps/desktop` | Multilingual Tauri desktop interface and native tray foundation |
 | `browser-extension` | Chromium/Firefox media detector and native-app bridge |
+
+## Portable builds
+
+Apocalipse is distributed primarily as a portable application, with no mandatory installer:
+
+- Windows: a complete folder inside a `.zip`, launched directly from the executable
+- Linux: a portable `.tar.gz`; AppImage will be added after compatibility validation
+- macOS: an application bundle (`.app`) inside a `.zip`
+- Browser-extension files are kept inside the `browser extensions` directory in every package
+- Windows ARM64, Linux ARM64 and Apple Silicon-native packages will be added as each target is validated
+
+The **Portable builds** workflow can be run manually for test artifacts. Tags beginning with `v` attach the same validated packages to GitHub Releases. Android is not supported or built.
 
 ## Try the current core
 
