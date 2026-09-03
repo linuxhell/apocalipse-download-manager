@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Apocalipse Download Manager</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside>
+    <div class="brand"><img src="assets/apocalipse-alien.png" alt=""><div><strong>APOCALIPSE</strong><small>DOWNLOAD MANAGER</small></div></div>
+    <nav>
+      <button class="active" data-page="downloads"><span>⇩</span><b data-i18n="downloads">Downloads</b></button>
+      <button data-page="media"><span>▶</span><b data-i18n="media">Media</b></button>
+      <button data-page="torrents"><span>◉</span><b data-i18n="torrents">Torrents</b></button>
+      <button data-page="link"><span>↔</span><b>Apocalipse Link</b></button>
+      <button data-page="tools"><span>⌁</span><b data-i18n="tools">Tools</b></button>
+      <button data-page="settings"><span>⚙</span><b data-i18n="settings">Settings</b></button>
+    </nav>
+    <div class="engine"><i></i><span><b data-i18n="engineReady">Engine ready</b><small>Rust Core · Native</small></span></div>
+  </aside>
+  <main>
+    <header><div><p data-i18n="overview">OVERVIEW</p><h1 data-i18n="downloads">Downloads</h1></div><div class="actions"><select id="language" aria-label="Language"><option value="en">English</option><option value="pt-BR">Português (Brasil)</option><option value="zh-CN">简体中文</option></select><button id="add" class="primary"><span>＋</span><b data-i18n="addDownload">Add download</b></button></div></header>
+    <section class="metrics">
+      <article><span class="cyan">↓</span><div><small data-i18n="downloadSpeed">DOWNLOAD SPEED</small><strong>0 B/s</strong></div></article>
+      <article><span class="violet">↑</span><div><small data-i18n="uploadSpeed">UPLOAD SPEED</small><strong>0 B/s</strong></div></article>
+      <article><span class="green">✓</span><div><small data-i18n="completed">COMPLETED</small><strong>0</strong></div></article>
+      <article><span class="orange">≋</span><div><small data-i18n="queue">IN QUEUE</small><strong>0</strong></div></article>
+    </section>
+    <section class="panel"><div class="toolbar"><div class="tabs"><button class="active" data-i18n="all">All</button><button data-i18n="active">Active</button><button data-i18n="completed">Completed</button></div><button class="ghost" data-i18n="clearFinished">Clear finished</button></div><div class="empty"><div class="orbit"><img src="assets/apocalipse-alien.png" alt=""></div><h2 data-i18n="emptyTitle">Ready for your next download</h2><p data-i18n="emptyText">Add a URL, drop a torrent, or use the browser extension.</p><button id="empty-add" class="primary" data-i18n="addFirst">Add your first download</button></div></section>
+    <footer><span><i></i><b data-i18n="connected">Browser bridge connected</b></span><span>v0.1.0-alpha.1</span></footer>
+  </main>
+  <dialog id="add-dialog"><form method="dialog"><div class="dialog-head"><div><small data-i18n="newTask">NEW TASK</small><h2 data-i18n="addDownload">Add download</h2></div><button value="cancel" class="close">×</button></div><label data-i18n="sourceUrl">Source URL</label><input id="url" type="url" placeholder="https://…" required autofocus><div id="analysis" class="analysis" hidden></div><div class="dialog-actions"><button value="cancel" data-i18n="cancel">Cancel</button><button id="analyze" value="default" class="primary" data-i18n="analyze">Analyze</button></div></form></dialog>
+  <script src="app.js"></script>
+</body>
+</html>
