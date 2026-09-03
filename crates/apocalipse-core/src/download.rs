@@ -29,7 +29,7 @@ impl DownloadEngine {
     pub fn new() -> Result<Self> {
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(15))
-            .timeout(Duration::from_secs(60))
+            .read_timeout(Duration::from_secs(60))
             .redirect(reqwest::redirect::Policy::limited(10))
             .user_agent("ApocalipseDownloadManager/0.1")
             .build()?;

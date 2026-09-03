@@ -386,6 +386,21 @@ dialog input:focus {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.task-progress {
+  height: 4px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #172832;
+}
+.task-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #20d8ec, #45a9ff);
+  box-shadow: 0 0 8px #20d8ec88;
+  transition: width 0.25s ease;
+}
 .download-info strong {
   font-size: 13px;
 }

@@ -24,6 +24,9 @@ const catalogs = {
     cancel: "Cancel",
     analyze: "Analyze",
     queued: "Queued",
+    inspecting: "Inspecting",
+    downloading: "Downloading",
+    failed: "Failed",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -51,6 +54,9 @@ const catalogs = {
     cancel: "Cancelar",
     analyze: "Analisar",
     queued: "Na fila",
+    inspecting: "Analisando",
+    downloading: "Baixando",
+    failed: "Falhou",
   },
   "zh-CN": {
     downloads: "下载",
@@ -77,11 +83,15 @@ const catalogs = {
     cancel: "取消",
     analyze: "分析",
     queued: "已排队",
+    inspecting: "正在检查",
+    downloading: "正在下载",
+    failed: "失败",
   },
 };
 
 let locale = localStorage.getItem("apocalipse.language") || "en";
 let downloads = [];
+let previousSample = { at: performance.now(), bytes: 0 };
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const invoke = (command, args = {}) => {
   const bridge = window.__TAURI__?.core?.invoke;
@@ -91,6 +101,16 @@ const invoke = (command, args = {}) => {
 
 function stateName(state) {
   return typeof state === "string" ? t(state) : Object.keys(state)[0];
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const index = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1,
+  );
+  return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
 }
 
 function renderDownloads() {
@@ -115,15 +135,39 @@ function renderDownloads() {
     source.textContent = task.source;
     source.title = task.source;
     info.append(name, source);
+    const progress = document.createElement("div");
+    progress.className = "task-progress";
+    const bar = document.createElement("i");
+    const percent = task.total
+      ? Math.min(100, (task.received / task.total) * 100)
+      : 0;
+    bar.style.width = `${percent}%`;
+    const details = document.createElement("small");
+    details.textContent = task.total
+      ? `${formatBytes(task.received)} / ${formatBytes(task.total)} · ${percent.toFixed(1)}%`
+      : formatBytes(task.received);
+    progress.append(bar);
+    info.append(progress, details);
     const state = Object.assign(document.createElement("span"), {
       className: "download-state",
       textContent: stateName(task.state),
     });
+    if (typeof task.state === "object")
+      state.title = task.state.failed?.message || "";
     row.append(icon, info, state);
     list.append(row);
   }
   document.querySelector(".metrics article:nth-child(4) strong").textContent =
     downloads.filter((task) => task.state === "queued").length;
+  document.querySelector(".metrics article:nth-child(3) strong").textContent =
+    downloads.filter((task) => task.state === "completed").length;
+  const now = performance.now();
+  const bytes = downloads.reduce((sum, task) => sum + task.received, 0);
+  const elapsed = Math.max(0.001, (now - previousSample.at) / 1000);
+  const speed = Math.max(0, bytes - previousSample.bytes) / elapsed;
+  document.querySelector(".metrics article:first-child strong").textContent =
+    `${formatBytes(speed)}/s`;
+  previousSample = { at: now, bytes };
 }
 
 function translate() {
@@ -145,9 +189,9 @@ async function refreshDownloads() {
 }
 
 const dialog = document.querySelector("#add-dialog");
-document.querySelectorAll("[data-dialog-close]").forEach(
-  (button) => (button.onclick = () => dialog.close()),
-);
+document
+  .querySelectorAll("[data-dialog-close]")
+  .forEach((button) => (button.onclick = () => dialog.close()));
 document.querySelectorAll("#add,#empty-add").forEach(
   (button) =>
     (button.onclick = () => {
@@ -202,3 +246,4 @@ document.querySelector("#enqueue").onclick = async () => {
 
 translate();
 refreshDownloads();
+setInterval(refreshDownloads, 750);

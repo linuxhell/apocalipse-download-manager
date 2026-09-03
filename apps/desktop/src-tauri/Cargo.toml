@@ -13,4 +13,4 @@ apocalipse-core = { path = "../../../crates/apocalipse-core" }
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2", features = ["tray-icon"] }
-
+tokio.workspace = true
