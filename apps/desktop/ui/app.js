@@ -145,6 +145,9 @@ async function refreshDownloads() {
 }
 
 const dialog = document.querySelector("#add-dialog");
+document.querySelectorAll("[data-dialog-close]").forEach(
+  (button) => (button.onclick = () => dialog.close()),
+);
 document.querySelectorAll("#add,#empty-add").forEach(
   (button) =>
     (button.onclick = () => {

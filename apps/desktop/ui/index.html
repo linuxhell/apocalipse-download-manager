@@ -117,7 +117,7 @@
             <small data-i18n="newTask">NEW TASK</small>
             <h2 data-i18n="addDownload">Add download</h2>
           </div>
-          <button value="cancel" class="close">×</button>
+          <button type="button" class="close" data-dialog-close>×</button>
         </div>
         <label data-i18n="sourceUrl">Source URL</label
         ><input
@@ -129,7 +129,7 @@
         />
         <div id="analysis" class="analysis" hidden></div>
         <div class="dialog-actions">
-          <button value="cancel" data-i18n="cancel">Cancel</button
+          <button type="button" data-dialog-close data-i18n="cancel">Cancel</button
           ><button
             id="analyze"
             type="button"
