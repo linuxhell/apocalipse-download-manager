@@ -277,6 +277,10 @@ footer span:first-child {
   align-items: center;
   gap: 7px;
 }
+footer .bridge-waiting i {
+  background: #ffae57;
+  box-shadow: 0 0 10px #ffae57;
+}
 dialog {
   width: min(560px, calc(100vw - 40px));
   border: 1px solid #27414c;
