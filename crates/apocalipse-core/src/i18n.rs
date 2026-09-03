@@ -33,6 +33,8 @@ impl Translator {
             (Language::PortugueseBrazil, "convert_ts") => "Converter TS para MP4",
             (Language::PortugueseBrazil, "fast_remux") => "Conversão rápida sem perda",
             (Language::PortugueseBrazil, "compatibility_mode") => "Modo de compatibilidade",
+            (Language::PortugueseBrazil, "watch_while_downloading") => "Assistir enquanto baixa",
+            (Language::PortugueseBrazil, "media_player") => "Reprodutor de mídia",
             (Language::ChineseSimplified, "downloads") => "下载",
             (Language::ChineseSimplified, "settings") => "设置",
             (Language::ChineseSimplified, "video") => "视频",
@@ -41,6 +43,8 @@ impl Translator {
             (Language::ChineseSimplified, "convert_ts") => "将 TS 转换为 MP4",
             (Language::ChineseSimplified, "fast_remux") => "无损快速封装",
             (Language::ChineseSimplified, "compatibility_mode") => "兼容模式",
+            (Language::ChineseSimplified, "watch_while_downloading") => "边下边看",
+            (Language::ChineseSimplified, "media_player") => "媒体播放器",
             (_, "downloads") => "Downloads",
             (_, "settings") => "Settings",
             (_, "video") => "Video",
@@ -49,6 +53,8 @@ impl Translator {
             (_, "convert_ts") => "Convert TS to MP4",
             (_, "fast_remux") => "Fast lossless remux",
             (_, "compatibility_mode") => "Compatibility mode",
+            (_, "watch_while_downloading") => "Watch while downloading",
+            (_, "media_player") => "Media player",
             _ => key,
         }
     }
@@ -62,7 +68,7 @@ mod tests {
         assert_eq!(Language::default(), Language::English);
         for language in Language::ALL {
             let tr = Translator::new(language);
-            for key in ["downloads", "settings", "video", "audio", "images", "convert_ts", "fast_remux", "compatibility_mode"] { assert_ne!(tr.text(key), key); }
+            for key in ["downloads", "settings", "video", "audio", "images", "convert_ts", "fast_remux", "compatibility_mode", "watch_while_downloading", "media_player"] { assert_ne!(tr.text(key), key); }
         }
     }
 }

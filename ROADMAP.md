@@ -28,6 +28,7 @@
 
 - libtorrent-backed magnet and torrent sessions
 - File selection, priorities, peers, trackers and sequential mode
+- Watch video torrents while downloading through VLC, mpv or a configured executable
 - Magnet and `.torrent` associations
 
 ## M4 — hardening

@@ -8,7 +8,7 @@ pub enum Engine {
     Aria2Rpc,
     YtDlp,
     NativeHls,
-    N_m3u8dlRe,
+    NM3u8dlRe,
     NativeTorrent,
     AMule,
 }
@@ -43,7 +43,7 @@ pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<Strategy
             reason: if capabilities.yt_dlp { "media_extractor_available" } else { "media_extractor_missing" },
         },
         DownloadKind::Hls => StrategyPlan {
-            primary: if capabilities.n_m3u8dl_re { Engine::N_m3u8dlRe } else { Engine::NativeHls },
+            primary: if capabilities.n_m3u8dl_re { Engine::NM3u8dlRe } else { Engine::NativeHls },
             fallbacks: vec![Engine::NativeHls],
             reason: "hls_manifest",
         },
