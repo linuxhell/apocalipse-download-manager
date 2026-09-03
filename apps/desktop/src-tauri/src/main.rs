@@ -449,7 +449,11 @@ fn main() {
             let menu = Menu::with_items(app, &[&show, &quit])?;
             // The detailed application artwork loses definition at the 16–24 px sizes used by
             // system trays. Keep a simplified, high-contrast asset specifically for this role.
-            let icon = Image::from_bytes(include_bytes!("../icons/tray.png"))?;
+            let icon = Image::new_owned(
+                include_bytes!("../icons/tray.rgba").to_vec(),
+                32,
+                32,
+            );
             TrayIconBuilder::new()
                 .icon(icon)
                 .tooltip("Apocalipse Download Manager")
