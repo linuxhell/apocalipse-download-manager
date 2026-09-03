@@ -27,6 +27,7 @@ Apocalipse combines fast resumable downloads, media discovery, streaming capture
 - HLS recording to MP4/AAC where the stream and applicable law permit it
 - Native tray integration and a low-memory background mode
 - Complete UI localization: English by default, Brazilian Portuguese and Simplified Chinese, including the extension
+- Explainable strategy selection with optional aria2 RPC and automatic content validation
 - Windows 10+, modern Linux distributions and macOS 13+
 
 Sites protected by DRM or access controls are intentionally not bypassed. Users are responsible for downloading only content they are authorized to save.

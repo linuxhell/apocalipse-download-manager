@@ -35,3 +35,10 @@
 - Signed update manifests, tool checksum verification and rollback
 - Crash recovery, fuzzing and large-file soak tests
 - Accessibility, translations and stable releases
+
+## M5 — optional power modules
+
+- aria2 JSON-RPC fallback engine secured to loopback with a per-install secret
+- ED2K/Kademlia integration through an optional aMule adapter
+- Apocalipse Link: consent-based, end-to-end encrypted computer-to-computer transfers
+- Optional local/cloud AI assistant for diagnostics and site-rule suggestions, disabled by default

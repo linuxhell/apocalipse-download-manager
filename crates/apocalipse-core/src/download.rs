@@ -4,6 +4,8 @@ use reqwest::{header, Client, StatusCode};
 use std::{path::PathBuf, time::Duration};
 use tokio::{fs, io::AsyncWriteExt, sync::mpsc};
 
+use crate::validation::{PayloadExpectation, validate_payload};
+
 #[derive(Debug, Clone)]
 pub struct DownloadRequest {
     pub url: String,
@@ -51,6 +53,12 @@ impl DownloadEngine {
         let resumed = existing > 0 && response.status() == StatusCode::PARTIAL_CONTENT;
         let start = if resumed { existing } else { 0 };
         let total = response.content_length().map(|n| n + start);
+        let content_type = response.headers().get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).map(str::to_owned);
+        let expectation = match request.destination.extension().and_then(|value| value.to_str()).map(str::to_ascii_lowercase).as_deref() {
+            Some("zip") => PayloadExpectation::Zip,
+            Some(_) => PayloadExpectation::Binary,
+            None => PayloadExpectation::Any,
+        };
         let _ = events.send(DownloadEvent::Started { resumed_at: start, total }).await;
         let mut file = if resumed {
             fs::OpenOptions::new().append(true).open(&partial).await?
@@ -59,8 +67,13 @@ impl DownloadEngine {
         };
         let mut received = start;
         let mut stream = response.bytes_stream();
+        let mut inspected = resumed;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.context("network stream failed")?;
+            if !inspected {
+                validate_payload(expectation, content_type.as_deref(), &chunk)?;
+                inspected = true;
+            }
             file.write_all(&chunk).await?;
             received += chunk.len() as u64;
             let _ = events.send(DownloadEvent::Progress { received, total }).await;
@@ -78,4 +91,3 @@ impl DownloadEngine {
         Ok(())
     }
 }
-
