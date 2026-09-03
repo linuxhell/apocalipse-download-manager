@@ -22,6 +22,7 @@ Apocalipse combines fast resumable downloads, media discovery, streaming capture
 - TS to MP4 conversion with lossless fast remux and an H.264/AAC compatibility mode
 - Selective torrent file window and peer/session information
 - Progressive torrent video preview in VLC, mpv or a user-configured player
+- Apocalipse Link for end-to-end encrypted file transfers between two computers, with direct connections and resumable relay fallback
 - Browser media discovery grouped into Video, Audio and Images
 - Correct thumbnails, estimated sizes and format/quality selection
 - In-page download button for supported media, with an explicit user action
