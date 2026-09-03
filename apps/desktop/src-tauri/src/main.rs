@@ -7,6 +7,7 @@ use apocalipse_core::{
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::{Path, PathBuf}, process::Command, sync::Mutex};
 use tauri::{image::Image, menu::{Menu, MenuItem}, tray::TrayIconBuilder, Manager, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::sync::{mpsc, oneshot};
 
 struct AppState {
@@ -17,9 +18,29 @@ struct AppState {
     settings_path: PathBuf,
 }
 
-#[derive(Clone, Default, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct UserSettings {
     download_directory: Option<PathBuf>,
+    #[serde(default)]
+    capture_clipboard: bool,
+    #[serde(default = "default_max_active")]
+    max_active_downloads: usize,
+    #[serde(default = "default_connections")]
+    connections_per_download: usize,
+}
+
+const fn default_max_active() -> usize { 3 }
+const fn default_connections() -> usize { 8 }
+
+impl Default for UserSettings {
+    fn default() -> Self {
+        Self {
+            download_directory: None,
+            capture_clipboard: false,
+            max_active_downloads: default_max_active(),
+            connections_per_download: default_connections(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -32,6 +53,17 @@ struct PlanResponse {
 #[derive(Serialize)]
 struct AutostartStatus {
     enabled: bool,
+}
+
+#[derive(Serialize)]
+struct ClipboardStatus {
+    enabled: bool,
+}
+
+#[derive(Serialize)]
+struct TransferLimits {
+    max_active_downloads: usize,
+    connections_per_download: usize,
 }
 
 #[tauri::command]
@@ -115,6 +147,7 @@ async fn run_download(
     let mut was_cancelled = false;
     loop {
         tokio::select! {
+            biased;
             _ = &mut cancellation => {
                 was_cancelled = true;
                 break;
@@ -149,7 +182,63 @@ async fn run_download(
         if let Ok(mut workers) = app.state::<AppState>().workers.lock() {
             workers.remove(&id);
         }
+        start_next_queued(&app);
     }
+}
+
+async fn run_external_download(
+    app: tauri::AppHandle,
+    id: DownloadId,
+    task: DownloadTask,
+    kind: DownloadKind,
+    mut cancellation: oneshot::Receiver<()>,
+) {
+    update_task(&app, id, true, |item| item.state = DownloadState::Downloading);
+    let directory = task.destination.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = task.destination.file_name().and_then(|value| value.to_str()).unwrap_or("download");
+    let mut command = match kind {
+        DownloadKind::MediaPage => {
+            let mut command = tokio::process::Command::new("yt-dlp");
+            command.args(["--no-playlist", "-f", "bestvideo+bestaudio/best", "--merge-output-format", "mp4", "-P"])
+                .arg(directory).arg("-o").arg(file_name).arg(&task.source);
+            command
+        }
+        DownloadKind::Hls => {
+            let executable = if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" };
+            let mut command = tokio::process::Command::new(executable);
+            let stem = task.destination.file_stem().and_then(|value| value.to_str()).unwrap_or("download");
+            command.arg(&task.source).arg("--save-dir").arg(directory).args(["--save-name", stem, "--auto-select"]);
+            command
+        }
+        DownloadKind::Torrent | DownloadKind::Magnet => {
+            let mut command = tokio::process::Command::new("aria2c");
+            command.arg(format!("--dir={}", directory.display())).arg(&task.source);
+            command
+        }
+        _ => return,
+    };
+    command.kill_on_drop(true);
+    let result = match command.spawn() {
+        Ok(mut child) => tokio::select! {
+            biased;
+            _ = &mut cancellation => {
+                let _ = child.kill().await;
+                return;
+            }
+            status = child.wait() => status.map_err(|error| error.to_string()).and_then(|status| {
+                if status.success() { Ok(()) } else { Err(format!("external_engine_exit_{:?}", status.code())) }
+            }),
+        },
+        Err(error) => Err(format!("external_engine_unavailable: {error}")),
+    };
+    match result {
+        Ok(()) => update_task(&app, id, true, |item| item.state = DownloadState::Completed),
+        Err(message) => update_task(&app, id, true, |item| item.state = DownloadState::Failed { message }),
+    }
+    if let Ok(mut workers) = app.state::<AppState>().workers.lock() {
+        workers.remove(&id);
+    }
+    start_next_queued(&app);
 }
 
 fn suggested_name(source: &str) -> String {
@@ -232,9 +321,7 @@ fn enqueue_download(
     file_name: Option<String>,
 ) -> Result<DownloadTask, String> {
     inspect_url(url.clone())?;
-    if classify_url(&url) != Some(DownloadKind::Http) {
-        return Err("selected_engine_not_implemented".to_owned());
-    }
+    let kind = classify_url(&url).ok_or_else(|| "unsupported_url".to_owned())?;
     let download_dir = match destination_directory.filter(|path| !path.trim().is_empty()) {
         Some(path) => {
             let path = PathBuf::from(path);
@@ -251,49 +338,125 @@ fn enqueue_download(
     queue.push(task.clone());
     save_queue(&state, &queue)?;
     drop(queue);
-    start_download(&app, &state, task.clone())?;
+    start_download(&app, &state, task.clone(), kind)?;
     Ok(task)
 }
 
-fn start_download(app: &tauri::AppHandle, state: &AppState, task: DownloadTask) -> Result<(), String> {
+fn start_download(app: &tauri::AppHandle, state: &AppState, task: DownloadTask, kind: DownloadKind) -> Result<(), String> {
     let mut workers = state.workers.lock().map_err(|error| error.to_string())?;
     if workers.contains_key(&task.id) {
         return Err("download_already_running".to_owned());
     }
+    let limits = state.settings.lock().map_err(|error| error.to_string())?.clone();
+    if workers.len() >= limits.max_active_downloads.clamp(1, 20) {
+        return Ok(());
+    }
     let (cancel, cancelled) = oneshot::channel();
     workers.insert(task.id, cancel);
     drop(workers);
-    let request = DownloadRequest {
-        url: task.source,
-        destination: task.destination,
-        overwrite: false,
-    };
-    tauri::async_runtime::spawn(run_download(app.clone(), task.id, request, cancelled));
+    if kind == DownloadKind::Http {
+        let request = DownloadRequest {
+            url: task.source,
+            destination: task.destination,
+            overwrite: false,
+            connections: limits.connections_per_download.clamp(1, 32),
+        };
+        tauri::async_runtime::spawn(run_download(app.clone(), task.id, request, cancelled));
+    } else {
+        tauri::async_runtime::spawn(run_external_download(app.clone(), task.id, task, kind, cancelled));
+    }
     Ok(())
 }
 
+fn start_next_queued(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let available = state.settings.lock().map(|settings| settings.max_active_downloads.clamp(1, 20))
+        .and_then(|maximum| state.workers.lock().map(|workers| maximum.saturating_sub(workers.len()))).unwrap_or(0);
+    if available == 0 { return; }
+    let queued = state.queue.lock().map(|queue| queue.iter().filter(|task| task.state == DownloadState::Queued).take(available).cloned().collect::<Vec<_>>()).unwrap_or_default();
+    for task in queued {
+        if let Some(kind) = classify_url(&task.source) {
+            let _ = start_download(app, &state, task, kind);
+        }
+    }
+}
+
 #[tauri::command]
-fn pause_download(state: State<'_, AppState>, id: DownloadId) -> Result<(), String> {
+fn pause_download(app: tauri::AppHandle, state: State<'_, AppState>, id: DownloadId) -> Result<(), String> {
     let cancel = state.workers.lock().map_err(|error| error.to_string())?.remove(&id)
         .ok_or_else(|| "download_not_running".to_owned())?;
     let _ = cancel.send(());
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     let task = queue.iter_mut().find(|task| task.id == id).ok_or_else(|| "download_not_found".to_owned())?;
     task.state = DownloadState::Paused;
-    save_queue(&state, &queue)
+    save_queue(&state, &queue)?;
+    drop(queue);
+    start_next_queued(&app);
+    Ok(())
 }
 
 #[tauri::command]
 fn resume_download(app: tauri::AppHandle, state: State<'_, AppState>, id: DownloadId) -> Result<(), String> {
     let task = {
-        let queue = state.queue.lock().map_err(|error| error.to_string())?;
-        let task = queue.iter().find(|task| task.id == id).ok_or_else(|| "download_not_found".to_owned())?;
+        let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+        let task = queue.iter_mut().find(|task| task.id == id).ok_or_else(|| "download_not_found".to_owned())?;
         match task.state {
-            DownloadState::Paused | DownloadState::Failed { .. } => task.clone(),
+            DownloadState::Paused | DownloadState::Failed { .. } => {
+                task.state = DownloadState::Queued;
+                let task = task.clone();
+                save_queue(&state, &queue)?;
+                task
+            },
             _ => return Err("download_not_resumable".to_owned()),
         }
     };
-    start_download(&app, &state, task)
+    let kind = classify_url(&task.source).ok_or_else(|| "unsupported_url".to_owned())?;
+    start_download(&app, &state, task, kind)
+}
+
+#[tauri::command]
+fn get_clipboard_monitor(state: State<'_, AppState>) -> Result<ClipboardStatus, String> {
+    let enabled = state.settings.lock().map_err(|error| error.to_string())?.capture_clipboard;
+    Ok(ClipboardStatus { enabled })
+}
+
+#[tauri::command]
+fn set_clipboard_monitor(state: State<'_, AppState>, enabled: bool) -> Result<ClipboardStatus, String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.capture_clipboard = enabled;
+    save_settings(&state, &settings)?;
+    Ok(ClipboardStatus { enabled })
+}
+
+#[tauri::command]
+fn get_transfer_limits(state: State<'_, AppState>) -> Result<TransferLimits, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    Ok(TransferLimits {
+        max_active_downloads: settings.max_active_downloads,
+        connections_per_download: settings.connections_per_download,
+    })
+}
+
+#[tauri::command]
+fn set_transfer_limits(state: State<'_, AppState>, max_active_downloads: usize, connections_per_download: usize) -> Result<TransferLimits, String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.max_active_downloads = max_active_downloads.clamp(1, 20);
+    settings.connections_per_download = connections_per_download.clamp(1, 32);
+    save_settings(&state, &settings)?;
+    Ok(TransferLimits {
+        max_active_downloads: settings.max_active_downloads,
+        connections_per_download: settings.connections_per_download,
+    })
+}
+
+#[tauri::command]
+fn read_clipboard_link(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    if !state.settings.lock().map_err(|error| error.to_string())?.capture_clipboard {
+        return Ok(None);
+    }
+    let value = app.clipboard().read_text().map_err(|error| error.to_string())?;
+    let value = value.trim();
+    Ok(classify_url(value).map(|_| value.to_owned()))
 }
 
 #[tauri::command]
@@ -434,6 +597,7 @@ async fn remove_downloads(state: State<'_, AppState>, ids: Vec<DownloadId>, dele
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let queue_path = app.path().app_data_dir()?.join("queue.json");
             let settings_path = app.path().app_data_dir()?.join("settings.json");
@@ -493,7 +657,12 @@ fn main() {
             resume_download,
             reveal_download,
             get_autostart,
-            set_autostart
+            set_autostart,
+            get_clipboard_monitor,
+            set_clipboard_monitor,
+            read_clipboard_link,
+            get_transfer_limits,
+            set_transfer_limits
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Apocalipse Download Manager");

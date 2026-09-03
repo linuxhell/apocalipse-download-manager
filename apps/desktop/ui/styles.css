@@ -385,6 +385,37 @@ dialog input:focus {
   background: #101920;
   cursor: pointer;
 }
+.transfer-settings {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #0b1319;
+}
+.transfer-settings label span {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.transfer-settings output {
+  color: var(--cyan);
+  font-weight: 700;
+}
+.transfer-settings input[type="range"] {
+  width: 100%;
+  accent-color: var(--cyan);
+}
+.transfer-settings button {
+  justify-self: end;
+  border: 1px solid #29424f;
+  border-radius: 8px;
+  background: #111d25;
+  color: #bcd1d9;
+  padding: 7px 13px;
+  cursor: pointer;
+}
 .setting-toggle input {
   width: 18px;
   accent-color: var(--cyan);

@@ -48,6 +48,11 @@ const catalogs = {
     defaultDirectory: "Default download directory",
     save: "Save",
     browse: "Browse…",
+    captureClipboard: "Capture clipboard links",
+    captureClipboardHint: "Open recognized HTTP, HLS, magnet and media links automatically",
+    maxTasks: "Maximum simultaneous tasks",
+    connections: "Connections per download",
+    defaults: "Default",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -99,6 +104,11 @@ const catalogs = {
     defaultDirectory: "Diretório padrão de downloads",
     save: "Salvar",
     browse: "Procurar…",
+    captureClipboard: "Capturar links da área de transferência",
+    captureClipboardHint: "Abrir automaticamente links HTTP, HLS, magnet e de mídia reconhecidos",
+    maxTasks: "Máximo de tarefas simultâneas",
+    connections: "Conexões por download",
+    defaults: "Padrão",
   },
   "zh-CN": {
     downloads: "下载",
@@ -149,6 +159,11 @@ const catalogs = {
     defaultDirectory: "默认下载目录",
     save: "保存",
     browse: "浏览…",
+    captureClipboard: "捕获剪贴板链接",
+    captureClipboardHint: "自动打开识别出的 HTTP、HLS、磁力和媒体链接",
+    maxTasks: "最大同时任务数",
+    connections: "每个下载的连接数",
+    defaults: "默认",
   },
 };
 
@@ -156,6 +171,8 @@ let locale = localStorage.getItem("apocalipse.language") || "en";
 let downloads = [];
 let activeFilter = "all";
 let overallSpeed = 0;
+let lastClipboardLink = "";
+const busyIds = new Set();
 const selectedIds = new Set();
 const speedSamples = new Map();
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
@@ -191,15 +208,15 @@ function updateSpeeds(tasks) {
     if (!currentIds.has(id)) speedSamples.delete(id);
   for (const task of tasks) {
     const previous = speedSamples.get(task.id);
-    let speed = previous?.speed || 0;
-    let activeAt = previous?.activeAt || 0;
-    if (previous) {
+    const active = stateKey(task.state) === "downloading";
+    let speed = active ? previous?.speed || 0 : 0;
+    if (previous && active) {
       const elapsed = Math.max(0.001, (now - previous.at) / 1000);
       const delta = Math.max(0, task.received - previous.bytes);
       if (delta > 0) {
-        speed = delta / elapsed;
-        activeAt = now;
-      } else if (now - activeAt > 2000) {
+        const instantaneous = delta / elapsed;
+        speed = previous.speed ? instantaneous * 0.65 + previous.speed * 0.35 : instantaneous;
+      } else if (now - previous.at >= 500) {
         speed = 0;
       }
     }
@@ -207,9 +224,8 @@ function updateSpeeds(tasks) {
       at: now,
       bytes: task.received,
       speed,
-      activeAt,
     });
-    if (task.state === "downloading") overallSpeed += speed;
+    if (active) overallSpeed += speed;
   }
 }
 
@@ -287,7 +303,9 @@ function renderDownloads() {
       const button = document.createElement("button");
       button.className = "task-action";
       button.textContent = label;
-      button.onclick = async () => {
+      const execute = async () => {
+        if (busyIds.has(task.id)) return;
+        busyIds.add(task.id);
         button.disabled = true;
         try {
           await invoke(command, { id: task.id });
@@ -295,8 +313,17 @@ function renderDownloads() {
         } catch (error) {
           console.error(error);
         } finally {
+          busyIds.delete(task.id);
           button.disabled = false;
         }
+      };
+      button.onpointerdown = (event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        execute();
+      };
+      button.onclick = (event) => {
+        if (event.detail === 0) execute();
       };
       actions.append(button);
     };
@@ -434,12 +461,18 @@ document.querySelectorAll("[data-clear-mode]").forEach((button) => {
 });
 document.querySelector('[data-page="settings"]').onclick = async () => {
   try {
-    const [autostart, directory] = await Promise.all([
+    const [autostart, directory, clipboard, limits] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
+      invoke("get_clipboard_monitor"),
+      invoke("get_transfer_limits"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
     document.querySelector("#default-directory").value = directory;
+    document.querySelector("#capture-clipboard").checked = clipboard.enabled;
+    document.querySelector("#max-tasks").value = limits.maxActiveDownloads;
+    document.querySelector("#connections").value = limits.connectionsPerDownload;
+    updateLimitLabels();
     settingsDialog.showModal();
   } catch (error) {
     console.error(error);
@@ -458,12 +491,30 @@ document.querySelector("#save-settings").onclick = async () => {
     await invoke("set_autostart", {
       enabled: document.querySelector("#autostart").checked,
     });
+    await invoke("set_clipboard_monitor", {
+      enabled: document.querySelector("#capture-clipboard").checked,
+    });
+    await invoke("set_transfer_limits", {
+      maxActiveDownloads: Number(document.querySelector("#max-tasks").value),
+      connectionsPerDownload: Number(document.querySelector("#connections").value),
+    });
     settingsDialog.close();
   } catch (error) {
     console.error(error);
   } finally {
     button.disabled = false;
   }
+};
+function updateLimitLabels() {
+  document.querySelector("#max-tasks-value").value = document.querySelector("#max-tasks").value;
+  document.querySelector("#connections-value").value = document.querySelector("#connections").value;
+}
+document.querySelector("#max-tasks").oninput = updateLimitLabels;
+document.querySelector("#connections").oninput = updateLimitLabels;
+document.querySelector("#default-limits").onclick = () => {
+  document.querySelector("#max-tasks").value = 3;
+  document.querySelector("#connections").value = 8;
+  updateLimitLabels();
 };
 document.querySelector("#url").oninput = () => {
   document.querySelector("#analysis").hidden = true;
@@ -516,3 +567,19 @@ document.querySelector("#enqueue").onclick = async () => {
 translate();
 refreshDownloads();
 setInterval(refreshDownloads, 250);
+setInterval(async () => {
+  try {
+    const link = await invoke("read_clipboard_link");
+    if (!link || link === lastClipboardLink) return;
+    lastClipboardLink = link;
+    const url = document.querySelector("#url");
+    url.value = link;
+    document.querySelector("#analysis").hidden = true;
+    document.querySelector("#enqueue").hidden = true;
+    document.querySelector("#analyze").hidden = false;
+    if (!dialog.open) dialog.showModal();
+    url.focus();
+  } catch (error) {
+    console.error(error);
+  }
+}, 750);

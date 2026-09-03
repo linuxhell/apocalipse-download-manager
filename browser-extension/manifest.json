@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage", "downloads"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "background": { "service_worker": "service-worker.js" },
   "content_scripts": [{ "matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_idle" }],
