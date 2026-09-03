@@ -351,6 +351,23 @@ dialog input {
 dialog input:focus {
   border-color: #27d9ee;
 }
+.path-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.path-picker button {
+  border: 1px solid #28424e;
+  border-radius: 9px;
+  padding: 0 13px;
+  background: #14232b;
+  color: #a9dbe5;
+  cursor: pointer;
+}
+.path-picker button:hover {
+  border-color: var(--cyan);
+  color: #e7fbff;
+}
 #destination {
   margin-top: 0;
 }

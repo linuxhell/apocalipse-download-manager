@@ -6,7 +6,7 @@ use apocalipse_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::{Path, PathBuf}, process::Command, sync::Mutex};
-use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder, Manager, State};
+use tauri::{image::Image, menu::{Menu, MenuItem}, tray::TrayIconBuilder, Manager, State};
 use tokio::sync::{mpsc, oneshot};
 
 struct AppState {
@@ -158,6 +158,40 @@ fn suggested_name(source: &str) -> String {
         .map(|character| if "<>:\"/\\|?*".contains(character) { '_' } else { character }).collect()
 }
 
+fn validate_file_name(name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() || name == "." || name == ".." || name.chars().any(|character| "<>:\"/\\|?*".contains(character)) {
+        return Err("invalid_file_name".to_owned());
+    }
+    Ok(name.to_owned())
+}
+
+fn unique_destination(directory: &Path, file_name: &str) -> PathBuf {
+    let original = directory.join(file_name);
+    if !original.exists() && !partial_path(&original).exists() {
+        return original;
+    }
+    let path = Path::new(file_name);
+    let stem = path.file_stem().and_then(|value| value.to_str()).unwrap_or("download");
+    let extension = path.extension().and_then(|value| value.to_str());
+    for index in 1..10_000 {
+        let candidate_name = match extension {
+            Some(extension) => format!("{stem} ({index}).{extension}"),
+            None => format!("{stem} ({index})"),
+        };
+        let candidate = directory.join(candidate_name);
+        if !candidate.exists() && !partial_path(&candidate).exists() {
+            return candidate;
+        }
+    }
+    directory.join(format!("{stem}-10000"))
+}
+
+#[tauri::command]
+fn suggest_download_name(url: String) -> String {
+    suggested_name(&url)
+}
+
 #[tauri::command]
 fn list_downloads(state: State<'_, AppState>) -> Result<Vec<DownloadTask>, String> {
     state.queue.lock().map(|queue| queue.clone()).map_err(|error| error.to_string())
@@ -181,11 +215,21 @@ fn set_default_download_directory(state: State<'_, AppState>, path: String) -> R
 }
 
 #[tauri::command]
+fn pick_directory(initial_directory: Option<String>) -> Option<String> {
+    let mut dialog = rfd::FileDialog::new();
+    if let Some(path) = initial_directory.filter(|path| !path.trim().is_empty()) {
+        dialog = dialog.set_directory(path);
+    }
+    dialog.pick_folder().map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 fn enqueue_download(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     url: String,
     destination_directory: Option<String>,
+    file_name: Option<String>,
 ) -> Result<DownloadTask, String> {
     inspect_url(url.clone())?;
     if classify_url(&url) != Some(DownloadKind::Http) {
@@ -201,7 +245,8 @@ fn enqueue_download(
         }
         None => configured_download_directory(&app, &state)?,
     };
-    let task = DownloadTask::new(&url, download_dir.join(suggested_name(&url)));
+    let file_name = validate_file_name(&file_name.unwrap_or_else(|| suggested_name(&url)))?;
+    let task = DownloadTask::new(&url, unique_destination(&download_dir, &file_name));
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     queue.push(task.clone());
     save_queue(&state, &queue)?;
@@ -402,7 +447,9 @@ fn main() {
             let show = MenuItem::with_id(app, "show", "Show Apocalipse", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
-            let icon = app.default_window_icon().cloned().expect("application icon is required");
+            // The detailed application artwork loses definition at the 16–24 px sizes used by
+            // system trays. Keep a simplified, high-contrast asset specifically for this role.
+            let icon = Image::from_bytes(include_bytes!("../icons/tray.png"))?;
             TrayIconBuilder::new()
                 .icon(icon)
                 .tooltip("Apocalipse Download Manager")
@@ -435,6 +482,8 @@ fn main() {
             enqueue_download,
             default_download_directory,
             set_default_download_directory,
+            pick_directory,
+            suggest_download_name,
             remove_downloads,
             pause_download,
             resume_download,

@@ -145,8 +145,18 @@
           autofocus
         />
         <div id="analysis" class="analysis" hidden></div>
+        <label for="file-name" data-i18n="fileName">File name</label>
+        <input id="file-name" type="text" required />
         <label for="destination" data-i18n="saveTo">Save to</label>
-        <input id="destination" type="text" required />
+        <div class="path-picker">
+          <input id="destination" type="text" required /><button
+            type="button"
+            data-pick-for="destination"
+            data-i18n="browse"
+          >
+            Browse…
+          </button>
+        </div>
         <div class="dialog-actions">
           <button type="button" data-dialog-close data-i18n="cancel">
             Cancel</button
@@ -223,7 +233,15 @@
         <label for="default-directory" data-i18n="defaultDirectory"
           >Default download directory</label
         >
-        <input id="default-directory" type="text" required />
+        <div class="path-picker">
+          <input id="default-directory" type="text" required /><button
+            type="button"
+            data-pick-for="default-directory"
+            data-i18n="browse"
+          >
+            Browse…
+          </button>
+        </div>
         <div class="dialog-actions">
           <button type="button" data-settings-close data-i18n="cancel">
             Cancel

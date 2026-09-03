@@ -32,6 +32,7 @@ const catalogs = {
     cancel: "Cancel",
     analyze: "Analyze",
     saveTo: "Save to",
+    fileName: "File name",
     queued: "Queued",
     inspecting: "Inspecting",
     downloading: "Downloading",
@@ -46,6 +47,7 @@ const catalogs = {
     startHidden: "Open hidden in the system tray",
     defaultDirectory: "Default download directory",
     save: "Save",
+    browse: "Browse…",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -81,6 +83,7 @@ const catalogs = {
     cancel: "Cancelar",
     analyze: "Analisar",
     saveTo: "Salvar em",
+    fileName: "Nome do arquivo",
     queued: "Na fila",
     inspecting: "Analisando",
     downloading: "Baixando",
@@ -95,6 +98,7 @@ const catalogs = {
     startHidden: "Abrir oculto na bandeja do sistema",
     defaultDirectory: "Diretório padrão de downloads",
     save: "Salvar",
+    browse: "Procurar…",
   },
   "zh-CN": {
     downloads: "下载",
@@ -129,6 +133,7 @@ const catalogs = {
     cancel: "取消",
     analyze: "分析",
     saveTo: "保存到",
+    fileName: "文件名",
     queued: "已排队",
     inspecting: "正在检查",
     downloading: "正在下载",
@@ -143,6 +148,7 @@ const catalogs = {
     startHidden: "启动后隐藏到系统托盘",
     defaultDirectory: "默认下载目录",
     save: "保存",
+    browse: "浏览…",
   },
 };
 
@@ -350,6 +356,22 @@ async function refreshDownloads() {
 const dialog = document.querySelector("#add-dialog");
 const clearDialog = document.querySelector("#clear-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
+document.querySelectorAll("[data-pick-for]").forEach((button) => {
+  button.onclick = async () => {
+    const input = document.querySelector(`#${button.dataset.pickFor}`);
+    button.disabled = true;
+    try {
+      const selected = await invoke("pick_directory", {
+        initialDirectory: input.value,
+      });
+      if (selected) input.value = selected;
+    } catch (error) {
+      console.error(error);
+    } finally {
+      button.disabled = false;
+    }
+  };
+});
 document
   .querySelectorAll("[data-dialog-close]")
   .forEach((button) => (button.onclick = () => dialog.close()));
@@ -456,6 +478,10 @@ document.querySelector("#analyze").onclick = async () => {
   box.textContent = "…";
   try {
     const plan = await invoke("inspect_url", { url: url.value });
+    document.querySelector("#file-name").value = await invoke(
+      "suggest_download_name",
+      { url: url.value },
+    );
     box.textContent = `${plan.primary} · ${plan.reason}`;
     document.querySelector("#analyze").hidden = true;
     document.querySelector("#enqueue").hidden = false;
@@ -472,6 +498,7 @@ document.querySelector("#enqueue").onclick = async () => {
       await invoke("enqueue_download", {
         url: url.value,
         destinationDirectory: document.querySelector("#destination").value,
+        fileName: document.querySelector("#file-name").value,
       }),
     );
     renderDownloads();
