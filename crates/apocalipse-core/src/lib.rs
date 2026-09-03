@@ -11,7 +11,7 @@ pub mod validation;
 
 pub use classifier::{classify_url, DownloadKind};
 pub use credentials::{AuthKind, CredentialMetadata, SecretStore, SensitiveSecret};
-pub use download::{DownloadEngine, DownloadEvent, DownloadRequest};
+pub use download::{partial_path, DownloadEngine, DownloadEvent, DownloadRequest};
 pub use i18n::{Language, Translator};
 pub use media::{ConversionMode, TsToMp4Request, convert_ts_to_mp4};
 pub use model::{DownloadId, DownloadState, DownloadTask};

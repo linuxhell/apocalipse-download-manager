@@ -1,17 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use apocalipse_core::{
-    classify_url, plan_download, Capabilities, DownloadEngine, DownloadEvent, DownloadId,
-    DownloadKind, DownloadRequest, DownloadState, DownloadTask,
+    classify_url, partial_path, plan_download, Capabilities, DownloadEngine, DownloadEvent,
+    DownloadId, DownloadKind, DownloadRequest, DownloadState, DownloadTask,
 };
 use serde::Serialize;
-use std::{fs, path::{Path, PathBuf}, sync::Mutex};
+use std::{collections::HashMap, fs, path::{Path, PathBuf}, sync::Mutex};
 use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder, Manager, State};
 use tokio::sync::mpsc;
 
 struct AppState {
     queue: Mutex<Vec<DownloadTask>>,
     queue_path: PathBuf,
+    workers: Mutex<HashMap<DownloadId, tokio::task::JoinHandle<()>>>,
 }
 
 #[derive(Serialize)]
@@ -103,6 +104,9 @@ async fn run_download(app: tauri::AppHandle, id: DownloadId, request: DownloadRe
             }
         }
     }
+    if let Ok(mut workers) = app.state::<AppState>().workers.lock() {
+        workers.remove(&id);
+    }
 }
 
 fn suggested_name(source: &str) -> String {
@@ -130,15 +134,56 @@ fn enqueue_download(app: tauri::AppHandle, state: State<'_, AppState>, url: Stri
     drop(queue);
     let request = DownloadRequest { url, destination: task.destination.clone(), overwrite: false };
     let task_id = task.id;
-    tauri::async_runtime::spawn(run_download(app, task_id, request));
+    let worker = tauri::async_runtime::spawn(run_download(app.clone(), task_id, request));
+    state.workers.lock().map_err(|error| error.to_string())?.insert(task_id, worker);
     Ok(task)
+}
+
+#[tauri::command]
+fn remove_downloads(state: State<'_, AppState>, ids: Vec<DownloadId>, delete_files: bool) -> Result<usize, String> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    if let Ok(mut workers) = state.workers.lock() {
+        for id in &ids {
+            if let Some(worker) = workers.remove(id) {
+                worker.abort();
+            }
+        }
+    }
+    let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+    let mut removed = Vec::new();
+    queue.retain(|task| {
+        if ids.contains(&task.id) {
+            removed.push(task.clone());
+            false
+        } else {
+            true
+        }
+    });
+    if delete_files {
+        for task in &removed {
+            let partial = partial_path(&task.destination);
+            for path in [&task.destination, &partial] {
+                if path.is_file() {
+                    fs::remove_file(path).map_err(|error| format!("{}: {error}", path.display()))?;
+                }
+            }
+        }
+    }
+    save_queue(&state, &queue)?;
+    Ok(removed.len())
 }
 
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let queue_path = app.path().app_data_dir()?.join("queue.json");
-            app.manage(AppState { queue: Mutex::new(load_queue(&queue_path)), queue_path });
+            app.manage(AppState {
+                queue: Mutex::new(load_queue(&queue_path)),
+                queue_path,
+                workers: Mutex::new(HashMap::new()),
+            });
             let show = MenuItem::with_id(app, "show", "Show Apocalipse", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
@@ -160,7 +205,12 @@ fn main() {
                 .build(app)?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![inspect_url, list_downloads, enqueue_download])
+        .invoke_handler(tauri::generate_handler![
+            inspect_url,
+            list_downloads,
+            enqueue_download,
+            remove_downloads
+        ])
         .run(tauri::generate_context!())
         .expect("failed to run Apocalipse Download Manager");
 }

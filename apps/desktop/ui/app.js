@@ -15,6 +15,14 @@ const catalogs = {
     all: "All",
     active: "Active",
     clearFinished: "Clear finished",
+    selectAll: "Select all",
+    removeSelected: "Remove selected",
+    manageList: "MANAGE LIST",
+    removeChoice: "What do you want to remove?",
+    listOnly: "Clear from list",
+    keepFiles: "Keep downloaded and partial files on disk",
+    listAndFiles: "Clear list and files",
+    deleteFiles: "Permanently delete downloaded and partial files",
     emptyTitle: "Ready for your next download",
     emptyText: "Add a URL, drop a torrent, or use the browser extension.",
     addFirst: "Add your first download",
@@ -44,6 +52,14 @@ const catalogs = {
     all: "Todos",
     active: "Ativos",
     clearFinished: "Limpar concluídos",
+    selectAll: "Selecionar todos",
+    removeSelected: "Remover selecionados",
+    manageList: "GERENCIAR LISTA",
+    removeChoice: "O que você deseja remover?",
+    listOnly: "Limpar somente da lista",
+    keepFiles: "Manter no disco os arquivos baixados e parciais",
+    listAndFiles: "Limpar lista e arquivos",
+    deleteFiles: "Excluir permanentemente os arquivos baixados e parciais",
     emptyTitle: "Pronto para o próximo download",
     emptyText:
       "Adicione uma URL, arraste um torrent ou use a extensão do navegador.",
@@ -74,6 +90,14 @@ const catalogs = {
     all: "全部",
     active: "进行中",
     clearFinished: "清除已完成",
+    selectAll: "全选",
+    removeSelected: "移除所选项目",
+    manageList: "管理列表",
+    removeChoice: "您想移除哪些内容？",
+    listOnly: "仅从列表中清除",
+    keepFiles: "保留磁盘上的已下载文件和部分文件",
+    listAndFiles: "清除列表和文件",
+    deleteFiles: "永久删除已下载文件和部分文件",
     emptyTitle: "准备开始新的下载",
     emptyText: "添加网址、拖入种子或使用浏览器扩展。",
     addFirst: "添加第一个下载",
@@ -91,7 +115,10 @@ const catalogs = {
 
 let locale = localStorage.getItem("apocalipse.language") || "en";
 let downloads = [];
-let previousSample = { at: performance.now(), bytes: 0 };
+let activeFilter = "all";
+let overallSpeed = 0;
+const selectedIds = new Set();
+const speedSamples = new Map();
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const invoke = (command, args = {}) => {
   const bridge = window.__TAURI__?.core?.invoke;
@@ -113,15 +140,67 @@ function formatBytes(bytes) {
   return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
 }
 
+function updateSpeeds(tasks) {
+  const now = performance.now();
+  const currentIds = new Set(tasks.map((task) => task.id));
+  overallSpeed = 0;
+  for (const [id] of speedSamples)
+    if (!currentIds.has(id)) speedSamples.delete(id);
+  for (const task of tasks) {
+    const previous = speedSamples.get(task.id);
+    let speed = previous?.speed || 0;
+    let activeAt = previous?.activeAt || 0;
+    if (previous) {
+      const elapsed = Math.max(0.001, (now - previous.at) / 1000);
+      const delta = Math.max(0, task.received - previous.bytes);
+      if (delta > 0) {
+        speed = delta / elapsed;
+        activeAt = now;
+      } else if (now - activeAt > 2000) {
+        speed = 0;
+      }
+    }
+    speedSamples.set(task.id, {
+      at: now,
+      bytes: task.received,
+      speed,
+      activeAt,
+    });
+    if (task.state === "downloading") overallSpeed += speed;
+  }
+}
+
+function visibleDownloads() {
+  if (activeFilter === "completed")
+    return downloads.filter((task) => task.state === "completed");
+  if (activeFilter === "active")
+    return downloads.filter((task) => task.state !== "completed");
+  return downloads;
+}
+
 function renderDownloads() {
   const list = document.querySelector("#download-list");
   const empty = document.querySelector("#empty");
   list.replaceChildren();
   list.hidden = downloads.length === 0;
   empty.hidden = downloads.length !== 0;
-  for (const task of downloads) {
+  const visible = visibleDownloads();
+  for (const task of visible) {
     const row = document.createElement("article");
     row.className = "download-row";
+    const select = document.createElement("input");
+    select.type = "checkbox";
+    select.className = "task-select";
+    select.checked = selectedIds.has(task.id);
+    select.setAttribute(
+      "aria-label",
+      `${t("removeSelected")}: ${task.destination}`,
+    );
+    select.onchange = () => {
+      if (select.checked) selectedIds.add(task.id);
+      else selectedIds.delete(task.id);
+      updateSelectionControls();
+    };
     const icon = Object.assign(document.createElement("span"), {
       className: "download-icon",
       textContent: "⇩",
@@ -143,9 +222,14 @@ function renderDownloads() {
       : 0;
     bar.style.width = `${percent}%`;
     const details = document.createElement("small");
-    details.textContent = task.total
+    const speed = speedSamples.get(task.id)?.speed || 0;
+    const progressText = task.total
       ? `${formatBytes(task.received)} / ${formatBytes(task.total)} · ${percent.toFixed(1)}%`
       : formatBytes(task.received);
+    details.textContent =
+      speed && task.state === "downloading"
+        ? `${progressText} · ${formatBytes(speed)}/s`
+        : progressText;
     progress.append(bar);
     info.append(progress, details);
     const state = Object.assign(document.createElement("span"), {
@@ -154,20 +238,27 @@ function renderDownloads() {
     });
     if (typeof task.state === "object")
       state.title = task.state.failed?.message || "";
-    row.append(icon, info, state);
+    row.append(select, icon, info, state);
     list.append(row);
   }
   document.querySelector(".metrics article:nth-child(4) strong").textContent =
     downloads.filter((task) => task.state === "queued").length;
   document.querySelector(".metrics article:nth-child(3) strong").textContent =
     downloads.filter((task) => task.state === "completed").length;
-  const now = performance.now();
-  const bytes = downloads.reduce((sum, task) => sum + task.received, 0);
-  const elapsed = Math.max(0.001, (now - previousSample.at) / 1000);
-  const speed = Math.max(0, bytes - previousSample.bytes) / elapsed;
   document.querySelector(".metrics article:first-child strong").textContent =
-    `${formatBytes(speed)}/s`;
-  previousSample = { at: now, bytes };
+    `${formatBytes(overallSpeed)}/s`;
+  updateSelectionControls();
+}
+
+function updateSelectionControls() {
+  const visible = visibleDownloads();
+  const selectAll = document.querySelector("#select-all");
+  selectAll.disabled = visible.length === 0;
+  selectAll.checked =
+    visible.length > 0 && visible.every((task) => selectedIds.has(task.id));
+  selectAll.indeterminate =
+    visible.some((task) => selectedIds.has(task.id)) && !selectAll.checked;
+  document.querySelector("#manage-list").disabled = selectedIds.size === 0;
 }
 
 function translate() {
@@ -182,6 +273,9 @@ function translate() {
 async function refreshDownloads() {
   try {
     downloads = await invoke("list_downloads");
+    const ids = new Set(downloads.map((task) => task.id));
+    for (const id of selectedIds) if (!ids.has(id)) selectedIds.delete(id);
+    updateSpeeds(downloads);
     renderDownloads();
   } catch (error) {
     console.error(error);
@@ -189,6 +283,7 @@ async function refreshDownloads() {
 }
 
 const dialog = document.querySelector("#add-dialog");
+const clearDialog = document.querySelector("#clear-dialog");
 document
   .querySelectorAll("[data-dialog-close]")
   .forEach((button) => (button.onclick = () => dialog.close()));
@@ -206,6 +301,44 @@ document.querySelector("#language").onchange = (event) => {
   localStorage.setItem("apocalipse.language", locale);
   translate();
 };
+document.querySelectorAll(".tabs [data-filter]").forEach((button) => {
+  button.onclick = () => {
+    activeFilter = button.dataset.filter;
+    document
+      .querySelectorAll(".tabs [data-filter]")
+      .forEach((tab) => tab.classList.toggle("active", tab === button));
+    renderDownloads();
+  };
+});
+document.querySelector("#select-all").onchange = (event) => {
+  for (const task of visibleDownloads()) {
+    if (event.target.checked) selectedIds.add(task.id);
+    else selectedIds.delete(task.id);
+  }
+  renderDownloads();
+};
+document.querySelector("#manage-list").onclick = () => clearDialog.showModal();
+document
+  .querySelectorAll("[data-clear-cancel]")
+  .forEach((button) => (button.onclick = () => clearDialog.close()));
+document.querySelectorAll("[data-clear-mode]").forEach((button) => {
+  button.onclick = async () => {
+    button.disabled = true;
+    try {
+      await invoke("remove_downloads", {
+        ids: [...selectedIds],
+        deleteFiles: button.dataset.clearMode === "files",
+      });
+      selectedIds.clear();
+      clearDialog.close();
+      await refreshDownloads();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      button.disabled = false;
+    }
+  };
+});
 document.querySelector("#url").oninput = () => {
   document.querySelector("#analysis").hidden = true;
   document.querySelector("#enqueue").hidden = true;
@@ -246,4 +379,4 @@ document.querySelector("#enqueue").onclick = async () => {
 
 translate();
 refreshDownloads();
-setInterval(refreshDownloads, 750);
+setInterval(refreshDownloads, 250);

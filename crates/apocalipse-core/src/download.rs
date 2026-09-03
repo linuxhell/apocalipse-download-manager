@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use futures_util::StreamExt;
 use reqwest::{header, Client, StatusCode};
-use std::{path::PathBuf, time::Duration};
+use std::{path::{Path, PathBuf}, time::Duration};
 use tokio::{fs, io::AsyncWriteExt, sync::mpsc};
 
 use crate::validation::{PayloadExpectation, validate_payload};
@@ -43,7 +43,7 @@ impl DownloadEngine {
         if let Some(parent) = request.destination.parent() {
             fs::create_dir_all(parent).await?;
         }
-        let partial = request.destination.with_extension(format!("{}part", request.destination.extension().and_then(|x| x.to_str()).map(|x| format!("{x}." )).unwrap_or_default()));
+        let partial = partial_path(&request.destination);
         let existing = fs::metadata(&partial).await.map(|m| m.len()).unwrap_or(0);
         let mut builder = self.client.get(&request.url);
         if existing > 0 {
@@ -89,5 +89,23 @@ impl DownloadEngine {
         fs::rename(&partial, &request.destination).await?;
         let _ = events.send(DownloadEvent::Completed { bytes: received }).await;
         Ok(())
+    }
+}
+
+pub fn partial_path(destination: &Path) -> PathBuf {
+    destination.with_extension(format!(
+        "{}part",
+        destination.extension().and_then(|value| value.to_str()).map(|value| format!("{value}.")).unwrap_or_default()
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partial_file_keeps_the_original_extension_visible() {
+        assert_eq!(partial_path(Path::new("video.mp4")), PathBuf::from("video.mp4.part"));
+        assert_eq!(partial_path(Path::new("archive")), PathBuf::from("archive.part"));
     }
 }

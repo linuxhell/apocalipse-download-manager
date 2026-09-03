@@ -83,13 +83,28 @@
       <section class="panel">
         <div class="toolbar">
           <div class="tabs">
-            <button class="active" data-i18n="all">All</button
-            ><button data-i18n="active">Active</button
-            ><button data-i18n="completed">Completed</button>
+            <button class="active" data-filter="all" data-i18n="all">All</button
+            ><button data-filter="active" data-i18n="active">Active</button
+            ><button data-filter="completed" data-i18n="completed">
+              Completed
+            </button>
           </div>
-          <button class="ghost" data-i18n="clearFinished">
-            Clear finished
-          </button>
+          <div class="list-actions">
+            <label
+              ><input id="select-all" type="checkbox" /><span
+                data-i18n="selectAll"
+                >Select all</span
+              ></label
+            >
+            <button
+              id="manage-list"
+              class="ghost"
+              data-i18n="removeSelected"
+              disabled
+            >
+              Remove selected
+            </button>
+          </div>
         </div>
         <div id="download-list" class="download-list" hidden></div>
         <div id="empty" class="empty">
@@ -106,7 +121,9 @@
         </div>
       </section>
       <footer>
-        <span class="bridge-waiting"><i></i><b data-i18n="bridgeStatus">Extension bridge not configured</b></span
+        <span class="bridge-waiting"
+          ><i></i
+          ><b data-i18n="bridgeStatus">Extension bridge not configured</b></span
         ><span>v0.1.0-alpha.1</span>
       </footer>
     </main>
@@ -129,7 +146,8 @@
         />
         <div id="analysis" class="analysis" hidden></div>
         <div class="dialog-actions">
-          <button type="button" data-dialog-close data-i18n="cancel">Cancel</button
+          <button type="button" data-dialog-close data-i18n="cancel">
+            Cancel</button
           ><button
             id="analyze"
             type="button"
@@ -145,6 +163,39 @@
             hidden
           >
             Add download
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="clear-dialog">
+      <form method="dialog">
+        <div class="dialog-head">
+          <div>
+            <small data-i18n="manageList">MANAGE LIST</small>
+            <h2 data-i18n="removeSelected">Remove selected</h2>
+          </div>
+          <button type="button" class="close" data-clear-cancel>×</button>
+        </div>
+        <p class="dialog-copy" data-i18n="removeChoice">
+          What do you want to remove?
+        </p>
+        <div class="remove-options">
+          <button type="button" data-clear-mode="list">
+            <b data-i18n="listOnly">Clear from list</b>
+            <small data-i18n="keepFiles"
+              >Keep downloaded and partial files on disk</small
+            >
+          </button>
+          <button type="button" class="danger" data-clear-mode="files">
+            <b data-i18n="listAndFiles">Clear list and files</b>
+            <small data-i18n="deleteFiles"
+              >Permanently delete downloaded and partial files</small
+            >
+          </button>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" data-clear-cancel data-i18n="cancel">
+            Cancel
           </button>
         </div>
       </form>
