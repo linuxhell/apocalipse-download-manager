@@ -52,12 +52,14 @@ fn save_queue(state: &AppState, queue: &[DownloadTask]) -> Result<(), String> {
 
 fn update_task(app: &tauri::AppHandle, id: DownloadId, persist: bool, update: impl FnOnce(&mut DownloadTask)) {
     let state = app.state::<AppState>();
-    if let Ok(mut queue) = state.queue.lock() {
-        if let Some(task) = queue.iter_mut().find(|task| task.id == id) {
-            update(task);
-            if persist {
-                let _ = save_queue(&state, &queue);
-            }
+    let mut queue = match state.queue.lock() {
+        Ok(queue) => queue,
+        Err(_) => return,
+    };
+    if let Some(task) = queue.iter_mut().find(|task| task.id == id) {
+        update(task);
+        if persist {
+            let _ = save_queue(&state, &queue);
         }
     }
 }
