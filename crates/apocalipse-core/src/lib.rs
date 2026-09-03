@@ -1,4 +1,5 @@
 pub mod classifier;
+pub mod credentials;
 pub mod download;
 pub mod i18n;
 pub mod media;
@@ -9,6 +10,7 @@ pub mod tools;
 pub mod validation;
 
 pub use classifier::{classify_url, DownloadKind};
+pub use credentials::{AuthKind, CredentialMetadata, SecretStore, SensitiveSecret};
 pub use download::{DownloadEngine, DownloadEvent, DownloadRequest};
 pub use i18n::{Language, Translator};
 pub use media::{ConversionMode, TsToMp4Request, convert_ts_to_mp4};

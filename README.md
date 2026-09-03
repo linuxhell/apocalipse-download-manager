@@ -29,6 +29,7 @@ Apocalipse combines fast resumable downloads, media discovery, streaming capture
 - Native tray integration and a low-memory background mode
 - Complete UI localization: English by default, Brazilian Portuguese and Simplified Chinese, including the extension
 - Explainable strategy selection with optional aria2 RPC and automatic content validation
+- Removable per-site credentials backed by the operating system secure vault
 - Windows 10+, modern Linux distributions and macOS 13+
 
 Sites protected by DRM or access controls are intentionally not bypassed. Users are responsible for downloading only content they are authorized to save.

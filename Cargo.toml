@@ -21,3 +21,4 @@ thiserror = "2.0"
 tokio = { version = "1.44", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 url = "2.5"
 uuid = { version = "1.16", features = ["serde", "v4"] }
+zeroize = "1.8"

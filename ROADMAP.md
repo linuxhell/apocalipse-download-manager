@@ -14,6 +14,7 @@
 - SQLite queue, scheduler, retry policy and bandwidth controls
 - Segmented HTTP engine with server capability detection
 - Native Messaging bridge authenticated per browser profile
+- Site credential manager using Windows Credential Manager, macOS Keychain and Linux Secret Service
 - Windows/macOS/Linux packages in GitHub Releases
 
 ## M2 — media intelligence
