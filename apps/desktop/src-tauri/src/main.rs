@@ -7,12 +7,12 @@ use apocalipse_core::{
 use serde::Serialize;
 use std::{collections::HashMap, fs, path::{Path, PathBuf}, sync::Mutex};
 use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder, Manager, State};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 struct AppState {
     queue: Mutex<Vec<DownloadTask>>,
     queue_path: PathBuf,
-    workers: Mutex<HashMap<DownloadId, tokio::task::JoinHandle<()>>>,
+    workers: Mutex<HashMap<DownloadId, oneshot::Sender<()>>>,
 }
 
 #[derive(Serialize)]
@@ -65,7 +65,12 @@ fn update_task(app: &tauri::AppHandle, id: DownloadId, persist: bool, update: im
     }
 }
 
-async fn run_download(app: tauri::AppHandle, id: DownloadId, request: DownloadRequest) {
+async fn run_download(
+    app: tauri::AppHandle,
+    id: DownloadId,
+    request: DownloadRequest,
+    mut cancelled: oneshot::Receiver<()>,
+) {
     update_task(&app, id, true, |task| task.state = DownloadState::Inspecting);
     let engine = match DownloadEngine::new() {
         Ok(engine) => engine,
@@ -78,6 +83,7 @@ async fn run_download(app: tauri::AppHandle, id: DownloadId, request: DownloadRe
     let mut download = Box::pin(engine.download(request, events));
     loop {
         tokio::select! {
+            _ = &mut cancelled => break,
             result = &mut download => {
                 match result {
                     Ok(()) => update_task(&app, id, true, |task| task.state = DownloadState::Completed),
@@ -134,8 +140,9 @@ fn enqueue_download(app: tauri::AppHandle, state: State<'_, AppState>, url: Stri
     drop(queue);
     let request = DownloadRequest { url, destination: task.destination.clone(), overwrite: false };
     let task_id = task.id;
-    let worker = tauri::async_runtime::spawn(run_download(app.clone(), task_id, request));
-    state.workers.lock().map_err(|error| error.to_string())?.insert(task_id, worker);
+    let (cancel, cancelled) = oneshot::channel();
+    state.workers.lock().map_err(|error| error.to_string())?.insert(task_id, cancel);
+    tauri::async_runtime::spawn(run_download(app, task_id, request, cancelled));
     Ok(task)
 }
 
@@ -146,8 +153,8 @@ fn remove_downloads(state: State<'_, AppState>, ids: Vec<DownloadId>, delete_fil
     }
     if let Ok(mut workers) = state.workers.lock() {
         for id in &ids {
-            if let Some(worker) = workers.remove(id) {
-                worker.abort();
+            if let Some(cancel) = workers.remove(id) {
+                let _ = cancel.send(());
             }
         }
     }
