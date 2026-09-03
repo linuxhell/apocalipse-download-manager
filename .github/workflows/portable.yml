@@ -3,11 +3,13 @@ name: Portable builds
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: portable-${{ github.ref }}
@@ -90,12 +92,27 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Attach package to tagged Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  release:
+    name: Publish tagged Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
-          generate_release_notes: true
-          files: |
-            dist/*.zip
-            dist/*.tar.gz
+          path: dist
+          merge-multiple: true
+      - name: Create Release and upload portable packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          prerelease=()
+          if [[ "${{ github.ref_name }}" =~ (alpha|beta|rc) ]]; then
+            prerelease=(--prerelease)
+          fi
+          gh release view "${{ github.ref_name }}" >/dev/null 2>&1 ||
+            gh release create "${{ github.ref_name }}" --generate-notes "${prerelease[@]}"
+          gh release upload "${{ github.ref_name }}" dist/* --clobber
