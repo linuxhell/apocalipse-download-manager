@@ -145,6 +145,8 @@
           autofocus
         />
         <div id="analysis" class="analysis" hidden></div>
+        <label for="destination" data-i18n="saveTo">Save to</label>
+        <input id="destination" type="text" required />
         <div class="dialog-actions">
           <button type="button" data-dialog-close data-i18n="cancel">
             Cancel</button
@@ -196,6 +198,43 @@
         <div class="dialog-actions">
           <button type="button" data-clear-cancel data-i18n="cancel">
             Cancel
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="settings-dialog">
+      <form method="dialog">
+        <div class="dialog-head">
+          <div>
+            <small data-i18n="preferences">PREFERENCES</small>
+            <h2 data-i18n="settings">Settings</h2>
+          </div>
+          <button type="button" class="close" data-settings-close>×</button>
+        </div>
+        <label class="setting-toggle">
+          <input id="autostart" type="checkbox" />
+          <span
+            ><b data-i18n="startWithSystem">Start with the system</b
+            ><small data-i18n="startHidden"
+              >Open hidden in the system tray</small
+            ></span
+          >
+        </label>
+        <label for="default-directory" data-i18n="defaultDirectory"
+          >Default download directory</label
+        >
+        <input id="default-directory" type="text" required />
+        <div class="dialog-actions">
+          <button type="button" data-settings-close data-i18n="cancel">
+            Cancel
+          </button>
+          <button
+            id="save-settings"
+            type="button"
+            class="primary"
+            data-i18n="save"
+          >
+            Save
           </button>
         </div>
       </form>

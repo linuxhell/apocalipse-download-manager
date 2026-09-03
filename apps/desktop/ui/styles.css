@@ -351,6 +351,36 @@ dialog input {
 dialog input:focus {
   border-color: #27d9ee;
 }
+#destination {
+  margin-top: 0;
+}
+#analysis:not([hidden]) + label {
+  margin-top: 14px;
+}
+.setting-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px;
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #101920;
+  cursor: pointer;
+}
+.setting-toggle input {
+  width: 18px;
+  accent-color: var(--cyan);
+}
+.setting-toggle span,
+.setting-toggle b,
+.setting-toggle small {
+  display: block;
+}
+.setting-toggle small {
+  margin-top: 3px;
+  color: var(--muted);
+}
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
@@ -442,6 +472,28 @@ dialog input:focus {
   border-radius: 99px;
   font-size: 10px;
   text-transform: uppercase;
+}
+.task-status {
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+}
+.task-actions {
+  display: flex;
+  gap: 5px;
+}
+.task-action {
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 7px;
+  background: #162832;
+  color: #9ac8d2;
+  font-size: 9px;
+  cursor: pointer;
+}
+.task-action:hover {
+  color: #e5fbff;
+  background: #1d3c48;
 }
 .dialog-copy {
   color: var(--muted);

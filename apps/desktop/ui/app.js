@@ -31,10 +31,21 @@ const catalogs = {
     sourceUrl: "Source URL",
     cancel: "Cancel",
     analyze: "Analyze",
+    saveTo: "Save to",
     queued: "Queued",
     inspecting: "Inspecting",
     downloading: "Downloading",
+    paused: "Paused",
     failed: "Failed",
+    pause: "Pause",
+    resume: "Resume",
+    retry: "Retry",
+    openFolder: "Open folder",
+    preferences: "PREFERENCES",
+    startWithSystem: "Start with the system",
+    startHidden: "Open hidden in the system tray",
+    defaultDirectory: "Default download directory",
+    save: "Save",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -69,10 +80,21 @@ const catalogs = {
     sourceUrl: "URL de origem",
     cancel: "Cancelar",
     analyze: "Analisar",
+    saveTo: "Salvar em",
     queued: "Na fila",
     inspecting: "Analisando",
     downloading: "Baixando",
+    paused: "Pausado",
     failed: "Falhou",
+    pause: "Pausar",
+    resume: "Continuar",
+    retry: "Tentar novamente",
+    openFolder: "Abrir pasta",
+    preferences: "PREFERÊNCIAS",
+    startWithSystem: "Iniciar com o sistema",
+    startHidden: "Abrir oculto na bandeja do sistema",
+    defaultDirectory: "Diretório padrão de downloads",
+    save: "Salvar",
   },
   "zh-CN": {
     downloads: "下载",
@@ -106,10 +128,21 @@ const catalogs = {
     sourceUrl: "来源网址",
     cancel: "取消",
     analyze: "分析",
+    saveTo: "保存到",
     queued: "已排队",
     inspecting: "正在检查",
     downloading: "正在下载",
+    paused: "已暂停",
     failed: "失败",
+    pause: "暂停",
+    resume: "继续",
+    retry: "重试",
+    openFolder: "打开文件夹",
+    preferences: "偏好设置",
+    startWithSystem: "随系统启动",
+    startHidden: "启动后隐藏到系统托盘",
+    defaultDirectory: "默认下载目录",
+    save: "保存",
   },
 };
 
@@ -127,7 +160,11 @@ const invoke = (command, args = {}) => {
 };
 
 function stateName(state) {
-  return typeof state === "string" ? t(state) : Object.keys(state)[0];
+  return t(stateKey(state));
+}
+
+function stateKey(state) {
+  return typeof state === "string" ? state : Object.keys(state)[0];
 }
 
 function formatBytes(bytes) {
@@ -238,7 +275,35 @@ function renderDownloads() {
     });
     if (typeof task.state === "object")
       state.title = task.state.failed?.message || "";
-    row.append(select, icon, info, state);
+    const actions = document.createElement("div");
+    actions.className = "task-actions";
+    const addAction = (label, command) => {
+      const button = document.createElement("button");
+      button.className = "task-action";
+      button.textContent = label;
+      button.onclick = async () => {
+        button.disabled = true;
+        try {
+          await invoke(command, { id: task.id });
+          await refreshDownloads();
+        } catch (error) {
+          console.error(error);
+        } finally {
+          button.disabled = false;
+        }
+      };
+      actions.append(button);
+    };
+    const key = stateKey(task.state);
+    if (key === "downloading" || key === "inspecting")
+      addAction(t("pause"), "pause_download");
+    if (key === "paused") addAction(t("resume"), "resume_download");
+    if (key === "failed") addAction(t("retry"), "resume_download");
+    addAction(t("openFolder"), "reveal_download");
+    const status = document.createElement("div");
+    status.className = "task-status";
+    status.append(state, actions);
+    row.append(select, icon, info, status);
     list.append(row);
   }
   document.querySelector(".metrics article:nth-child(4) strong").textContent =
@@ -284,6 +349,7 @@ async function refreshDownloads() {
 
 const dialog = document.querySelector("#add-dialog");
 const clearDialog = document.querySelector("#clear-dialog");
+const settingsDialog = document.querySelector("#settings-dialog");
 document
   .querySelectorAll("[data-dialog-close]")
   .forEach((button) => (button.onclick = () => dialog.close()));
@@ -293,6 +359,11 @@ document.querySelectorAll("#add,#empty-add").forEach(
       document.querySelector("#analysis").hidden = true;
       document.querySelector("#enqueue").hidden = true;
       document.querySelector("#analyze").hidden = false;
+      invoke("default_download_directory")
+        .then((path) => {
+          document.querySelector("#destination").value = path;
+        })
+        .catch(console.error);
       dialog.showModal();
     }),
 );
@@ -339,6 +410,39 @@ document.querySelectorAll("[data-clear-mode]").forEach((button) => {
     }
   };
 });
+document.querySelector('[data-page="settings"]').onclick = async () => {
+  try {
+    const [autostart, directory] = await Promise.all([
+      invoke("get_autostart"),
+      invoke("default_download_directory"),
+    ]);
+    document.querySelector("#autostart").checked = autostart.enabled;
+    document.querySelector("#default-directory").value = directory;
+    settingsDialog.showModal();
+  } catch (error) {
+    console.error(error);
+  }
+};
+document
+  .querySelectorAll("[data-settings-close]")
+  .forEach((button) => (button.onclick = () => settingsDialog.close()));
+document.querySelector("#save-settings").onclick = async () => {
+  const button = document.querySelector("#save-settings");
+  const directory = document.querySelector("#default-directory");
+  if (!directory.reportValidity()) return;
+  button.disabled = true;
+  try {
+    await invoke("set_default_download_directory", { path: directory.value });
+    await invoke("set_autostart", {
+      enabled: document.querySelector("#autostart").checked,
+    });
+    settingsDialog.close();
+  } catch (error) {
+    console.error(error);
+  } finally {
+    button.disabled = false;
+  }
+};
 document.querySelector("#url").oninput = () => {
   document.querySelector("#analysis").hidden = true;
   document.querySelector("#enqueue").hidden = true;
@@ -364,7 +468,12 @@ document.querySelector("#enqueue").onclick = async () => {
   const button = document.querySelector("#enqueue");
   button.disabled = true;
   try {
-    downloads.push(await invoke("enqueue_download", { url: url.value }));
+    downloads.push(
+      await invoke("enqueue_download", {
+        url: url.value,
+        destinationDirectory: document.querySelector("#destination").value,
+      }),
+    );
     renderDownloads();
     dialog.close();
     url.value = "";
