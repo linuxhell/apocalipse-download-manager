@@ -61,6 +61,7 @@ struct ClipboardStatus {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TransferLimits {
     max_active_downloads: usize,
     connections_per_download: usize,
