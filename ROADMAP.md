@@ -20,6 +20,7 @@
 
 - yt-dlp inspection and format picker
 - FFmpeg and N_m3u8DL-RE adapters
+- TS to MP4 conversion (fast remux and compatibility transcode)
 - Video/Audio/Image extension tabs with thumbnails and reliable size labels
 - HLS capture/recording and merge progress
 
@@ -34,4 +35,3 @@
 - Signed update manifests, tool checksum verification and rollback
 - Crash recovery, fuzzing and large-file soak tests
 - Accessibility, translations and stable releases
-

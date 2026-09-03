@@ -19,6 +19,7 @@ Apocalipse combines fast resumable downloads, media discovery, streaming capture
 - `.torrent`, magnet, `.m3u8` and URL protocol/file associations
 - yt-dlp format discovery with best video + audio selected by default
 - FFmpeg and N_m3u8DL-RE integration, health checks and safe updates
+- TS to MP4 conversion with lossless fast remux and an H.264/AAC compatibility mode
 - Selective torrent file window and peer/session information
 - Browser media discovery grouped into Video, Audio and Images
 - Correct thumbnails, estimated sizes and format/quality selection

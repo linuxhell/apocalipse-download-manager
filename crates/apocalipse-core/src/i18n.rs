@@ -30,16 +30,25 @@ impl Translator {
             (Language::PortugueseBrazil, "video") => "Vídeo",
             (Language::PortugueseBrazil, "audio") => "Áudio",
             (Language::PortugueseBrazil, "images") => "Imagens",
+            (Language::PortugueseBrazil, "convert_ts") => "Converter TS para MP4",
+            (Language::PortugueseBrazil, "fast_remux") => "Conversão rápida sem perda",
+            (Language::PortugueseBrazil, "compatibility_mode") => "Modo de compatibilidade",
             (Language::ChineseSimplified, "downloads") => "下载",
             (Language::ChineseSimplified, "settings") => "设置",
             (Language::ChineseSimplified, "video") => "视频",
             (Language::ChineseSimplified, "audio") => "音频",
             (Language::ChineseSimplified, "images") => "图片",
+            (Language::ChineseSimplified, "convert_ts") => "将 TS 转换为 MP4",
+            (Language::ChineseSimplified, "fast_remux") => "无损快速封装",
+            (Language::ChineseSimplified, "compatibility_mode") => "兼容模式",
             (_, "downloads") => "Downloads",
             (_, "settings") => "Settings",
             (_, "video") => "Video",
             (_, "audio") => "Audio",
             (_, "images") => "Images",
+            (_, "convert_ts") => "Convert TS to MP4",
+            (_, "fast_remux") => "Fast lossless remux",
+            (_, "compatibility_mode") => "Compatibility mode",
             _ => key,
         }
     }
@@ -53,7 +62,7 @@ mod tests {
         assert_eq!(Language::default(), Language::English);
         for language in Language::ALL {
             let tr = Translator::new(language);
-            for key in ["downloads", "settings", "video", "audio", "images"] { assert_ne!(tr.text(key), key); }
+            for key in ["downloads", "settings", "video", "audio", "images", "convert_ts", "fast_remux", "compatibility_mode"] { assert_ne!(tr.text(key), key); }
         }
     }
 }
