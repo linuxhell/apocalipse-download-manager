@@ -5,6 +5,7 @@ let bypassHeld = false;
 let bypassUntil = 0;
 let bypassNextUntil = 0;
 let forceHeld = false;
+let lastFormSubmission = null;
 
 async function bridgeRequest(path, options = {}, suppliedToken = null) {
   const { pairingToken = "" } = suppliedToken === null ? await chrome.storage.local.get({ pairingToken: "" }) : { pairingToken: suppliedToken };
@@ -114,6 +115,12 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     cancelled = true;
     if (eraseFromHistory) await eraseBrowserDownload(item.id);
     const pageUrl = item.referrer || null;
+    const formRequest = lastFormSubmission
+      && Date.now() - lastFormSubmission.capturedAt < 30000
+      && pageUrl === lastFormSubmission.pageUrl
+      ? lastFormSubmission
+      : null;
+    if (formRequest) lastFormSubmission = null;
     await bridgeRequest("/v1/download", {
       method: "POST",
       body: JSON.stringify({
@@ -123,6 +130,9 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
         duration: null,
         cookieHeader: await cookieHeaderFor([url, item.url, pageUrl]),
         userAgent: navigator.userAgent,
+        requestMethod: formRequest?.method || "GET",
+        requestBody: formRequest?.body || null,
+        requestContentType: formRequest?.contentType || null,
       }),
     });
   } catch {
@@ -145,6 +155,11 @@ if (chrome.downloads.onDeterminingFilename?.addListener) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.type === "APOCALIPSE_FORM_SUBMIT" && message.request?.method === "POST") {
+    lastFormSubmission = message.request;
+    reply({ ok: true });
+    return;
+  }
   if (message?.type === "APOCALIPSE_BYPASS_NEXT") {
     bypassNextUntil = Date.now() + Math.min(Math.max(Number(message.ttlMs) || 15000, 2000), 30000);
     reply({ ok: true });

@@ -16,6 +16,9 @@ pub struct DownloadRequest {
     pub destination: PathBuf,
     pub overwrite: bool,
     pub connections: usize,
+    pub method: String,
+    pub body: Option<Vec<u8>>,
+    pub headers: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,13 +51,14 @@ impl DownloadEngine {
         if let Some(parent) = request.destination.parent() {
             fs::create_dir_all(parent).await?;
         }
-        let head = self.client.head(&request.url).send().await.ok();
+        let can_segment = request.method.eq_ignore_ascii_case("GET") && request.body.is_none();
+        let head = if can_segment { self.client.head(&request.url).send().await.ok() } else { None };
         let total = head.as_ref().and_then(|response| response.content_length());
         let accepts_ranges = head.as_ref().and_then(|response| response.headers().get(header::ACCEPT_RANGES))
             .and_then(|value| value.to_str().ok()).is_some_and(|value| value.eq_ignore_ascii_case("bytes"));
         let requested = request.connections.clamp(1, 32);
         let useful_connections = total.map(|size| requested.min(size.div_ceil(4_194_304) as usize)).unwrap_or(1);
-        if accepts_ranges && useful_connections > 1 {
+        if can_segment && accepts_ranges && useful_connections > 1 {
             let probe = self.client.get(&request.url).header(header::RANGE, "bytes=0-0").send().await?;
             if probe.status() == StatusCode::PARTIAL_CONTENT {
                 return self.download_segmented(request, events, total.unwrap(), useful_connections).await;
@@ -66,8 +70,13 @@ impl DownloadEngine {
     async fn download_single(&self, request: DownloadRequest, events: mpsc::Sender<DownloadEvent>) -> Result<()> {
         let partial = partial_path(&request.destination);
         let existing = fs::metadata(&partial).await.map(|metadata| metadata.len()).unwrap_or(0);
-        let mut builder = self.client.get(&request.url);
-        if existing > 0 {
+        let method = reqwest::Method::from_bytes(request.method.as_bytes()).context("invalid HTTP method")?;
+        let mut builder = self.client.request(method, &request.url);
+        for (name, value) in &request.headers {
+            builder = builder.header(name.as_str(), value.as_str());
+        }
+        if let Some(body) = &request.body { builder = builder.body(body.clone()); }
+        if existing > 0 && request.method.eq_ignore_ascii_case("GET") && request.body.is_none() {
             builder = builder.header(header::RANGE, format!("bytes={existing}-"));
         }
         let response = builder.send().await?.error_for_status()?;

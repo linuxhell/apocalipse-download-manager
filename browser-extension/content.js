@@ -25,6 +25,24 @@
     bypassPressed: false,
     forcePressed: false,
   }).catch(() => {}));
+  document.addEventListener("submit", (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || String(form.method || "get").toLowerCase() !== "post") return;
+    const data = new FormData(form, event.submitter || undefined);
+    const body = new URLSearchParams();
+    for (const [name, value] of data) if (typeof value === "string") body.append(name, value);
+    chrome.runtime.sendMessage({
+      type: "APOCALIPSE_FORM_SUBMIT",
+      request: {
+        url: absolute(form.action || location.href),
+        pageUrl: location.href,
+        method: "POST",
+        body: body.toString(),
+        contentType: "application/x-www-form-urlencoded",
+        capturedAt: Date.now(),
+      },
+    }).catch(() => {});
+  }, true);
 
   const absolute = (value) => {
     try { return new URL(value, location.href).href; } catch { return null; }

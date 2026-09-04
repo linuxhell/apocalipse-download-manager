@@ -241,6 +241,9 @@ let pendingReferer = null;
 let pendingDuration = null;
 let pendingCookieHeader = null;
 let pendingUserAgent = null;
+let pendingRequestMethod = null;
+let pendingRequestBody = null;
+let pendingRequestContentType = null;
 let downloads = [];
 let activeFilter = "all";
 let overallSpeed = 0;
@@ -571,6 +574,9 @@ document.querySelectorAll("#add,#empty-add").forEach(
       pendingDuration = null;
       pendingCookieHeader = null;
       pendingUserAgent = null;
+      pendingRequestMethod = null;
+      pendingRequestBody = null;
+      pendingRequestContentType = null;
       resetMediaInspection();
       invoke("default_download_directory")
         .then((path) => {
@@ -832,6 +838,9 @@ document.querySelector("#enqueue").onclick = async () => {
           knownDuration: pendingDuration,
           cookieHeader: pendingCookieHeader,
           userAgent: pendingUserAgent,
+          requestMethod: pendingRequestMethod,
+          requestBody: pendingRequestBody,
+          requestContentType: pendingRequestContentType,
         },
       }),
     );
@@ -860,6 +869,9 @@ setInterval(async () => {
     pendingDuration = null;
     pendingCookieHeader = null;
     pendingUserAgent = null;
+    pendingRequestMethod = null;
+    pendingRequestBody = null;
+    pendingRequestContentType = null;
     const url = document.querySelector("#url");
     url.value = link;
     document.querySelector("#analysis").hidden = true;
@@ -881,6 +893,9 @@ setInterval(async () => {
     pendingDuration = Number.isFinite(request.duration) ? request.duration : null;
     pendingCookieHeader = request.cookieHeader || null;
     pendingUserAgent = request.userAgent || null;
+    pendingRequestMethod = request.requestMethod || null;
+    pendingRequestBody = request.requestBody || null;
+    pendingRequestContentType = request.requestContentType || null;
     document.querySelector("#url").value = request.url;
     document.querySelector("#file-name").value = request.fileName || "";
     document.querySelector("#analysis").hidden = true;

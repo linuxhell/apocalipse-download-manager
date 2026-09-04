@@ -104,7 +104,14 @@ fn http_origin(url: &str) -> Option<&str> {
 }
 
 fn version_line(executable: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new(executable).args(args).output().ok()?;
+    let mut command = Command::new(executable);
+    command.args(args);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let output = command.output().ok()?;
     if !output.status.success() { return None; }
     let text = if output.stdout.is_empty() { String::from_utf8_lossy(&output.stderr) } else { String::from_utf8_lossy(&output.stdout) };
     text.lines().next().map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned)
@@ -148,6 +155,9 @@ struct BridgeDownload {
     duration: Option<f64>,
     cookie_header: Option<String>,
     user_agent: Option<String>,
+    request_method: Option<String>,
+    request_body: Option<String>,
+    request_content_type: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -157,12 +167,18 @@ struct DownloadContext {
     known_duration: Option<f64>,
     cookie_header: Option<String>,
     user_agent: Option<String>,
+    request_method: Option<String>,
+    request_body: Option<String>,
+    request_content_type: Option<String>,
 }
 
 #[derive(Clone)]
 struct RequestIdentity {
     cookie_header: Option<String>,
     user_agent: Option<String>,
+    request_method: String,
+    request_body: Option<String>,
+    request_content_type: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -195,9 +211,14 @@ fn inspect_url(url: String) -> Result<PlanResponse, String> {
 #[tauri::command]
 async fn inspect_media_formats(state: State<'_, AppState>, url: String) -> Result<MediaInspection, String> {
     let executable = configured_tool(&state.settings.lock().map_err(|error| error.to_string())?.yt_dlp_path, "yt-dlp");
-    let output = tokio::process::Command::new(executable)
-        .args(["--dump-single-json", "--no-playlist", "--skip-download", "--no-warnings"])
-        .arg(&url).output().await.map_err(|error| format!("yt_dlp_unavailable: {error}"))?;
+    let mut command = tokio::process::Command::new(executable);
+    command.args(["--dump-single-json", "--no-playlist", "--skip-download", "--no-warnings"]).arg(&url);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.as_std_mut().creation_flags(0x08000000);
+    }
+    let output = command.output().await.map_err(|error| format!("yt_dlp_unavailable: {error}"))?;
     if !output.status.success() { return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned()); }
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
     let title = value.get("title").and_then(|item| item.as_str()).unwrap_or("media").to_owned();
@@ -820,9 +841,14 @@ fn enqueue_download(
             .filter(|duration| duration.is_finite() && *duration > 0.0);
         let cookie_header = context.cookie_header.filter(|value| value.len() <= 16_384 && !value.contains('\r') && !value.contains('\n'));
         let user_agent = context.user_agent.filter(|value| value.len() <= 1024 && !value.contains('\r') && !value.contains('\n'));
-        if cookie_header.is_some() || user_agent.is_some() {
+        let request_method = context.request_method.as_deref().unwrap_or("GET").to_ascii_uppercase();
+        let request_method = if request_method == "POST" { "POST" } else { "GET" }.to_owned();
+        let request_body = context.request_body.filter(|value| value.len() <= 65_536);
+        let request_content_type = context.request_content_type
+            .filter(|value| value.len() <= 256 && !value.contains('\r') && !value.contains('\n'));
+        if cookie_header.is_some() || user_agent.is_some() || request_method == "POST" {
             state.request_identities.lock().map_err(|error| error.to_string())?
-                .insert(task.id, RequestIdentity { cookie_header, user_agent });
+                .insert(task.id, RequestIdentity { cookie_header, user_agent, request_method, request_body, request_content_type });
         }
     }
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
@@ -846,11 +872,20 @@ fn start_download(app: &tauri::AppHandle, state: &AppState, task: DownloadTask, 
     workers.insert(task.id, cancel);
     drop(workers);
     if kind == DownloadKind::Http {
+        let identity = state.request_identities.lock().ok().and_then(|items| items.get(&task.id).cloned());
+        let mut headers = Vec::new();
+        if let Some(referer) = task.referer.as_ref() { headers.push(("Referer".to_owned(), referer.clone())); }
+        if let Some(user_agent) = identity.as_ref().and_then(|item| item.user_agent.as_ref()) { headers.push(("User-Agent".to_owned(), user_agent.clone())); }
+        if let Some(cookie) = identity.as_ref().and_then(|item| item.cookie_header.as_ref()) { headers.push(("Cookie".to_owned(), cookie.clone())); }
+        if let Some(content_type) = identity.as_ref().and_then(|item| item.request_content_type.as_ref()) { headers.push(("Content-Type".to_owned(), content_type.clone())); }
         let request = DownloadRequest {
             url: task.source,
             destination: task.destination,
             overwrite: false,
             connections: limits.connections_per_download.clamp(1, 32),
+            method: identity.as_ref().map(|item| item.request_method.clone()).unwrap_or_else(|| "GET".to_owned()),
+            body: identity.and_then(|item| item.request_body.map(String::into_bytes)),
+            headers,
         };
         tauri::async_runtime::spawn(run_download(app.clone(), task.id, request, cancelled));
     } else {

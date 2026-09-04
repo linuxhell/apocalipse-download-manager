@@ -13,6 +13,9 @@ async fn main() -> Result<()> {
         destination: PathBuf::from(&args[2]),
         overwrite: false,
         connections: 8,
+        method: "GET".to_owned(),
+        body: None,
+        headers: Vec::new(),
     };
     let worker = tokio::spawn(async move { DownloadEngine::new()?.download(request, tx).await });
     while let Some(event) = rx.recv().await {
