@@ -343,17 +343,25 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return true;
   }
   if (message?.type === "APOCALIPSE_DOWNLOAD" && message.item?.url) {
-    sourcePageUrl(sender).then(async (pageUrl) => bridgeRequest("/v1/download", {
+    sourcePageUrl(sender).then(async (pageUrl) => {
+      let url = message.item.url;
+      try {
+        const tabUrl = new URL(pageUrl);
+        if (/(^|\.)facebook\.com$/i.test(tabUrl.hostname)
+          && /(?:^|\/)(?:reel|reels|watch|videos|posts|share)(?:\/|$)/i.test(tabUrl.pathname)) url = tabUrl.href;
+      } catch {}
+      return bridgeRequest("/v1/download", {
         method: "POST",
         body: JSON.stringify({
-          url: message.item.url,
+          url,
           fileName: message.item.title || null,
           pageUrl,
           duration: Number.isFinite(message.item.duration) ? message.item.duration : null,
-          cookieHeader: await cookieHeaderFor([message.item.url, ...(message.item.requestUrls || []), pageUrl]),
+          cookieHeader: await cookieHeaderFor([url, message.item.url, ...(message.item.requestUrls || []), pageUrl]),
           userAgent: message.item.userAgent || null,
         }),
-      }))
+      });
+    })
       .then(() => reply({ target: "apocalipse" }))
       .catch((error) => reply({ target: "error", error: String(error) }));
     return true;

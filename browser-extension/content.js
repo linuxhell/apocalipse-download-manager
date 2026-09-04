@@ -47,6 +47,20 @@
   const absolute = (value) => {
     try { return new URL(value, location.href).href; } catch { return null; }
   };
+  const copyTextNow = (value) => {
+    void navigator.clipboard.writeText(value).catch(() => {});
+    const input = document.createElement("textarea");
+    input.value = value;
+    input.setAttribute("readonly", "");
+    input.style.cssText = "position:fixed;left:-10000px;top:0;opacity:0";
+    document.documentElement.append(input);
+    input.select();
+    input.setSelectionRange(0, input.value.length);
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch {}
+    input.remove();
+    return copied;
+  };
   const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
   const thumbnailFor = (element, kind) => {
     if (kind === "audio") return "";
@@ -296,7 +310,8 @@
         event.stopPropagation();
         const originalText = button.textContent;
         button.textContent = "…";
-        const resolved = isFacebookVideo ? await revealFacebookUrl(element) : await resolveDownloadUrl(element);
+        const visibleFacebookUrl = isFacebookVideo && isFacebookMediaUrl(location.href) ? location.href : null;
+        const resolved = visibleFacebookUrl || (isFacebookVideo ? await revealFacebookUrl(element) : await resolveDownloadUrl(element));
         if (resolved === "clipboard-copied") {
           button.textContent = "✓";
           button.title = "Link copiado; o Apocalipse abrirá a janela de download";
@@ -310,13 +325,7 @@
           setTimeout(() => { button.textContent = originalText; }, 2500);
           return;
         }
-        let copiedToClipboard = false;
-        if (isFacebookVideo) {
-          try {
-            await navigator.clipboard.writeText(currentUrl);
-            copiedToClipboard = true;
-          } catch {}
-        }
+        const copiedToClipboard = isFacebookVideo ? copyTextNow(currentUrl) : false;
         chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls: resolved?.requestUrls || [], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
           const failed = !copiedToClipboard && (chrome.runtime.lastError || result?.target !== "apocalipse");
           button.textContent = failed ? "⚠" : "✓";
