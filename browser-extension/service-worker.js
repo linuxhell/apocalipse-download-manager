@@ -117,11 +117,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           userAgent: message.item.userAgent || null,
         }),
       }))
-      .then(() => reply({ target: "apocalipse" })).catch(() => {
-      chrome.downloads.download({ url: message.item.url, saveAs: true }, (downloadId) => {
-        reply({ target: "browser", downloadId, error: chrome.runtime.lastError?.message });
-      });
-    });
+      .then(() => reply({ target: "apocalipse" }))
+      .catch((error) => reply({ target: "error", error: String(error) }));
     return true;
   }
 });

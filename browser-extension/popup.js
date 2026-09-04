@@ -62,7 +62,11 @@ const render = () => {
     row.querySelector("small").textContent = [formatBytes(item.size), formatDuration(item.duration), item.recommended ? t("recommended") : "", new URL(item.url).hostname].filter(Boolean).join(" · ");
     const button = row.querySelector("button");
     button.textContent = t("download");
-    button.onclick = () => chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item });
+    button.onclick = () => chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item }, (result) => {
+      if (result?.target === "error" || chrome.runtime.lastError) {
+        showBridgeError(result?.error || chrome.runtime.lastError?.message || "unavailable");
+      }
+    });
     root.append(row);
   }
 };

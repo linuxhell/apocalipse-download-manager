@@ -960,6 +960,32 @@ fn bridge_authorized(headers: &str, expected: &str) -> bool {
     })
 }
 
+fn bridge_content_length(headers: &str) -> usize {
+    headers.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("content-length")
+            .then(|| value.trim().parse::<usize>().ok()).flatten()
+    }).unwrap_or(0)
+}
+
+fn read_bridge_request(stream: &mut TcpStream) -> Option<Vec<u8>> {
+    const MAX_REQUEST_SIZE: usize = 262_144;
+    let mut request = Vec::with_capacity(8_192);
+    let mut chunk = [0_u8; 8_192];
+    loop {
+        let count = stream.read(&mut chunk).ok()?;
+        if count == 0 { break; }
+        request.extend_from_slice(&chunk[..count]);
+        if request.len() > MAX_REQUEST_SIZE { return None; }
+        if let Some(header_end) = request.windows(4).position(|value| value == b"\r\n\r\n") {
+            let body_start = header_end + 4;
+            let headers = String::from_utf8_lossy(&request[..header_end]);
+            if request.len() >= body_start + bridge_content_length(&headers) { break; }
+        }
+    }
+    (!request.is_empty()).then_some(request)
+}
+
 fn bridge_response(stream: &mut TcpStream, status: &str, origin: Option<&str>, body: &str) {
     let cors = origin.map(|value| format!("Access-Control-Allow-Origin: {value}\r\nVary: Origin\r\n")).unwrap_or_else(|| "Access-Control-Allow-Origin: *\r\n".to_owned());
     let response = format!(
@@ -989,9 +1015,8 @@ fn take_bridge_download(state: State<'_, AppState>) -> Result<Option<BridgeDownl
 
 fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
-    let mut buffer = vec![0_u8; 65_536];
-    let count = match stream.read(&mut buffer) { Ok(count) => count, Err(_) => return };
-    let request = String::from_utf8_lossy(&buffer[..count]);
+    let Some(buffer) = read_bridge_request(&mut stream) else { return };
+    let request = String::from_utf8_lossy(&buffer);
     let Some((headers, body)) = request.split_once("\r\n\r\n") else { return };
     let origin = bridge_origin(headers);
     let has_origin = headers.lines().any(|line| line.split_once(':').is_some_and(|(name, _)| name.eq_ignore_ascii_case("origin")));
@@ -1310,5 +1335,11 @@ mod tests {
     fn uses_latest_valid_percentage_in_a_progress_chunk() {
         assert_eq!(parse_external_progress("Vid: 42% Aud: 41%"), Some(41.0));
         assert_eq!(parse_external_progress("HTTP 403%"), None);
+    }
+
+    #[test]
+    fn parses_bridge_content_length_case_insensitively() {
+        assert_eq!(bridge_content_length("POST / HTTP/1.1\r\nContent-Length: 123"), 123);
+        assert_eq!(bridge_content_length("GET / HTTP/1.1\r\ncontent-length: 0"), 0);
     }
 }
