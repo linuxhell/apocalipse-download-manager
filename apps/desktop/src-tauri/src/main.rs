@@ -20,6 +20,7 @@ struct AppState {
     bridge_pending: Mutex<Vec<BridgeDownload>>,
     request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
     log_path: PathBuf,
+    log_write_lock: Mutex<()>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -298,6 +299,10 @@ fn sanitize_log_detail(detail: &str) -> String {
 }
 
 fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
+    let _write_guard = match state.log_write_lock.lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
     if let Some(parent) = state.log_path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -607,6 +612,7 @@ fn write_yt_dlp_diagnostic(
 #[tauri::command]
 fn read_general_log(state: State<'_, AppState>) -> Result<String, String> {
     diagnostic_log(&state, "INFO", "log.viewed", "viewed_inside_application");
+    let _read_guard = state.log_write_lock.lock().map_err(|error| error.to_string())?;
     match fs::read_to_string(&state.log_path) {
         Ok(contents) => {
             let start = contents.len().saturating_sub(512 * 1024);
@@ -621,11 +627,14 @@ fn read_general_log(state: State<'_, AppState>) -> Result<String, String> {
 #[tauri::command]
 fn clear_general_log(state: State<'_, AppState>) -> Result<(), String> {
     let rotated = state.log_path.with_extension("log.1");
-    for path in [&state.log_path, &rotated] {
-        match fs::remove_file(path) {
-            Ok(()) => {},
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
-            Err(error) => return Err(error.to_string()),
+    {
+        let _write_guard = state.log_write_lock.lock().map_err(|error| error.to_string())?;
+        for path in [&state.log_path, &rotated] {
+            match fs::remove_file(path) {
+                Ok(()) => {},
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+                Err(error) => return Err(error.to_string()),
+            }
         }
     }
     diagnostic_log(&state, "INFO", "log.cleared", "cleared_by_user");
@@ -1511,6 +1520,7 @@ fn main() {
                 bridge_pending: Mutex::new(Vec::new()),
                 request_identities: Mutex::new(HashMap::new()),
                 log_path,
+                log_write_lock: Mutex::new(()),
             });
             diagnostic_log(&app.state::<AppState>(), "INFO", "application.started", env!("CARGO_PKG_VERSION"));
             let bridge_app = app.handle().clone();
