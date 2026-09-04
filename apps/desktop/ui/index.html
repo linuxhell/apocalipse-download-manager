@@ -297,6 +297,11 @@
           </div>
           <button id="regenerate-pairing" type="button" data-i18n="regenerate">Regenerate</button>
         </section>
+        <section class="pairing-settings">
+          <b data-i18n="siteRules">Site rules</b>
+          <small data-i18n="siteRulesHint">Versioned fixes that can change site behavior without rebuilding the application</small>
+          <button id="manage-site-rules" type="button" data-i18n="manageRules">Manage rules</button>
+        </section>
         <section class="tool-settings">
           <b data-i18n="externalTools">Required media and transfer tools</b>
           <small data-i18n="toolsHint">Configure each executable. Apocalipse uses these exact paths for downloads.</small>
@@ -352,6 +357,24 @@
           <button id="refresh-log" type="button" data-i18n="refreshLog">Refresh</button>
           <button id="open-log-external" type="button" data-i18n="openExternal">Open in editor</button>
           <button type="button" data-log-close data-i18n="closeLog">Close</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="site-rules-dialog">
+      <form method="dialog" class="rules-editor">
+        <div class="dialog-head">
+          <div>
+            <small data-i18n="siteRules">Site rules</small>
+            <h2 data-i18n="manageRules">Manage rules</h2>
+          </div>
+          <button type="button" class="close" data-site-rules-close>×</button>
+        </div>
+        <textarea id="site-rules-json" spellcheck="false"></textarea>
+        <div id="site-rules-error" class="analysis" hidden></div>
+        <div class="dialog-actions">
+          <button id="reset-site-rules" type="button" data-i18n="resetRules">Restore defaults</button>
+          <button type="button" data-site-rules-close data-i18n="cancel">Cancel</button>
+          <button id="save-site-rules" type="button" class="primary" data-i18n="saveRules">Validate and save</button>
         </div>
       </form>
     </dialog>

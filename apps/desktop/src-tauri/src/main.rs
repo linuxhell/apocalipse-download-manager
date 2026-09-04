@@ -21,6 +21,70 @@ struct AppState {
     request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
+    site_rules: Mutex<Vec<SiteRule>>,
+    site_rules_path: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum SiteRuleAction {
+    Standard,
+    SingleConnection,
+    UupdumpPost,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SiteRule {
+    id: String,
+    name: String,
+    hosts: Vec<String>,
+    action: SiteRuleAction,
+    enabled: bool,
+    connections: usize,
+}
+
+fn default_site_rules() -> Vec<SiteRule> {
+    vec![SiteRule {
+        id: "uupdump".to_owned(),
+        name: "UUP dump".to_owned(),
+        hosts: vec!["uupdump.net".to_owned(), "*.uupdump.net".to_owned()],
+        action: SiteRuleAction::UupdumpPost,
+        enabled: true,
+        connections: 1,
+    }]
+}
+
+fn valid_site_rule(rule: &SiteRule) -> bool {
+    !rule.id.trim().is_empty() && rule.id.len() <= 64
+        && !rule.name.trim().is_empty() && rule.name.len() <= 120
+        && !rule.hosts.is_empty() && rule.hosts.len() <= 32
+        && rule.hosts.iter().all(|host| {
+            let host = host.trim().trim_start_matches("*.");
+            !host.is_empty() && host.len() <= 253 && host.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '-'))
+        })
+        && (1..=32).contains(&rule.connections)
+}
+
+fn load_site_rules(path: &Path) -> Vec<SiteRule> {
+    fs::read(path).ok().and_then(|data| serde_json::from_slice::<Vec<SiteRule>>(&data).ok())
+        .filter(|rules| !rules.is_empty() && rules.len() <= 100 && rules.iter().all(valid_site_rule))
+        .unwrap_or_else(default_site_rules)
+}
+
+fn host_from_url(url: &str) -> Option<String> {
+    let scheme = url.find("://")? + 3;
+    let authority = url[scheme..].split(['/', '?', '#']).next()?;
+    let host = authority.rsplit('@').next()?.split(':').next()?.trim().to_ascii_lowercase();
+    (!host.is_empty()).then_some(host)
+}
+
+fn matching_site_rule(url: &str, rules: &[SiteRule]) -> Option<SiteRule> {
+    let host = host_from_url(url)?;
+    rules.iter().find(|rule| rule.enabled && rule.hosts.iter().any(|pattern| {
+        let pattern = pattern.trim().to_ascii_lowercase();
+        pattern.strip_prefix("*.").map_or(host == pattern, |suffix| host == suffix || host.ends_with(&format!(".{suffix}")))
+    })).cloned()
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -249,6 +313,39 @@ async fn inspect_media_formats(state: State<'_, AppState>, url: String) -> Resul
 
 fn load_queue(path: &Path) -> Vec<DownloadTask> {
     fs::read(path).ok().and_then(|data| serde_json::from_slice(&data).ok()).unwrap_or_default()
+}
+
+fn copy_directory_if_missing(source: &Path, destination: &Path) {
+    if !source.is_dir() || destination.exists() { return; }
+    if fs::create_dir_all(destination).is_err() { return; }
+    let Ok(entries) = fs::read_dir(source) else { return };
+    for entry in entries.flatten() {
+        let target = destination.join(entry.file_name());
+        if entry.path().is_dir() {
+            copy_directory_if_missing(&entry.path(), &target);
+        } else if !target.exists() {
+            let _ = fs::copy(entry.path(), target);
+        }
+    }
+}
+
+fn portable_data_directory<R: tauri::Runtime>(app: &tauri::App<R>) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let executable = std::env::current_exe()?;
+    let directory = executable.parent().ok_or_else(|| std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "executable_has_no_parent",
+    ))?.join("data");
+    fs::create_dir_all(&directory)?;
+    let legacy = app.path().app_data_dir()?;
+    for name in ["queue.json", "settings.json", "site-rules.json"] {
+        let source = legacy.join(name);
+        let destination = directory.join(name);
+        if source.is_file() && !destination.exists() {
+            let _ = fs::copy(source, destination);
+        }
+    }
+    copy_directory_if_missing(&legacy.join("logs"), &directory.join("logs"));
+    Ok(directory)
 }
 
 fn save_queue(state: &AppState, queue: &[DownloadTask]) -> Result<(), String> {
@@ -670,6 +767,50 @@ fn open_log_external(state: State<'_, AppState>) -> Result<(), String> {
     Command::new(editor).arg(&state.log_path).spawn().map(|_| ()).map_err(|error| error.to_string())
 }
 
+fn save_site_rules(state: &AppState, rules: &[SiteRule]) -> Result<(), String> {
+    if let Some(parent) = state.site_rules_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    if state.site_rules_path.exists() {
+        fs::copy(&state.site_rules_path, state.site_rules_path.with_extension("backup.json"))
+            .map_err(|error| error.to_string())?;
+    }
+    let data = serde_json::to_vec_pretty(rules).map_err(|error| error.to_string())?;
+    fs::write(&state.site_rules_path, data).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_site_rules(state: State<'_, AppState>) -> Result<String, String> {
+    let rules = state.site_rules.lock().map_err(|error| error.to_string())?;
+    serde_json::to_string_pretty(&*rules).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_site_rules(state: State<'_, AppState>, json: String) -> Result<String, String> {
+    let rules = serde_json::from_str::<Vec<SiteRule>>(&json).map_err(|error| format!("invalid_site_rules_json: {error}"))?;
+    if rules.is_empty() || rules.len() > 100 || !rules.iter().all(valid_site_rule) {
+        return Err("invalid_site_rules".to_owned());
+    }
+    let mut ids = rules.iter().map(|rule| rule.id.trim().to_ascii_lowercase()).collect::<Vec<_>>();
+    ids.sort();
+    if ids.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err("duplicate_site_rule_id".to_owned());
+    }
+    save_site_rules(&state, &rules)?;
+    *state.site_rules.lock().map_err(|error| error.to_string())? = rules;
+    diagnostic_log(&state, "INFO", "site_rules.updated", &format!("count={}", ids.len()));
+    get_site_rules(state)
+}
+
+#[tauri::command]
+fn reset_site_rules(state: State<'_, AppState>) -> Result<String, String> {
+    let rules = default_site_rules();
+    save_site_rules(&state, &rules)?;
+    *state.site_rules.lock().map_err(|error| error.to_string())? = rules;
+    diagnostic_log(&state, "INFO", "site_rules.reset", "defaults_restored");
+    get_site_rules(state)
+}
+
 async fn read_process_tail(
     mut stream: impl tokio::io::AsyncRead + Unpin,
     progress: Option<(tauri::AppHandle, DownloadId)>,
@@ -953,7 +1094,12 @@ fn enqueue_download(
     format_selection: Option<String>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
-    let uupdump = uupdump_urls(&url);
+    let site_rule = {
+        let rules = state.site_rules.lock().map_err(|error| error.to_string())?;
+        matching_site_rule(&url, &rules)
+    };
+    let uupdump = site_rule.as_ref().filter(|rule| rule.action == SiteRuleAction::UupdumpPost)
+        .and_then(|_| uupdump_urls(&url));
     let url = uupdump.as_ref().map(|item| item.0.clone()).unwrap_or(url);
     inspect_url(url.clone())?;
     let kind = classify_url(&url).ok_or_else(|| "unsupported_url".to_owned())?;
@@ -1009,7 +1155,7 @@ fn enqueue_download(
     queue.push(task.clone());
     save_queue(&state, &queue)?;
     drop(queue);
-    diagnostic_log(&state, "INFO", "task.enqueued", &format!("task={} engine={kind:?} url={} file={}", task.id, redact_url(&task.source), task.destination.display()));
+    diagnostic_log(&state, "INFO", "task.enqueued", &format!("task={} engine={kind:?} rule={} url={} file={}", task.id, site_rule.as_ref().map_or("none", |rule| rule.id.as_str()), redact_url(&task.source), task.destination.display()));
     start_download(&app, &state, task.clone(), kind)?;
     Ok(task)
 }
@@ -1029,7 +1175,9 @@ fn start_download(app: &tauri::AppHandle, state: &AppState, task: DownloadTask, 
     diagnostic_log(state, "INFO", "task.dispatched", &format!("task={} engine={kind:?}", task.id));
     if kind == DownloadKind::Http {
         let identity = state.request_identities.lock().ok().and_then(|items| items.get(&task.id).cloned());
-        let connections = if task.source.starts_with("https://uupdump.net/get.php") { 1 } else { limits.connections_per_download.clamp(1, 32) };
+        let rule = state.site_rules.lock().ok().and_then(|rules| matching_site_rule(&task.source, &rules));
+        let connections = rule.as_ref().filter(|rule| matches!(rule.action, SiteRuleAction::SingleConnection | SiteRuleAction::UupdumpPost))
+            .map_or_else(|| limits.connections_per_download.clamp(1, 32), |rule| rule.connections);
         let mut headers = Vec::new();
         if let Some(referer) = task.referer.as_ref() { headers.push(("Referer".to_owned(), referer.clone())); }
         if let Some(user_agent) = identity.as_ref().and_then(|item| item.user_agent.as_ref()) { headers.push(("User-Agent".to_owned(), user_agent.clone())); }
@@ -1328,6 +1476,11 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     if let Ok(mut seen) = state.bridge_last_seen.lock() { *seen = Some(Instant::now()); }
     if first.starts_with("GET /v1/health ") {
         bridge_response(&mut stream, "200 OK", origin, "{\"ok\":true}");
+    } else if first.starts_with("GET /v1/site-rules ") {
+        let body = state.site_rules.lock().ok()
+            .and_then(|rules| serde_json::to_string(&*rules).ok())
+            .unwrap_or_else(|| "[]".to_owned());
+        bridge_response(&mut stream, "200 OK", origin, &body);
     } else if first.starts_with("POST /v1/download ") {
         match serde_json::from_str::<BridgeDownload>(body).map_err(|error| error.to_string()).and_then(|request| queue_from_bridge(app, request)) {
             Ok(()) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
@@ -1506,10 +1659,11 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
-            let app_data = app.path().app_data_dir()?;
+            let app_data = portable_data_directory(app)?;
             let queue_path = app_data.join("queue.json");
             let settings_path = app_data.join("settings.json");
             let log_path = app_data.join("logs").join("apocalipse.log");
+            let site_rules_path = app_data.join("site-rules.json");
             app.manage(AppState {
                 queue: Mutex::new(load_queue(&queue_path)),
                 queue_path,
@@ -1521,6 +1675,8 @@ fn main() {
                 request_identities: Mutex::new(HashMap::new()),
                 log_path,
                 log_write_lock: Mutex::new(()),
+                site_rules: Mutex::new(load_site_rules(&site_rules_path)),
+                site_rules_path,
             });
             diagnostic_log(&app.state::<AppState>(), "INFO", "application.started", env!("CARGO_PKG_VERSION"));
             let bridge_app = app.handle().clone();
@@ -1580,6 +1736,9 @@ fn main() {
             get_log_editor,
             set_log_editor,
             open_log_external,
+            get_site_rules,
+            set_site_rules,
+            reset_site_rules,
             pause_download,
             resume_download,
             redownload_downloads,
@@ -1669,5 +1828,23 @@ mod tests {
             sanitize_log_detail("url=https://example.com/a?h=secret&e=123"),
             "url=https://example.com/a?h=<redacted>&e=<redacted>",
         );
+    }
+
+    #[test]
+    fn site_rules_match_exact_hosts_and_subdomains() {
+        let rules = default_site_rules();
+        assert_eq!(matching_site_rule("https://uupdump.net/get.php?id=1", &rules).unwrap().id, "uupdump");
+        assert_eq!(matching_site_rule("https://www.uupdump.net/download.php", &rules).unwrap().id, "uupdump");
+        assert!(matching_site_rule("https://example.com/uupdump.net/file", &rules).is_none());
+    }
+
+    #[test]
+    fn site_rule_validation_rejects_unsafe_hosts_and_connections() {
+        let mut rule = default_site_rules().remove(0);
+        rule.hosts = vec!["https://uupdump.net/path".to_owned()];
+        assert!(!valid_site_rule(&rule));
+        rule.hosts = vec!["uupdump.net".to_owned()];
+        rule.connections = 0;
+        assert!(!valid_site_rule(&rule));
     }
 }

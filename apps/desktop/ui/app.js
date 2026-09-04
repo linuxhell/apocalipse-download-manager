@@ -89,6 +89,11 @@ const catalogs = {
     chooseEditor: "Choose editor…",
     removeEditor: "Remove editor",
     openExternal: "Open in editor",
+    siteRules: "Site rules",
+    siteRulesHint: "Versioned fixes that can change site behavior without rebuilding the application",
+    manageRules: "Manage rules",
+    saveRules: "Validate and save",
+    resetRules: "Restore defaults",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -181,6 +186,11 @@ const catalogs = {
     chooseEditor: "Escolher editor…",
     removeEditor: "Remover editor",
     openExternal: "Abrir no editor",
+    siteRules: "Regras por site",
+    siteRulesHint: "Correções versionadas que alteram o comportamento dos sites sem recompilar o aplicativo",
+    manageRules: "Gerenciar regras",
+    saveRules: "Validar e salvar",
+    resetRules: "Restaurar padrões",
   },
   "zh-CN": {
     downloads: "下载",
@@ -272,6 +282,11 @@ const catalogs = {
     chooseEditor: "选择编辑器…",
     removeEditor: "移除编辑器",
     openExternal: "在编辑器中打开",
+    siteRules: "站点规则",
+    siteRulesHint: "无需重新编译应用程序即可更改站点行为的版本化修复",
+    manageRules: "管理规则",
+    saveRules: "验证并保存",
+    resetRules: "恢复默认值",
   },
 };
 
@@ -514,6 +529,7 @@ const dialog = document.querySelector("#add-dialog");
 const clearDialog = document.querySelector("#clear-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
 const logDialog = document.querySelector("#log-dialog");
+const siteRulesDialog = document.querySelector("#site-rules-dialog");
 function updateLogEditorControls() {
   const configured = Boolean(document.querySelector("#log-editor").value.trim());
   document.querySelector("#remove-log-editor").disabled = !configured;
@@ -804,6 +820,34 @@ document.querySelector("#remove-log-editor").onclick = async () => {
 };
 document.querySelectorAll("[data-log-close]").forEach((button) => {
   button.onclick = () => logDialog.close();
+});
+document.querySelector("#manage-site-rules").onclick = async () => {
+  try {
+    document.querySelector("#site-rules-json").value = await invoke("get_site_rules");
+    document.querySelector("#site-rules-error").hidden = true;
+    siteRulesDialog.showModal();
+  } catch (error) { console.error(error); }
+};
+document.querySelector("#save-site-rules").onclick = async () => {
+  const errorBox = document.querySelector("#site-rules-error");
+  try {
+    document.querySelector("#site-rules-json").value = await invoke("set_site_rules", {
+      json: document.querySelector("#site-rules-json").value,
+    });
+    errorBox.hidden = true;
+  } catch (error) {
+    errorBox.textContent = String(error);
+    errorBox.hidden = false;
+  }
+};
+document.querySelector("#reset-site-rules").onclick = async () => {
+  try {
+    document.querySelector("#site-rules-json").value = await invoke("reset_site_rules");
+    document.querySelector("#site-rules-error").hidden = true;
+  } catch (error) { console.error(error); }
+};
+document.querySelectorAll("[data-site-rules-close]").forEach((button) => {
+  button.onclick = () => siteRulesDialog.close();
 });
 document.querySelectorAll("[data-tool-pick]").forEach((button) => {
   button.onclick = async () => {

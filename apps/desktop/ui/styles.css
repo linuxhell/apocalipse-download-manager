@@ -251,6 +251,20 @@ h1 {
   font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
   user-select: text;
 }
+.rules-editor {
+  width: min(900px, 82vw);
+}
+#site-rules-json {
+  width: 100%;
+  min-height: 430px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 12px;
+  background: #071018;
+  color: #b8ced7;
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
 .ghost:disabled,
 .primary:disabled {
   cursor: not-allowed;

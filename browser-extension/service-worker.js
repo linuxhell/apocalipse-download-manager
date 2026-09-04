@@ -6,6 +6,7 @@ let bypassUntil = 0;
 let bypassNextUntil = 0;
 let forceHeld = false;
 let lastFormSubmission = null;
+let siteRules = [{ id: "uupdump", hosts: ["uupdump.net", "*.uupdump.net"], action: "uupdump_post", enabled: true }];
 
 async function bridgeRequest(path, options = {}, suppliedToken = null) {
   const { pairingToken = "" } = suppliedToken === null ? await chrome.storage.local.get({ pairingToken: "" }) : { pairingToken: suppliedToken };
@@ -39,7 +40,12 @@ ensureHeartbeat();
 chrome.runtime.onInstalled.addListener(ensureHeartbeat);
 chrome.runtime.onStartup.addListener(ensureHeartbeat);
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === HEARTBEAT_ALARM) bridgeRequest("/v1/health").catch(() => {});
+  if (alarm.name === HEARTBEAT_ALARM) {
+    bridgeRequest("/v1/health")
+      .then(() => bridgeRequest("/v1/site-rules"))
+      .then((rules) => { if (Array.isArray(rules)) siteRules = rules; })
+      .catch(() => {});
+  }
 });
 
 async function hlsDuration(url, depth = 0) {
@@ -89,7 +95,12 @@ const fileNameFromPath = (path) => String(path || "").split(/[\\/]/).pop() || nu
 function uupDumpPost(url) {
   try {
     const parsed = new URL(url);
-    if (!["uupdump.net", "www.uupdump.net"].includes(parsed.hostname.toLowerCase())) return null;
+    const host = parsed.hostname.toLowerCase();
+    const rule = siteRules.find((item) => item.enabled && item.action === "uupdump_post"
+      && item.hosts?.some((pattern) => pattern.startsWith("*.")
+        ? host === pattern.slice(2) || host.endsWith(`.${pattern.slice(2)}`)
+        : host === pattern));
+    if (!rule) return null;
     if (!["/download.php", "/get.php"].includes(parsed.pathname.toLowerCase())) return null;
     return {
       url: `https://uupdump.net/get.php${parsed.search}`,
