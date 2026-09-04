@@ -1,7 +1,7 @@
 const BRIDGE = "http://127.0.0.1:17654";
 
-async function bridgeRequest(path, options = {}) {
-  const { pairingToken = "" } = await chrome.storage.local.get({ pairingToken: "" });
+async function bridgeRequest(path, options = {}, suppliedToken = null) {
+  const { pairingToken = "" } = suppliedToken === null ? await chrome.storage.local.get({ pairingToken: "" }) : { pairingToken: suppliedToken };
   if (!pairingToken) throw new Error("not_paired");
   const response = await fetch(`${BRIDGE}${path}`, {
     ...options,
@@ -29,8 +29,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return true;
   }
   if (message?.type === "APOCALIPSE_PAIR") {
-    chrome.storage.local.set({ pairingToken: message.token.trim() })
-      .then(() => bridgeRequest("/v1/health"))
+    const token = message.token.trim();
+    bridgeRequest("/v1/health", {}, token)
+      .then(() => chrome.storage.local.set({ pairingToken: token }))
       .then(() => reply({ connected: true }))
       .catch((error) => reply({ connected: false, error: String(error) }));
     return true;

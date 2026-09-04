@@ -20,6 +20,14 @@ const setBridgeStatus = (connected) => {
   label.dataset.i18n = connected ? "connected" : "disconnected";
   label.textContent = t(label.dataset.i18n);
 };
+const showBridgeError = (error) => {
+  const label = document.querySelector("#bridge-label");
+  label.removeAttribute("data-i18n");
+  const invalid = String(error).includes("401");
+  if (locale === "pt_BR") label.textContent = invalid ? "Token de pareamento inválido." : "Não foi possível encontrar o Apocalipse. Mantenha o programa aberto.";
+  else if (locale === "zh_CN") label.textContent = invalid ? "配对令牌无效。" : "无法连接 Apocalipse。请保持桌面程序运行。";
+  else label.textContent = invalid ? "Invalid pairing token." : "Apocalipse is not reachable. Keep the desktop app open.";
+};
 const render = () => {
   const root = document.querySelector("#items");
   root.textContent = "";
@@ -73,7 +81,13 @@ chrome.storage.local.get({ pairingToken: "" }, ({ pairingToken }) => {
 });
 document.querySelector("#connect").onclick = () => {
   const token = document.querySelector("#pairing-token").value;
-  chrome.runtime.sendMessage({ type: "APOCALIPSE_PAIR", token }, (status) => setBridgeStatus(Boolean(status?.connected)));
+  const button = document.querySelector("#connect");
+  button.disabled = true;
+  chrome.runtime.sendMessage({ type: "APOCALIPSE_PAIR", token }, (status) => {
+    button.disabled = false;
+    setBridgeStatus(Boolean(status?.connected));
+    if (!status?.connected) showBridgeError(status?.error || chrome.runtime.lastError?.message || "unavailable");
+  });
 };
 document.querySelector("#language").onchange = (event) => {
   locale = event.target.value;

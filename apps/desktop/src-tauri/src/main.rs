@@ -627,7 +627,7 @@ fn bridge_origin(headers: &str) -> Option<&str> {
         let (name, value) = line.split_once(':')?;
         if name.eq_ignore_ascii_case("origin") {
             let value = value.trim();
-            (value.starts_with("chrome-extension://") || value.starts_with("moz-extension://")).then_some(value)
+            (value.starts_with("chrome-extension://") || value.starts_with("moz-extension://") || value == "null").then_some(value)
         } else { None }
     })
 }
@@ -641,7 +641,7 @@ fn bridge_authorized(headers: &str, expected: &str) -> bool {
 }
 
 fn bridge_response(stream: &mut TcpStream, status: &str, origin: Option<&str>, body: &str) {
-    let cors = origin.map(|value| format!("Access-Control-Allow-Origin: {value}\r\nVary: Origin\r\n")).unwrap_or_default();
+    let cors = origin.map(|value| format!("Access-Control-Allow-Origin: {value}\r\nVary: Origin\r\n")).unwrap_or_else(|| "Access-Control-Allow-Origin: *\r\n".to_owned());
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: application/json\r\n{cors}Access-Control-Allow-Headers: Authorization, Content-Type\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
@@ -671,7 +671,8 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     let request = String::from_utf8_lossy(&buffer[..count]);
     let Some((headers, body)) = request.split_once("\r\n\r\n") else { return };
     let origin = bridge_origin(headers);
-    if origin.is_none() {
+    let has_origin = headers.lines().any(|line| line.split_once(':').is_some_and(|(name, _)| name.eq_ignore_ascii_case("origin")));
+    if has_origin && origin.is_none() {
         bridge_response(&mut stream, "403 Forbidden", None, "{\"ok\":false}");
         return;
     }
