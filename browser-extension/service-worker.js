@@ -165,20 +165,21 @@ const eraseBrowserDownload = (id) => new Promise((resolve) => {
 
 async function takeBrowserDownload(item, eraseFromHistory = false) {
   let url = item.finalUrl || item.url;
-  if (!item.id) return;
+  if (!item.id) return false;
   if (/^blob:https:\/\/web\.telegram\.org\//i.test(url)) {
     if (Date.now() < bypassNextUntil) {
       bypassNextUntil = 0;
-      return;
+      return false;
     }
-    if (!bridgeConnected || bypassHeld || Date.now() < bypassUntil) return;
+    if (!bridgeConnected || bypassHeld || Date.now() < bypassUntil) return false;
     if (await handOffTelegramBlob(item)) {
       await cancelBrowserDownload(item.id).catch(() => {});
       if (eraseFromHistory) await eraseBrowserDownload(item.id);
+      return true;
     }
-    return;
+    return false;
   }
-  if (!/^https?:/i.test(url)) return;
+  if (!/^https?:/i.test(url)) return false;
   const pageUrl = item.referrer || null;
   const now = Date.now();
   const expectedName = fileNameFromPath(item.filename)?.toLowerCase() || "";
@@ -213,16 +214,16 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     if (sameRequest) {
       lastFormSubmission = null;
       const uupRequest = uupDumpPost(url);
-      if (!uupRequest) return;
+      if (!uupRequest) return false;
       url = uupRequest.url;
       formRequest = uupRequest;
     }
   }
   if (Date.now() < bypassNextUntil) {
     bypassNextUntil = 0;
-    return;
+    return false;
   }
-  if (!bridgeConnected || bypassHeld || Date.now() < bypassUntil) return;
+  if (!bridgeConnected || bypassHeld || Date.now() < bypassUntil) return false;
   let cancelled = false;
   try {
     await cancelBrowserDownload(item.id);
@@ -248,18 +249,23 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
         requestContentType: formRequest?.contentType || null,
       }),
     });
+    return true;
   } catch {
     if (cancelled) {
       bypassUntil = Date.now() + 2000;
       chrome.downloads.download({ url, saveAs: false }, () => void chrome.runtime.lastError);
+      return true;
     }
+    return false;
   }
 }
 
 if (chrome.downloads.onDeterminingFilename?.addListener) {
   chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-    suggest();
-    void takeBrowserDownload(item);
+    void takeBrowserDownload(item).then((intercepted) => {
+      if (!intercepted) suggest();
+    }).catch(() => suggest());
+    return true;
   });
 } else {
   chrome.downloads.onCreated.addListener((item) => {
