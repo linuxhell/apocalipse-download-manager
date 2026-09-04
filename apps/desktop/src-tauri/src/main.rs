@@ -624,6 +624,20 @@ fn open_general_log(state: State<'_, AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn read_general_log(state: State<'_, AppState>) -> Result<String, String> {
+    diagnostic_log(&state, "INFO", "log.viewed", "viewed_inside_application");
+    match fs::read_to_string(&state.log_path) {
+        Ok(contents) => {
+            let start = contents.len().saturating_sub(512 * 1024);
+            let start = contents.char_indices().map(|(index, _)| index).find(|index| *index >= start).unwrap_or(0);
+            Ok(contents[start..].to_owned())
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[tauri::command]
 fn clear_general_log(state: State<'_, AppState>) -> Result<(), String> {
     let rotated = state.log_path.with_extension("log.1");
     for path in [&state.log_path, &rotated] {
@@ -1542,6 +1556,7 @@ fn main() {
             suggest_download_name,
             remove_downloads,
             open_general_log,
+            read_general_log,
             clear_general_log,
             pause_download,
             resume_download,

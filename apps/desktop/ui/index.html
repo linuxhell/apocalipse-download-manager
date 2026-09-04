@@ -331,6 +331,22 @@
         </div>
       </form>
     </dialog>
+    <dialog id="log-dialog">
+      <form method="dialog" class="log-viewer">
+        <div class="dialog-head">
+          <div>
+            <small data-i18n="diagnostics">Diagnostics</small>
+            <h2 data-i18n="openLog">Open diagnostic log</h2>
+          </div>
+          <button type="button" class="close" data-log-close>×</button>
+        </div>
+        <pre id="diagnostic-log"></pre>
+        <div class="dialog-actions">
+          <button id="refresh-log" type="button" data-i18n="refreshLog">Refresh</button>
+          <button type="button" data-log-close data-i18n="closeLog">Close</button>
+        </div>
+      </form>
+    </dialog>
     <script src="app.js"></script>
   </body>
 </html>

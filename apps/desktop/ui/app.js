@@ -81,6 +81,9 @@ const catalogs = {
     diagnosticsHint: "Safe activity log with credentials and URL parameters hidden",
     openLog: "Open diagnostic log",
     clearLog: "Clear log",
+    refreshLog: "Refresh",
+    closeLog: "Close",
+    emptyLog: "No diagnostic events recorded yet.",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -165,6 +168,9 @@ const catalogs = {
     diagnosticsHint: "Log seguro de atividades com credenciais e parâmetros das URLs ocultados",
     openLog: "Abrir log de diagnóstico",
     clearLog: "Limpar log",
+    refreshLog: "Atualizar",
+    closeLog: "Fechar",
+    emptyLog: "Ainda não há eventos de diagnóstico registrados.",
   },
   "zh-CN": {
     downloads: "下载",
@@ -248,6 +254,9 @@ const catalogs = {
     diagnosticsHint: "隐藏凭据和网址参数的安全活动日志",
     openLog: "打开诊断日志",
     clearLog: "清除日志",
+    refreshLog: "刷新",
+    closeLog: "关闭",
+    emptyLog: "尚未记录诊断事件。",
   },
 };
 
@@ -489,6 +498,7 @@ async function refreshDownloads() {
 const dialog = document.querySelector("#add-dialog");
 const clearDialog = document.querySelector("#clear-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
+const logDialog = document.querySelector("#log-dialog");
 document.querySelector("#download-list").addEventListener("pointerdown", (event) => {
   if (event.target.closest?.(".task-select")) selectionPointerActive = true;
 });
@@ -729,14 +739,32 @@ document.querySelector("#save-settings").onclick = async () => {
   }
 };
 document.querySelector("#check-tools").onclick = refreshToolStatuses;
-document.querySelector("#open-log").onclick = () => invoke("open_general_log").catch(console.error);
+async function refreshDiagnosticLog() {
+  const output = document.querySelector("#diagnostic-log");
+  const contents = await invoke("read_general_log");
+  output.textContent = contents || t("emptyLog");
+  output.scrollTop = output.scrollHeight;
+}
+document.querySelector("#open-log").onclick = async () => {
+  try {
+    await refreshDiagnosticLog();
+    logDialog.showModal();
+  } catch (error) { console.error(error); }
+};
 document.querySelector("#clear-log").onclick = async (event) => {
   const button = event.currentTarget;
   button.disabled = true;
-  try { await invoke("clear_general_log"); }
+  try {
+    await invoke("clear_general_log");
+    if (logDialog.open) await refreshDiagnosticLog();
+  }
   catch (error) { console.error(error); }
   finally { button.disabled = false; }
 };
+document.querySelector("#refresh-log").onclick = () => refreshDiagnosticLog().catch(console.error);
+document.querySelectorAll("[data-log-close]").forEach((button) => {
+  button.onclick = () => logDialog.close();
+});
 document.querySelectorAll("[data-tool-pick]").forEach((button) => {
   button.onclick = async () => {
     const input = document.querySelector(`#tool-${button.dataset.toolPick}`);
