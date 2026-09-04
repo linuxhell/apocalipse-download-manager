@@ -1,1 +1,32 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="popup.css"></head><body><header><strong>APOCALIPSE</strong><span data-i18n="mediaIntelligence"></span></header><section class="language"><select id="language" aria-label="Language"><option value="en">English</option><option value="pt_BR">Português (Brasil)</option><option value="zh_CN">简体中文</option></select></section><nav><button data-kind="video" data-i18n="video" class="active"></button><button data-kind="audio" data-i18n="audio"></button><button data-kind="image" data-i18n="images"></button></nav><main id="items"></main><template id="row"><article><img alt=""><span class="audio-icon" hidden>♫</span><div><b></b><small></small></div><button>Download</button></article></template><script src="popup.js"></script></body></html>
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width">
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <header><strong>APOCALIPSE</strong><span data-i18n="mediaIntelligence"></span></header>
+    <section class="pairing">
+      <i id="bridge-dot"></i>
+      <span id="bridge-label" data-i18n="disconnected">Disconnected</span>
+      <input id="pairing-token" type="password" data-i18n-placeholder="pairingToken" placeholder="Pairing token">
+      <button id="connect" data-i18n="connect">Connect</button>
+    </section>
+    <section class="language">
+      <select id="language" aria-label="Language">
+        <option value="en">English</option>
+        <option value="pt_BR">Português (Brasil)</option>
+        <option value="zh_CN">简体中文</option>
+      </select>
+    </section>
+    <nav>
+      <button data-kind="video" data-i18n="video" class="active"></button>
+      <button data-kind="audio" data-i18n="audio"></button>
+      <button data-kind="image" data-i18n="images"></button>
+    </nav>
+    <main id="items"></main>
+    <template id="row"><article><img alt=""><span class="audio-icon" hidden>♫</span><div><b></b><small></small></div><button>Download</button></article></template>
+    <script src="popup.js"></script>
+  </body>
+</html>

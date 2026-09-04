@@ -5,7 +5,7 @@ use apocalipse_core::{
     DownloadId, DownloadKind, DownloadRequest, DownloadState, DownloadTask,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, path::{Path, PathBuf}, process::Command, sync::Mutex};
+use std::{collections::HashMap, fs, io::{Read, Write}, net::{TcpListener, TcpStream}, path::{Path, PathBuf}, process::Command, sync::Mutex, time::{Duration, Instant}};
 use tauri::{image::Image, menu::{Menu, MenuItem}, tray::TrayIconBuilder, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::sync::{mpsc, oneshot};
@@ -16,6 +16,7 @@ struct AppState {
     workers: Mutex<HashMap<DownloadId, oneshot::Sender<()>>>,
     settings: Mutex<UserSettings>,
     settings_path: PathBuf,
+    bridge_last_seen: Mutex<Option<Instant>>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -27,10 +28,13 @@ struct UserSettings {
     max_active_downloads: usize,
     #[serde(default = "default_connections")]
     connections_per_download: usize,
+    #[serde(default = "default_bridge_token")]
+    bridge_token: String,
 }
 
 const fn default_max_active() -> usize { 3 }
 const fn default_connections() -> usize { 8 }
+fn default_bridge_token() -> String { uuid::Uuid::new_v4().simple().to_string() }
 
 impl Default for UserSettings {
     fn default() -> Self {
@@ -39,6 +43,7 @@ impl Default for UserSettings {
             capture_clipboard: false,
             max_active_downloads: default_max_active(),
             connections_per_download: default_connections(),
+            bridge_token: default_bridge_token(),
         }
     }
 }
@@ -66,6 +71,23 @@ struct TransferLimits {
     max_active_downloads: usize,
     connections_per_download: usize,
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgePairing {
+    token: String,
+    port: u16,
+    connected: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgeDownload {
+    url: String,
+    file_name: Option<String>,
+}
+
+const BRIDGE_PORT: u16 = 17654;
 
 #[tauri::command]
 fn inspect_url(url: String) -> Result<PlanResponse, String> {
@@ -461,6 +483,115 @@ fn read_clipboard_link(app: tauri::AppHandle, state: State<'_, AppState>) -> Res
 }
 
 #[tauri::command]
+fn get_bridge_pairing(state: State<'_, AppState>) -> Result<BridgePairing, String> {
+    let token = state.settings.lock().map_err(|error| error.to_string())?.bridge_token.clone();
+    let connected = state.bridge_last_seen.lock().map_err(|error| error.to_string())?
+        .is_some_and(|seen| seen.elapsed() < Duration::from_secs(15));
+    Ok(BridgePairing { token, port: BRIDGE_PORT, connected })
+}
+
+#[tauri::command]
+fn regenerate_bridge_token(state: State<'_, AppState>) -> Result<BridgePairing, String> {
+    let token = {
+        let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+        settings.bridge_token = default_bridge_token();
+        save_settings(&state, &settings)?;
+        settings.bridge_token.clone()
+    };
+    if let Ok(mut seen) = state.bridge_last_seen.lock() { *seen = None; }
+    Ok(BridgePairing { token, port: BRIDGE_PORT, connected: false })
+}
+
+#[tauri::command]
+fn copy_bridge_token(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let token = state.settings.lock().map_err(|error| error.to_string())?.bridge_token.clone();
+    app.clipboard().write_text(token).map_err(|error| error.to_string())
+}
+
+fn bridge_origin(headers: &str) -> Option<&str> {
+    headers.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        if name.eq_ignore_ascii_case("origin") {
+            let value = value.trim();
+            (value.starts_with("chrome-extension://") || value.starts_with("moz-extension://")).then_some(value)
+        } else { None }
+    })
+}
+
+fn bridge_authorized(headers: &str, expected: &str) -> bool {
+    headers.lines().any(|line| {
+        line.split_once(':').is_some_and(|(name, value)| {
+            name.eq_ignore_ascii_case("authorization") && value.trim() == format!("Bearer {expected}")
+        })
+    })
+}
+
+fn bridge_response(stream: &mut TcpStream, status: &str, origin: Option<&str>, body: &str) {
+    let cors = origin.map(|value| format!("Access-Control-Allow-Origin: {value}\r\nVary: Origin\r\n")).unwrap_or_default();
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\n{cors}Access-Control-Allow-Headers: Authorization, Content-Type\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.write_all(response.as_bytes());
+}
+
+fn enqueue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let kind = classify_url(&request.url).ok_or_else(|| "unsupported_url".to_owned())?;
+    let directory = configured_download_directory(app, &state)?;
+    let proposed = request.file_name.filter(|name| !name.trim().is_empty()).unwrap_or_else(|| suggested_name(&request.url));
+    let file_name = validate_file_name(&suggested_name(&proposed))?;
+    let task = DownloadTask::new(&request.url, unique_destination(&directory, &file_name));
+    let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+    queue.push(task.clone());
+    save_queue(&state, &queue)?;
+    drop(queue);
+    start_download(app, &state, task, kind)
+}
+
+fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+    let mut buffer = vec![0_u8; 65_536];
+    let count = match stream.read(&mut buffer) { Ok(count) => count, Err(_) => return };
+    let request = String::from_utf8_lossy(&buffer[..count]);
+    let Some((headers, body)) = request.split_once("\r\n\r\n") else { return };
+    let origin = bridge_origin(headers);
+    if origin.is_none() {
+        bridge_response(&mut stream, "403 Forbidden", None, "{\"ok\":false}");
+        return;
+    }
+    let first = headers.lines().next().unwrap_or_default();
+    if first.starts_with("OPTIONS ") {
+        bridge_response(&mut stream, "204 No Content", origin, "");
+        return;
+    }
+    let state = app.state::<AppState>();
+    let token = match state.settings.lock() { Ok(settings) => settings.bridge_token.clone(), Err(_) => return };
+    if !bridge_authorized(headers, &token) {
+        bridge_response(&mut stream, "401 Unauthorized", origin, "{\"ok\":false}");
+        return;
+    }
+    if let Ok(mut seen) = state.bridge_last_seen.lock() { *seen = Some(Instant::now()); }
+    if first.starts_with("GET /v1/health ") {
+        bridge_response(&mut stream, "200 OK", origin, "{\"ok\":true}");
+    } else if first.starts_with("POST /v1/download ") {
+        match serde_json::from_str::<BridgeDownload>(body).map_err(|error| error.to_string()).and_then(|request| enqueue_from_bridge(app, request)) {
+            Ok(()) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
+            Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
+        }
+    } else {
+        bridge_response(&mut stream, "404 Not Found", origin, "{\"ok\":false}");
+    }
+}
+
+fn run_extension_bridge(app: tauri::AppHandle) {
+    let Ok(listener) = TcpListener::bind(("127.0.0.1", BRIDGE_PORT)) else { return };
+    for stream in listener.incoming().flatten() {
+        handle_bridge_connection(&app, stream);
+    }
+}
+
+#[tauri::command]
 fn reveal_download(state: State<'_, AppState>, id: DownloadId) -> Result<(), String> {
     let queue = state.queue.lock().map_err(|error| error.to_string())?;
     let task = queue.iter().find(|task| task.id == id).ok_or_else(|| "download_not_found".to_owned())?;
@@ -608,7 +739,11 @@ fn main() {
                 workers: Mutex::new(HashMap::new()),
                 settings: Mutex::new(load_settings(&settings_path)),
                 settings_path,
+                bridge_last_seen: Mutex::new(None),
             });
+            let bridge_app = app.handle().clone();
+            std::thread::Builder::new().name("apocalipse-extension-bridge".into())
+                .spawn(move || run_extension_bridge(bridge_app))?;
             let show = MenuItem::with_id(app, "show", "Show Apocalipse", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
@@ -663,7 +798,10 @@ fn main() {
             set_clipboard_monitor,
             read_clipboard_link,
             get_transfer_limits,
-            set_transfer_limits
+            set_transfer_limits,
+            get_bridge_pairing,
+            regenerate_bridge_token,
+            copy_bridge_token
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Apocalipse Download Manager");

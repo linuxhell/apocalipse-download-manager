@@ -416,6 +416,32 @@ dialog input:focus {
   padding: 7px 13px;
   cursor: pointer;
 }
+.pairing-settings {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #0b1319;
+}
+.pairing-settings > label {
+  color: var(--muted);
+  font-size: 12px;
+}
+.pairing-settings > button {
+  justify-self: end;
+  border: 1px solid #29424f;
+  border-radius: 8px;
+  background: #111d25;
+  color: #bcd1d9;
+  padding: 7px 13px;
+  cursor: pointer;
+}
+footer .bridge-connected i {
+  background: #38ef9b;
+  box-shadow: 0 0 10px #38ef9b;
+}
 .setting-toggle input {
   width: 18px;
   accent-color: var(--cyan);

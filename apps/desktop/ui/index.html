@@ -262,6 +262,15 @@
           </label>
           <button id="default-limits" type="button" data-i18n="defaults">Default</button>
         </div>
+        <section class="pairing-settings">
+          <b data-i18n="extensionPairing">Browser extension pairing</b>
+          <label for="pairing-token" data-i18n="pairingToken">Pairing token</label>
+          <div class="path-picker">
+            <input id="pairing-token" type="text" readonly />
+            <button id="copy-pairing" type="button" data-i18n="copy">Copy</button>
+          </div>
+          <button id="regenerate-pairing" type="button" data-i18n="regenerate">Regenerate</button>
+        </section>
         <div class="dialog-actions">
           <button type="button" data-settings-close data-i18n="cancel">
             Cancel

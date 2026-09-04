@@ -53,6 +53,12 @@ const catalogs = {
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
     defaults: "Default",
+    extensionPairing: "Browser extension pairing",
+    pairingToken: "Pairing token",
+    copy: "Copy",
+    regenerate: "Regenerate",
+    bridgeConnected: "Extension connected",
+    bridgeWaiting: "Waiting for extension",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -109,6 +115,12 @@ const catalogs = {
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
     defaults: "Padrão",
+    extensionPairing: "Conexão com a extensão",
+    pairingToken: "Token de pareamento",
+    copy: "Copiar",
+    regenerate: "Gerar outro",
+    bridgeConnected: "Extensão conectada",
+    bridgeWaiting: "Aguardando extensão",
   },
   "zh-CN": {
     downloads: "下载",
@@ -164,6 +176,12 @@ const catalogs = {
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
     defaults: "默认",
+    extensionPairing: "浏览器扩展配对",
+    pairingToken: "配对令牌",
+    copy: "复制",
+    regenerate: "重新生成",
+    bridgeConnected: "扩展已连接",
+    bridgeWaiting: "正在等待扩展",
   },
 };
 
@@ -461,11 +479,12 @@ document.querySelectorAll("[data-clear-mode]").forEach((button) => {
 });
 document.querySelector('[data-page="settings"]').onclick = async () => {
   try {
-    const [autostart, directory, clipboard, limits] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
       invoke("get_transfer_limits"),
+      invoke("get_bridge_pairing"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
     document.querySelector("#default-directory").value = directory;
@@ -473,6 +492,7 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
     document.querySelector("#max-tasks").value = limits.maxActiveDownloads;
     document.querySelector("#connections").value = limits.connectionsPerDownload;
     updateLimitLabels();
+    document.querySelector("#pairing-token").value = pairing.token;
     settingsDialog.showModal();
   } catch (error) {
     console.error(error);
@@ -515,6 +535,15 @@ document.querySelector("#default-limits").onclick = () => {
   document.querySelector("#max-tasks").value = 3;
   document.querySelector("#connections").value = 8;
   updateLimitLabels();
+};
+document.querySelector("#copy-pairing").onclick = () => invoke("copy_bridge_token").catch(console.error);
+document.querySelector("#regenerate-pairing").onclick = async () => {
+  try {
+    const pairing = await invoke("regenerate_bridge_token");
+    document.querySelector("#pairing-token").value = pairing.token;
+  } catch (error) {
+    console.error(error);
+  }
 };
 document.querySelector("#url").oninput = () => {
   document.querySelector("#analysis").hidden = true;
@@ -583,3 +612,16 @@ setInterval(async () => {
     console.error(error);
   }
 }, 750);
+async function refreshBridgeStatus() {
+  try {
+    const status = await invoke("get_bridge_pairing");
+    const root = document.querySelector("footer > span:first-child");
+    root.classList.toggle("bridge-waiting", !status.connected);
+    root.classList.toggle("bridge-connected", status.connected);
+    root.querySelector("b").textContent = status.connected ? t("bridgeConnected") : t("bridgeWaiting");
+  } catch (error) {
+    console.error(error);
+  }
+}
+refreshBridgeStatus();
+setInterval(refreshBridgeStatus, 3000);

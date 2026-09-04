@@ -1,8 +1,8 @@
 let media = [], selected = "video", locale = "en";
 const messages = {
-  en: { mediaIntelligence: "Media intelligence", video: "Video", audio: "Audio", images: "Images", download: "Download", empty: "No media detected in this tab.", unknownSize: "Size unavailable" },
-  pt_BR: { mediaIntelligence: "Inteligência de mídia", video: "Vídeo", audio: "Áudio", images: "Imagens", download: "Download", empty: "Nenhuma mídia detectada nesta aba.", unknownSize: "Tamanho indisponível" },
-  zh_CN: { mediaIntelligence: "媒体智能", video: "视频", audio: "音频", images: "图片", download: "下载", empty: "此标签页未检测到媒体。", unknownSize: "大小未知" }
+  en: { mediaIntelligence: "Media intelligence", video: "Video", audio: "Audio", images: "Images", download: "Download", empty: "No media detected in this tab.", unknownSize: "Size unavailable", connected: "Connected to Apocalipse", disconnected: "Disconnected", pairingToken: "Pairing token", connect: "Connect" },
+  pt_BR: { mediaIntelligence: "Inteligência de mídia", video: "Vídeo", audio: "Áudio", images: "Imagens", download: "Download", empty: "Nenhuma mídia detectada nesta aba.", unknownSize: "Tamanho indisponível", connected: "Conectada ao Apocalipse", disconnected: "Desconectada", pairingToken: "Token de pareamento", connect: "Conectar" },
+  zh_CN: { mediaIntelligence: "媒体智能", video: "视频", audio: "音频", images: "图片", download: "下载", empty: "此标签页未检测到媒体。", unknownSize: "大小未知", connected: "已连接到 Apocalipse", disconnected: "未连接", pairingToken: "配对令牌", connect: "连接" }
 };
 const t = (key) => messages[locale]?.[key] || messages.en[key] || key;
 const formatBytes = (bytes) => {
@@ -14,6 +14,12 @@ const formatBytes = (bytes) => {
 const translate = () => document.querySelectorAll("[data-i18n]").forEach((element) => {
   element.textContent = t(element.dataset.i18n);
 });
+const setBridgeStatus = (connected) => {
+  document.querySelector("#bridge-dot").classList.toggle("connected", connected);
+  const label = document.querySelector("#bridge-label");
+  label.dataset.i18n = connected ? "connected" : "disconnected";
+  label.textContent = t(label.dataset.i18n);
+};
 const render = () => {
   const root = document.querySelector("#items");
   root.textContent = "";
@@ -61,6 +67,14 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
     });
   });
 });
+chrome.storage.local.get({ pairingToken: "" }, ({ pairingToken }) => {
+  document.querySelector("#pairing-token").value = pairingToken;
+  chrome.runtime.sendMessage({ type: "APOCALIPSE_BRIDGE_STATUS" }, (status) => setBridgeStatus(Boolean(status?.connected)));
+});
+document.querySelector("#connect").onclick = () => {
+  const token = document.querySelector("#pairing-token").value;
+  chrome.runtime.sendMessage({ type: "APOCALIPSE_PAIR", token }, (status) => setBridgeStatus(Boolean(status?.connected)));
+};
 document.querySelector("#language").onchange = (event) => {
   locale = event.target.value;
   chrome.storage.local.set({ language: locale });
