@@ -294,6 +294,22 @@
           </label>
           <small data-i18n="proxyPortableWarning">The proxy configuration is saved in the portable data/settings.json file.</small>
         </section>
+        <section class="pairing-settings">
+          <label class="setting-toggle compact-toggle">
+            <input id="dns-enabled" type="checkbox" />
+            <span><b data-i18n="customDns">Custom DNS</b><small data-i18n="customDnsHint">Resolve native downloads without changing the operating system DNS</small></span>
+          </label>
+          <label for="dns-preset" data-i18n="dnsProvider">Provider</label>
+          <select id="dns-preset">
+            <option value="custom" data-i18n="dnsCustom">Custom</option>
+            <option value="1.1.1.1,1.0.0.1">Cloudflare</option>
+            <option value="8.8.8.8,8.8.4.4">Google</option>
+            <option value="9.9.9.9,149.112.112.112">Quad9</option>
+          </select>
+          <label for="dns-servers" data-i18n="dnsServers">DNS servers</label>
+          <input id="dns-servers" type="text" maxlength="400" placeholder="1.1.1.1, 1.0.0.1" />
+          <small data-i18n="dnsScopeHint">Applied to the native HTTP engine and aria2. SOCKS5H continues resolving through the proxy.</small>
+        </section>
         <div class="transfer-settings">
           <label>
             <span><b data-i18n="maxTasks">Maximum simultaneous tasks</b><output id="max-tasks-value">3</output></span>

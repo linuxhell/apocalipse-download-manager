@@ -1,7 +1,16 @@
 use anyhow::{bail, Context, Result};
 use futures_util::{stream::FuturesUnordered, StreamExt};
-use reqwest::{header, Client, StatusCode};
+use hickory_resolver::{
+    config::{NameServerConfigGroup, ResolverConfig},
+    name_server::TokioConnectionProvider,
+    TokioResolver,
+};
+use reqwest::{
+    dns::{Addrs, Name, Resolve, Resolving},
+    header, Client, StatusCode,
+};
 use std::{
+    net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -40,15 +49,44 @@ pub struct DownloadEngine {
     client: Client,
 }
 
+#[derive(Clone)]
+struct CustomDnsResolver {
+    resolver: TokioResolver,
+}
+
+impl Resolve for CustomDnsResolver {
+    fn resolve(&self, name: Name) -> Resolving {
+        let resolver = self.resolver.clone();
+        Box::pin(async move {
+            let lookup = resolver.lookup_ip(name.as_str()).await?;
+            let addrs: Addrs = Box::new(
+                lookup
+                    .into_iter()
+                    .map(|address| SocketAddr::new(address, 0)),
+            );
+            Ok(addrs)
+        })
+    }
+}
+
 impl DownloadEngine {
     pub fn new() -> Result<Self> {
-        Self::with_proxy(None, None, None)
+        Self::with_network(None, None, None, &[])
     }
 
     pub fn with_proxy(
         proxy_url: Option<&str>,
         username: Option<&str>,
         password: Option<&str>,
+    ) -> Result<Self> {
+        Self::with_network(proxy_url, username, password, &[])
+    }
+
+    pub fn with_network(
+        proxy_url: Option<&str>,
+        username: Option<&str>,
+        password: Option<&str>,
+        dns_servers: &[IpAddr],
     ) -> Result<Self> {
         let mut builder = Client::builder()
             .connect_timeout(Duration::from_secs(15))
@@ -61,6 +99,14 @@ impl DownloadEngine {
                 proxy = proxy.basic_auth(user, password.unwrap_or_default());
             }
             builder = builder.proxy(proxy);
+        }
+        if !dns_servers.is_empty() {
+            let name_servers = NameServerConfigGroup::from_ips_clear(dns_servers, 53, true);
+            let config = ResolverConfig::from_parts(None, Vec::new(), name_servers);
+            let resolver =
+                TokioResolver::builder_with_config(config, TokioConnectionProvider::default())
+                    .build();
+            builder = builder.dns_resolver(Arc::new(CustomDnsResolver { resolver }));
         }
         let client = builder.build()?;
         Ok(Self { client })

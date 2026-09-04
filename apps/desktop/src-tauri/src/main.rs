@@ -165,6 +165,10 @@ struct UserSettings {
     proxy_username: Option<String>,
     #[serde(default)]
     proxy_password: Option<String>,
+    #[serde(default)]
+    dns_enabled: bool,
+    #[serde(default)]
+    dns_servers: Vec<std::net::IpAddr>,
 }
 
 const fn default_max_active() -> usize {
@@ -196,6 +200,8 @@ impl Default for UserSettings {
             proxy_url: None,
             proxy_username: None,
             proxy_password: None,
+            dns_enabled: false,
+            dns_servers: Vec::new(),
         }
     }
 }
@@ -207,6 +213,13 @@ struct ProxySetting {
     url: String,
     username: String,
     has_password: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DnsSetting {
+    enabled: bool,
+    servers: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -726,23 +739,34 @@ async fn run_download(
     update_task(&app, id, true, |task| {
         task.state = DownloadState::Inspecting
     });
-    let proxy = app
+    let network = app
         .state::<AppState>()
         .settings
         .lock()
         .ok()
-        .and_then(|settings| {
-            settings.proxy_enabled.then(|| {
+        .map(|settings| {
+            let proxy = settings.proxy_enabled.then(|| {
                 (
                     settings.proxy_url.clone(),
                     settings.proxy_username.clone(),
                     settings.proxy_password.clone(),
                 )
-            })
+            });
+            let dns = settings
+                .dns_enabled
+                .then(|| settings.dns_servers.clone())
+                .unwrap_or_default();
+            (proxy, dns)
         });
-    let engine_result = match proxy {
-        Some((url, username, password)) => {
-            DownloadEngine::with_proxy(url.as_deref(), username.as_deref(), password.as_deref())
+    let engine_result = match network {
+        Some((proxy, dns)) => {
+            let (url, username, password) = proxy.unwrap_or_default();
+            DownloadEngine::with_network(
+                url.as_deref(),
+                username.as_deref(),
+                password.as_deref(),
+                &dns,
+            )
         }
         None => DownloadEngine::new(),
     };
@@ -867,6 +891,10 @@ async fn run_external_download(
                     .flatten(),
                 settings.proxy_username.clone(),
                 settings.proxy_password.clone(),
+                settings
+                    .dns_enabled
+                    .then(|| settings.dns_servers.clone())
+                    .unwrap_or_default(),
             )
         })
         .unwrap_or_else(|_| {
@@ -879,6 +907,7 @@ async fn run_external_download(
                 None,
                 None,
                 None,
+                Vec::new(),
             )
         });
     let identity = app
@@ -1063,6 +1092,17 @@ async fn run_external_download(
         }
         DownloadKind::Torrent | DownloadKind::Magnet => {
             let mut command = tokio::process::Command::new(&tools.3);
+            if !tools.8.is_empty() {
+                command.arg(format!(
+                    "--async-dns-server={}",
+                    tools
+                        .8
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ));
+            }
             if let Some(proxy_url) = tools.5.as_deref() {
                 command.arg(format!("--all-proxy={proxy_url}"));
                 if let Some(username) = tools.6.as_deref() {
@@ -2310,6 +2350,66 @@ fn set_proxy_setting(
 }
 
 #[tauri::command]
+fn get_dns_setting(state: State<'_, AppState>) -> Result<DnsSetting, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    Ok(DnsSetting {
+        enabled: settings.dns_enabled,
+        servers: settings
+            .dns_servers
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+    })
+}
+
+fn parse_dns_servers(servers: &[String]) -> Result<Vec<std::net::IpAddr>, String> {
+    if servers.len() > 8 {
+        return Err("too_many_dns_servers".to_owned());
+    }
+    let mut parsed = Vec::with_capacity(servers.len());
+    for server in servers {
+        let address = server
+            .trim()
+            .parse::<std::net::IpAddr>()
+            .map_err(|_| "invalid_dns_server".to_owned())?;
+        if !parsed.contains(&address) {
+            parsed.push(address);
+        }
+    }
+    Ok(parsed)
+}
+
+#[tauri::command]
+fn set_dns_setting(
+    state: State<'_, AppState>,
+    enabled: bool,
+    servers: Vec<String>,
+) -> Result<DnsSetting, String> {
+    let parsed = parse_dns_servers(&servers)?;
+    if enabled && parsed.is_empty() {
+        return Err("dns_server_required".to_owned());
+    }
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.dns_enabled = enabled;
+    settings.dns_servers = parsed;
+    save_settings(&state, &settings)?;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "dns.updated",
+        &format!("enabled={enabled} servers={}", settings.dns_servers.len()),
+    );
+    Ok(DnsSetting {
+        enabled: settings.dns_enabled,
+        servers: settings
+            .dns_servers
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+    })
+}
+
+#[tauri::command]
 fn read_clipboard_link(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -2888,6 +2988,8 @@ fn main() {
             set_user_agent,
             get_proxy_setting,
             set_proxy_setting,
+            get_dns_setting,
+            set_dns_setting,
             get_bridge_pairing,
             regenerate_bridge_token,
             copy_bridge_token,
@@ -3020,5 +3122,17 @@ mod tests {
             external_proxy_url("socks5h://127.0.0.1:1080", Some("user name"), Some("p@ss")),
             "socks5h://user%20name:p%40ss@127.0.0.1:1080",
         );
+    }
+
+    #[test]
+    fn parses_and_deduplicates_dns_servers() {
+        let servers = vec![
+            "1.1.1.1".to_owned(),
+            " 1.1.1.1 ".to_owned(),
+            "2606:4700:4700::1111".to_owned(),
+        ];
+        let parsed = parse_dns_servers(&servers).expect("valid DNS servers");
+        assert_eq!(parsed.len(), 2);
+        assert!(parse_dns_servers(&["not-an-address".to_owned()]).is_err());
     }
 }

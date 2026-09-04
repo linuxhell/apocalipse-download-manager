@@ -61,6 +61,12 @@ const catalogs = {
     proxyPasswordHint: "Leave blank to keep the saved password",
     proxyClearPassword: "Remove the saved proxy password",
     proxyPortableWarning: "The proxy configuration is saved in the portable data/settings.json file.",
+    customDns: "Custom DNS",
+    customDnsHint: "Resolve native downloads without changing the operating system DNS",
+    dnsProvider: "Provider",
+    dnsCustom: "Custom",
+    dnsServers: "DNS servers",
+    dnsScopeHint: "Applied to the native HTTP engine and aria2. SOCKS5H continues resolving through the proxy.",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
     defaults: "Default",
@@ -166,6 +172,12 @@ const catalogs = {
     proxyPasswordHint: "Deixe vazio para manter a senha salva",
     proxyClearPassword: "Remover a senha de proxy salva",
     proxyPortableWarning: "A configuração do proxy é salva no arquivo portátil data/settings.json.",
+    customDns: "DNS personalizado",
+    customDnsHint: "Resolver downloads nativos sem alterar o DNS do sistema operacional",
+    dnsProvider: "Provedor",
+    dnsCustom: "Personalizado",
+    dnsServers: "Servidores DNS",
+    dnsScopeHint: "Aplicado ao motor HTTP nativo e ao aria2. O SOCKS5H continua resolvendo pelo proxy.",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
     defaults: "Padrão",
@@ -270,6 +282,12 @@ const catalogs = {
     proxyPasswordHint: "留空以保留已保存的密码",
     proxyClearPassword: "删除已保存的代理密码",
     proxyPortableWarning: "代理配置保存在便携式 data/settings.json 文件中。",
+    customDns: "自定义 DNS",
+    customDnsHint: "解析原生下载而不更改操作系统 DNS",
+    dnsProvider: "提供商",
+    dnsCustom: "自定义",
+    dnsServers: "DNS 服务器",
+    dnsScopeHint: "应用于原生 HTTP 引擎和 aria2。SOCKS5H 仍通过代理解析。",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
     defaults: "默认",
@@ -745,9 +763,20 @@ function updateProxyControls() {
   }
 }
 document.querySelector("#proxy-enabled").onchange = updateProxyControls;
+function updateDnsControls() {
+  const enabled = document.querySelector("#dns-enabled").checked;
+  document.querySelector("#dns-preset").disabled = !enabled;
+  document.querySelector("#dns-servers").disabled = !enabled;
+}
+document.querySelector("#dns-enabled").onchange = updateDnsControls;
+document.querySelector("#dns-preset").onchange = (event) => {
+  if (event.target.value !== "custom") {
+    document.querySelector("#dns-servers").value = event.target.value;
+  }
+};
 document.querySelector('[data-page="settings"]').onclick = async () => {
   try {
-    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
@@ -756,6 +785,7 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
       invoke("get_user_agent"),
       invoke("get_log_editor"),
       invoke("get_proxy_setting"),
+      invoke("get_dns_setting"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
     document.querySelector("#default-directory").value = directory;
@@ -775,6 +805,13 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
       : t("proxyPasswordHint");
     document.querySelector("#proxy-clear-password").checked = false;
     updateProxyControls();
+    const dnsValue = dns.servers.join(",");
+    document.querySelector("#dns-enabled").checked = dns.enabled;
+    document.querySelector("#dns-servers").value = dns.servers.join(", ");
+    document.querySelector("#dns-preset").value = ["1.1.1.1,1.0.0.1", "8.8.8.8,8.8.4.4", "9.9.9.9,149.112.112.112"].includes(dnsValue)
+      ? dnsValue
+      : "custom";
+    updateDnsControls();
     updateLogEditorControls();
     await refreshToolStatuses();
     settingsDialog.showModal();
@@ -811,6 +848,13 @@ document.querySelector("#save-settings").onclick = async () => {
       username: document.querySelector("#proxy-username").value,
       password: document.querySelector("#proxy-password").value,
       clearPassword: document.querySelector("#proxy-clear-password").checked,
+    });
+    await invoke("set_dns_setting", {
+      enabled: document.querySelector("#dns-enabled").checked,
+      servers: document.querySelector("#dns-servers").value
+        .split(/[;,\s]+/)
+        .map((server) => server.trim())
+        .filter(Boolean),
     });
     await invoke("set_tool_paths", {
       ffmpeg: document.querySelector("#tool-ffmpeg").value,
