@@ -71,11 +71,27 @@ async function sourcePageUrl(sender) {
 
 const fileNameFromPath = (path) => String(path || "").split(/[\\/]/).pop() || null;
 
-chrome.downloads.onCreated.addListener(async (item) => {
+const cancelBrowserDownload = (id) => new Promise((resolve, reject) => {
+  chrome.downloads.cancel(id, () => {
+    const error = chrome.runtime.lastError;
+    if (error) reject(new Error(error.message));
+    else resolve();
+  });
+});
+
+const eraseBrowserDownload = (id) => new Promise((resolve) => {
+  chrome.downloads.erase({ id }, () => {
+    void chrome.runtime.lastError;
+    resolve();
+  });
+});
+
+async function takeBrowserDownload(item, eraseFromHistory = false) {
   const url = item.finalUrl || item.url;
   if (!item.id || !/^https?:/i.test(url)) return;
   try {
-    await chrome.downloads.pause(item.id);
+    await cancelBrowserDownload(item.id);
+    if (eraseFromHistory) await eraseBrowserDownload(item.id);
     const pageUrl = item.referrer || null;
     await bridgeRequest("/v1/download", {
       method: "POST",
@@ -88,12 +104,19 @@ chrome.downloads.onCreated.addListener(async (item) => {
         userAgent: navigator.userAgent,
       }),
     });
-    await chrome.downloads.cancel(item.id);
-    await chrome.downloads.erase({ id: item.id });
-  } catch {
-    chrome.downloads.resume(item.id).catch(() => {});
-  }
-});
+  } catch {}
+}
+
+if (chrome.downloads.onDeterminingFilename?.addListener) {
+  chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+    suggest();
+    void takeBrowserDownload(item);
+  });
+} else {
+  chrome.downloads.onCreated.addListener((item) => {
+    void takeBrowserDownload(item, true);
+  });
+}
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "APOCALIPSE_MEDIA" && sender.tab?.id) {
