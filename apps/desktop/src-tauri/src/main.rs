@@ -5,10 +5,10 @@ use apocalipse_core::{
     DownloadId, DownloadKind, DownloadRequest, DownloadState, DownloadTask,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, io::{Read, Write}, net::{TcpListener, TcpStream}, path::{Path, PathBuf}, process::Command, sync::Mutex, time::{Duration, Instant}};
+use std::{collections::HashMap, fs, io::{Read, Write}, net::{TcpListener, TcpStream}, path::{Path, PathBuf}, process::{Command, Stdio}, sync::Mutex, time::{Duration, Instant}};
 use tauri::{image::Image, menu::{Menu, MenuItem}, tray::TrayIconBuilder, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
-use tokio::sync::{mpsc, oneshot};
+use tokio::{io::AsyncReadExt, sync::{mpsc, oneshot}};
 
 struct AppState {
     queue: Mutex<Vec<DownloadTask>>,
@@ -129,6 +129,7 @@ struct BridgePairing {
 struct BridgeDownload {
     url: String,
     file_name: Option<String>,
+    page_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -323,6 +324,7 @@ async fn run_external_download(
             if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
                 command.args(["--cookies-from-browser", "chrome", "--retries", "10", "--fragment-retries", "10", "--retry-sleep", "fragment:exp=1:8"]);
             }
+            if let Some(referer) = task.referer.as_deref() { command.args(["--referer", referer]); }
             if let Some(audio_format) = selection.strip_prefix("audio:") {
                 command.args(["-f", "bestaudio/best", "-x", "--audio-format", audio_format]);
             } else {
@@ -351,6 +353,8 @@ async fn run_external_download(
                 .args(["--save-name", stem, "--auto-select", "--concurrent-download", "--download-retry-count", "10", "--http-request-timeout", "30"])
                 .arg("--thread-count").arg(tools.4.to_string())
                 .arg("--ffmpeg-binary-path").arg(&tools.0);
+            if let Some(referer) = task.referer.as_deref() { command.arg("-H").arg(format!("Referer: {referer}")); }
+            command.arg("-H").arg("User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36");
             // Some video hosts expose completed VOD playlists without ENDLIST and therefore
             // look live. Treat known finite CDN captures as VOD so the task does not wait forever.
             if task.source.contains("growcdnssedge.com") {
@@ -371,17 +375,27 @@ async fn run_external_download(
         use std::os::windows::process::CommandExt;
         command.as_std_mut().creation_flags(0x08000000);
     }
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
     command.kill_on_drop(true);
     let result = match command.spawn() {
-        Ok(mut child) => tokio::select! {
-            biased;
-            _ = &mut cancellation => {
-                let _ = child.kill().await;
-                return;
-            }
-            status = child.wait() => status.map_err(|error| error.to_string()).and_then(|status| {
-                if status.success() { Ok(()) } else { Err(format!("external_engine_exit_{:?}", status.code())) }
-            }),
+        Ok(mut child) => {
+            let mut stdout = child.stdout.take();
+            let mut stderr = child.stderr.take();
+            let output = tokio::spawn(async move { match stdout.take() { Some(stream) => read_process_tail(stream).await, None => Vec::new() } });
+            let errors = tokio::spawn(async move { match stderr.take() { Some(stream) => read_process_tail(stream).await, None => Vec::new() } });
+            let status = tokio::select! {
+                biased;
+                _ = &mut cancellation => { let _ = child.kill().await; return; }
+                status = child.wait() => status,
+            };
+            let mut text = String::from_utf8_lossy(&output.await.unwrap_or_default()).into_owned();
+            text.push_str(&String::from_utf8_lossy(&errors.await.unwrap_or_default()));
+            status.map_err(|error| error.to_string()).and_then(|status| {
+                if status.success() { Ok(()) } else {
+                    let detail = text.lines().filter(|line| !line.trim().is_empty()).rev().take(6).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" | ");
+                    Err(if detail.is_empty() { format!("external_engine_exit_{:?}", status.code()) } else { detail })
+                }
+            })
         },
         Err(error) => Err(format!("external_engine_unavailable: {error}")),
     };
@@ -393,6 +407,21 @@ async fn run_external_download(
         workers.remove(&id);
     }
     start_next_queued(&app);
+}
+
+async fn read_process_tail(mut stream: impl tokio::io::AsyncRead + Unpin) -> Vec<u8> {
+    let mut tail = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        match stream.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(count) => {
+                tail.extend_from_slice(&chunk[..count]);
+                if tail.len() > 65_536 { tail.drain(..tail.len() - 65_536); }
+            }
+        }
+    }
+    tail
 }
 
 fn suggested_name(source: &str) -> String {
@@ -753,7 +782,8 @@ fn enqueue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Resul
     let proposed = request.file_name.filter(|name| !name.trim().is_empty()).unwrap_or_else(|| suggested_name(&request.url));
     let file_name = validate_file_name(&append_source_extension(suggested_name(&proposed), &request.url, kind))?;
     remember_download_directory(&state, &directory)?;
-    let task = DownloadTask::new(&request.url, unique_destination(&directory, &file_name));
+    let mut task = DownloadTask::new(&request.url, unique_destination(&directory, &file_name));
+    task.referer = request.page_url.filter(|url| url.starts_with("https://") || url.starts_with("http://"));
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     queue.push(task.clone());
     save_queue(&state, &queue)?;

@@ -351,6 +351,14 @@ function renderDownloads() {
         : progressText;
     progress.append(bar);
     info.append(progress, details);
+    const failureMessage = typeof task.state === "object" ? task.state.failed?.message : null;
+    if (failureMessage) {
+      const error = document.createElement("small");
+      error.className = "task-error";
+      error.textContent = failureMessage;
+      error.title = failureMessage;
+      info.append(error);
+    }
     const state = Object.assign(document.createElement("span"), {
       className: "download-state",
       textContent: stateName(task.state),

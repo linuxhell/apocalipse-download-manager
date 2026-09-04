@@ -229,6 +229,7 @@ h1 {
 .task-select {
   accent-color: var(--cyan);
 }
+.task-error { display: block; margin-top: 5px; color: #ff8f8f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ghost:disabled,
 .primary:disabled {
   cursor: not-allowed;

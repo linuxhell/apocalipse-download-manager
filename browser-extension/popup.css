@@ -19,5 +19,7 @@ article img, .audio-icon { width: 112px; height: 63px; object-fit: cover; border
 .audio-icon { display: grid; place-items: center; background: linear-gradient(135deg,#152735,#203d51); font-size: 28px; color: #5cecff; }
 .audio-icon[hidden] { display: none; }
 article b, article small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+article b { font-size: 13px; line-height: 1.35; color: #f0fbff; }
+article small { margin-top: 5px; font-size: 11px; line-height: 1.35; color: #a9c0ca; }
 article button { height: 36px; padding: 0 10px; border: 0; border-radius: 9px; background: #19cce8; color: #00151a; font-weight: 700; }
 #empty { padding: 28px; text-align: center; color: #7f98a2; }

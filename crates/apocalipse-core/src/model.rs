@@ -26,6 +26,8 @@ pub struct DownloadTask {
     pub total: Option<u64>,
     #[serde(default)]
     pub format_selection: Option<String>,
+    #[serde(default)]
+    pub referer: Option<String>,
 }
 
 impl DownloadTask {
@@ -38,6 +40,7 @@ impl DownloadTask {
             received: 0,
             total: None,
             format_selection: None,
+            referer: None,
         }
     }
 }
