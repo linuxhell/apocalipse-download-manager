@@ -89,18 +89,49 @@
     }
     return null;
   };
-  const revealFacebookUrl = async (element) => {
-    const immediate = facebookUrlFor(element);
-    if (immediate) return immediate;
-    if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
-    const target = element.closest?.('a[href],[role="link"]') || element.parentElement || element;
-    target.click?.();
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+  const waitForFacebookUrl = async (element, attempts = 20) => {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 100));
       const revealed = facebookUrlFor(element);
       if (revealed) return revealed;
     }
     return null;
+  };
+  const facebookUrlFromMenu = async (element) => {
+    const article = element.closest?.('[role="article"],article') || element.parentElement;
+    const buttons = [...(article?.querySelectorAll?.('button,[role="button"]') || [])];
+    const menuButton = buttons.find((button) => {
+      const label = `${button.getAttribute("aria-label") || ""} ${button.title || ""} ${button.textContent || ""}`.trim();
+      return /(?:ações|acoes|opções|opcoes|actions|options|more|更多|更多选项)/i.test(label) || /^\s*(?:\.\.\.|…|⋯)\s*$/.test(label);
+    });
+    if (!menuButton) return null;
+    menuButton.click();
+    let copyItem = null;
+    for (let attempt = 0; attempt < 20 && !copyItem; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      copyItem = [...document.querySelectorAll('[role="menuitem"],[role="menuitemradio"]')].find((item) =>
+        /(?:copiar link|copy link|复制链接|複製連結)/i.test(item.textContent || ""));
+    }
+    if (!copyItem) return null;
+    copyItem.click();
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      try {
+        const copied = (await navigator.clipboard.readText()).trim();
+        if (isFacebookMediaUrl(copied)) return copied;
+      } catch {}
+    }
+    return null;
+  };
+  const revealFacebookUrl = async (element) => {
+    const immediate = facebookUrlFor(element);
+    if (immediate) return immediate;
+    if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
+    const rect = element.getBoundingClientRect();
+    const target = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+      || element.closest?.('a[href],[role="link"]') || element;
+    target.click?.();
+    return await waitForFacebookUrl(element) || await facebookUrlFromMenu(element);
   };
   const collect = () => {
     const items = new Map();
