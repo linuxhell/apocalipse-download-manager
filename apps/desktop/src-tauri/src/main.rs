@@ -365,6 +365,14 @@ async fn run_external_download(
             let selection = task.format_selection.as_deref().unwrap_or("bestvideo+bestaudio/best");
             command.args(["--no-playlist", "--newline", "--verbose"]);
             command.arg("--concurrent-fragments").arg(tools.4.to_string());
+            let quickjs_name = if cfg!(windows) { "qjs.exe" } else { "qjs" };
+            let adjacent_quickjs = tools.1.parent().map(|directory| directory.join(quickjs_name))
+                .filter(|path| path.is_file());
+            if let Some(quickjs) = adjacent_quickjs {
+                command.arg("--js-runtimes").arg(format!("quickjs:{}", quickjs.display()));
+            } else {
+                command.args(["--js-runtimes", "quickjs"]);
+            }
             if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
                 if let Some(cookie) = identity.as_ref().and_then(|value| value.cookie_header.as_deref()).filter(|value| !value.is_empty()) {
                     command.arg("--add-headers").arg(format!("Cookie:{cookie}"));
