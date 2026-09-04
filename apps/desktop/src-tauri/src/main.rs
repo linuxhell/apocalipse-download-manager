@@ -93,6 +93,12 @@ fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
     path.clone().filter(|value| !value.as_os_str().is_empty()).unwrap_or_else(|| PathBuf::from(fallback))
 }
 
+fn http_origin(url: &str) -> Option<&str> {
+    let scheme_end = url.find("://")? + 3;
+    let path_start = url[scheme_end..].find('/').map(|index| scheme_end + index).unwrap_or(url.len());
+    Some(&url[..path_start])
+}
+
 fn version_line(executable: &Path, args: &[&str]) -> Option<String> {
     let output = Command::new(executable).args(args).output().ok()?;
     if !output.status.success() { return None; }
@@ -362,8 +368,16 @@ async fn run_external_download(
                 .args(["--save-name", stem, "--auto-select", "--concurrent-download", "--download-retry-count", "10", "--http-request-timeout", "30"])
                 .arg("--thread-count").arg(tools.4.to_string())
                 .arg("--ffmpeg-binary-path").arg(&tools.0);
-            if let Some(referer) = task.referer.as_deref() { command.arg("-H").arg(format!("Referer: {referer}")); }
+            if let Some(referer) = task.referer.as_deref() {
+                command.arg("-H").arg(format!("Referer: {referer}"));
+                if let Some(origin) = http_origin(referer) {
+                    command.arg("-H").arg(format!("Origin: {origin}"));
+                }
+            }
             command.arg("-H").arg("User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36");
+            if task.source.contains("hdsex.org") || task.referer.as_deref().is_some_and(|url| url.contains("hdsex.org")) {
+                command.arg("--append-url-params=true");
+            }
             // Some video hosts expose completed VOD playlists without ENDLIST and therefore
             // look live. Treat known finite CDN captures as VOD so the task does not wait forever.
             if task.known_duration.is_some_and(|duration| duration > 0.0)

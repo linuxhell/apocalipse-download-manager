@@ -41,7 +41,7 @@
     const urls = [...new Set(performance.getEntriesByType("resource").map((entry) => entry.name)
       .filter((url) => /\.m3u8(?:$|[?#])/i.test(url)))];
     const masters = urls.filter((url) => /(?:\/master\/|master\.m3u8)/i.test(url));
-    return { candidates: masters.length ? masters : urls, fallback: masters.at(-1) || urls.at(-1) || null };
+    return { candidates: urls, fallback: urls.at(-1) || masters.at(-1) || null };
   };
   const downloadUrlFor = (element) => {
     if (element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch") return location.href;
@@ -60,8 +60,8 @@
         urls: hls.candidates,
         expectedDuration: Number.isFinite(element.duration) ? element.duration : null,
       });
-      return selected?.url || immediate;
-    } catch { return immediate; }
+      return selected || { url: immediate, duration: null };
+    } catch { return { url: immediate, duration: null }; }
   };
   let overlayTimer;
   const installOverlays = () => {
@@ -80,9 +80,10 @@
       button.addEventListener("click", async (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const currentUrl = await resolveDownloadUrl(element) || (isYouTubeVideo ? location.href : url);
+        const resolved = await resolveDownloadUrl(element);
+        const currentUrl = resolved?.url || resolved || (isYouTubeVideo ? location.href : url);
         if (!currentUrl) return;
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, kind: element.tagName.toLowerCase(), title: document.title, thumbnail: thumbnailFor(element, "video") } });
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, kind: element.tagName.toLowerCase(), title: document.title, thumbnail: thumbnailFor(element, "video") } });
       });
       const position = () => {
         if (!element.isConnected) { button.remove(); return; }

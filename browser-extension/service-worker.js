@@ -53,6 +53,12 @@ async function analyzeHls(urls, expectedDuration) {
   return items.map((item) => ({ ...item, recommended: item.url === recommendedUrl }));
 }
 
+async function sourcePageUrl(sender) {
+  if (sender.tab?.url) return sender.tab.url;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab?.url || null;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "APOCALIPSE_MEDIA" && sender.tab?.id) {
     chrome.storage.session.set({ [`media:${sender.tab.id}`]: message.media });
@@ -90,15 +96,16 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return true;
   }
   if (message?.type === "APOCALIPSE_DOWNLOAD" && message.item?.url) {
-    bridgeRequest("/v1/download", {
-      method: "POST",
-      body: JSON.stringify({
-        url: message.item.url,
-        fileName: message.item.title || null,
-        pageUrl: sender.tab?.url || null,
-        duration: Number.isFinite(message.item.duration) ? message.item.duration : null,
-      }),
-    }).then(() => reply({ target: "apocalipse" })).catch(() => {
+    sourcePageUrl(sender).then((pageUrl) => bridgeRequest("/v1/download", {
+        method: "POST",
+        body: JSON.stringify({
+          url: message.item.url,
+          fileName: message.item.title || null,
+          pageUrl,
+          duration: Number.isFinite(message.item.duration) ? message.item.duration : null,
+        }),
+      }))
+      .then(() => reply({ target: "apocalipse" })).catch(() => {
       chrome.downloads.download({ url: message.item.url, saveAs: true }, (downloadId) => {
         reply({ target: "browser", downloadId, error: chrome.runtime.lastError?.message });
       });
