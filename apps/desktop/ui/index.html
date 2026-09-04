@@ -277,6 +277,23 @@
         </div>
         <label for="user-agent" data-i18n="userAgent">Custom User-Agent</label>
         <input id="user-agent" type="text" maxlength="1024" data-i18n-placeholder="userAgentHint" placeholder="Automatic — use the browser identity" />
+        <section class="pairing-settings">
+          <label class="setting-toggle compact-toggle">
+            <input id="proxy-enabled" type="checkbox" />
+            <span><b data-i18n="proxy">Proxy</b><small data-i18n="proxyHint">Route downloads through an HTTP, HTTPS or SOCKS proxy</small></span>
+          </label>
+          <label for="proxy-url" data-i18n="proxyAddress">Proxy address</label>
+          <input id="proxy-url" type="text" maxlength="2048" placeholder="socks5h://127.0.0.1:1080" />
+          <div class="credential-grid">
+            <label><span data-i18n="proxyUsername">Username</span><input id="proxy-username" type="text" maxlength="512" autocomplete="off" /></label>
+            <label><span data-i18n="proxyPassword">Password</span><input id="proxy-password" type="password" maxlength="2048" autocomplete="new-password" data-i18n-placeholder="proxyPasswordHint" placeholder="Leave blank to keep it" /></label>
+          </div>
+          <label class="setting-toggle compact-toggle">
+            <input id="proxy-clear-password" type="checkbox" />
+            <span><small data-i18n="proxyClearPassword">Remove the saved proxy password</small></span>
+          </label>
+          <small data-i18n="proxyPortableWarning">The proxy configuration is saved in the portable data/settings.json file.</small>
+        </section>
         <div class="transfer-settings">
           <label>
             <span><b data-i18n="maxTasks">Maximum simultaneous tasks</b><output id="max-tasks-value">3</output></span>

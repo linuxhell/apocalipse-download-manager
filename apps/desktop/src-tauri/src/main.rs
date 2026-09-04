@@ -112,6 +112,14 @@ struct UserSettings {
     user_agent: Option<String>,
     #[serde(default)]
     log_editor_path: Option<PathBuf>,
+    #[serde(default)]
+    proxy_enabled: bool,
+    #[serde(default)]
+    proxy_url: Option<String>,
+    #[serde(default)]
+    proxy_username: Option<String>,
+    #[serde(default)]
+    proxy_password: Option<String>,
 }
 
 const fn default_max_active() -> usize { 3 }
@@ -133,8 +141,21 @@ impl Default for UserSettings {
             aria2_path: None,
             user_agent: None,
             log_editor_path: None,
+            proxy_enabled: false,
+            proxy_url: None,
+            proxy_username: None,
+            proxy_password: None,
         }
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProxySetting {
+    enabled: bool,
+    url: String,
+    username: String,
+    has_password: bool,
 }
 
 #[derive(Serialize)]
@@ -371,12 +392,21 @@ fn save_settings(state: &AppState, settings: &UserSettings) -> Result<(), String
 fn redact_url(url: &str) -> String {
     let (base, query) = match url.split_once('?') {
         Some(parts) => parts,
-        None => return url.split('#').next().unwrap_or(url).to_owned(),
+        None => (url.split('#').next().unwrap_or(url), ""),
+    };
+    let base = if let Some(scheme_end) = base.find("://") {
+        let authority_start = scheme_end + 3;
+        match base[authority_start..].find('@') {
+            Some(at) => format!("{}{}", &base[..authority_start], &base[authority_start + at + 1..]),
+            None => base.to_owned(),
+        }
+    } else {
+        base.to_owned()
     };
     let parameters = query.split('#').next().unwrap_or_default().split('&').filter(|item| !item.is_empty())
         .map(|item| format!("{}=<redacted>", item.split_once('=').map_or(item, |(name, _)| name)))
         .collect::<Vec<_>>();
-    if parameters.is_empty() { base.to_owned() } else { format!("{base}?{}", parameters.join("&")) }
+    if parameters.is_empty() { base } else { format!("{base}?{}", parameters.join("&")) }
 }
 
 fn sanitize_log_detail(detail: &str) -> String {
@@ -451,7 +481,20 @@ async fn run_download(
 ) {
     diagnostic_log(&app.state::<AppState>(), "INFO", "http.start", &format!("task={id} url={}", redact_url(&request.url)));
     update_task(&app, id, true, |task| task.state = DownloadState::Inspecting);
-    let engine = match DownloadEngine::new() {
+    let proxy = app.state::<AppState>().settings.lock().ok().and_then(|settings| {
+        settings.proxy_enabled.then(|| (
+            settings.proxy_url.clone(),
+            settings.proxy_username.clone(),
+            settings.proxy_password.clone(),
+        ))
+    });
+    let engine_result = match proxy {
+        Some((url, username, password)) => DownloadEngine::with_proxy(
+            url.as_deref(), username.as_deref(), password.as_deref(),
+        ),
+        None => DownloadEngine::new(),
+    };
+    let engine = match engine_result {
         Ok(engine) => engine,
         Err(error) => {
             diagnostic_log(&app.state::<AppState>(), "ERROR", "http.engine", &format!("task={id} error={error}"));
@@ -529,7 +572,10 @@ async fn run_external_download(
         configured_tool(&settings.n_m3u8dl_re_path, if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" }),
         configured_tool(&settings.aria2_path, if cfg!(windows) { "aria2c.exe" } else { "aria2c" }),
         settings.connections_per_download.clamp(1, 32),
-    )).unwrap_or_else(|_| ("ffmpeg".into(), "yt-dlp".into(), "N_m3u8DL-RE".into(), "aria2c".into(), 8));
+        settings.proxy_enabled.then(|| settings.proxy_url.clone()).flatten(),
+        settings.proxy_username.clone(),
+        settings.proxy_password.clone(),
+    )).unwrap_or_else(|_| ("ffmpeg".into(), "yt-dlp".into(), "N_m3u8DL-RE".into(), "aria2c".into(), 8, None, None, None));
     let identity = app.state::<AppState>().request_identities.lock().ok()
         .and_then(|identities| identities.get(&task.id).cloned());
     let configured_user_agent = app.state::<AppState>().settings.lock().ok()
@@ -537,9 +583,11 @@ async fn run_external_download(
     let user_agent = configured_user_agent.as_deref()
         .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_deref()))
         .unwrap_or("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36");
+    let proxy_url = tools.5.as_deref().map(|url| external_proxy_url(url, tools.6.as_deref(), tools.7.as_deref()));
     let mut command = match kind {
         DownloadKind::MediaPage => {
             let mut command = tokio::process::Command::new(&tools.1);
+            if let Some(proxy_url) = proxy_url.as_deref() { command.arg("--proxy").arg(proxy_url); }
             let selection = task.format_selection.as_deref().unwrap_or("bestvideo+bestaudio/best");
             command.args(["--no-playlist", "--newline", "--verbose"]);
             command.arg("--concurrent-fragments").arg(tools.4.to_string());
@@ -572,6 +620,7 @@ async fn run_external_download(
         DownloadKind::Hls => {
             if let Some(audio_format) = task.format_selection.as_deref().and_then(|value| value.strip_prefix("audio:")) {
                 let mut command = tokio::process::Command::new(&tools.0);
+                if let Some(proxy_url) = proxy_url.as_deref() { command.arg("-http_proxy").arg(proxy_url); }
                 command.args(["-y", "-i"]).arg(&task.source).arg("-vn");
                 match audio_format {
                     "mp3" => { command.args(["-c:a", "libmp3lame", "-q:a", "2"]); }
@@ -584,6 +633,7 @@ async fn run_external_download(
                 command
             } else {
             let mut command = tokio::process::Command::new(&tools.2);
+            if let Some(proxy_url) = proxy_url.as_deref() { command.arg("--custom-proxy").arg(proxy_url); }
             let stem = task.destination.file_stem().and_then(|value| value.to_str()).unwrap_or("download");
             command.arg(&task.source).arg("--save-dir").arg(directory)
                 .args(["--save-name", stem, "--auto-select", "--concurrent-download", "--download-retry-count", "10", "--http-request-timeout", "30"])
@@ -623,6 +673,11 @@ async fn run_external_download(
         }
         DownloadKind::Torrent | DownloadKind::Magnet => {
             let mut command = tokio::process::Command::new(&tools.3);
+            if let Some(proxy_url) = tools.5.as_deref() {
+                command.arg(format!("--all-proxy={proxy_url}"));
+                if let Some(username) = tools.6.as_deref() { command.arg(format!("--all-proxy-user={username}")); }
+                if let Some(password) = tools.7.as_deref() { command.arg(format!("--all-proxy-passwd={password}")); }
+            }
             command.arg(format!("--dir={}", directory.display())).arg(&task.source);
             command
         }
@@ -691,11 +746,13 @@ fn write_yt_dlp_diagnostic(
     let directory = state.queue_path.parent()?.join("logs");
     fs::create_dir_all(&directory).ok()?;
     let path = directory.join(format!("yt-dlp-{id}.log"));
+    let proxy_password = state.settings.lock().ok().and_then(|settings| settings.proxy_password.clone());
     let sanitized = output.lines().map(|line| {
         if line.to_ascii_lowercase().contains("cookie:") {
             "[linha com cookie ocultada]".to_owned()
         } else {
-            line.to_owned()
+            proxy_password.as_deref().filter(|value| !value.is_empty())
+                .map_or_else(|| sanitize_log_detail(line), |password| sanitize_log_detail(&line.replace(password, "<redacted>")))
         }
     }).collect::<Vec<_>>().join("\n");
     let contents = format!(
@@ -1055,6 +1112,15 @@ fn optional_path(value: String) -> Option<PathBuf> {
     (!value.is_empty()).then(|| PathBuf::from(value))
 }
 
+fn external_proxy_url(url: &str, username: Option<&str>, password: Option<&str>) -> String {
+    let Ok(mut parsed) = url::Url::parse(url) else { return url.to_owned() };
+    if let Some(username) = username.filter(|value| !value.is_empty()) {
+        let _ = parsed.set_username(username);
+        let _ = parsed.set_password(password);
+    }
+    parsed.to_string()
+}
+
 fn uupdump_urls(url: &str) -> Option<(String, String)> {
     let lower = url.to_ascii_lowercase();
     let prefixes = [
@@ -1341,6 +1407,58 @@ fn set_user_agent(state: State<'_, AppState>, user_agent: String) -> Result<User
     settings.user_agent = (!value.is_empty()).then(|| value.to_owned());
     save_settings(&state, &settings)?;
     Ok(UserAgentSetting { user_agent: settings.user_agent.clone().unwrap_or_default() })
+}
+
+#[tauri::command]
+fn get_proxy_setting(state: State<'_, AppState>) -> Result<ProxySetting, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    Ok(ProxySetting {
+        enabled: settings.proxy_enabled,
+        url: settings.proxy_url.clone().unwrap_or_default(),
+        username: settings.proxy_username.clone().unwrap_or_default(),
+        has_password: settings.proxy_password.as_ref().is_some_and(|value| !value.is_empty()),
+    })
+}
+
+#[tauri::command]
+fn set_proxy_setting(
+    state: State<'_, AppState>,
+    enabled: bool,
+    url: String,
+    username: String,
+    password: String,
+    clear_password: bool,
+) -> Result<ProxySetting, String> {
+    let url = url.trim();
+    let username = username.trim();
+    if url.len() > 2048 || username.len() > 512 || password.len() > 2048
+        || [url, username, password.as_str()].iter().any(|value| value.chars().any(|character| matches!(character, '\r' | '\n')))
+    {
+        return Err("invalid_proxy_setting".to_owned());
+    }
+    if enabled {
+        let parsed = url::Url::parse(url).map_err(|_| "invalid_proxy_url".to_owned())?;
+        if !matches!(parsed.scheme(), "http" | "https" | "socks4" | "socks5" | "socks5h") || parsed.host().is_none() {
+            return Err("invalid_proxy_url".to_owned());
+        }
+    }
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.proxy_enabled = enabled;
+    settings.proxy_url = (!url.is_empty()).then(|| url.to_owned());
+    settings.proxy_username = (!username.is_empty()).then(|| username.to_owned());
+    if clear_password {
+        settings.proxy_password = None;
+    } else if !password.is_empty() {
+        settings.proxy_password = Some(password);
+    }
+    save_settings(&state, &settings)?;
+    diagnostic_log(&state, "INFO", "proxy.updated", &format!("enabled={enabled} authenticated={}", settings.proxy_username.is_some()));
+    Ok(ProxySetting {
+        enabled: settings.proxy_enabled,
+        url: settings.proxy_url.clone().unwrap_or_default(),
+        username: settings.proxy_username.clone().unwrap_or_default(),
+        has_password: settings.proxy_password.as_ref().is_some_and(|value| !value.is_empty()),
+    })
 }
 
 #[tauri::command]
@@ -1757,6 +1875,8 @@ fn main() {
             set_transfer_limits,
             get_user_agent,
             set_user_agent,
+            get_proxy_setting,
+            set_proxy_setting,
             get_bridge_pairing,
             regenerate_bridge_token,
             copy_bridge_token,
@@ -1824,6 +1944,7 @@ mod tests {
             "https://example.com/file.zip?id=<redacted>&token=<redacted>",
         );
         assert_eq!(redact_url("https://example.com/file.zip#part"), "https://example.com/file.zip");
+        assert_eq!(redact_url("http://user:secret@proxy.example:8080/file"), "http://proxy.example:8080/file");
     }
 
     #[test]
@@ -1851,5 +1972,13 @@ mod tests {
         rule.hosts = vec!["uupdump.net".to_owned()];
         rule.connections = 0;
         assert!(!valid_site_rule(&rule));
+    }
+
+    #[test]
+    fn external_proxy_credentials_are_url_encoded() {
+        assert_eq!(
+            external_proxy_url("socks5h://127.0.0.1:1080", Some("user name"), Some("p@ss")),
+            "socks5h://user%20name:p%40ss@127.0.0.1:1080/",
+        );
     }
 }

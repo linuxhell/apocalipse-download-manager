@@ -35,12 +35,23 @@ pub struct DownloadEngine {
 
 impl DownloadEngine {
     pub fn new() -> Result<Self> {
-        let client = Client::builder()
+        Self::with_proxy(None, None, None)
+    }
+
+    pub fn with_proxy(proxy_url: Option<&str>, username: Option<&str>, password: Option<&str>) -> Result<Self> {
+        let mut builder = Client::builder()
             .connect_timeout(Duration::from_secs(15))
             .read_timeout(Duration::from_secs(60))
             .redirect(reqwest::redirect::Policy::limited(10))
-            .user_agent("ApocalipseDownloadManager/0.1")
-            .build()?;
+            .user_agent("ApocalipseDownloadManager/0.1");
+        if let Some(url) = proxy_url.map(str::trim).filter(|value| !value.is_empty()) {
+            let mut proxy = reqwest::Proxy::all(url).context("invalid proxy URL")?;
+            if let Some(user) = username.filter(|value| !value.is_empty()) {
+                proxy = proxy.basic_auth(user, password.unwrap_or_default());
+            }
+            builder = builder.proxy(proxy);
+        }
+        let client = builder.build()?;
         Ok(Self { client })
     }
 

@@ -254,6 +254,21 @@ h1 {
 .rules-editor {
   width: min(900px, 82vw);
 }
+.credential-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.credential-grid label {
+  display: grid;
+  gap: 6px;
+}
+.compact-toggle {
+  margin: 0;
+}
+@media (max-width: 620px) {
+  .credential-grid { grid-template-columns: 1fr; }
+}
 #site-rules-json {
   width: 100%;
   min-height: 430px;

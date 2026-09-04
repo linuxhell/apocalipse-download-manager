@@ -53,6 +53,14 @@ const catalogs = {
     captureClipboardHint: "Open recognized HTTP, HLS, magnet and media links automatically",
     userAgent: "Custom User-Agent",
     userAgentHint: "Automatic — use the browser identity",
+    proxy: "Proxy",
+    proxyHint: "Route downloads through an HTTP, HTTPS or SOCKS proxy",
+    proxyAddress: "Proxy address",
+    proxyUsername: "Username",
+    proxyPassword: "Password",
+    proxyPasswordHint: "Leave blank to keep the saved password",
+    proxyClearPassword: "Remove the saved proxy password",
+    proxyPortableWarning: "The proxy configuration is saved in the portable data/settings.json file.",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
     defaults: "Default",
@@ -150,6 +158,14 @@ const catalogs = {
     captureClipboardHint: "Abrir automaticamente links HTTP, HLS, magnet e de mídia reconhecidos",
     userAgent: "User-Agent personalizado",
     userAgentHint: "Automático — usar a identidade do navegador",
+    proxy: "Proxy",
+    proxyHint: "Encaminhar os downloads por um proxy HTTP, HTTPS ou SOCKS",
+    proxyAddress: "Endereço do proxy",
+    proxyUsername: "Nome de usuário",
+    proxyPassword: "Senha",
+    proxyPasswordHint: "Deixe vazio para manter a senha salva",
+    proxyClearPassword: "Remover a senha de proxy salva",
+    proxyPortableWarning: "A configuração do proxy é salva no arquivo portátil data/settings.json.",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
     defaults: "Padrão",
@@ -246,6 +262,14 @@ const catalogs = {
     captureClipboardHint: "自动打开识别出的 HTTP、HLS、磁力和媒体链接",
     userAgent: "自定义 User-Agent",
     userAgentHint: "自动 — 使用浏览器身份",
+    proxy: "代理服务器",
+    proxyHint: "通过 HTTP、HTTPS 或 SOCKS 代理下载",
+    proxyAddress: "代理地址",
+    proxyUsername: "用户名",
+    proxyPassword: "密码",
+    proxyPasswordHint: "留空以保留已保存的密码",
+    proxyClearPassword: "删除已保存的代理密码",
+    proxyPortableWarning: "代理配置保存在便携式 data/settings.json 文件中。",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
     defaults: "默认",
@@ -714,9 +738,16 @@ document.querySelectorAll("[data-clear-mode]").forEach((button) => {
     }
   };
 });
+function updateProxyControls() {
+  const enabled = document.querySelector("#proxy-enabled").checked;
+  for (const id of ["#proxy-url", "#proxy-username", "#proxy-password", "#proxy-clear-password"]) {
+    document.querySelector(id).disabled = !enabled;
+  }
+}
+document.querySelector("#proxy-enabled").onchange = updateProxyControls;
 document.querySelector('[data-page="settings"]').onclick = async () => {
   try {
-    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
@@ -724,6 +755,7 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
       invoke("get_bridge_pairing"),
       invoke("get_user_agent"),
       invoke("get_log_editor"),
+      invoke("get_proxy_setting"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
     document.querySelector("#default-directory").value = directory;
@@ -734,6 +766,15 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
     document.querySelector("#pairing-token").value = pairing.token;
     document.querySelector("#user-agent").value = userAgent.userAgent;
     document.querySelector("#log-editor").value = logEditor;
+    document.querySelector("#proxy-enabled").checked = proxy.enabled;
+    document.querySelector("#proxy-url").value = proxy.url;
+    document.querySelector("#proxy-username").value = proxy.username;
+    document.querySelector("#proxy-password").value = "";
+    document.querySelector("#proxy-password").placeholder = proxy.hasPassword
+      ? "••••••••"
+      : t("proxyPasswordHint");
+    document.querySelector("#proxy-clear-password").checked = false;
+    updateProxyControls();
     updateLogEditorControls();
     await refreshToolStatuses();
     settingsDialog.showModal();
@@ -763,6 +804,13 @@ document.querySelector("#save-settings").onclick = async () => {
     });
     await invoke("set_user_agent", {
       userAgent: document.querySelector("#user-agent").value,
+    });
+    await invoke("set_proxy_setting", {
+      enabled: document.querySelector("#proxy-enabled").checked,
+      url: document.querySelector("#proxy-url").value,
+      username: document.querySelector("#proxy-username").value,
+      password: document.querySelector("#proxy-password").value,
+      clearPassword: document.querySelector("#proxy-clear-password").checked,
     });
     await invoke("set_tool_paths", {
       ffmpeg: document.querySelector("#tool-ffmpeg").value,

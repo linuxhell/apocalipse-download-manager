@@ -17,3 +17,4 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-clipboard-manager = "2"
 tokio.workspace = true
 uuid.workspace = true
+url.workspace = true
