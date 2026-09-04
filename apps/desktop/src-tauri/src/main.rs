@@ -409,6 +409,14 @@ fn validate_file_name(name: &str) -> Result<String, String> {
     Ok(name.to_owned())
 }
 
+fn append_source_extension(file_name: String, source: &str, kind: DownloadKind) -> String {
+    if kind != DownloadKind::Http || Path::new(&file_name).extension().is_some() { return file_name; }
+    let source_name = suggested_name(source);
+    let extension = Path::new(&source_name).extension().and_then(|value| value.to_str())
+        .filter(|value| (1..=10).contains(&value.len()) && value.chars().all(|character| character.is_ascii_alphanumeric()));
+    extension.map(|extension| format!("{file_name}.{extension}")).unwrap_or(file_name)
+}
+
 fn unique_destination(directory: &Path, file_name: &str) -> PathBuf {
     let original = directory.join(file_name);
     if !original.exists() && !partial_path(&original).exists() {
@@ -743,7 +751,7 @@ fn enqueue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Resul
     let kind = classify_url(&request.url).ok_or_else(|| "unsupported_url".to_owned())?;
     let directory = configured_download_directory(app, &state)?;
     let proposed = request.file_name.filter(|name| !name.trim().is_empty()).unwrap_or_else(|| suggested_name(&request.url));
-    let file_name = validate_file_name(&suggested_name(&proposed))?;
+    let file_name = validate_file_name(&append_source_extension(suggested_name(&proposed), &request.url, kind.clone()))?;
     remember_download_directory(&state, &directory)?;
     let task = DownloadTask::new(&request.url, unique_destination(&directory, &file_name));
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
