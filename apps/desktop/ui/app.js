@@ -59,6 +59,10 @@ const catalogs = {
     regenerate: "Regenerate",
     bridgeConnected: "Extension connected",
     bridgeWaiting: "Waiting for extension",
+    recentLocations: "Download locations",
+    clearLocations: "Clear download locations",
+    defaultLocation: "Default",
+    unavailableLocation: "Unavailable",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -121,6 +125,10 @@ const catalogs = {
     regenerate: "Gerar outro",
     bridgeConnected: "Extensão conectada",
     bridgeWaiting: "Aguardando extensão",
+    recentLocations: "Locais de download",
+    clearLocations: "Limpar caminhos de download",
+    defaultLocation: "Padrão",
+    unavailableLocation: "Indisponível",
   },
   "zh-CN": {
     downloads: "下载",
@@ -182,6 +190,10 @@ const catalogs = {
     regenerate: "重新生成",
     bridgeConnected: "扩展已连接",
     bridgeWaiting: "正在等待扩展",
+    recentLocations: "下载位置",
+    clearLocations: "清除下载路径",
+    defaultLocation: "默认",
+    unavailableLocation: "不可用",
   },
 };
 
@@ -401,6 +413,44 @@ async function refreshDownloads() {
 const dialog = document.querySelector("#add-dialog");
 const clearDialog = document.querySelector("#clear-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
+async function refreshDestinationHistory() {
+  try {
+    const destinations = await invoke("list_download_directories");
+    const root = document.querySelector("#destination-list");
+    root.replaceChildren();
+    for (const item of destinations) {
+      const row = document.createElement("div");
+      row.className = "destination-row";
+      row.classList.toggle("unavailable", !item.available);
+      const select = document.createElement("button");
+      select.type = "button";
+      select.className = "destination-select";
+      const path = document.createElement("span");
+      path.textContent = item.path;
+      const badge = document.createElement("small");
+      badge.textContent = item.isDefault ? t("defaultLocation") : (!item.available ? t("unavailableLocation") : "");
+      select.append(path, badge);
+      select.onclick = () => {
+        document.querySelector("#destination").value = item.path;
+      };
+      row.append(select);
+      if (!item.isDefault) {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "destination-remove";
+        remove.textContent = "×";
+        remove.onclick = async () => {
+          await invoke("remove_download_directory", { path: item.path });
+          await refreshDestinationHistory();
+        };
+        row.append(remove);
+      }
+      root.append(row);
+    }
+  } catch (error) {
+    console.error(error);
+  }
+}
 document.querySelectorAll("[data-pick-for]").forEach((button) => {
   button.onclick = async () => {
     const input = document.querySelector(`#${button.dataset.pickFor}`);
@@ -431,6 +481,7 @@ document.querySelectorAll("#add,#empty-add").forEach(
           document.querySelector("#destination").value = path;
         })
         .catch(console.error);
+      refreshDestinationHistory();
       dialog.showModal();
     }),
 );
@@ -456,6 +507,14 @@ document.querySelector("#select-all").onchange = (event) => {
   renderDownloads();
 };
 document.querySelector("#manage-list").onclick = () => clearDialog.showModal();
+document.querySelector("#clear-destinations").onclick = async () => {
+  try {
+    await invoke("clear_download_directories");
+    await refreshDestinationHistory();
+  } catch (error) {
+    console.error(error);
+  }
+};
 document
   .querySelectorAll("[data-clear-cancel]")
   .forEach((button) => (button.onclick = () => clearDialog.close()));

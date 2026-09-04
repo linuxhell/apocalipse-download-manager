@@ -30,6 +30,8 @@ struct UserSettings {
     connections_per_download: usize,
     #[serde(default = "default_bridge_token")]
     bridge_token: String,
+    #[serde(default)]
+    recent_download_directories: Vec<PathBuf>,
 }
 
 const fn default_max_active() -> usize { 3 }
@@ -44,6 +46,7 @@ impl Default for UserSettings {
             max_active_downloads: default_max_active(),
             connections_per_download: default_connections(),
             bridge_token: default_bridge_token(),
+            recent_download_directories: Vec::new(),
         }
     }
 }
@@ -87,6 +90,14 @@ struct BridgeDownload {
     file_name: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DestinationChoice {
+    path: String,
+    is_default: bool,
+    available: bool,
+}
+
 const BRIDGE_PORT: u16 = 17654;
 
 #[tauri::command]
@@ -128,6 +139,14 @@ fn save_settings(state: &AppState, settings: &UserSettings) -> Result<(), String
     }
     let data = serde_json::to_vec_pretty(settings).map_err(|error| error.to_string())?;
     fs::write(&state.settings_path, data).map_err(|error| error.to_string())
+}
+
+fn remember_download_directory(state: &AppState, directory: &Path) -> Result<(), String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.recent_download_directories.retain(|path| path != directory);
+    settings.recent_download_directories.insert(0, directory.to_path_buf());
+    settings.recent_download_directories.truncate(20);
+    save_settings(state, &settings)
 }
 
 fn configured_download_directory(app: &tauri::AppHandle, state: &AppState) -> Result<PathBuf, String> {
@@ -327,6 +346,36 @@ fn set_default_download_directory(state: State<'_, AppState>, path: String) -> R
 }
 
 #[tauri::command]
+fn list_download_directories(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<DestinationChoice>, String> {
+    let default = configured_download_directory(&app, &state)?;
+    let recent = state.settings.lock().map_err(|error| error.to_string())?.recent_download_directories.clone();
+    let mut paths = vec![default.clone()];
+    for path in recent {
+        if !paths.contains(&path) { paths.push(path); }
+    }
+    Ok(paths.into_iter().map(|path| DestinationChoice {
+        is_default: path == default,
+        available: path.is_dir(),
+        path: path.to_string_lossy().into_owned(),
+    }).collect())
+}
+
+#[tauri::command]
+fn remove_download_directory(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let target = PathBuf::from(path);
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.recent_download_directories.retain(|item| item != &target);
+    save_settings(&state, &settings)
+}
+
+#[tauri::command]
+fn clear_download_directories(state: State<'_, AppState>) -> Result<(), String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.recent_download_directories.clear();
+    save_settings(&state, &settings)
+}
+
+#[tauri::command]
 fn pick_directory(initial_directory: Option<String>) -> Option<String> {
     let mut dialog = rfd::FileDialog::new();
     if let Some(path) = initial_directory.filter(|path| !path.trim().is_empty()) {
@@ -356,6 +405,7 @@ fn enqueue_download(
         None => configured_download_directory(&app, &state)?,
     };
     let file_name = validate_file_name(&file_name.unwrap_or_else(|| suggested_name(&url)))?;
+    remember_download_directory(&state, &download_dir)?;
     let task = DownloadTask::new(&url, unique_destination(&download_dir, &file_name));
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     queue.push(task.clone());
@@ -541,6 +591,7 @@ fn enqueue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Resul
     let directory = configured_download_directory(app, &state)?;
     let proposed = request.file_name.filter(|name| !name.trim().is_empty()).unwrap_or_else(|| suggested_name(&request.url));
     let file_name = validate_file_name(&suggested_name(&proposed))?;
+    remember_download_directory(&state, &directory)?;
     let task = DownloadTask::new(&request.url, unique_destination(&directory, &file_name));
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     queue.push(task.clone());
@@ -801,7 +852,10 @@ fn main() {
             set_transfer_limits,
             get_bridge_pairing,
             regenerate_bridge_token,
-            copy_bridge_token
+            copy_bridge_token,
+            list_download_directories,
+            remove_download_directory,
+            clear_download_directories
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Apocalipse Download Manager");

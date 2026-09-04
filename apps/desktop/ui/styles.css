@@ -303,6 +303,8 @@ footer .bridge-waiting i {
 }
 dialog {
   width: min(560px, calc(100vw - 40px));
+  max-height: calc(100vh - 30px);
+  overflow-y: auto;
   border: 1px solid #27414c;
   border-radius: 14px;
   background: #0d151c;
@@ -436,6 +438,62 @@ dialog input:focus {
   background: #111d25;
   color: #bcd1d9;
   padding: 7px 13px;
+  cursor: pointer;
+}
+.destination-history {
+  margin-top: 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0a1117;
+}
+.destination-history > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--line);
+}
+.destination-history > div:first-child button {
+  border: 0;
+  background: transparent;
+  color: var(--cyan);
+  cursor: pointer;
+  font-size: 11px;
+}
+#destination-list {
+  max-height: 132px;
+  overflow-y: auto;
+}
+.destination-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  border-bottom: 1px solid #15232c;
+}
+.destination-row:last-child { border-bottom: 0; }
+.destination-row:has(.destination-select:only-child) { grid-template-columns: 1fr; }
+.destination-select {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #cce0e7;
+  padding: 9px 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.destination-select span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.destination-select small { color: var(--cyan); }
+.destination-row.unavailable .destination-select span { color: #667983; }
+.destination-remove {
+  border: 0;
+  border-left: 1px solid #15232c;
+  background: transparent;
+  color: #f28b8b;
   cursor: pointer;
 }
 footer .bridge-connected i {
