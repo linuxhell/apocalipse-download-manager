@@ -63,6 +63,8 @@
     document.querySelectorAll("video").forEach((element) => {
       add(element.currentSrc || element.src, "video", element);
       element.querySelectorAll("source").forEach((source) => add(source.src, "video", element));
+      const facebookUrl = facebookUrlFor(element);
+      if (facebookUrl) add(facebookUrl, "video", element);
     });
     if (/^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch") {
       const videoId = new URL(location.href).searchParams.get("v");
@@ -150,8 +152,27 @@
     const masters = urls.filter((url) => /(?:\/master\/|master\.m3u8)/i.test(url));
     return { candidates: urls, fallback: urls.at(-1) || masters.at(-1) || null };
   };
+  const facebookUrlFor = (element) => {
+    if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
+    const container = element.closest?.('[role="dialog"],article,[data-pagelet]') || element.parentElement;
+    const anchors = container?.querySelectorAll?.('a[href]') || [];
+    for (const anchor of anchors) {
+      const url = absolute(anchor.href);
+      if (!url) continue;
+      try {
+        const parsed = new URL(url);
+        if (/(?:^|\/)(?:reel|reels|watch|videos|share)(?:\/|$)/i.test(parsed.pathname)) return url;
+      } catch {}
+    }
+    if (/(?:^|\/)(?:reel|reels|watch|videos|share)(?:\/|$)/i.test(location.pathname)) return location.href;
+    return null;
+  };
   const downloadUrlFor = (element) => {
     if (element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch") return location.href;
+    if (element.tagName === "VIDEO") {
+      const facebookUrl = facebookUrlFor(element);
+      if (facebookUrl) return facebookUrl;
+    }
     const direct = absolute(element.currentSrc || element.src);
     if (direct && /^https?:/.test(direct)) return direct;
     if (element.tagName === "VIDEO") return hlsForPage().fallback;

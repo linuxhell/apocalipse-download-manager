@@ -26,7 +26,18 @@ pub fn classify_url(input: &str) -> Option<DownloadKind> {
         Some(DownloadKind::Torrent)
     } else if path.ends_with(".m3u8") {
         Some(DownloadKind::Hls)
-    } else if matches!(url.domain(), Some("youtube.com" | "www.youtube.com" | "youtu.be")) {
+    } else if matches!(
+        url.domain(),
+        Some(
+            "youtube.com"
+                | "www.youtube.com"
+                | "youtu.be"
+                | "facebook.com"
+                | "www.facebook.com"
+                | "m.facebook.com"
+                | "fb.watch"
+        )
+    ) {
         Some(DownloadKind::MediaPage)
     } else {
         Some(DownloadKind::Http)
@@ -42,6 +53,7 @@ mod tests {
         assert_eq!(classify_url("magnet:?xt=urn:btih:abc"), Some(DownloadKind::Magnet));
         assert_eq!(classify_url("https://cdn.test/live/master.m3u8?token=x"), Some(DownloadKind::Hls));
         assert_eq!(classify_url("https://youtu.be/abc"), Some(DownloadKind::MediaPage));
+        assert_eq!(classify_url("https://www.facebook.com/share/example/"), Some(DownloadKind::MediaPage));
         assert_eq!(classify_url("file:///tmp/a"), None);
         assert_eq!(classify_url("ed2k://|file|example.iso|42|abc|/"), Some(DownloadKind::Ed2k));
     }
