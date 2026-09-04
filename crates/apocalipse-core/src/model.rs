@@ -24,6 +24,8 @@ pub struct DownloadTask {
     pub state: DownloadState,
     pub received: u64,
     pub total: Option<u64>,
+    #[serde(default)]
+    pub format_selection: Option<String>,
 }
 
 impl DownloadTask {
@@ -35,7 +37,7 @@ impl DownloadTask {
             state: DownloadState::Queued,
             received: 0,
             total: None,
+            format_selection: None,
         }
     }
 }
-

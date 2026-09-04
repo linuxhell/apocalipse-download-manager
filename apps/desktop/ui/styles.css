@@ -534,6 +534,14 @@ footer .bridge-connected i {
   background: #0b2028;
   color: #96eafa;
 }
+
+.media-inspection { display: grid; grid-template-columns: 128px 1fr; gap: 14px; margin: 14px 0; padding: 12px; border: 1px solid #243844; border-radius: 12px; background: #0b151c; }
+.media-inspection img { width: 128px; height: 72px; object-fit: cover; border-radius: 8px; }
+.media-inspection > div { min-width: 0; display: grid; gap: 6px; }
+.media-inspection strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-inspection span { color: #8da3b1; font-size: 12px; }
+.media-inspection label { margin: 2px 0 0; }
+.media-inspection select { width: 100%; min-width: 0; padding: 10px; color: #eaf6fb; background: #081117; border: 1px solid #2a4655; border-radius: 8px; }
 .download-list {
   padding: 8px 14px;
 }

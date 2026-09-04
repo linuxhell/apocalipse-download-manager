@@ -59,6 +59,20 @@ struct PlanResponse {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaFormat { selection: String, label: String }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaInspection {
+    title: String,
+    thumbnail: Option<String>,
+    duration: Option<f64>,
+    suggested_file_name: String,
+    formats: Vec<MediaFormat>,
+}
+
+#[derive(Serialize)]
 struct AutostartStatus {
     enabled: bool,
 }
@@ -115,6 +129,34 @@ fn inspect_url(url: String) -> Result<PlanResponse, String> {
         fallbacks: plan.fallbacks.iter().map(|engine| format!("{engine:?}")).collect(),
         reason: plan.reason.to_owned(),
     })
+}
+
+#[tauri::command]
+async fn inspect_media_formats(url: String) -> Result<MediaInspection, String> {
+    let output = tokio::process::Command::new("yt-dlp")
+        .args(["--dump-single-json", "--no-playlist", "--skip-download", "--no-warnings"])
+        .arg(&url).output().await.map_err(|error| format!("yt_dlp_unavailable: {error}"))?;
+    if !output.status.success() { return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned()); }
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
+    let title = value.get("title").and_then(|item| item.as_str()).unwrap_or("media").to_owned();
+    let thumbnail = value.get("thumbnail").and_then(|item| item.as_str()).map(str::to_owned);
+    let duration = value.get("duration").and_then(|item| item.as_f64());
+    let mut formats = value.get("formats").and_then(|item| item.as_array()).into_iter().flatten().filter_map(|format| {
+        let id = format.get("format_id")?.as_str()?;
+        let vcodec = format.get("vcodec").and_then(|item| item.as_str()).unwrap_or("none");
+        let acodec = format.get("acodec").and_then(|item| item.as_str()).unwrap_or("none");
+        if vcodec == "none" { return None; }
+        let height = format.get("height").and_then(|item| item.as_u64()).map(|value| format!("{value}p")).unwrap_or_else(|| "video".into());
+        let fps = format.get("fps").and_then(|item| item.as_f64()).map(|value| format!(" · {} fps", value.round())).unwrap_or_default();
+        let extension = format.get("ext").and_then(|item| item.as_str()).unwrap_or("");
+        let size = format.get("filesize").or_else(|| format.get("filesize_approx")).and_then(|item| item.as_u64()).map(|value| format!(" · {:.1} MB", value as f64 / 1_048_576.0)).unwrap_or_default();
+        let selection = if acodec == "none" { format!("{id}+bestaudio/best") } else { id.to_owned() };
+        Some(MediaFormat { selection, label: format!("{height}{fps} · {extension}{size}") })
+    }).collect::<Vec<_>>();
+    formats.reverse();
+    formats.truncate(120);
+    let safe_title = title.chars().map(|character| if "<>:\"/\\|?*".contains(character) { '_' } else { character }).collect::<String>();
+    Ok(MediaInspection { title, thumbnail, duration, suggested_file_name: format!("{safe_title}.mp4"), formats })
 }
 
 fn load_queue(path: &Path) -> Vec<DownloadTask> {
@@ -241,16 +283,36 @@ async fn run_external_download(
     let mut command = match kind {
         DownloadKind::MediaPage => {
             let mut command = tokio::process::Command::new("yt-dlp");
-            command.args(["--no-playlist", "-f", "bestvideo+bestaudio/best", "--merge-output-format", "mp4", "-P"])
-                .arg(directory).arg("-o").arg(file_name).arg(&task.source);
+            let selection = task.format_selection.as_deref().unwrap_or("bestvideo+bestaudio/best");
+            command.arg("--no-playlist");
+            if let Some(audio_format) = selection.strip_prefix("audio:") {
+                command.args(["-f", "bestaudio/best", "-x", "--audio-format", audio_format]);
+            } else {
+                command.args(["-f", selection, "--merge-output-format", "mp4"]);
+            }
+            command.arg("-P").arg(directory).arg("-o").arg(file_name).arg(&task.source);
             command
         }
         DownloadKind::Hls => {
+            if let Some(audio_format) = task.format_selection.as_deref().and_then(|value| value.strip_prefix("audio:")) {
+                let mut command = tokio::process::Command::new("ffmpeg");
+                command.args(["-y", "-i"]).arg(&task.source).arg("-vn");
+                match audio_format {
+                    "mp3" => { command.args(["-c:a", "libmp3lame", "-q:a", "2"]); }
+                    "wav" => { command.args(["-c:a", "pcm_s16le"]); }
+                    "flac" => { command.args(["-c:a", "flac"]); }
+                    "opus" => { command.args(["-c:a", "libopus", "-b:a", "192k"]); }
+                    _ => { command.args(["-c:a", "aac", "-b:a", "256k"]); }
+                }
+                command.arg(&task.destination);
+                command
+            } else {
             let executable = if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" };
             let mut command = tokio::process::Command::new(executable);
             let stem = task.destination.file_stem().and_then(|value| value.to_str()).unwrap_or("download");
             command.arg(&task.source).arg("--save-dir").arg(directory).args(["--save-name", stem, "--auto-select"]);
             command
+            }
         }
         DownloadKind::Torrent | DownloadKind::Magnet => {
             let mut command = tokio::process::Command::new("aria2c");
@@ -391,6 +453,7 @@ fn enqueue_download(
     url: String,
     destination_directory: Option<String>,
     file_name: Option<String>,
+    format_selection: Option<String>,
 ) -> Result<DownloadTask, String> {
     inspect_url(url.clone())?;
     let kind = classify_url(&url).ok_or_else(|| "unsupported_url".to_owned())?;
@@ -406,7 +469,8 @@ fn enqueue_download(
     };
     let file_name = validate_file_name(&file_name.unwrap_or_else(|| suggested_name(&url)))?;
     remember_download_directory(&state, &download_dir)?;
-    let task = DownloadTask::new(&url, unique_destination(&download_dir, &file_name));
+    let mut task = DownloadTask::new(&url, unique_destination(&download_dir, &file_name));
+    task.format_selection = format_selection.filter(|value| !value.trim().is_empty());
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     queue.push(task.clone());
     save_queue(&state, &queue)?;
@@ -833,6 +897,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             inspect_url,
+            inspect_media_formats,
             list_downloads,
             enqueue_download,
             default_download_directory,

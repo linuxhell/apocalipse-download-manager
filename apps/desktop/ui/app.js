@@ -63,6 +63,11 @@ const catalogs = {
     clearLocations: "Clear download locations",
     defaultLocation: "Default",
     unavailableLocation: "Unavailable",
+    qualityFormat: "Quality and format",
+    bestQuality: "Best video + best audio (recommended)",
+    audioOnly: "Audio only",
+    duration: "Duration",
+    mediaUnavailable: "Media details are unavailable; the default format can still be used.",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -129,6 +134,11 @@ const catalogs = {
     clearLocations: "Limpar caminhos de download",
     defaultLocation: "Padrão",
     unavailableLocation: "Indisponível",
+    qualityFormat: "Qualidade e formato",
+    bestQuality: "Melhor vídeo + melhor áudio (recomendado)",
+    audioOnly: "Somente áudio",
+    duration: "Duração",
+    mediaUnavailable: "Os detalhes da mídia não estão disponíveis; ainda é possível usar o formato padrão.",
   },
   "zh-CN": {
     downloads: "下载",
@@ -194,6 +204,11 @@ const catalogs = {
     clearLocations: "清除下载路径",
     defaultLocation: "默认",
     unavailableLocation: "不可用",
+    qualityFormat: "质量和格式",
+    bestQuality: "最佳视频 + 最佳音频（推荐）",
+    audioOnly: "仅音频",
+    duration: "时长",
+    mediaUnavailable: "媒体详情不可用；仍可使用默认格式。",
   },
 };
 
@@ -608,6 +623,52 @@ document.querySelector("#url").oninput = () => {
   document.querySelector("#analysis").hidden = true;
   document.querySelector("#enqueue").hidden = true;
   document.querySelector("#analyze").hidden = false;
+  document.querySelector("#media-inspection").hidden = true;
+};
+
+function secondsLabel(value) {
+  if (!Number.isFinite(value)) return "";
+  const hours = Math.floor(value / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  const seconds = Math.floor(value % 60);
+  return [hours, minutes, seconds].filter((_, index) => index || hours).map((item) => String(item).padStart(2, "0")).join(":");
+}
+
+function option(select, value, label) {
+  select.append(Object.assign(document.createElement("option"), { value, textContent: label }));
+}
+
+async function showMediaInspection(url) {
+  const panel = document.querySelector("#media-inspection");
+  const select = document.querySelector("#media-format");
+  select.replaceChildren();
+  option(select, "bestvideo+bestaudio/best", t("bestQuality"));
+  for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
+    option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
+  try {
+    const media = await invoke("inspect_media_formats", { url });
+    document.querySelector("#media-title").textContent = media.title;
+    document.querySelector("#media-duration").textContent = media.duration ? `${t("duration")}: ${secondsLabel(media.duration)}` : "";
+    const thumbnail = document.querySelector("#media-thumbnail");
+    thumbnail.hidden = !media.thumbnail;
+    if (media.thumbnail) thumbnail.src = media.thumbnail;
+    for (const format of media.formats) option(select, format.selection, format.label);
+    document.querySelector("#file-name").value = media.suggestedFileName;
+    panel.hidden = false;
+  } catch (error) {
+    console.warn(error);
+    document.querySelector("#media-title").textContent = t("mediaUnavailable");
+    document.querySelector("#media-duration").textContent = "";
+    document.querySelector("#media-thumbnail").hidden = true;
+    panel.hidden = false;
+  }
+}
+document.querySelector("#media-format").onchange = (event) => {
+  const audio = event.target.value.match(/^audio:(.+)$/);
+  if (!audio) return;
+  const input = document.querySelector("#file-name");
+  const base = input.value.replace(/\.[^.]+$/, "");
+  input.value = `${base}.${audio[1]}`;
 };
 document.querySelector("#analyze").onclick = async () => {
   const url = document.querySelector("#url");
@@ -622,6 +683,19 @@ document.querySelector("#analyze").onclick = async () => {
       { url: url.value },
     );
     box.textContent = `${plan.primary} · ${plan.reason}`;
+    if (plan.primary === "YtDlp") await showMediaInspection(url.value);
+    else if (plan.primary === "NM3u8DlRe") {
+      const panel = document.querySelector("#media-inspection");
+      const select = document.querySelector("#media-format");
+      select.replaceChildren();
+      option(select, "", t("bestQuality"));
+      for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
+        option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
+      document.querySelector("#media-title").textContent = "HLS";
+      document.querySelector("#media-duration").textContent = "";
+      document.querySelector("#media-thumbnail").hidden = true;
+      panel.hidden = false;
+    }
     document.querySelector("#analyze").hidden = true;
     document.querySelector("#enqueue").hidden = false;
   } catch (error) {
@@ -638,6 +712,7 @@ document.querySelector("#enqueue").onclick = async () => {
         url: url.value,
         destinationDirectory: document.querySelector("#destination").value,
         fileName: document.querySelector("#file-name").value,
+        formatSelection: document.querySelector("#media-inspection").hidden ? null : document.querySelector("#media-format").value,
       }),
     );
     renderDownloads();
