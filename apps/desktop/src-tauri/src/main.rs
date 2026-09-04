@@ -554,7 +554,7 @@ fn parse_external_progress(text: &str) -> Option<f64> {
             .take_while(|(_, character)| character.is_ascii_digit() || *character == '.')
             .last().map(|(index, _)| index)?;
         prefix[start..].parse::<f64>().ok()
-    }).filter(|value| (0.0..=100.0).contains(value)).next_back()
+    }).rfind(|value| (0.0..=100.0).contains(value))
 }
 
 fn external_error_detail(output: &str, exit_code: Option<i32>) -> String {
