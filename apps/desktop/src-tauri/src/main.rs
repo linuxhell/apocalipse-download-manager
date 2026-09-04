@@ -134,6 +134,13 @@ struct BridgeDownload {
     duration: Option<f64>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadContext {
+    referer: Option<String>,
+    known_duration: Option<f64>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DestinationChoice {
@@ -600,8 +607,7 @@ fn enqueue_download(
     destination_directory: Option<String>,
     file_name: Option<String>,
     format_selection: Option<String>,
-    referer: Option<String>,
-    known_duration: Option<f64>,
+    context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
     inspect_url(url.clone())?;
     let kind = classify_url(&url).ok_or_else(|| "unsupported_url".to_owned())?;
@@ -620,8 +626,14 @@ fn enqueue_download(
     remember_download_directory(&state, &download_dir)?;
     let mut task = DownloadTask::new(&url, unique_destination(&download_dir, &file_name));
     task.format_selection = format_selection.filter(|value| !value.trim().is_empty());
-    task.referer = referer.filter(|url| url.starts_with("https://") || url.starts_with("http://"));
-    task.known_duration = known_duration.filter(|duration| duration.is_finite() && *duration > 0.0);
+    if let Some(context) = context {
+        task.referer = context
+            .referer
+            .filter(|url| url.starts_with("https://") || url.starts_with("http://"));
+        task.known_duration = context
+            .known_duration
+            .filter(|duration| duration.is_finite() && *duration > 0.0);
+    }
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     queue.push(task.clone());
     save_queue(&state, &queue)?;

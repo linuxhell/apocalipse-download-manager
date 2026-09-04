@@ -773,8 +773,10 @@ document.querySelector("#enqueue").onclick = async () => {
         destinationDirectory: document.querySelector("#destination").value,
         fileName: document.querySelector("#file-name").value,
         formatSelection: document.querySelector("#media-inspection").hidden ? null : document.querySelector("#media-format").value,
-        referer: pendingReferer,
-        knownDuration: pendingDuration,
+        context: {
+          referer: pendingReferer,
+          knownDuration: pendingDuration,
+        },
       }),
     );
     renderDownloads();
