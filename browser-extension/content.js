@@ -113,17 +113,31 @@
   };
   const facebookUrlFromMenu = async (element) => {
     const videoRect = element.getBoundingClientRect();
-    let container = element.parentElement;
-    let buttons = [];
-    for (let depth = 0; container && depth < 16; depth += 1, container = container.parentElement) {
-      buttons = [...(container.querySelectorAll?.('button,[role="button"]') || [])];
-      if (buttons.some((button) => /(?:ações|acoes|opções|opcoes|actions|options|more|menu|更多|更多选项)/i.test(
-        `${button.getAttribute("aria-label") || ""} ${button.title || ""} ${button.textContent || ""}`))) break;
+    const post = element.closest?.('[role="article"],article') || element.parentElement;
+    let container = post;
+    for (let depth = 0; container?.parentElement && depth < 6; depth += 1) {
+      const rect = container.getBoundingClientRect();
+      if (rect.top <= videoRect.top - 20 && rect.right >= videoRect.right - 20) break;
+      container = container.parentElement;
     }
-    let menuButton = buttons.find((button) => {
+    const buttons = [...(container?.querySelectorAll?.('button,[role="button"]') || [])];
+    const labeled = buttons.filter((button) => {
       const label = `${button.getAttribute("aria-label") || ""} ${button.title || ""} ${button.textContent || ""}`.trim();
       return /(?:ações|acoes|opções|opcoes|actions|options|more|menu|更多|更多选项)/i.test(label) || /^\s*(?:\.\.\.|…|⋯)\s*$/.test(label);
     });
+    const candidates = labeled.length ? labeled : buttons;
+    let menuButton = candidates.filter((button) => {
+      const rect = button.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && rect.top < videoRect.top + 80;
+    }).sort((left, right) => {
+      const score = (button) => {
+        const rect = button.getBoundingClientRect();
+        const label = `${button.getAttribute("aria-label") || ""} ${button.title || ""} ${button.textContent || ""}`;
+        const postMenuBonus = /(?:publicação|publicacao|anúncio|anuncio|\bpost\b|\bad\b)/i.test(label) ? -1000 : 0;
+        return postMenuBonus + Math.abs(rect.right - videoRect.right) + Math.abs(rect.bottom - videoRect.top);
+      };
+      return score(left) - score(right);
+    })[0];
     if (!menuButton) {
       menuButton = buttons.filter((button) => {
         const rect = button.getBoundingClientRect();
@@ -159,6 +173,11 @@
     const immediate = facebookUrlFor(element);
     if (immediate) return immediate;
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
+    const postText = element.closest?.('[role="article"],article')?.textContent || "";
+    if (/(?:patrocinado|sponsored)/i.test(postText)) {
+      const menuUrl = await facebookUrlFromMenu(element);
+      if (menuUrl) return menuUrl;
+    }
     const rect = element.getBoundingClientRect();
     const target = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
       || element.closest?.('a[href],[role="link"]') || element;
