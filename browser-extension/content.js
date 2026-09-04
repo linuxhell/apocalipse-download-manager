@@ -37,6 +37,36 @@
     const value = (navigator.language || "en").toLowerCase();
     return value.startsWith("zh") ? "下载" : value.startsWith("pt") ? "Baixar" : "Download";
   };
+  const downloadableLink = (anchor) => {
+    const url = absolute(anchor?.href);
+    if (!url || !/^https?:/i.test(url)) return null;
+    if (anchor.hasAttribute("download")) return url;
+    return /\.(?:7z|apk|bin|bz2|cab|deb|dmg|exe|gz|img|iso|msi|msix|pkg|rar|rpm|tar|tbz2|tgz|txz|xz|zip)(?:$|[?#])/i.test(url) ? url : null;
+  };
+  const fileNameForUrl = (url) => {
+    const value = new URL(url).pathname.split("/").pop() || "download";
+    try { return decodeURIComponent(value); } catch { return value; }
+  };
+  document.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const anchor = event.target.closest?.("a[href]");
+    const url = downloadableLink(anchor);
+    if (!url) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    chrome.runtime.sendMessage({
+      type: "APOCALIPSE_DOWNLOAD",
+      item: {
+        url,
+        requestUrls: [url],
+        userAgent: navigator.userAgent,
+        kind: "file",
+        title: fileNameForUrl(url),
+      },
+    }, (result) => {
+      if (result?.target !== "apocalipse" || chrome.runtime.lastError) location.assign(url);
+    });
+  }, true);
   const hlsForPage = () => {
     const urls = [...new Set(performance.getEntriesByType("resource").map((entry) => entry.name)
       .filter((url) => /\.m3u8(?:$|[?#])/i.test(url)))];
