@@ -7,7 +7,7 @@
 <p align="center"><strong>A powerful, intelligent and open-source download manager for Windows, Linux and macOS.</strong></p>
 
 > [!IMPORTANT]
-> Apocalipse is being built from scratch. The repository currently contains the tested core foundation, first desktop interface and browser-extension prototype; it is not yet a production release.
+> DE UMA SEMENTE NASCE ALGO GRANDIOSO ! 一颗种子，孕育出非凡之物！FROM A SEED, SOMETHING MAGNIFICENT IS BORN!
 
 ## Vision
 
