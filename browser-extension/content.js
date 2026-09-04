@@ -167,9 +167,17 @@
         if (!currentUrl) return;
         chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls: resolved?.requestUrls || [], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: document.title, thumbnail: thumbnailFor(element, "video") } });
       });
+      let positionTimer = null;
       const position = () => {
-        if (!element.isConnected) { button.remove(); return; }
-        const rect = element.getBoundingClientRect();
+        if (!element.isConnected) {
+          button.remove();
+          if (positionTimer) clearInterval(positionTimer);
+          return;
+        }
+        const anchor = isYouTubeVideo
+          ? document.querySelector("#movie_player") || element.closest("ytd-player") || element
+          : element;
+        const rect = anchor.getBoundingClientRect();
         button.style.left = `${Math.max(6, rect.left + scrollX + 8)}px`;
         const top = isYouTubeVideo
           ? rect.top + scrollY - button.offsetHeight - 8
@@ -181,6 +189,7 @@
       position();
       addEventListener("scroll", position, { passive: true });
       addEventListener("resize", position, { passive: true });
+      if (isYouTubeVideo) positionTimer = setInterval(position, 1000);
     });
   };
   const scheduleOverlays = () => {
