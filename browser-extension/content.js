@@ -83,7 +83,7 @@
         const resolved = await resolveDownloadUrl(element);
         const currentUrl = resolved?.url || resolved || (isYouTubeVideo ? location.href : url);
         if (!currentUrl) return;
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, kind: element.tagName.toLowerCase(), title: document.title, thumbnail: thumbnailFor(element, "video") } });
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls: resolved?.requestUrls || [], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: document.title, thumbnail: thumbnailFor(element, "video") } });
       });
       const position = () => {
         if (!element.isConnected) { button.remove(); return; }

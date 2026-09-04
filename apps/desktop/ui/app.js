@@ -50,6 +50,8 @@ const catalogs = {
     browse: "Browse…",
     captureClipboard: "Capture clipboard links",
     captureClipboardHint: "Open recognized HTTP, HLS, magnet and media links automatically",
+    userAgent: "Custom User-Agent",
+    userAgentHint: "Automatic — use the browser identity",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
     defaults: "Default",
@@ -129,6 +131,8 @@ const catalogs = {
     browse: "Procurar…",
     captureClipboard: "Capturar links da área de transferência",
     captureClipboardHint: "Abrir automaticamente links HTTP, HLS, magnet e de mídia reconhecidos",
+    userAgent: "User-Agent personalizado",
+    userAgentHint: "Automático — usar a identidade do navegador",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
     defaults: "Padrão",
@@ -207,6 +211,8 @@ const catalogs = {
     browse: "浏览…",
     captureClipboard: "捕获剪贴板链接",
     captureClipboardHint: "自动打开识别出的 HTTP、HLS、磁力和媒体链接",
+    userAgent: "自定义 User-Agent",
+    userAgentHint: "自动 — 使用浏览器身份",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
     defaults: "默认",
@@ -239,6 +245,8 @@ const catalogs = {
 let locale = localStorage.getItem("apocalipse.language") || "en";
 let pendingReferer = null;
 let pendingDuration = null;
+let pendingCookieHeader = null;
+let pendingUserAgent = null;
 let downloads = [];
 let activeFilter = "all";
 let overallSpeed = 0;
@@ -451,6 +459,9 @@ function translate() {
   document
     .querySelectorAll("[data-i18n]")
     .forEach((element) => (element.textContent = t(element.dataset.i18n)));
+  document
+    .querySelectorAll("[data-i18n-placeholder]")
+    .forEach((element) => (element.placeholder = t(element.dataset.i18nPlaceholder)));
   document.querySelector("#language").value = locale;
   renderDownloads();
 }
@@ -549,6 +560,8 @@ document.querySelectorAll("#add,#empty-add").forEach(
       document.querySelector("#analyze").hidden = false;
       pendingReferer = null;
       pendingDuration = null;
+      pendingCookieHeader = null;
+      pendingUserAgent = null;
       invoke("default_download_directory")
         .then((path) => {
           document.querySelector("#destination").value = path;
@@ -612,12 +625,13 @@ document.querySelectorAll("[data-clear-mode]").forEach((button) => {
 });
 document.querySelector('[data-page="settings"]').onclick = async () => {
   try {
-    const [autostart, directory, clipboard, limits, pairing] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
       invoke("get_transfer_limits"),
       invoke("get_bridge_pairing"),
+      invoke("get_user_agent"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
     document.querySelector("#default-directory").value = directory;
@@ -626,6 +640,7 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
     document.querySelector("#connections").value = limits.connectionsPerDownload;
     updateLimitLabels();
     document.querySelector("#pairing-token").value = pairing.token;
+    document.querySelector("#user-agent").value = userAgent.userAgent;
     await refreshToolStatuses();
     settingsDialog.showModal();
   } catch (error) {
@@ -651,6 +666,9 @@ document.querySelector("#save-settings").onclick = async () => {
     await invoke("set_transfer_limits", {
       maxActiveDownloads: Number(document.querySelector("#max-tasks").value),
       connectionsPerDownload: Number(document.querySelector("#connections").value),
+    });
+    await invoke("set_user_agent", {
+      userAgent: document.querySelector("#user-agent").value,
     });
     await invoke("set_tool_paths", {
       ffmpeg: document.querySelector("#tool-ffmpeg").value,
@@ -794,6 +812,8 @@ document.querySelector("#enqueue").onclick = async () => {
         context: {
           referer: pendingReferer,
           knownDuration: pendingDuration,
+          cookieHeader: pendingCookieHeader,
+          userAgent: pendingUserAgent,
         },
       }),
     );
@@ -817,6 +837,10 @@ setInterval(async () => {
     const link = await invoke("read_clipboard_link");
     if (!link || link === lastClipboardLink) return;
     lastClipboardLink = link;
+    pendingReferer = null;
+    pendingDuration = null;
+    pendingCookieHeader = null;
+    pendingUserAgent = null;
     const url = document.querySelector("#url");
     url.value = link;
     document.querySelector("#analysis").hidden = true;
@@ -835,6 +859,8 @@ setInterval(async () => {
     if (!request) return;
     pendingReferer = request.pageUrl || null;
     pendingDuration = Number.isFinite(request.duration) ? request.duration : null;
+    pendingCookieHeader = request.cookieHeader || null;
+    pendingUserAgent = request.userAgent || null;
     document.querySelector("#url").value = request.url;
     document.querySelector("#file-name").value = request.fileName || "";
     document.querySelector("#analysis").hidden = true;

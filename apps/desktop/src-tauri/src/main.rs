@@ -18,6 +18,7 @@ struct AppState {
     settings_path: PathBuf,
     bridge_last_seen: Mutex<Option<Instant>>,
     bridge_pending: Mutex<Vec<BridgeDownload>>,
+    request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -41,6 +42,8 @@ struct UserSettings {
     n_m3u8dl_re_path: Option<PathBuf>,
     #[serde(default)]
     aria2_path: Option<PathBuf>,
+    #[serde(default)]
+    user_agent: Option<String>,
 }
 
 const fn default_max_active() -> usize { 3 }
@@ -60,6 +63,7 @@ impl Default for UserSettings {
             yt_dlp_path: None,
             n_m3u8dl_re_path: None,
             aria2_path: None,
+            user_agent: None,
         }
     }
 }
@@ -125,6 +129,10 @@ struct TransferLimits {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct UserAgentSetting { user_agent: String }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct BridgePairing {
     token: String,
     port: u16,
@@ -138,6 +146,8 @@ struct BridgeDownload {
     file_name: Option<String>,
     page_url: Option<String>,
     duration: Option<f64>,
+    cookie_header: Option<String>,
+    user_agent: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -145,6 +155,14 @@ struct BridgeDownload {
 struct DownloadContext {
     referer: Option<String>,
     known_duration: Option<f64>,
+    cookie_header: Option<String>,
+    user_agent: Option<String>,
+}
+
+#[derive(Clone)]
+struct RequestIdentity {
+    cookie_header: Option<String>,
+    user_agent: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -331,6 +349,13 @@ async fn run_external_download(
         configured_tool(&settings.aria2_path, if cfg!(windows) { "aria2c.exe" } else { "aria2c" }),
         settings.connections_per_download.clamp(1, 32),
     )).unwrap_or_else(|_| ("ffmpeg".into(), "yt-dlp".into(), "N_m3u8DL-RE".into(), "aria2c".into(), 8));
+    let identity = app.state::<AppState>().request_identities.lock().ok()
+        .and_then(|identities| identities.get(&task.id).cloned());
+    let configured_user_agent = app.state::<AppState>().settings.lock().ok()
+        .and_then(|settings| settings.user_agent.clone());
+    let user_agent = configured_user_agent.as_deref()
+        .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_deref()))
+        .unwrap_or("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36");
     let mut command = match kind {
         DownloadKind::MediaPage => {
             let mut command = tokio::process::Command::new(&tools.1);
@@ -374,7 +399,10 @@ async fn run_external_download(
                     command.arg("-H").arg(format!("Origin: {origin}"));
                 }
             }
-            command.arg("-H").arg("User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36");
+            command.arg("-H").arg(format!("User-Agent: {user_agent}"));
+            if let Some(cookie) = identity.as_ref().and_then(|value| value.cookie_header.as_deref()) {
+                command.arg("-H").arg(format!("Cookie: {cookie}"));
+            }
             if task.source.contains("hdsex.org") || task.referer.as_deref().is_some_and(|url| url.contains("hdsex.org")) {
                 command.arg("--append-url-params=true");
             }
@@ -710,6 +738,12 @@ fn enqueue_download(
         task.known_duration = context
             .known_duration
             .filter(|duration| duration.is_finite() && *duration > 0.0);
+        let cookie_header = context.cookie_header.filter(|value| value.len() <= 16_384 && !value.contains('\r') && !value.contains('\n'));
+        let user_agent = context.user_agent.filter(|value| value.len() <= 1024 && !value.contains('\r') && !value.contains('\n'));
+        if cookie_header.is_some() || user_agent.is_some() {
+            state.request_identities.lock().map_err(|error| error.to_string())?
+                .insert(task.id, RequestIdentity { cookie_header, user_agent });
+        }
     }
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     queue.push(task.clone());
@@ -824,6 +858,24 @@ fn set_transfer_limits(state: State<'_, AppState>, max_active_downloads: usize, 
         max_active_downloads: settings.max_active_downloads,
         connections_per_download: settings.connections_per_download,
     })
+}
+
+#[tauri::command]
+fn get_user_agent(state: State<'_, AppState>) -> Result<UserAgentSetting, String> {
+    let value = state.settings.lock().map_err(|error| error.to_string())?.user_agent.clone().unwrap_or_default();
+    Ok(UserAgentSetting { user_agent: value })
+}
+
+#[tauri::command]
+fn set_user_agent(state: State<'_, AppState>, user_agent: String) -> Result<UserAgentSetting, String> {
+    let value = user_agent.trim();
+    if value.len() > 1024 || value.contains('\r') || value.contains('\n') {
+        return Err("invalid_user_agent".to_owned());
+    }
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.user_agent = (!value.is_empty()).then(|| value.to_owned());
+    save_settings(&state, &settings)?;
+    Ok(UserAgentSetting { user_agent: settings.user_agent.clone().unwrap_or_default() })
 }
 
 #[tauri::command]
@@ -1073,6 +1125,9 @@ async fn remove_downloads(state: State<'_, AppState>, ids: Vec<DownloadId>, dele
     }
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     queue.retain(|task| !ids.contains(&task.id));
+    if let Ok(mut identities) = state.request_identities.lock() {
+        identities.retain(|id, _| !ids.contains(id));
+    }
     save_queue(&state, &queue)?;
     Ok(removed.len())
 }
@@ -1118,6 +1173,7 @@ fn main() {
                 settings_path,
                 bridge_last_seen: Mutex::new(None),
                 bridge_pending: Mutex::new(Vec::new()),
+                request_identities: Mutex::new(HashMap::new()),
             });
             let bridge_app = app.handle().clone();
             std::thread::Builder::new().name("apocalipse-extension-bridge".into())
@@ -1181,6 +1237,8 @@ fn main() {
             read_clipboard_link,
             get_transfer_limits,
             set_transfer_limits,
+            get_user_agent,
+            set_user_agent,
             get_bridge_pairing,
             regenerate_bridge_token,
             copy_bridge_token,
