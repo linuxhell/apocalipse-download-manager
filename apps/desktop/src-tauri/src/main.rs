@@ -795,6 +795,25 @@ fn optional_path(value: String) -> Option<PathBuf> {
     (!value.is_empty()).then(|| PathBuf::from(value))
 }
 
+fn uupdump_urls(url: &str) -> Option<(String, String)> {
+    let lower = url.to_ascii_lowercase();
+    let prefixes = [
+        "https://uupdump.net/", "https://www.uupdump.net/",
+        "http://uupdump.net/", "http://www.uupdump.net/",
+    ];
+    let prefix = prefixes.into_iter().find(|prefix| lower.starts_with(prefix))?;
+    let remainder = &url[prefix.len()..];
+    let (path, query) = remainder.split_once('?').unwrap_or((remainder, ""));
+    if !matches!(path.to_ascii_lowercase().as_str(), "download.php" | "get.php") {
+        return None;
+    }
+    let suffix = if query.is_empty() { String::new() } else { format!("?{query}") };
+    Some((
+        format!("https://uupdump.net/get.php{suffix}"),
+        format!("https://uupdump.net/download.php{suffix}"),
+    ))
+}
+
 #[tauri::command]
 fn set_tool_paths(state: State<'_, AppState>, ffmpeg: String, yt_dlp: String, n_m3u8dl_re: String, aria2: String) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
@@ -815,6 +834,8 @@ fn enqueue_download(
     format_selection: Option<String>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
+    let uupdump = uupdump_urls(&url);
+    let url = uupdump.as_ref().map(|item| item.0.clone()).unwrap_or(url);
     inspect_url(url.clone())?;
     let kind = classify_url(&url).ok_or_else(|| "unsupported_url".to_owned())?;
     let download_dir = match destination_directory.filter(|path| !path.trim().is_empty()) {
@@ -851,6 +872,20 @@ fn enqueue_download(
                 .insert(task.id, RequestIdentity { cookie_header, user_agent, request_method, request_body, request_content_type });
         }
     }
+    if let Some((_, page_url)) = uupdump {
+        task.referer = Some(page_url);
+        let mut identities = state.request_identities.lock().map_err(|error| error.to_string())?;
+        let identity = identities.entry(task.id).or_insert_with(|| RequestIdentity {
+            cookie_header: None,
+            user_agent: None,
+            request_method: "POST".to_owned(),
+            request_body: None,
+            request_content_type: None,
+        });
+        identity.request_method = "POST".to_owned();
+        identity.request_body = Some("autodl=2&updates=1".to_owned());
+        identity.request_content_type = Some("application/x-www-form-urlencoded".to_owned());
+    }
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     queue.push(task.clone());
     save_queue(&state, &queue)?;
@@ -873,6 +908,7 @@ fn start_download(app: &tauri::AppHandle, state: &AppState, task: DownloadTask, 
     drop(workers);
     if kind == DownloadKind::Http {
         let identity = state.request_identities.lock().ok().and_then(|items| items.get(&task.id).cloned());
+        let connections = if task.source.starts_with("https://uupdump.net/get.php") { 1 } else { limits.connections_per_download.clamp(1, 32) };
         let mut headers = Vec::new();
         if let Some(referer) = task.referer.as_ref() { headers.push(("Referer".to_owned(), referer.clone())); }
         if let Some(user_agent) = identity.as_ref().and_then(|item| item.user_agent.as_ref()) { headers.push(("User-Agent".to_owned(), user_agent.clone())); }
@@ -882,7 +918,7 @@ fn start_download(app: &tauri::AppHandle, state: &AppState, task: DownloadTask, 
             url: task.source,
             destination: task.destination,
             overwrite: false,
-            connections: limits.connections_per_download.clamp(1, 32),
+            connections,
             method: identity.as_ref().map(|item| item.request_method.clone()).unwrap_or_else(|| "GET".to_owned()),
             body: identity.and_then(|item| item.request_body.map(String::into_bytes)),
             headers,
@@ -1428,5 +1464,14 @@ mod tests {
     fn parses_bridge_content_length_case_insensitively() {
         assert_eq!(bridge_content_length("POST / HTTP/1.1\r\nContent-Length: 123"), 123);
         assert_eq!(bridge_content_length("GET / HTTP/1.1\r\ncontent-length: 0"), 0);
+    }
+
+    #[test]
+    fn normalizes_uupdump_download_to_required_post_endpoint() {
+        let (download, referer) = uupdump_urls(
+            "https://uupdump.net/download.php?id=abc&pack=pt-br&edition=professional",
+        ).expect("UUP dump URL");
+        assert_eq!(download, "https://uupdump.net/get.php?id=abc&pack=pt-br&edition=professional");
+        assert_eq!(referer, "https://uupdump.net/download.php?id=abc&pack=pt-br&edition=professional");
     }
 }

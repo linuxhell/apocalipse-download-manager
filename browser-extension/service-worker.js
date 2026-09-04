@@ -86,6 +86,23 @@ async function sourcePageUrl(sender) {
 
 const fileNameFromPath = (path) => String(path || "").split(/[\\/]/).pop() || null;
 
+function uupDumpPost(url) {
+  try {
+    const parsed = new URL(url);
+    if (!["uupdump.net", "www.uupdump.net"].includes(parsed.hostname.toLowerCase())) return null;
+    if (!["/download.php", "/get.php"].includes(parsed.pathname.toLowerCase())) return null;
+    return {
+      url: `https://uupdump.net/get.php${parsed.search}`,
+      pageUrl: `https://uupdump.net/download.php${parsed.search}`,
+      method: "POST",
+      body: "autodl=2&updates=1",
+      contentType: "application/x-www-form-urlencoded",
+    };
+  } catch {
+    return null;
+  }
+}
+
 const cancelBrowserDownload = (id) => new Promise((resolve, reject) => {
   chrome.downloads.cancel(id, () => {
     const error = chrome.runtime.lastError;
@@ -102,12 +119,13 @@ const eraseBrowserDownload = (id) => new Promise((resolve) => {
 });
 
 async function takeBrowserDownload(item, eraseFromHistory = false) {
-  const url = item.finalUrl || item.url;
+  let url = item.finalUrl || item.url;
   if (!item.id || !/^https?:/i.test(url)) return;
   const pageUrl = item.referrer || null;
   const pendingPost = lastFormSubmission && Date.now() - lastFormSubmission.capturedAt < 30000
     ? lastFormSubmission
     : null;
+  let formRequest = null;
   if (pendingPost) {
     let sameRequest = pageUrl === pendingPost.pageUrl;
     try {
@@ -115,7 +133,10 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     } catch {}
     if (sameRequest) {
       lastFormSubmission = null;
-      return;
+      const uupRequest = uupDumpPost(url);
+      if (!uupRequest) return;
+      url = uupRequest.url;
+      formRequest = uupRequest;
     }
   }
   if (Date.now() < bypassNextUntil) {
@@ -128,7 +149,7 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     await cancelBrowserDownload(item.id);
     cancelled = true;
     if (eraseFromHistory) await eraseBrowserDownload(item.id);
-    const formRequest = lastFormSubmission
+    formRequest ||= lastFormSubmission
       && Date.now() - lastFormSubmission.capturedAt < 30000
       && pageUrl === lastFormSubmission.pageUrl
       ? lastFormSubmission
