@@ -111,7 +111,18 @@
     }
     if ((event.ctrlKey || event.shiftKey || event.altKey) && !force) return;
     const anchor = event.target.closest?.("a[href]");
-    const url = force ? absolute(anchor?.href) : downloadableLink(anchor);
+    const anchorUrl = absolute(anchor?.href);
+    if (!force && anchorUrl && /(^|\.)filespayouts\.com$/i.test(location.hostname)
+      && anchor?.hasAttribute("download")) {
+      // Filespayouts marks its generator page as a download. A regular click
+      // therefore downloads the HTML; navigation (the same behavior as Open
+      // link in new tab) lets the page resolve the temporary CDN address.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      window.open(anchorUrl, "_blank", "noopener");
+      return;
+    }
+    const url = force ? anchorUrl : downloadableLink(anchor);
     if (!url) return;
     event.preventDefault();
     event.stopImmediatePropagation();

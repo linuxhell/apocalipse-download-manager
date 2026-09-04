@@ -7,6 +7,24 @@ let bypassNextUntil = 0;
 let forceHeld = false;
 let lastFormSubmission = null;
 let siteRules = [{ id: "uupdump", hosts: ["uupdump.net", "*.uupdump.net"], action: "uupdump_post", enabled: true }];
+const recentFileResponses = [];
+
+function responseHeader(headers, name) {
+  return (headers || []).find((header) => header.name?.toLowerCase() === name)?.value || "";
+}
+
+if (chrome.webRequest?.onResponseStarted) {
+  chrome.webRequest.onResponseStarted.addListener((details) => {
+    if (details.tabId < 0 || !/^https?:/i.test(details.url)) return;
+    const contentType = responseHeader(details.responseHeaders, "content-type").toLowerCase();
+    const disposition = responseHeader(details.responseHeaders, "content-disposition").toLowerCase();
+    const looksLikeFile = disposition.includes("attachment")
+      || (!contentType.includes("text/html") && /(?:application\/(?:octet-stream|x-rar|zip)|binary)/i.test(contentType));
+    if (!looksLikeFile) return;
+    recentFileResponses.push({ url: details.url, disposition, capturedAt: Date.now() });
+    recentFileResponses.splice(0, Math.max(0, recentFileResponses.length - 50));
+  }, { urls: ["http://*/*", "https://*/*"] }, ["responseHeaders"]);
+}
 
 async function bridgeRequest(path, options = {}, suppliedToken = null) {
   const { pairingToken = "" } = suppliedToken === null ? await chrome.storage.local.get({ pairingToken: "" }) : { pairingToken: suppliedToken };
@@ -133,6 +151,27 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
   let url = item.finalUrl || item.url;
   if (!item.id || !/^https?:/i.test(url)) return;
   const pageUrl = item.referrer || null;
+  const now = Date.now();
+  const expectedName = fileNameFromPath(item.filename)?.toLowerCase() || "";
+  const candidates = recentFileResponses.filter((response) => now - response.capturedAt < 10000);
+  const recentResponse = candidates.findLast((response) => {
+    let decodedUrl = response.url.toLowerCase();
+    try { decodedUrl = decodeURIComponent(decodedUrl); } catch {}
+    return expectedName && (response.disposition.includes(expectedName) || decodedUrl.includes(expectedName));
+  }) || (candidates.length === 1 ? candidates[0] : null);
+  if (recentResponse && Date.now() - recentResponse.capturedAt < 10000) {
+    let landingOrigin = "";
+    let resolvedOrigin = "";
+    try {
+      landingOrigin = new URL(url).origin;
+      resolvedOrigin = new URL(recentResponse.url).origin;
+    } catch {}
+    if (recentResponse.url !== url && resolvedOrigin && resolvedOrigin !== landingOrigin) {
+      url = recentResponse.url;
+    }
+    const index = recentFileResponses.indexOf(recentResponse);
+    if (index >= 0) recentFileResponses.splice(index, 1);
+  }
   const pendingPost = lastFormSubmission && Date.now() - lastFormSubmission.capturedAt < 30000
     ? lastFormSubmission
     : null;
