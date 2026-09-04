@@ -53,16 +53,28 @@
     if (element?.tagName === "IMG") return element.currentSrc || element.src || "";
     return element?.poster || document.querySelector('meta[property="og:image"]')?.content || element?.closest?.("figure,article")?.querySelector?.("img")?.currentSrc || "";
   };
-  const isFacebookMediaPath = (pathname) => /(?:^|\/)(?:reel|reels|watch|videos|share)(?:\/|$)/i.test(pathname);
+  const isFacebookMediaUrl = (url) => {
+    try {
+      const parsed = new URL(url, location.href);
+      if (!/(^|\.)facebook\.com$/i.test(parsed.hostname)) return false;
+      return /(?:^|\/)(?:reel|reels|watch|videos|posts|share)(?:\/|$)/i.test(parsed.pathname)
+        || /\/(?:permalink|story)\.php$/i.test(parsed.pathname)
+        || parsed.searchParams.has("fbid")
+        || parsed.searchParams.has("story_fbid");
+    } catch { return false; }
+  };
   const facebookUrlFor = (element) => {
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
-    if (isFacebookMediaPath(location.pathname)) return location.href;
+    if (isFacebookMediaUrl(location.href)) return location.href;
     const selector = [
       'a[href*="/reel/"]',
       'a[href*="/reels/"]',
       'a[href*="/videos/"]',
+      'a[href*="/posts/"]',
       'a[href*="/watch/"]',
       'a[href*="/watch?"]',
+      'a[href*="/permalink.php"]',
+      'a[href*="/story.php"]',
       'a[href*="/share/r/"]',
       'a[href*="/share/v/"]',
     ].join(",");
@@ -70,11 +82,23 @@
     for (let depth = 0; container && depth < 10; depth += 1, container = container.parentElement) {
       const anchor = container.querySelector?.(selector);
       const url = absolute(anchor?.href);
-      if (!url) continue;
-      try {
-        const parsed = new URL(url);
-        if (/(^|\.)facebook\.com$/i.test(parsed.hostname) && isFacebookMediaPath(parsed.pathname)) return url;
-      } catch {}
+      if (url && isFacebookMediaUrl(url)) return url;
+      const markup = container.innerHTML || "";
+      const path = markup.replaceAll("\\/", "/").match(/\/(?:reel|reels|videos|posts|share\/[rv])\/[A-Za-z0-9._-]+/i)?.[0];
+      if (path && isFacebookMediaUrl(path)) return absolute(path);
+    }
+    return null;
+  };
+  const revealFacebookUrl = async (element) => {
+    const immediate = facebookUrlFor(element);
+    if (immediate) return immediate;
+    if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
+    const target = element.closest?.('a[href],[role="link"]') || element.parentElement || element;
+    target.click?.();
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const revealed = facebookUrlFor(element);
+      if (revealed) return revealed;
     }
     return null;
   };
@@ -209,7 +233,8 @@
     document.querySelectorAll("video,audio").forEach((element) => {
       if (element.dataset.apocalipseButton) return;
       const isYouTubeVideo = element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch";
-      const url = downloadUrlFor(element);
+      const isFacebookVideo = element.tagName === "VIDEO" && /(^|\.)facebook\.com$/i.test(location.hostname);
+      const url = isFacebookVideo ? facebookUrlFor(element) || location.href : downloadUrlFor(element);
       if (!url || !/^https?:/.test(url)) return;
       element.dataset.apocalipseButton = "1";
       const button = document.createElement("button");
@@ -220,10 +245,16 @@
       button.addEventListener("click", async (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const resolved = await resolveDownloadUrl(element);
-        const currentUrl = resolved?.url || resolved || (isYouTubeVideo ? location.href : url);
-        if (!currentUrl) return;
         const originalText = button.textContent;
+        button.textContent = "…";
+        const resolved = isFacebookVideo ? await revealFacebookUrl(element) : await resolveDownloadUrl(element);
+        const currentUrl = resolved?.url || resolved || (isYouTubeVideo ? location.href : null);
+        if (!currentUrl || (isFacebookVideo && !isFacebookMediaUrl(currentUrl))) {
+          button.textContent = "⚠";
+          button.title = "Abra o vídeo ou use os três pontos e Copiar link";
+          setTimeout(() => { button.textContent = originalText; }, 2500);
+          return;
+        }
         chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls: resolved?.requestUrls || [], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
           const failed = chrome.runtime.lastError || result?.target !== "apocalipse";
           button.textContent = failed ? "⚠" : "✓";
