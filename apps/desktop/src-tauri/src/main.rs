@@ -600,7 +600,7 @@ fn read_clipboard_link(app: tauri::AppHandle, state: State<'_, AppState>) -> Res
 fn get_bridge_pairing(state: State<'_, AppState>) -> Result<BridgePairing, String> {
     let token = state.settings.lock().map_err(|error| error.to_string())?.bridge_token.clone();
     let connected = state.bridge_last_seen.lock().map_err(|error| error.to_string())?
-        .is_some_and(|seen| seen.elapsed() < Duration::from_secs(15));
+        .is_some_and(|seen| seen.elapsed() < Duration::from_secs(75));
     Ok(BridgePairing { token, port: BRIDGE_PORT, connected })
 }
 

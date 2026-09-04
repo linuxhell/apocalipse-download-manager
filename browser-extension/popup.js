@@ -79,6 +79,12 @@ chrome.storage.local.get({ pairingToken: "" }, ({ pairingToken }) => {
   document.querySelector("#pairing-token").value = pairingToken;
   chrome.runtime.sendMessage({ type: "APOCALIPSE_BRIDGE_STATUS" }, (status) => setBridgeStatus(Boolean(status?.connected)));
 });
+setInterval(() => {
+  chrome.runtime.sendMessage({ type: "APOCALIPSE_BRIDGE_STATUS" }, (status) => {
+    if (chrome.runtime.lastError) return;
+    setBridgeStatus(Boolean(status?.connected));
+  });
+}, 5000);
 document.querySelector("#connect").onclick = () => {
   const token = document.querySelector("#pairing-token").value;
   const button = document.querySelector("#connect");

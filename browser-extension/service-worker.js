@@ -1,4 +1,5 @@
 const BRIDGE = "http://127.0.0.1:17654";
+const HEARTBEAT_ALARM = "apocalipse-bridge-heartbeat";
 
 async function bridgeRequest(path, options = {}, suppliedToken = null) {
   const { pairingToken = "" } = suppliedToken === null ? await chrome.storage.local.get({ pairingToken: "" }) : { pairingToken: suppliedToken };
@@ -14,6 +15,17 @@ async function bridgeRequest(path, options = {}, suppliedToken = null) {
   if (!response.ok) throw new Error(`bridge_http_${response.status}`);
   return response.json();
 }
+
+function ensureHeartbeat() {
+  chrome.alarms.create(HEARTBEAT_ALARM, { delayInMinutes: 0.1, periodInMinutes: 0.5 });
+}
+
+ensureHeartbeat();
+chrome.runtime.onInstalled.addListener(ensureHeartbeat);
+chrome.runtime.onStartup.addListener(ensureHeartbeat);
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === HEARTBEAT_ALARM) bridgeRequest("/v1/health").catch(() => {});
+});
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "APOCALIPSE_MEDIA" && sender.tab?.id) {
@@ -32,6 +44,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     const token = message.token.trim();
     bridgeRequest("/v1/health", {}, token)
       .then(() => chrome.storage.local.set({ pairingToken: token }))
+      .then(() => ensureHeartbeat())
       .then(() => reply({ connected: true }))
       .catch((error) => reply({ connected: false, error: String(error) }));
     return true;
