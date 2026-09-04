@@ -44,6 +44,8 @@ const catalogs = {
     retry: "Retry",
     openFolder: "Open folder",
     preferences: "PREFERENCES",
+    appearanceTheme: "Interface theme",
+    themeHint: "Colors and text contrast are adjusted together for readability.",
     startWithSystem: "Start with the system",
     startHidden: "Open hidden in the system tray",
     defaultDirectory: "Default download directory",
@@ -155,6 +157,8 @@ const catalogs = {
     retry: "Tentar novamente",
     openFolder: "Abrir pasta",
     preferences: "PREFERÊNCIAS",
+    appearanceTheme: "Tema da interface",
+    themeHint: "As cores e o contraste do texto são ajustados juntos para manter a leitura.",
     startWithSystem: "Iniciar com o sistema",
     startHidden: "Abrir oculto na bandeja do sistema",
     defaultDirectory: "Diretório padrão de downloads",
@@ -265,6 +269,8 @@ const catalogs = {
     retry: "重试",
     openFolder: "打开文件夹",
     preferences: "偏好设置",
+    appearanceTheme: "界面主题",
+    themeHint: "颜色与文字对比度会同步调整，以保持清晰易读。",
     startWithSystem: "随系统启动",
     startHidden: "启动后隐藏到系统托盘",
     defaultDirectory: "默认下载目录",
@@ -333,6 +339,11 @@ const catalogs = {
 };
 
 let locale = localStorage.getItem("apocalipse.language") || "en";
+const applyTheme = (theme) => {
+  const valid = ["void", "inferno", "toxic", "synthwave", "royal", "crimson", "arctic"];
+  document.documentElement.dataset.theme = valid.includes(theme) ? theme : "void";
+};
+applyTheme(localStorage.getItem("apocalipse.theme") || "void");
 let pendingReferer = null;
 let pendingDuration = null;
 let pendingCookieHeader = null;
@@ -788,6 +799,7 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
       invoke("get_dns_setting"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
+    document.querySelector("#theme").value = document.documentElement.dataset.theme;
     document.querySelector("#default-directory").value = directory;
     document.querySelector("#capture-clipboard").checked = clipboard.enabled;
     document.querySelector("#max-tasks").value = limits.maxActiveDownloads;
@@ -821,13 +833,20 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
 };
 document
   .querySelectorAll("[data-settings-close]")
-  .forEach((button) => (button.onclick = () => settingsDialog.close()));
+  .forEach((button) => (button.onclick = () => {
+    applyTheme(localStorage.getItem("apocalipse.theme") || "void");
+    settingsDialog.close();
+  }));
+document.querySelector("#theme").onchange = (event) => applyTheme(event.target.value);
 document.querySelector("#save-settings").onclick = async () => {
   const button = document.querySelector("#save-settings");
   const directory = document.querySelector("#default-directory");
   if (!directory.reportValidity()) return;
   button.disabled = true;
   try {
+    const theme = document.querySelector("#theme").value;
+    localStorage.setItem("apocalipse.theme", theme);
+    applyTheme(theme);
     await invoke("set_default_download_directory", { path: directory.value });
     await invoke("set_autostart", {
       enabled: document.querySelector("#autostart").checked,

@@ -2585,11 +2585,16 @@ fn bridge_response(stream: &mut TcpStream, status: &str, origin: Option<&str>, b
 }
 
 fn show_main_window(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
+    let main_app = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(window) = main_app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_always_on_top(true);
+            let _ = window.set_focus();
+            let _ = window.set_always_on_top(false);
+        }
+    });
 }
 
 fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<(), String> {
@@ -2617,6 +2622,8 @@ fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<
         std::thread::sleep(Duration::from_millis(350));
         show_main_window(&restored_app);
         let _ = restored_app.emit("bridge-download-ready", ());
+        std::thread::sleep(Duration::from_millis(850));
+        show_main_window(&restored_app);
     });
     Ok(())
 }

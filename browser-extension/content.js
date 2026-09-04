@@ -382,7 +382,7 @@
     overlayTimer = setTimeout(installOverlays, 250);
   };
   const style = document.createElement("style");
-  style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:1px solid #73efff!important;border-radius:8px!important;padding:7px 11px!important;background:linear-gradient(135deg,#18d5ec,#348fff)!important;color:#031219!important;font:700 12px system-ui!important;box-shadow:0 4px 18px #0009!important;cursor:pointer!important}";
+  style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:1px solid #4c6470!important;border-radius:7px!important;padding:6px 9px!important;background:#111a20e8!important;color:#f3fbff!important;font:600 12px system-ui!important;box-shadow:0 3px 12px #0008!important;backdrop-filter:blur(5px)!important;cursor:pointer!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download:hover{border-color:#31d9ee!important;background:#15262eeF!important;box-shadow:0 3px 14px #00cce755!important}";
   document.documentElement.append(style);
   new MutationObserver(scheduleOverlays).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "poster"] });
   scheduleOverlays();

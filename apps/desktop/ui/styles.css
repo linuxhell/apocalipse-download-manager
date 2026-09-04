@@ -7,7 +7,22 @@
   --line: #1b2a33;
   --panel: #0e151c;
   --muted: #78909b;
+  --app-bg: #080c11;
+  --app-glow: #102532;
+  --sidebar: #080d12f0;
+  --surface: #0e151c;
+  --surface-2: #111a22;
+  --input: #080e13;
+  --text: #e9f7fb;
+  --accent: #25d9ef;
+  --accent-2: #45a9ff;
 }
+:root[data-theme="inferno"] { --app-bg:#100806; --app-glow:#5a1c08; --sidebar:#160b08f2; --surface:#1b0f0b; --surface-2:#27130c; --input:#120906; --text:#fff2e8; --muted:#c19a85; --line:#4a2518; --cyan:#ff6a20; --accent:#ff6a20; --accent-2:#ffc247; }
+:root[data-theme="toxic"] { --app-bg:#071009; --app-glow:#214b12; --sidebar:#08130af2; --surface:#0c1a0e; --surface-2:#132718; --input:#071108; --text:#efffe9; --muted:#8eac86; --line:#24452a; --cyan:#82f23d; --accent:#82f23d; --accent-2:#d8ff3f; }
+:root[data-theme="synthwave"] { --app-bg:#0d0717; --app-glow:#39135f; --sidebar:#10091df2; --surface:#171027; --surface-2:#21143a; --input:#0d0818; --text:#fff0ff; --muted:#b69ac8; --line:#40265c; --cyan:#ff4fca; --accent:#ff4fca; --accent-2:#6ee7ff; }
+:root[data-theme="royal"] { --app-bg:#09091a; --app-glow:#27266e; --sidebar:#0b0b20f2; --surface:#11122a; --surface-2:#191a3a; --input:#090a1c; --text:#f3f1ff; --muted:#9e9cbd; --line:#30325c; --cyan:#9c83ff; --accent:#9c83ff; --accent-2:#55d7ff; }
+:root[data-theme="crimson"] { --app-bg:#10070c; --app-glow:#55132b; --sidebar:#160910f2; --surface:#1d0d15; --surface-2:#2a111d; --input:#12070d; --text:#fff0f4; --muted:#bf929f; --line:#4c2230; --cyan:#ff4775; --accent:#ff4775; --accent-2:#ff9d66; }
+:root[data-theme="arctic"] { --app-bg:#071017; --app-glow:#123f58; --sidebar:#08131bf2; --surface:#0c1a24; --surface-2:#122735; --input:#07121a; --text:#eefaff; --muted:#8faebb; --line:#234454; --cyan:#65e8ff; --accent:#65e8ff; --accent-2:#79a7ff; }
 * {
   box-sizing: border-box;
 }
@@ -17,7 +32,7 @@ body {
   display: grid;
   grid-template-columns: 240px 1fr;
   background:
-    radial-gradient(circle at 75% 0, #102532 0, transparent 32%), #080c11;
+    radial-gradient(circle at 75% 0, var(--app-glow) 0, transparent 32%), var(--app-bg);
 }
 aside {
   height: 100vh;
@@ -25,7 +40,7 @@ aside {
   top: 0;
   padding: 24px 14px 18px;
   border-right: 1px solid var(--line);
-  background: rgba(8, 13, 18, 0.94);
+  background: var(--sidebar);
   display: flex;
   flex-direction: column;
 }
@@ -480,7 +495,7 @@ dialog input:focus {
 }
 .pairing-settings > label {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 .pairing-settings > button {
   justify-self: end;
@@ -501,6 +516,9 @@ dialog input:focus {
 #tool-list button, #check-tools { border: 1px solid #29424f; border-radius: 8px; background: #111d25; color: #bcd1d9; padding: 7px 13px; cursor: pointer; }
 #check-tools { justify-self: end; }
 #settings-dialog form { max-height: min(820px, 88vh); overflow-y: auto; }
+#settings-dialog label { font-size: 14px; }
+#settings-dialog small { font-size: 13px; line-height: 1.45; }
+#settings-dialog .dialog-head small { font-size: 12px; }
 .destination-history {
   margin-top: 13px;
   border: 1px solid var(--line);
@@ -729,6 +747,41 @@ footer .bridge-connected i {
   margin-top: 4px;
   color: var(--muted);
 }
+
+/* Theme layer: surfaces and foreground colors move as a set to preserve contrast. */
+body, dialog { color: var(--text); }
+.brand strong, header p, .cyan, .tabs button.active, .download-state { color: var(--accent); }
+.actions select, dialog, .panel, .engine, .setting-toggle, .pairing-settings,
+.transfer-settings, .tool-settings, .media-inspection, .destination-history {
+  background: var(--surface);
+  border-color: var(--line);
+}
+.metrics article, .dialog-actions > button:not(.primary), .remove-options button,
+.transfer-settings button, .pairing-settings > button, #tool-list button, #check-tools {
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--text);
+}
+dialog input, dialog select, .media-inspection select, #diagnostic-log, #site-rules-json {
+  background: var(--input);
+  border-color: var(--line);
+  color: var(--text);
+}
+.primary, .task-progress i {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+}
+.primary { color: #071014; }
+.tabs button.active, nav button:hover, nav button.active, .download-icon {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+}
+nav button:hover, nav button.active, .download-icon { color: var(--accent); }
+.analysis {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  color: color-mix(in srgb, var(--accent) 55%, var(--text));
+}
+.theme-settings select { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.theme-settings small { color: var(--muted); }
 @media (max-width: 950px) {
   body {
     grid-template-columns: 78px 1fr;
