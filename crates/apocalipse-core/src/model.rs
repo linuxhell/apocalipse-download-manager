@@ -28,6 +28,8 @@ pub struct DownloadTask {
     pub format_selection: Option<String>,
     #[serde(default)]
     pub referer: Option<String>,
+    #[serde(default)]
+    pub known_duration: Option<f64>,
 }
 
 impl DownloadTask {
@@ -41,6 +43,7 @@ impl DownloadTask {
             total: None,
             format_selection: None,
             referer: None,
+            known_duration: None,
         }
     }
 }

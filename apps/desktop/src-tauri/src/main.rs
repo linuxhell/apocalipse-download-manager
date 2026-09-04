@@ -17,6 +17,7 @@ struct AppState {
     settings: Mutex<UserSettings>,
     settings_path: PathBuf,
     bridge_last_seen: Mutex<Option<Instant>>,
+    bridge_pending: Mutex<Vec<BridgeDownload>>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -124,12 +125,13 @@ struct BridgePairing {
     connected: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BridgeDownload {
     url: String,
     file_name: Option<String>,
     page_url: Option<String>,
+    duration: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -357,9 +359,20 @@ async fn run_external_download(
             command.arg("-H").arg("User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36");
             // Some video hosts expose completed VOD playlists without ENDLIST and therefore
             // look live. Treat known finite CDN captures as VOD so the task does not wait forever.
-            if task.source.contains("growcdnssedge.com") {
+            if task.known_duration.is_some_and(|duration| duration > 0.0)
+                || task.source.contains("growcdnssedge.com")
+            {
                 command.arg("--live-perform-as-vod");
             }
+            command.args([
+                "--check-segments-count=true",
+                "--del-after-done=true",
+                "--write-meta-json=false",
+                "--no-log=true",
+                "--no-ansi-color=true",
+                "--disable-update-check=true",
+                "--mux-after-done=format=mp4:muxer=ffmpeg",
+            ]);
             command
             }
         }
@@ -439,7 +452,14 @@ fn validate_file_name(name: &str) -> Result<String, String> {
 }
 
 fn append_source_extension(file_name: String, source: &str, kind: DownloadKind) -> String {
-    if kind != DownloadKind::Http || Path::new(&file_name).extension().is_some() { return file_name; }
+    let has_extension = Path::new(&file_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| {
+            (1..=10).contains(&value.len())
+                && value.chars().all(|character| character.is_ascii_alphanumeric())
+        });
+    if kind != DownloadKind::Http || has_extension { return file_name; }
     let source_name = suggested_name(source);
     let extension = Path::new(&source_name).extension().and_then(|value| value.to_str())
         .filter(|value| (1..=10).contains(&value.len()) && value.chars().all(|character| character.is_ascii_alphanumeric()));
@@ -580,6 +600,8 @@ fn enqueue_download(
     destination_directory: Option<String>,
     file_name: Option<String>,
     format_selection: Option<String>,
+    referer: Option<String>,
+    known_duration: Option<f64>,
 ) -> Result<DownloadTask, String> {
     inspect_url(url.clone())?;
     let kind = classify_url(&url).ok_or_else(|| "unsupported_url".to_owned())?;
@@ -593,10 +615,13 @@ fn enqueue_download(
         }
         None => configured_download_directory(&app, &state)?,
     };
-    let file_name = validate_file_name(&file_name.unwrap_or_else(|| suggested_name(&url)))?;
+    let proposed = file_name.unwrap_or_else(|| suggested_name(&url));
+    let file_name = validate_file_name(&append_source_extension(proposed, &url, kind))?;
     remember_download_directory(&state, &download_dir)?;
     let mut task = DownloadTask::new(&url, unique_destination(&download_dir, &file_name));
     task.format_selection = format_selection.filter(|value| !value.trim().is_empty());
+    task.referer = referer.filter(|url| url.starts_with("https://") || url.starts_with("http://"));
+    task.known_duration = known_duration.filter(|duration| duration.is_finite() && *duration > 0.0);
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     queue.push(task.clone());
     save_queue(&state, &queue)?;
@@ -775,20 +800,22 @@ fn bridge_response(stream: &mut TcpStream, status: &str, origin: Option<&str>, b
     let _ = stream.write_all(response.as_bytes());
 }
 
-fn enqueue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<(), String> {
+fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let kind = classify_url(&request.url).ok_or_else(|| "unsupported_url".to_owned())?;
-    let directory = configured_download_directory(app, &state)?;
-    let proposed = request.file_name.filter(|name| !name.trim().is_empty()).unwrap_or_else(|| suggested_name(&request.url));
-    let file_name = validate_file_name(&append_source_extension(suggested_name(&proposed), &request.url, kind))?;
-    remember_download_directory(&state, &directory)?;
-    let mut task = DownloadTask::new(&request.url, unique_destination(&directory, &file_name));
-    task.referer = request.page_url.filter(|url| url.starts_with("https://") || url.starts_with("http://"));
-    let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
-    queue.push(task.clone());
-    save_queue(&state, &queue)?;
-    drop(queue);
-    start_download(app, &state, task, kind)
+    classify_url(&request.url).ok_or_else(|| "unsupported_url".to_owned())?;
+    state.bridge_pending.lock().map_err(|error| error.to_string())?.push(request);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn take_bridge_download(state: State<'_, AppState>) -> Result<Option<BridgeDownload>, String> {
+    let mut pending = state.bridge_pending.lock().map_err(|error| error.to_string())?;
+    Ok((!pending.is_empty()).then(|| pending.remove(0)))
 }
 
 fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
@@ -818,7 +845,7 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     if first.starts_with("GET /v1/health ") {
         bridge_response(&mut stream, "200 OK", origin, "{\"ok\":true}");
     } else if first.starts_with("POST /v1/download ") {
-        match serde_json::from_str::<BridgeDownload>(body).map_err(|error| error.to_string()).and_then(|request| enqueue_from_bridge(app, request)) {
+        match serde_json::from_str::<BridgeDownload>(body).map_err(|error| error.to_string()).and_then(|request| queue_from_bridge(app, request)) {
             Ok(()) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
             Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
         }
@@ -983,6 +1010,7 @@ fn main() {
                 settings: Mutex::new(load_settings(&settings_path)),
                 settings_path,
                 bridge_last_seen: Mutex::new(None),
+                bridge_pending: Mutex::new(Vec::new()),
             });
             let bridge_app = app.handle().clone();
             std::thread::Builder::new().name("apocalipse-extension-bridge".into())
@@ -1051,7 +1079,8 @@ fn main() {
             copy_bridge_token,
             list_download_directories,
             remove_download_directory,
-            clear_download_directories
+            clear_download_directories,
+            take_bridge_download
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Apocalipse Download Manager");

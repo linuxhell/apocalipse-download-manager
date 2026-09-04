@@ -96,6 +96,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         url: message.item.url,
         fileName: message.item.title || null,
         pageUrl: sender.tab?.url || null,
+        duration: Number.isFinite(message.item.duration) ? message.item.duration : null,
       }),
     }).then(() => reply({ target: "apocalipse" })).catch(() => {
       chrome.downloads.download({ url: message.item.url, saveAs: true }, (downloadId) => {

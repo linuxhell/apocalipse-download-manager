@@ -228,6 +228,8 @@ const catalogs = {
 };
 
 let locale = localStorage.getItem("apocalipse.language") || "en";
+let pendingReferer = null;
+let pendingDuration = null;
 let downloads = [];
 let activeFilter = "all";
 let overallSpeed = 0;
@@ -528,6 +530,8 @@ document.querySelectorAll("#add,#empty-add").forEach(
       document.querySelector("#analysis").hidden = true;
       document.querySelector("#enqueue").hidden = true;
       document.querySelector("#analyze").hidden = false;
+      pendingReferer = null;
+      pendingDuration = null;
       invoke("default_download_directory")
         .then((path) => {
           document.querySelector("#destination").value = path;
@@ -769,6 +773,8 @@ document.querySelector("#enqueue").onclick = async () => {
         destinationDirectory: document.querySelector("#destination").value,
         fileName: document.querySelector("#file-name").value,
         formatSelection: document.querySelector("#media-inspection").hidden ? null : document.querySelector("#media-format").value,
+        referer: pendingReferer,
+        knownDuration: pendingDuration,
       }),
     );
     renderDownloads();
@@ -802,6 +808,25 @@ setInterval(async () => {
     console.error(error);
   }
 }, 750);
+setInterval(async () => {
+  try {
+    if (dialog.open) return;
+    const request = await invoke("take_bridge_download");
+    if (!request) return;
+    pendingReferer = request.pageUrl || null;
+    pendingDuration = Number.isFinite(request.duration) ? request.duration : null;
+    document.querySelector("#url").value = request.url;
+    document.querySelector("#file-name").value = request.fileName || "";
+    document.querySelector("#analysis").hidden = true;
+    document.querySelector("#enqueue").hidden = true;
+    document.querySelector("#analyze").hidden = false;
+    document.querySelector("#media-inspection").hidden = true;
+    document.querySelector("#destination").value = await invoke("default_download_directory");
+    await refreshDestinationHistory();
+    dialog.showModal();
+    document.querySelector("#url").focus();
+  } catch (error) { console.error(error); }
+}, 400);
 async function refreshBridgeStatus() {
   try {
     const status = await invoke("get_bridge_pairing");
