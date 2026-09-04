@@ -114,7 +114,10 @@
     const anchorUrl = absolute(anchor?.href);
     let anchorHost = "";
     try { anchorHost = new URL(anchorUrl).hostname; } catch {}
-    if (!force && anchorUrl && /(^|\.)filespayouts\.com$/i.test(anchorHost)) {
+    const onFilespayouts = /(^|\.)filespayouts\.com$/i.test(location.hostname);
+    const entersFilespayouts = /(^|\.)filespayouts\.com$/i.test(anchorHost);
+    if (!force && anchorUrl && entersFilespayouts && !onFilespayouts
+      && !/\/undefined(?:$|[?#])/i.test(new URL(anchorUrl).pathname)) {
       // A Filespayouts URL ending in a file extension is still a generator
       // page. Navigation (the same behavior as Open link in new tab) lets it
       // resolve the temporary CDN address before interception.
