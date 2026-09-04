@@ -988,17 +988,13 @@ async fn run_external_download(
             } else {
                 command.args(["--js-runtimes", "quickjs"]);
             }
-            let session_media = task.source.contains("youtube.com/")
-                || task.source.contains("youtu.be/")
-                || task.source.contains("facebook.com/")
-                || task.source.contains("fb.watch/");
             if let Some(cookie) = identity
                 .as_ref()
                 .and_then(|value| value.cookie_header.as_deref())
                 .filter(|value| !value.is_empty())
             {
                 command.arg("--add-headers").arg(format!("Cookie:{cookie}"));
-            } else if session_media {
+            } else if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
                 command.args(["--cookies-from-browser", "chrome"]);
             }
             if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {

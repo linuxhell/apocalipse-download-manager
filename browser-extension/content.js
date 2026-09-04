@@ -53,6 +53,31 @@
     if (element?.tagName === "IMG") return element.currentSrc || element.src || "";
     return element?.poster || document.querySelector('meta[property="og:image"]')?.content || element?.closest?.("figure,article")?.querySelector?.("img")?.currentSrc || "";
   };
+  const isFacebookMediaPath = (pathname) => /(?:^|\/)(?:reel|reels|watch|videos|share)(?:\/|$)/i.test(pathname);
+  const facebookUrlFor = (element) => {
+    if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
+    if (isFacebookMediaPath(location.pathname)) return location.href;
+    const selector = [
+      'a[href*="/reel/"]',
+      'a[href*="/reels/"]',
+      'a[href*="/videos/"]',
+      'a[href*="/watch/"]',
+      'a[href*="/watch?"]',
+      'a[href*="/share/r/"]',
+      'a[href*="/share/v/"]',
+    ].join(",");
+    let container = element;
+    for (let depth = 0; container && depth < 10; depth += 1, container = container.parentElement) {
+      const anchor = container.querySelector?.(selector);
+      const url = absolute(anchor?.href);
+      if (!url) continue;
+      try {
+        const parsed = new URL(url);
+        if (/(^|\.)facebook\.com$/i.test(parsed.hostname) && isFacebookMediaPath(parsed.pathname)) return url;
+      } catch {}
+    }
+    return null;
+  };
   const collect = () => {
     const items = new Map();
     const add = (url, kind, element, thumbnail) => {
@@ -66,6 +91,8 @@
       const facebookUrl = facebookUrlFor(element);
       if (facebookUrl) add(facebookUrl, "video", element);
     });
+    const facebookPageUrl = facebookUrlFor(document.querySelector("video"));
+    if (facebookPageUrl) add(facebookPageUrl, "video", document.querySelector("video"));
     if (/^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch") {
       const videoId = new URL(location.href).searchParams.get("v");
       add(location.href, "video", document.querySelector("video"), document.querySelector('meta[property="og:image"]')?.content || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ""));
@@ -152,21 +179,6 @@
     const masters = urls.filter((url) => /(?:\/master\/|master\.m3u8)/i.test(url));
     return { candidates: urls, fallback: urls.at(-1) || masters.at(-1) || null };
   };
-  const facebookUrlFor = (element) => {
-    if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
-    const container = element.closest?.('[role="dialog"],article,[data-pagelet]') || element.parentElement;
-    const anchors = container?.querySelectorAll?.('a[href]') || [];
-    for (const anchor of anchors) {
-      const url = absolute(anchor.href);
-      if (!url) continue;
-      try {
-        const parsed = new URL(url);
-        if (/(?:^|\/)(?:reel|reels|watch|videos|share)(?:\/|$)/i.test(parsed.pathname)) return url;
-      } catch {}
-    }
-    if (/(?:^|\/)(?:reel|reels|watch|videos|share)(?:\/|$)/i.test(location.pathname)) return location.href;
-    return null;
-  };
   const downloadUrlFor = (element) => {
     if (element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch") return location.href;
     if (element.tagName === "VIDEO") {
@@ -211,7 +223,13 @@
         const resolved = await resolveDownloadUrl(element);
         const currentUrl = resolved?.url || resolved || (isYouTubeVideo ? location.href : url);
         if (!currentUrl) return;
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls: resolved?.requestUrls || [], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: document.title, thumbnail: thumbnailFor(element, "video") } });
+        const originalText = button.textContent;
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls: resolved?.requestUrls || [], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
+          const failed = chrome.runtime.lastError || result?.target !== "apocalipse";
+          button.textContent = failed ? "⚠" : "✓";
+          if (failed) button.title = result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable";
+          setTimeout(() => { button.textContent = originalText; }, 1500);
+        });
       });
       let positionTimer = null;
       const position = () => {
