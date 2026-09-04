@@ -5,7 +5,8 @@
   const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
   const thumbnailFor = (element, kind) => {
     if (kind === "audio") return "";
-    return element?.poster || element?.currentSrc || element?.src || element?.closest?.("figure,article")?.querySelector?.("img")?.currentSrc || "";
+    if (element?.tagName === "IMG") return element.currentSrc || element.src || "";
+    return element?.poster || document.querySelector('meta[property="og:image"]')?.content || element?.closest?.("figure,article")?.querySelector?.("img")?.currentSrc || "";
   };
   const collect = () => {
     const items = new Map();
@@ -18,6 +19,10 @@
       add(element.currentSrc || element.src, "video", element);
       element.querySelectorAll("source").forEach((source) => add(source.src, "video", element));
     });
+    if (/^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch") {
+      const videoId = new URL(location.href).searchParams.get("v");
+      add(location.href, "video", document.querySelector("video"), document.querySelector('meta[property="og:image"]')?.content || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ""));
+    }
     document.querySelectorAll("audio").forEach((element) => {
       add(element.currentSrc || element.src, "audio", element);
       element.querySelectorAll("source").forEach((source) => add(source.src, "audio", element));
@@ -26,17 +31,37 @@
     performance.getEntriesByType("resource").forEach((entry) => {
       if (/\.m3u8(?:$|[?#])/i.test(entry.name)) add(entry.name, "video", null, document.querySelector("video")?.poster || "");
     });
-    return [...items.values()];
+    const found = [...items.values()];
+    if (/(^|\.)hdsex\.org$/.test(location.hostname)) {
+      const hls = found.filter((item) => item.kind === "video" && /\.m3u8(?:$|[?#])/i.test(item.url));
+      const master = hls.filter((item) => /(?:\/master\/|master\.m3u8)/i.test(item.url)).at(-1) || hls.at(-1);
+      if (master) return found.filter((item) => item.kind !== "video" || !/\.m3u8(?:$|[?#])/i.test(item.url) || item === master);
+    }
+    return found;
   };
   const downloadLabel = () => {
     const value = (navigator.language || "en").toLowerCase();
-    return value.startsWith("zh") ? "下载" : "Download";
+    return value.startsWith("zh") ? "下载" : value.startsWith("pt") ? "Baixar" : "Download";
+  };
+  const hlsForPage = () => {
+    const urls = performance.getEntriesByType("resource").map((entry) => entry.name)
+      .filter((url) => /\.m3u8(?:$|[?#])/i.test(url));
+    return urls.filter((url) => /(?:\/master\/|master\.m3u8)/i.test(url)).at(-1) || urls.at(-1) || null;
+  };
+  const downloadUrlFor = (element) => {
+    if (element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch") return location.href;
+    const direct = absolute(element.currentSrc || element.src);
+    if (direct && /^https?:/.test(direct)) return direct;
+    if (element.tagName === "VIDEO") return hlsForPage();
+    return null;
   };
   let overlayTimer;
   const installOverlays = () => {
-    document.querySelectorAll("video,audio,img").forEach((element) => {
-      if (element.dataset.apocalipseButton || (element.tagName === "IMG" && (element.clientWidth < 120 || element.clientHeight < 70))) return;
-      const url = absolute(element.currentSrc || element.src);
+    if (/(^|\.)chatgpt\.com$/.test(location.hostname)) return;
+    document.querySelectorAll("video,audio").forEach((element) => {
+      if (element.dataset.apocalipseButton) return;
+      const isYouTubeVideo = element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch";
+      const url = downloadUrlFor(element);
       if (!url || !/^https?:/.test(url)) return;
       element.dataset.apocalipseButton = "1";
       const button = document.createElement("button");
@@ -47,7 +72,9 @@
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url, kind: element.tagName.toLowerCase(), title: titleFor(element), thumbnail: thumbnailFor(element, "video") } });
+        const currentUrl = downloadUrlFor(element) || (isYouTubeVideo ? location.href : url);
+        if (!currentUrl) return;
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, kind: element.tagName.toLowerCase(), title: document.title, thumbnail: thumbnailFor(element, "video") } });
       });
       const position = () => {
         if (!element.isConnected) { button.remove(); return; }
@@ -71,6 +98,7 @@
   document.documentElement.append(style);
   new MutationObserver(scheduleOverlays).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "poster"] });
   scheduleOverlays();
+  setInterval(scheduleOverlays, 2000);
   chrome.runtime.onMessage.addListener((message, _sender, reply) => {
     if (message?.type !== "APOCALIPSE_SCAN") return;
     const found = collect();

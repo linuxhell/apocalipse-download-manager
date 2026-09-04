@@ -47,7 +47,11 @@ const render = () => {
       image.hidden = true;
       audio.hidden = false;
     } else {
-      image.src = item.thumbnail || item.url;
+      image.src = item.thumbnail || (selected === "image" ? item.url : chrome.runtime.getURL("icons/alien-48.png"));
+      image.onerror = () => {
+        image.onerror = null;
+        image.src = chrome.runtime.getURL("icons/alien-48.png");
+      };
     }
     row.querySelector("b").textContent = item.title || item.url.split("/").pop();
     row.querySelector("small").textContent = `${formatBytes(item.size)} · ${new URL(item.url).hostname}`;

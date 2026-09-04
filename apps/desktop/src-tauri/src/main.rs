@@ -313,12 +313,16 @@ async fn run_external_download(
         configured_tool(&settings.yt_dlp_path, "yt-dlp"),
         configured_tool(&settings.n_m3u8dl_re_path, if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" }),
         configured_tool(&settings.aria2_path, if cfg!(windows) { "aria2c.exe" } else { "aria2c" }),
-    )).unwrap_or_else(|_| ("ffmpeg".into(), "yt-dlp".into(), "N_m3u8DL-RE".into(), "aria2c".into()));
+        settings.connections_per_download.clamp(1, 32),
+    )).unwrap_or_else(|_| ("ffmpeg".into(), "yt-dlp".into(), "N_m3u8DL-RE".into(), "aria2c".into(), 8));
     let mut command = match kind {
         DownloadKind::MediaPage => {
             let mut command = tokio::process::Command::new(&tools.1);
             let selection = task.format_selection.as_deref().unwrap_or("bestvideo+bestaudio/best");
             command.arg("--no-playlist");
+            if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
+                command.args(["--cookies-from-browser", "chrome", "--retries", "10", "--fragment-retries", "10", "--retry-sleep", "fragment:exp=1:8"]);
+            }
             if let Some(audio_format) = selection.strip_prefix("audio:") {
                 command.args(["-f", "bestaudio/best", "-x", "--audio-format", audio_format]);
             } else {
@@ -343,7 +347,15 @@ async fn run_external_download(
             } else {
             let mut command = tokio::process::Command::new(&tools.2);
             let stem = task.destination.file_stem().and_then(|value| value.to_str()).unwrap_or("download");
-            command.arg(&task.source).arg("--save-dir").arg(directory).args(["--save-name", stem, "--auto-select"]);
+            command.arg(&task.source).arg("--save-dir").arg(directory)
+                .args(["--save-name", stem, "--auto-select", "--concurrent-download", "--download-retry-count", "10", "--http-request-timeout", "30"])
+                .arg("--thread-count").arg(tools.4.to_string())
+                .arg("--ffmpeg-binary-path").arg(&tools.0);
+            // Some video hosts expose completed VOD playlists without ENDLIST and therefore
+            // look live. Treat known finite CDN captures as VOD so the task does not wait forever.
+            if task.source.contains("growcdnssedge.com") {
+                command.arg("--live-perform-as-vod");
+            }
             command
             }
         }
@@ -354,6 +366,11 @@ async fn run_external_download(
         }
         _ => return,
     };
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.as_std_mut().creation_flags(0x08000000);
+    }
     command.kill_on_drop(true);
     let result = match command.spawn() {
         Ok(mut child) => tokio::select! {
