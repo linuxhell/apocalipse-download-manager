@@ -248,6 +248,7 @@ let lastClipboardLink = "";
 const busyIds = new Set();
 const selectedIds = new Set();
 const speedSamples = new Map();
+let selectionPointerActive = false;
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const invoke = (command, args = {}) => {
   const bridge = window.__TAURI__?.core?.invoke;
@@ -454,7 +455,9 @@ function translate() {
 
 async function refreshDownloads() {
   try {
-    downloads = await invoke("list_downloads");
+    const refreshed = await invoke("list_downloads");
+    if (selectionPointerActive) return;
+    downloads = refreshed;
     const ids = new Set(downloads.map((task) => task.id));
     for (const id of selectedIds) if (!ids.has(id)) selectedIds.delete(id);
     updateSpeeds(downloads);
@@ -467,6 +470,16 @@ async function refreshDownloads() {
 const dialog = document.querySelector("#add-dialog");
 const clearDialog = document.querySelector("#clear-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
+document.querySelector("#download-list").addEventListener("pointerdown", (event) => {
+  if (event.target.closest?.(".task-select")) selectionPointerActive = true;
+});
+const finishSelectionPointer = () => setTimeout(() => {
+  if (!selectionPointerActive) return;
+  selectionPointerActive = false;
+  refreshDownloads();
+}, 0);
+window.addEventListener("pointerup", finishSelectionPointer);
+window.addEventListener("pointercancel", finishSelectionPointer);
 async function refreshToolStatuses() {
   const button = document.querySelector("#check-tools");
   button.disabled = true;
