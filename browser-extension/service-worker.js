@@ -3,6 +3,7 @@ const HEARTBEAT_ALARM = "apocalipse-bridge-heartbeat";
 let bridgeConnected = false;
 let bypassHeld = false;
 let bypassUntil = 0;
+let bypassNextUntil = 0;
 let forceHeld = false;
 
 async function bridgeRequest(path, options = {}, suppliedToken = null) {
@@ -102,6 +103,10 @@ const eraseBrowserDownload = (id) => new Promise((resolve) => {
 async function takeBrowserDownload(item, eraseFromHistory = false) {
   const url = item.finalUrl || item.url;
   if (!item.id || !/^https?:/i.test(url)) return;
+  if (Date.now() < bypassNextUntil) {
+    bypassNextUntil = 0;
+    return;
+  }
   if (!bridgeConnected || bypassHeld || Date.now() < bypassUntil) return;
   let cancelled = false;
   try {
@@ -140,6 +145,11 @@ if (chrome.downloads.onDeterminingFilename?.addListener) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.type === "APOCALIPSE_BYPASS_NEXT") {
+    bypassNextUntil = Date.now() + Math.min(Math.max(Number(message.ttlMs) || 15000, 2000), 30000);
+    reply({ ok: true });
+    return;
+  }
   if (message?.type === "APOCALIPSE_SHORTCUT_STATE") {
     const wasBypassHeld = bypassHeld;
     bypassHeld = Boolean(message.bypassPressed);

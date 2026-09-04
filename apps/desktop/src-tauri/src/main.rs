@@ -366,7 +366,7 @@ async fn run_external_download(
             command.args(["--no-playlist", "--newline", "--verbose"]);
             if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
                 if let Some(cookie) = identity.as_ref().and_then(|value| value.cookie_header.as_deref()).filter(|value| !value.is_empty()) {
-                    command.args(["--add-headers", &format!("Cookie:{cookie}")]);
+                    command.arg("--add-headers").arg(format!("Cookie:{cookie}"));
                 } else {
                     command.args(["--cookies-from-browser", "chrome"]);
                 }
@@ -444,9 +444,7 @@ async fn run_external_download(
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        if kind != DownloadKind::MediaPage {
-            command.as_std_mut().creation_flags(0x08000000);
-        }
+        command.as_std_mut().creation_flags(0x08000000);
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     command.kill_on_drop(true);
@@ -466,9 +464,13 @@ async fn run_external_download(
             let mut text = String::from_utf8_lossy(&output.await.unwrap_or_default()).into_owned();
             text.push_str(&String::from_utf8_lossy(&errors.await.unwrap_or_default()));
             status.map_err(|error| error.to_string()).and_then(|status| {
-                if status.success() { Ok(()) } else {
-                    Err(external_error_detail(&text, status.code()))
+                if status.success() { return Ok(()); }
+                if kind == DownloadKind::MediaPage {
+                    if let Some(path) = write_yt_dlp_diagnostic(&app, id, &text, status.code()) {
+                        open_diagnostic_log(&path);
+                    }
                 }
+                Err(external_error_detail(&text, status.code()))
             })
         },
         Err(error) => Err(format!("external_engine_unavailable: {error}")),
@@ -485,6 +487,39 @@ async fn run_external_download(
     }
     start_next_queued(&app);
 }
+
+fn write_yt_dlp_diagnostic(
+    app: &tauri::AppHandle,
+    id: DownloadId,
+    output: &str,
+    exit_code: Option<i32>,
+) -> Option<PathBuf> {
+    let state = app.state::<AppState>();
+    let directory = state.queue_path.parent()?.join("logs");
+    fs::create_dir_all(&directory).ok()?;
+    let path = directory.join(format!("yt-dlp-{id}.log"));
+    let sanitized = output.lines().map(|line| {
+        if line.to_ascii_lowercase().contains("cookie:") {
+            "[linha com cookie ocultada]".to_owned()
+        } else {
+            line.to_owned()
+        }
+    }).collect::<Vec<_>>().join("\n");
+    let contents = format!(
+        "Apocalipse Download Manager - diagnóstico do yt-dlp\nTarefa: {id}\nCódigo de saída: {}\n\n{sanitized}\n",
+        exit_code.map_or_else(|| "indisponível".to_owned(), |code| code.to_string()),
+    );
+    fs::write(&path, contents).ok()?;
+    Some(path)
+}
+
+#[cfg(target_os = "windows")]
+fn open_diagnostic_log(path: &Path) {
+    let _ = Command::new("notepad.exe").arg(path).spawn();
+}
+
+#[cfg(not(target_os = "windows"))]
+fn open_diagnostic_log(_path: &Path) {}
 
 async fn read_process_tail(
     mut stream: impl tokio::io::AsyncRead + Unpin,

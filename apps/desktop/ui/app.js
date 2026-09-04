@@ -551,6 +551,16 @@ document.querySelectorAll("[data-pick-for]").forEach((button) => {
 document
   .querySelectorAll("[data-dialog-close]")
   .forEach((button) => (button.onclick = () => dialog.close()));
+function resetMediaInspection() {
+  const panel = document.querySelector("#media-inspection");
+  const thumbnail = document.querySelector("#media-thumbnail");
+  panel.hidden = true;
+  thumbnail.hidden = true;
+  thumbnail.removeAttribute("src");
+  document.querySelector("#media-title").textContent = "";
+  document.querySelector("#media-duration").textContent = "";
+  document.querySelector("#media-format").replaceChildren();
+}
 document.querySelectorAll("#add,#empty-add").forEach(
   (button) =>
     (button.onclick = () => {
@@ -561,6 +571,7 @@ document.querySelectorAll("#add,#empty-add").forEach(
       pendingDuration = null;
       pendingCookieHeader = null;
       pendingUserAgent = null;
+      resetMediaInspection();
       invoke("default_download_directory")
         .then((path) => {
           document.querySelector("#destination").value = path;
@@ -718,7 +729,7 @@ document.querySelector("#url").oninput = () => {
   document.querySelector("#analysis").hidden = true;
   document.querySelector("#enqueue").hidden = true;
   document.querySelector("#analyze").hidden = false;
-  document.querySelector("#media-inspection").hidden = true;
+  resetMediaInspection();
 };
 
 function secondsLabel(value) {
@@ -734,6 +745,7 @@ function option(select, value, label) {
 }
 
 async function showMediaInspection(url) {
+  resetMediaInspection();
   const panel = document.querySelector("#media-inspection");
   const select = document.querySelector("#media-format");
   select.replaceChildren();
@@ -747,6 +759,7 @@ async function showMediaInspection(url) {
     const thumbnail = document.querySelector("#media-thumbnail");
     thumbnail.hidden = !media.thumbnail;
     if (media.thumbnail) thumbnail.src = media.thumbnail;
+    else thumbnail.removeAttribute("src");
     for (const format of media.formats) option(select, format.selection, format.label);
     document.querySelector("#file-name").value = media.suggestedFileName;
     panel.hidden = false;
@@ -754,7 +767,9 @@ async function showMediaInspection(url) {
     console.warn(error);
     document.querySelector("#media-title").textContent = t("mediaUnavailable");
     document.querySelector("#media-duration").textContent = "";
-    document.querySelector("#media-thumbnail").hidden = true;
+    const thumbnail = document.querySelector("#media-thumbnail");
+    thumbnail.hidden = true;
+    thumbnail.removeAttribute("src");
     panel.hidden = false;
   }
 }
@@ -819,6 +834,7 @@ document.querySelector("#enqueue").onclick = async () => {
     renderDownloads();
     dialog.close();
     url.value = "";
+    resetMediaInspection();
   } catch (error) {
     const box = document.querySelector("#analysis");
     box.hidden = false;
@@ -845,6 +861,7 @@ setInterval(async () => {
     document.querySelector("#analysis").hidden = true;
     document.querySelector("#enqueue").hidden = true;
     document.querySelector("#analyze").hidden = false;
+    resetMediaInspection();
     if (!dialog.open) dialog.showModal();
     url.focus();
   } catch (error) {
@@ -865,7 +882,7 @@ setInterval(async () => {
     document.querySelector("#analysis").hidden = true;
     document.querySelector("#enqueue").hidden = true;
     document.querySelector("#analyze").hidden = false;
-    document.querySelector("#media-inspection").hidden = true;
+    resetMediaInspection();
     document.querySelector("#destination").value = await invoke("default_download_directory");
     await refreshDestinationHistory();
     dialog.showModal();

@@ -16,6 +16,10 @@
   }).catch(() => {});
   document.addEventListener("keydown", sendShortcutState, true);
   document.addEventListener("keyup", sendShortcutState, true);
+  document.addEventListener("pointerdown", (event) => {
+    if (!modifierPressed(event, shortcutKeys.bypass)) return;
+    chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 15000 }).catch(() => {});
+  }, true);
   window.addEventListener("blur", () => chrome.runtime.sendMessage({
     type: "APOCALIPSE_SHORTCUT_STATE",
     bypassPressed: false,
@@ -74,7 +78,11 @@
     if (event.defaultPrevented || event.button !== 0 || event.metaKey) return;
     const bypass = modifierPressed(event, shortcutKeys.bypass);
     const force = modifierPressed(event, shortcutKeys.force);
-    if (bypass || ((event.ctrlKey || event.shiftKey || event.altKey) && !force)) return;
+    if (bypass) {
+      chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 15000 }).catch(() => {});
+      return;
+    }
+    if ((event.ctrlKey || event.shiftKey || event.altKey) && !force) return;
     const anchor = event.target.closest?.("a[href]");
     const url = force ? absolute(anchor?.href) : downloadableLink(anchor);
     if (!url) return;
