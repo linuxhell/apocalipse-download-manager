@@ -450,6 +450,19 @@ fn suggested_name(source: &str) -> String {
         .map(|character| if "<>:\"/\\|?*".contains(character) { '_' } else { character }).collect()
 }
 
+fn suggested_download_name(source: &str) -> String {
+    let name = suggested_name(source);
+    if classify_url(source) == Some(DownloadKind::Hls) {
+        let stem = Path::new(&name)
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("stream");
+        format!("{stem}.mp4")
+    } else {
+        name
+    }
+}
+
 fn validate_file_name(name: &str) -> Result<String, String> {
     let name = name.trim();
     if name.is_empty() || name == "." || name == ".." || name.chars().any(|character| "<>:\"/\\|?*".contains(character)) {
@@ -496,7 +509,7 @@ fn unique_destination(directory: &Path, file_name: &str) -> PathBuf {
 
 #[tauri::command]
 fn suggest_download_name(url: String) -> String {
-    suggested_name(&url)
+    suggested_download_name(&url)
 }
 
 #[tauri::command]
@@ -998,7 +1011,15 @@ async fn remove_downloads(state: State<'_, AppState>, ids: Vec<DownloadId>, dele
     if delete_files {
         for task in &removed {
             let partial = partial_path(&task.destination);
-            for path in [&task.destination, &partial] {
+            let mut paths = vec![task.destination.clone(), partial];
+            let stem = task.destination.file_stem().and_then(|value| value.to_str());
+            if let (Some(parent), Some(stem)) = (task.destination.parent(), stem) {
+                for extension in ["mp4", "mkv", "ts", "webm", "m4a", "mp3", "wav", "flac", "opus", "aac"] {
+                    let candidate = parent.join(format!("{stem}.{extension}"));
+                    if !paths.contains(&candidate) { paths.push(candidate); }
+                }
+            }
+            for path in &paths {
                 if path.is_file() {
                     fs::remove_file(path).map_err(|error| format!("{}: {error}", path.display()))?;
                 }

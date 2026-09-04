@@ -73,6 +73,8 @@ const catalogs = {
     installed: "Detected",
     missing: "Not found",
     checkTools: "Check versions",
+    errorDetails: "Error details",
+    copyError: "Copy error",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -149,6 +151,8 @@ const catalogs = {
     installed: "Detectado",
     missing: "Não encontrado",
     checkTools: "Verificar versões",
+    errorDetails: "Detalhes do erro",
+    copyError: "Copiar erro",
   },
   "zh-CN": {
     downloads: "下载",
@@ -224,6 +228,8 @@ const catalogs = {
     installed: "已检测",
     missing: "未找到",
     checkTools: "检查版本",
+    errorDetails: "错误详情",
+    copyError: "复制错误",
   },
 };
 
@@ -355,10 +361,18 @@ function renderDownloads() {
     info.append(progress, details);
     const failureMessage = typeof task.state === "object" ? task.state.failed?.message : null;
     if (failureMessage) {
-      const error = document.createElement("small");
+      const error = document.createElement("details");
       error.className = "task-error";
-      error.textContent = failureMessage;
-      error.title = failureMessage;
+      error.open = true;
+      const summary = document.createElement("summary");
+      summary.textContent = t("errorDetails");
+      const message = document.createElement("pre");
+      message.textContent = failureMessage;
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.textContent = t("copyError");
+      copy.onclick = () => navigator.clipboard.writeText(failureMessage).catch(console.error);
+      error.append(summary, message, copy);
       info.append(error);
     }
     const state = Object.assign(document.createElement("span"), {
