@@ -112,6 +112,7 @@
     if ((event.ctrlKey || event.shiftKey || event.altKey) && !force) return;
     const anchor = event.target.closest?.("a[href]");
     const anchorUrl = absolute(anchor?.href);
+    if (!anchorUrl || /\/undefined(?:$|[?#])/i.test(anchorUrl)) return;
     let anchorHost = "";
     try { anchorHost = new URL(anchorUrl).hostname; } catch {}
     const onFilespayouts = /(^|\.)filespayouts\.com$/i.test(location.hostname);
