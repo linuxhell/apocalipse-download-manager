@@ -19,7 +19,7 @@ use std::{
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     Manager, State,
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -2584,6 +2584,14 @@ fn bridge_response(stream: &mut TcpStream, status: &str, origin: Option<&str>, b
     let _ = stream.write_all(response.as_bytes());
 }
 
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<(), String> {
     let state = app.state::<AppState>();
     classify_url(&request.url).ok_or_else(|| "unsupported_url".to_owned())?;
@@ -2602,11 +2610,7 @@ fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<
         .lock()
         .map_err(|error| error.to_string())?
         .push(request);
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
+    show_main_window(app);
     Ok(())
 }
 
@@ -2631,11 +2635,9 @@ fn take_bridge_download(
                     .is_some_and(|page| page.trim().trim_end_matches('#') == current)
             })
         });
-    if current_url.is_some() {
-        Ok(index.map(|index| pending.remove(index)))
-    } else {
-        Ok((!pending.is_empty()).then(|| pending.remove(0)))
-    }
+    Ok(index
+        .or_else(|| (!pending.is_empty()).then_some(0))
+        .map(|index| pending.remove(index)))
 }
 
 fn decode_hex(value: &str) -> Result<Vec<u8>, String> {
@@ -3118,14 +3120,20 @@ fn main() {
                 .tooltip("Apocalipse Download Manager")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id().as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
+                    "show" => show_main_window(app),
                     "quit" => app.exit(0),
                     _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if matches!(
+                        event,
+                        TrayIconEvent::DoubleClick {
+                            button: MouseButton::Left,
+                            ..
+                        }
+                    ) {
+                        show_main_window(tray.app_handle());
+                    }
                 })
                 .build(app)?;
             if std::env::args().any(|argument| argument == "--hidden") {

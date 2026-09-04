@@ -98,12 +98,30 @@
     return null;
   };
   const facebookUrlFromMenu = async (element) => {
-    const article = element.closest?.('[role="article"],article') || element.parentElement;
-    const buttons = [...(article?.querySelectorAll?.('button,[role="button"]') || [])];
-    const menuButton = buttons.find((button) => {
+    const videoRect = element.getBoundingClientRect();
+    let container = element.parentElement;
+    let buttons = [];
+    for (let depth = 0; container && depth < 16; depth += 1, container = container.parentElement) {
+      buttons = [...(container.querySelectorAll?.('button,[role="button"]') || [])];
+      if (buttons.some((button) => /(?:ações|acoes|opções|opcoes|actions|options|more|menu|更多|更多选项)/i.test(
+        `${button.getAttribute("aria-label") || ""} ${button.title || ""} ${button.textContent || ""}`))) break;
+    }
+    let menuButton = buttons.find((button) => {
       const label = `${button.getAttribute("aria-label") || ""} ${button.title || ""} ${button.textContent || ""}`.trim();
-      return /(?:ações|acoes|opções|opcoes|actions|options|more|更多|更多选项)/i.test(label) || /^\s*(?:\.\.\.|…|⋯)\s*$/.test(label);
+      return /(?:ações|acoes|opções|opcoes|actions|options|more|menu|更多|更多选项)/i.test(label) || /^\s*(?:\.\.\.|…|⋯)\s*$/.test(label);
     });
+    if (!menuButton) {
+      menuButton = buttons.filter((button) => {
+        const rect = button.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && rect.top >= videoRect.top - 180 && rect.bottom <= videoRect.top + 100;
+      }).sort((left, right) => {
+        const score = (button) => {
+          const rect = button.getBoundingClientRect();
+          return Math.abs(rect.right - videoRect.right) + Math.abs(rect.bottom - videoRect.top);
+        };
+        return score(left) - score(right);
+      })[0];
+    }
     if (!menuButton) return null;
     menuButton.click();
     let copyItem = null;
@@ -121,7 +139,7 @@
         if (isFacebookMediaUrl(copied)) return copied;
       } catch {}
     }
-    return null;
+    return "clipboard-copied";
   };
   const revealFacebookUrl = async (element) => {
     const immediate = facebookUrlFor(element);
@@ -279,6 +297,12 @@
         const originalText = button.textContent;
         button.textContent = "…";
         const resolved = isFacebookVideo ? await revealFacebookUrl(element) : await resolveDownloadUrl(element);
+        if (resolved === "clipboard-copied") {
+          button.textContent = "✓";
+          button.title = "Link copiado; o Apocalipse abrirá a janela de download";
+          setTimeout(() => { button.textContent = originalText; }, 2500);
+          return;
+        }
         const currentUrl = resolved?.url || resolved || (isYouTubeVideo ? location.href : null);
         if (!currentUrl || (isFacebookVideo && !isFacebookMediaUrl(currentUrl))) {
           button.textContent = "⚠";
