@@ -5,10 +5,28 @@ use apocalipse_core::{
     DownloadId, DownloadKind, DownloadRequest, DownloadState, DownloadTask,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, fs::OpenOptions, io::{Read, Write}, net::{TcpListener, TcpStream}, path::{Path, PathBuf}, process::{Command, Stdio}, sync::Mutex, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
-use tauri::{image::Image, menu::{Menu, MenuItem}, tray::TrayIconBuilder, Manager, State};
+use std::{
+    collections::HashMap,
+    fs,
+    fs::OpenOptions,
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    sync::Mutex,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+use tauri::{
+    image::Image,
+    menu::{Menu, MenuItem},
+    tray::TrayIconBuilder,
+    Manager, State,
+};
 use tauri_plugin_clipboard_manager::ClipboardExt;
-use tokio::{io::AsyncReadExt, sync::{mpsc, oneshot}};
+use tokio::{
+    io::AsyncReadExt,
+    sync::{mpsc, oneshot},
+};
 
 struct AppState {
     queue: Mutex<Vec<DownloadTask>>,
@@ -56,35 +74,62 @@ fn default_site_rules() -> Vec<SiteRule> {
 }
 
 fn valid_site_rule(rule: &SiteRule) -> bool {
-    !rule.id.trim().is_empty() && rule.id.len() <= 64
-        && !rule.name.trim().is_empty() && rule.name.len() <= 120
-        && !rule.hosts.is_empty() && rule.hosts.len() <= 32
+    !rule.id.trim().is_empty()
+        && rule.id.len() <= 64
+        && !rule.name.trim().is_empty()
+        && rule.name.len() <= 120
+        && !rule.hosts.is_empty()
+        && rule.hosts.len() <= 32
         && rule.hosts.iter().all(|host| {
             let host = host.trim().trim_start_matches("*.");
-            !host.is_empty() && host.len() <= 253 && host.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '-'))
+            !host.is_empty()
+                && host.len() <= 253
+                && host.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '.' | '-')
+                })
         })
         && (1..=32).contains(&rule.connections)
 }
 
 fn load_site_rules(path: &Path) -> Vec<SiteRule> {
-    fs::read(path).ok().and_then(|data| serde_json::from_slice::<Vec<SiteRule>>(&data).ok())
-        .filter(|rules| !rules.is_empty() && rules.len() <= 100 && rules.iter().all(valid_site_rule))
+    fs::read(path)
+        .ok()
+        .and_then(|data| serde_json::from_slice::<Vec<SiteRule>>(&data).ok())
+        .filter(|rules| {
+            !rules.is_empty() && rules.len() <= 100 && rules.iter().all(valid_site_rule)
+        })
         .unwrap_or_else(default_site_rules)
 }
 
 fn host_from_url(url: &str) -> Option<String> {
     let scheme = url.find("://")? + 3;
     let authority = url[scheme..].split(['/', '?', '#']).next()?;
-    let host = authority.rsplit('@').next()?.split(':').next()?.trim().to_ascii_lowercase();
+    let host = authority
+        .rsplit('@')
+        .next()?
+        .split(':')
+        .next()?
+        .trim()
+        .to_ascii_lowercase();
     (!host.is_empty()).then_some(host)
 }
 
 fn matching_site_rule(url: &str, rules: &[SiteRule]) -> Option<SiteRule> {
     let host = host_from_url(url)?;
-    rules.iter().find(|rule| rule.enabled && rule.hosts.iter().any(|pattern| {
-        let pattern = pattern.trim().to_ascii_lowercase();
-        pattern.strip_prefix("*.").map_or(host == pattern, |suffix| host == suffix || host.ends_with(&format!(".{suffix}")))
-    })).cloned()
+    rules
+        .iter()
+        .find(|rule| {
+            rule.enabled
+                && rule.hosts.iter().any(|pattern| {
+                    let pattern = pattern.trim().to_ascii_lowercase();
+                    pattern
+                        .strip_prefix("*.")
+                        .map_or(host == pattern, |suffix| {
+                            host == suffix || host.ends_with(&format!(".{suffix}"))
+                        })
+                })
+        })
+        .cloned()
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -122,9 +167,15 @@ struct UserSettings {
     proxy_password: Option<String>,
 }
 
-const fn default_max_active() -> usize { 3 }
-const fn default_connections() -> usize { 8 }
-fn default_bridge_token() -> String { uuid::Uuid::new_v4().simple().to_string() }
+const fn default_max_active() -> usize {
+    3
+}
+const fn default_connections() -> usize {
+    8
+}
+fn default_bridge_token() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
 
 impl Default for UserSettings {
     fn default() -> Self {
@@ -167,7 +218,10 @@ struct PlanResponse {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct MediaFormat { selection: String, label: String }
+struct MediaFormat {
+    selection: String,
+    label: String,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -181,15 +235,25 @@ struct MediaInspection {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ToolStatus { id: String, path: String, found: bool, version: Option<String> }
+struct ToolStatus {
+    id: String,
+    path: String,
+    found: bool,
+    version: Option<String>,
+}
 
 fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
-    path.clone().filter(|value| !value.as_os_str().is_empty()).unwrap_or_else(|| PathBuf::from(fallback))
+    path.clone()
+        .filter(|value| !value.as_os_str().is_empty())
+        .unwrap_or_else(|| PathBuf::from(fallback))
 }
 
 fn http_origin(url: &str) -> Option<&str> {
     let scheme_end = url.find("://")? + 3;
-    let path_start = url[scheme_end..].find('/').map(|index| scheme_end + index).unwrap_or(url.len());
+    let path_start = url[scheme_end..]
+        .find('/')
+        .map(|index| scheme_end + index)
+        .unwrap_or(url.len());
     Some(&url[..path_start])
 }
 
@@ -202,9 +266,19 @@ fn version_line(executable: &Path, args: &[&str]) -> Option<String> {
         command.creation_flags(0x08000000);
     }
     let output = command.output().ok()?;
-    if !output.status.success() { return None; }
-    let text = if output.stdout.is_empty() { String::from_utf8_lossy(&output.stderr) } else { String::from_utf8_lossy(&output.stdout) };
-    text.lines().next().map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned)
+    if !output.status.success() {
+        return None;
+    }
+    let text = if output.stdout.is_empty() {
+        String::from_utf8_lossy(&output.stderr)
+    } else {
+        String::from_utf8_lossy(&output.stdout)
+    };
+    text.lines()
+        .next()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
 }
 
 #[derive(Serialize)]
@@ -226,7 +300,9 @@ struct TransferLimits {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct UserAgentSetting { user_agent: String }
+struct UserAgentSetting {
+    user_agent: String,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -293,53 +369,148 @@ fn inspect_url(url: String) -> Result<PlanResponse, String> {
     let plan = plan_download(&url, capabilities).ok_or_else(|| "unsupported_url".to_owned())?;
     Ok(PlanResponse {
         primary: format!("{:?}", plan.primary),
-        fallbacks: plan.fallbacks.iter().map(|engine| format!("{engine:?}")).collect(),
+        fallbacks: plan
+            .fallbacks
+            .iter()
+            .map(|engine| format!("{engine:?}"))
+            .collect(),
         reason: plan.reason.to_owned(),
     })
 }
 
 #[tauri::command]
-async fn inspect_media_formats(state: State<'_, AppState>, url: String) -> Result<MediaInspection, String> {
-    let executable = configured_tool(&state.settings.lock().map_err(|error| error.to_string())?.yt_dlp_path, "yt-dlp");
+async fn inspect_media_formats(
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<MediaInspection, String> {
+    let executable = configured_tool(
+        &state
+            .settings
+            .lock()
+            .map_err(|error| error.to_string())?
+            .yt_dlp_path,
+        "yt-dlp",
+    );
     let mut command = tokio::process::Command::new(executable);
-    command.args(["--dump-single-json", "--no-playlist", "--skip-download", "--no-warnings"]).arg(&url);
+    command
+        .args([
+            "--dump-single-json",
+            "--no-playlist",
+            "--skip-download",
+            "--no-warnings",
+        ])
+        .arg(&url);
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         command.as_std_mut().creation_flags(0x08000000);
     }
-    let output = command.output().await.map_err(|error| format!("yt_dlp_unavailable: {error}"))?;
-    if !output.status.success() { return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned()); }
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
-    let title = value.get("title").and_then(|item| item.as_str()).unwrap_or("media").to_owned();
-    let thumbnail = value.get("thumbnail").and_then(|item| item.as_str()).map(str::to_owned);
+    let output = command
+        .output()
+        .await
+        .map_err(|error| format!("yt_dlp_unavailable: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
+    let title = value
+        .get("title")
+        .and_then(|item| item.as_str())
+        .unwrap_or("media")
+        .to_owned();
+    let thumbnail = value
+        .get("thumbnail")
+        .and_then(|item| item.as_str())
+        .map(str::to_owned);
     let duration = value.get("duration").and_then(|item| item.as_f64());
-    let mut formats = value.get("formats").and_then(|item| item.as_array()).into_iter().flatten().filter_map(|format| {
-        let id = format.get("format_id")?.as_str()?;
-        let vcodec = format.get("vcodec").and_then(|item| item.as_str()).unwrap_or("none");
-        let acodec = format.get("acodec").and_then(|item| item.as_str()).unwrap_or("none");
-        if vcodec == "none" { return None; }
-        let height = format.get("height").and_then(|item| item.as_u64()).map(|value| format!("{value}p")).unwrap_or_else(|| "video".into());
-        let fps = format.get("fps").and_then(|item| item.as_f64()).map(|value| format!(" · {} fps", value.round())).unwrap_or_default();
-        let extension = format.get("ext").and_then(|item| item.as_str()).unwrap_or("");
-        let size = format.get("filesize").or_else(|| format.get("filesize_approx")).and_then(|item| item.as_u64()).map(|value| format!(" · {:.1} MB", value as f64 / 1_048_576.0)).unwrap_or_default();
-        let selection = if acodec == "none" { format!("{id}+bestaudio/best") } else { id.to_owned() };
-        Some(MediaFormat { selection, label: format!("{height}{fps} · {extension}{size}") })
-    }).collect::<Vec<_>>();
+    let mut formats = value
+        .get("formats")
+        .and_then(|item| item.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|format| {
+            let id = format.get("format_id")?.as_str()?;
+            let vcodec = format
+                .get("vcodec")
+                .and_then(|item| item.as_str())
+                .unwrap_or("none");
+            let acodec = format
+                .get("acodec")
+                .and_then(|item| item.as_str())
+                .unwrap_or("none");
+            if vcodec == "none" {
+                return None;
+            }
+            let height = format
+                .get("height")
+                .and_then(|item| item.as_u64())
+                .map(|value| format!("{value}p"))
+                .unwrap_or_else(|| "video".into());
+            let fps = format
+                .get("fps")
+                .and_then(|item| item.as_f64())
+                .map(|value| format!(" · {} fps", value.round()))
+                .unwrap_or_default();
+            let extension = format
+                .get("ext")
+                .and_then(|item| item.as_str())
+                .unwrap_or("");
+            let size = format
+                .get("filesize")
+                .or_else(|| format.get("filesize_approx"))
+                .and_then(|item| item.as_u64())
+                .map(|value| format!(" · {:.1} MB", value as f64 / 1_048_576.0))
+                .unwrap_or_default();
+            let selection = if acodec == "none" {
+                format!("{id}+bestaudio/best")
+            } else {
+                id.to_owned()
+            };
+            Some(MediaFormat {
+                selection,
+                label: format!("{height}{fps} · {extension}{size}"),
+            })
+        })
+        .collect::<Vec<_>>();
     formats.reverse();
     formats.truncate(120);
-    let safe_title = title.chars().map(|character| if "<>:\"/\\|?*".contains(character) { '_' } else { character }).collect::<String>();
-    Ok(MediaInspection { title, thumbnail, duration, suggested_file_name: format!("{safe_title}.mp4"), formats })
+    let safe_title = title
+        .chars()
+        .map(|character| {
+            if "<>:\"/\\|?*".contains(character) {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    Ok(MediaInspection {
+        title,
+        thumbnail,
+        duration,
+        suggested_file_name: format!("{safe_title}.mp4"),
+        formats,
+    })
 }
 
 fn load_queue(path: &Path) -> Vec<DownloadTask> {
-    fs::read(path).ok().and_then(|data| serde_json::from_slice(&data).ok()).unwrap_or_default()
+    fs::read(path)
+        .ok()
+        .and_then(|data| serde_json::from_slice(&data).ok())
+        .unwrap_or_default()
 }
 
 fn copy_directory_if_missing(source: &Path, destination: &Path) {
-    if !source.is_dir() || destination.exists() { return; }
-    if fs::create_dir_all(destination).is_err() { return; }
-    let Ok(entries) = fs::read_dir(source) else { return };
+    if !source.is_dir() || destination.exists() {
+        return;
+    }
+    if fs::create_dir_all(destination).is_err() {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(source) else {
+        return;
+    };
     for entry in entries.flatten() {
         let target = destination.join(entry.file_name());
         if entry.path().is_dir() {
@@ -350,12 +521,16 @@ fn copy_directory_if_missing(source: &Path, destination: &Path) {
     }
 }
 
-fn portable_data_directory<R: tauri::Runtime>(app: &tauri::App<R>) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn portable_data_directory<R: tauri::Runtime>(
+    app: &tauri::App<R>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let executable = std::env::current_exe()?;
-    let directory = executable.parent().ok_or_else(|| std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        "executable_has_no_parent",
-    ))?.join("data");
+    let directory = executable
+        .parent()
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "executable_has_no_parent")
+        })?
+        .join("data");
     fs::create_dir_all(&directory)?;
     let legacy = app.path().app_data_dir()?;
     for name in ["queue.json", "settings.json", "site-rules.json"] {
@@ -378,7 +553,10 @@ fn save_queue(state: &AppState, queue: &[DownloadTask]) -> Result<(), String> {
 }
 
 fn load_settings(path: &Path) -> UserSettings {
-    fs::read(path).ok().and_then(|data| serde_json::from_slice(&data).ok()).unwrap_or_default()
+    fs::read(path)
+        .ok()
+        .and_then(|data| serde_json::from_slice(&data).ok())
+        .unwrap_or_default()
 }
 
 fn save_settings(state: &AppState, settings: &UserSettings) -> Result<(), String> {
@@ -397,32 +575,64 @@ fn redact_url(url: &str) -> String {
     let base = if let Some(scheme_end) = base.find("://") {
         let authority_start = scheme_end + 3;
         match base[authority_start..].find('@') {
-            Some(at) => format!("{}{}", &base[..authority_start], &base[authority_start + at + 1..]),
+            Some(at) => format!(
+                "{}{}",
+                &base[..authority_start],
+                &base[authority_start + at + 1..]
+            ),
             None => base.to_owned(),
         }
     } else {
         base.to_owned()
     };
-    let parameters = query.split('#').next().unwrap_or_default().split('&').filter(|item| !item.is_empty())
-        .map(|item| format!("{}=<redacted>", item.split_once('=').map_or(item, |(name, _)| name)))
+    let parameters = query
+        .split('#')
+        .next()
+        .unwrap_or_default()
+        .split('&')
+        .filter(|item| !item.is_empty())
+        .map(|item| {
+            format!(
+                "{}=<redacted>",
+                item.split_once('=').map_or(item, |(name, _)| name)
+            )
+        })
         .collect::<Vec<_>>();
-    if parameters.is_empty() { base } else { format!("{base}?{}", parameters.join("&")) }
+    if parameters.is_empty() {
+        base
+    } else {
+        format!("{base}?{}", parameters.join("&"))
+    }
 }
 
 fn sanitize_log_detail(detail: &str) -> String {
     let lowered = detail.to_ascii_lowercase();
-    if ["cookie:", "cookie=", "authorization:", "authorization=", "password:", "password=", "passwd:", "passwd="]
-        .iter().any(|marker| lowered.contains(marker))
+    if [
+        "cookie:",
+        "cookie=",
+        "authorization:",
+        "authorization=",
+        "password:",
+        "password=",
+        "passwd:",
+        "passwd=",
+    ]
+    .iter()
+    .any(|marker| lowered.contains(marker))
     {
         return "<redacted>".to_owned();
     }
-    detail.split_whitespace().map(|part| {
-        if let Some(index) = part.find("http://").or_else(|| part.find("https://")) {
-            let (prefix, url) = part.split_at(index);
-            return format!("{prefix}{}", redact_url(url));
-        }
-        part.to_owned()
-    }).collect::<Vec<_>>().join(" ")
+    detail
+        .split_whitespace()
+        .map(|part| {
+            if let Some(index) = part.find("http://").or_else(|| part.find("https://")) {
+                let (prefix, url) = part.split_at(index);
+                return format!("{prefix}{}", redact_url(url));
+            }
+            part.to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
@@ -438,28 +648,56 @@ fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
         let _ = fs::remove_file(&rotated);
         let _ = fs::rename(&state.log_path, rotated);
     }
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |value| value.as_secs());
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&state.log_path) {
-        let _ = writeln!(file, "[{timestamp}] {level} {event} {}", sanitize_log_detail(detail));
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |value| value.as_secs());
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&state.log_path)
+    {
+        let _ = writeln!(
+            file,
+            "[{timestamp}] {level} {event} {}",
+            sanitize_log_detail(detail)
+        );
     }
 }
 
 fn remember_download_directory(state: &AppState, directory: &Path) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    settings.recent_download_directories.retain(|path| path != directory);
-    settings.recent_download_directories.insert(0, directory.to_path_buf());
+    settings
+        .recent_download_directories
+        .retain(|path| path != directory);
+    settings
+        .recent_download_directories
+        .insert(0, directory.to_path_buf());
     settings.recent_download_directories.truncate(20);
     save_settings(state, &settings)
 }
 
-fn configured_download_directory(app: &tauri::AppHandle, state: &AppState) -> Result<PathBuf, String> {
-    if let Some(path) = state.settings.lock().map_err(|error| error.to_string())?.download_directory.clone() {
+fn configured_download_directory(
+    app: &tauri::AppHandle,
+    state: &AppState,
+) -> Result<PathBuf, String> {
+    if let Some(path) = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .download_directory
+        .clone()
+    {
         return Ok(path);
     }
     app.path().download_dir().map_err(|error| error.to_string())
 }
 
-fn update_task(app: &tauri::AppHandle, id: DownloadId, persist: bool, update: impl FnOnce(&mut DownloadTask)) {
+fn update_task(
+    app: &tauri::AppHandle,
+    id: DownloadId,
+    persist: bool,
+    update: impl FnOnce(&mut DownloadTask),
+) {
     let state = app.state::<AppState>();
     let mut queue = match state.queue.lock() {
         Ok(queue) => queue,
@@ -479,26 +717,49 @@ async fn run_download(
     request: DownloadRequest,
     mut cancellation: oneshot::Receiver<()>,
 ) {
-    diagnostic_log(&app.state::<AppState>(), "INFO", "http.start", &format!("task={id} url={}", redact_url(&request.url)));
-    update_task(&app, id, true, |task| task.state = DownloadState::Inspecting);
-    let proxy = app.state::<AppState>().settings.lock().ok().and_then(|settings| {
-        settings.proxy_enabled.then(|| (
-            settings.proxy_url.clone(),
-            settings.proxy_username.clone(),
-            settings.proxy_password.clone(),
-        ))
+    diagnostic_log(
+        &app.state::<AppState>(),
+        "INFO",
+        "http.start",
+        &format!("task={id} url={}", redact_url(&request.url)),
+    );
+    update_task(&app, id, true, |task| {
+        task.state = DownloadState::Inspecting
     });
+    let proxy = app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .ok()
+        .and_then(|settings| {
+            settings.proxy_enabled.then(|| {
+                (
+                    settings.proxy_url.clone(),
+                    settings.proxy_username.clone(),
+                    settings.proxy_password.clone(),
+                )
+            })
+        });
     let engine_result = match proxy {
-        Some((url, username, password)) => DownloadEngine::with_proxy(
-            url.as_deref(), username.as_deref(), password.as_deref(),
-        ),
+        Some((url, username, password)) => {
+            DownloadEngine::with_proxy(url.as_deref(), username.as_deref(), password.as_deref())
+        }
         None => DownloadEngine::new(),
     };
     let engine = match engine_result {
         Ok(engine) => engine,
         Err(error) => {
-            diagnostic_log(&app.state::<AppState>(), "ERROR", "http.engine", &format!("task={id} error={error}"));
-            update_task(&app, id, true, |task| task.state = DownloadState::Failed { message: error.to_string() });
+            diagnostic_log(
+                &app.state::<AppState>(),
+                "ERROR",
+                "http.engine",
+                &format!("task={id} error={error}"),
+            );
+            update_task(&app, id, true, |task| {
+                task.state = DownloadState::Failed {
+                    message: error.to_string(),
+                }
+            });
             return;
         }
     };
@@ -559,126 +820,261 @@ async fn run_external_download(
     kind: DownloadKind,
     mut cancellation: oneshot::Receiver<()>,
 ) {
-    diagnostic_log(&app.state::<AppState>(), "INFO", "external.start", &format!("task={id} engine={kind:?} url={}", redact_url(&task.source)));
+    diagnostic_log(
+        &app.state::<AppState>(),
+        "INFO",
+        "external.start",
+        &format!("task={id} engine={kind:?} url={}", redact_url(&task.source)),
+    );
     update_task(&app, id, true, |item| {
         item.state = DownloadState::Downloading;
         item.progress_percent = Some(0.0);
     });
     let directory = task.destination.parent().unwrap_or_else(|| Path::new("."));
-    let file_name = task.destination.file_name().and_then(|value| value.to_str()).unwrap_or("download");
-    let tools = app.state::<AppState>().settings.lock().map(|settings| (
-        configured_tool(&settings.ffmpeg_path, "ffmpeg"),
-        configured_tool(&settings.yt_dlp_path, "yt-dlp"),
-        configured_tool(&settings.n_m3u8dl_re_path, if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" }),
-        configured_tool(&settings.aria2_path, if cfg!(windows) { "aria2c.exe" } else { "aria2c" }),
-        settings.connections_per_download.clamp(1, 32),
-        settings.proxy_enabled.then(|| settings.proxy_url.clone()).flatten(),
-        settings.proxy_username.clone(),
-        settings.proxy_password.clone(),
-    )).unwrap_or_else(|_| ("ffmpeg".into(), "yt-dlp".into(), "N_m3u8DL-RE".into(), "aria2c".into(), 8, None, None, None));
-    let identity = app.state::<AppState>().request_identities.lock().ok()
+    let file_name = task
+        .destination
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download");
+    let tools = app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .map(|settings| {
+            (
+                configured_tool(&settings.ffmpeg_path, "ffmpeg"),
+                configured_tool(&settings.yt_dlp_path, "yt-dlp"),
+                configured_tool(
+                    &settings.n_m3u8dl_re_path,
+                    if cfg!(windows) {
+                        "N_m3u8DL-RE.exe"
+                    } else {
+                        "N_m3u8DL-RE"
+                    },
+                ),
+                configured_tool(
+                    &settings.aria2_path,
+                    if cfg!(windows) {
+                        "aria2c.exe"
+                    } else {
+                        "aria2c"
+                    },
+                ),
+                settings.connections_per_download.clamp(1, 32),
+                settings
+                    .proxy_enabled
+                    .then(|| settings.proxy_url.clone())
+                    .flatten(),
+                settings.proxy_username.clone(),
+                settings.proxy_password.clone(),
+            )
+        })
+        .unwrap_or_else(|_| {
+            (
+                "ffmpeg".into(),
+                "yt-dlp".into(),
+                "N_m3u8DL-RE".into(),
+                "aria2c".into(),
+                8,
+                None,
+                None,
+                None,
+            )
+        });
+    let identity = app
+        .state::<AppState>()
+        .request_identities
+        .lock()
+        .ok()
         .and_then(|identities| identities.get(&task.id).cloned());
-    let configured_user_agent = app.state::<AppState>().settings.lock().ok()
+    let configured_user_agent = app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .ok()
         .and_then(|settings| settings.user_agent.clone());
     let user_agent = configured_user_agent.as_deref()
         .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_deref()))
         .unwrap_or("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36");
-    let proxy_url = tools.5.as_deref().map(|url| external_proxy_url(url, tools.6.as_deref(), tools.7.as_deref()));
+    let proxy_url = tools
+        .5
+        .as_deref()
+        .map(|url| external_proxy_url(url, tools.6.as_deref(), tools.7.as_deref()));
     let mut command = match kind {
         DownloadKind::MediaPage => {
             let mut command = tokio::process::Command::new(&tools.1);
-            if let Some(proxy_url) = proxy_url.as_deref() { command.arg("--proxy").arg(proxy_url); }
-            let selection = task.format_selection.as_deref().unwrap_or("bestvideo+bestaudio/best");
+            if let Some(proxy_url) = proxy_url.as_deref() {
+                command.arg("--proxy").arg(proxy_url);
+            }
+            let selection = task
+                .format_selection
+                .as_deref()
+                .unwrap_or("bestvideo+bestaudio/best");
             command.args(["--no-playlist", "--newline", "--verbose"]);
-            command.arg("--concurrent-fragments").arg(tools.4.to_string());
+            command
+                .arg("--concurrent-fragments")
+                .arg(tools.4.to_string());
             let quickjs_name = if cfg!(windows) { "qjs.exe" } else { "qjs" };
-            let adjacent_quickjs = tools.1.parent().map(|directory| directory.join(quickjs_name))
+            let adjacent_quickjs = tools
+                .1
+                .parent()
+                .map(|directory| directory.join(quickjs_name))
                 .filter(|path| path.is_file());
             if let Some(quickjs) = adjacent_quickjs {
-                command.arg("--js-runtimes").arg(format!("quickjs:{}", quickjs.display()));
+                command
+                    .arg("--js-runtimes")
+                    .arg(format!("quickjs:{}", quickjs.display()));
             } else {
                 command.args(["--js-runtimes", "quickjs"]);
             }
             if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
-                if let Some(cookie) = identity.as_ref().and_then(|value| value.cookie_header.as_deref()).filter(|value| !value.is_empty()) {
+                if let Some(cookie) = identity
+                    .as_ref()
+                    .and_then(|value| value.cookie_header.as_deref())
+                    .filter(|value| !value.is_empty())
+                {
                     command.arg("--add-headers").arg(format!("Cookie:{cookie}"));
                 } else {
                     command.args(["--cookies-from-browser", "chrome"]);
                 }
-                command.args(["--retries", "10", "--fragment-retries", "10", "--retry-sleep", "fragment:exp=1:8"]);
+                command.args([
+                    "--retries",
+                    "10",
+                    "--fragment-retries",
+                    "10",
+                    "--retry-sleep",
+                    "fragment:exp=1:8",
+                ]);
             }
             command.args(["--user-agent", user_agent]);
-            if let Some(referer) = task.referer.as_deref() { command.args(["--referer", referer]); }
+            if let Some(referer) = task.referer.as_deref() {
+                command.args(["--referer", referer]);
+            }
             if let Some(audio_format) = selection.strip_prefix("audio:") {
                 command.args(["-f", "bestaudio/best", "-x", "--audio-format", audio_format]);
             } else {
                 command.args(["-f", selection, "--merge-output-format", "mp4"]);
             }
-            command.arg("-P").arg(directory).arg("-o").arg(file_name).arg(&task.source);
+            command
+                .arg("-P")
+                .arg(directory)
+                .arg("-o")
+                .arg(file_name)
+                .arg(&task.source);
             command
         }
         DownloadKind::Hls => {
-            if let Some(audio_format) = task.format_selection.as_deref().and_then(|value| value.strip_prefix("audio:")) {
+            if let Some(audio_format) = task
+                .format_selection
+                .as_deref()
+                .and_then(|value| value.strip_prefix("audio:"))
+            {
                 let mut command = tokio::process::Command::new(&tools.0);
-                if let Some(proxy_url) = proxy_url.as_deref() { command.arg("-http_proxy").arg(proxy_url); }
+                if let Some(proxy_url) = proxy_url.as_deref() {
+                    command.arg("-http_proxy").arg(proxy_url);
+                }
                 command.args(["-y", "-i"]).arg(&task.source).arg("-vn");
                 match audio_format {
-                    "mp3" => { command.args(["-c:a", "libmp3lame", "-q:a", "2"]); }
-                    "wav" => { command.args(["-c:a", "pcm_s16le"]); }
-                    "flac" => { command.args(["-c:a", "flac"]); }
-                    "opus" => { command.args(["-c:a", "libopus", "-b:a", "192k"]); }
-                    _ => { command.args(["-c:a", "aac", "-b:a", "256k"]); }
+                    "mp3" => {
+                        command.args(["-c:a", "libmp3lame", "-q:a", "2"]);
+                    }
+                    "wav" => {
+                        command.args(["-c:a", "pcm_s16le"]);
+                    }
+                    "flac" => {
+                        command.args(["-c:a", "flac"]);
+                    }
+                    "opus" => {
+                        command.args(["-c:a", "libopus", "-b:a", "192k"]);
+                    }
+                    _ => {
+                        command.args(["-c:a", "aac", "-b:a", "256k"]);
+                    }
                 }
                 command.arg(&task.destination);
                 command
             } else {
-            let mut command = tokio::process::Command::new(&tools.2);
-            if let Some(proxy_url) = proxy_url.as_deref() { command.arg("--custom-proxy").arg(proxy_url); }
-            let stem = task.destination.file_stem().and_then(|value| value.to_str()).unwrap_or("download");
-            command.arg(&task.source).arg("--save-dir").arg(directory)
-                .args(["--save-name", stem, "--auto-select", "--concurrent-download", "--download-retry-count", "10", "--http-request-timeout", "30"])
-                .arg("--thread-count").arg(tools.4.to_string())
-                .arg("--ffmpeg-binary-path").arg(&tools.0);
-            if let Some(referer) = task.referer.as_deref() {
-                command.arg("-H").arg(format!("Referer: {referer}"));
-                if let Some(origin) = http_origin(referer) {
-                    command.arg("-H").arg(format!("Origin: {origin}"));
+                let mut command = tokio::process::Command::new(&tools.2);
+                if let Some(proxy_url) = proxy_url.as_deref() {
+                    command.arg("--custom-proxy").arg(proxy_url);
                 }
-            }
-            command.arg("-H").arg(format!("User-Agent: {user_agent}"));
-            if let Some(cookie) = identity.as_ref().and_then(|value| value.cookie_header.as_deref()) {
-                command.arg("-H").arg(format!("Cookie: {cookie}"));
-            }
-            if task.source.contains("hdsex.org") || task.referer.as_deref().is_some_and(|url| url.contains("hdsex.org")) {
-                command.arg("--append-url-params=true");
-            }
-            // Some video hosts expose completed VOD playlists without ENDLIST and therefore
-            // look live. Treat known finite CDN captures as VOD so the task does not wait forever.
-            if task.known_duration.is_some_and(|duration| duration > 0.0)
-                || task.source.contains("growcdnssedge.com")
-            {
-                command.arg("--live-perform-as-vod");
-            }
-            command.args([
-                "--check-segments-count=true",
-                "--del-after-done=true",
-                "--write-meta-json=false",
-                "--no-log=true",
-                "--no-ansi-color=true",
-                "--disable-update-check=true",
-                "--mux-after-done=format=mp4:muxer=ffmpeg",
-            ]);
-            command
+                let stem = task
+                    .destination
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("download");
+                command
+                    .arg(&task.source)
+                    .arg("--save-dir")
+                    .arg(directory)
+                    .args([
+                        "--save-name",
+                        stem,
+                        "--auto-select",
+                        "--concurrent-download",
+                        "--download-retry-count",
+                        "10",
+                        "--http-request-timeout",
+                        "30",
+                    ])
+                    .arg("--thread-count")
+                    .arg(tools.4.to_string())
+                    .arg("--ffmpeg-binary-path")
+                    .arg(&tools.0);
+                if let Some(referer) = task.referer.as_deref() {
+                    command.arg("-H").arg(format!("Referer: {referer}"));
+                    if let Some(origin) = http_origin(referer) {
+                        command.arg("-H").arg(format!("Origin: {origin}"));
+                    }
+                }
+                command.arg("-H").arg(format!("User-Agent: {user_agent}"));
+                if let Some(cookie) = identity
+                    .as_ref()
+                    .and_then(|value| value.cookie_header.as_deref())
+                {
+                    command.arg("-H").arg(format!("Cookie: {cookie}"));
+                }
+                if task.source.contains("hdsex.org")
+                    || task
+                        .referer
+                        .as_deref()
+                        .is_some_and(|url| url.contains("hdsex.org"))
+                {
+                    command.arg("--append-url-params=true");
+                }
+                // Some video hosts expose completed VOD playlists without ENDLIST and therefore
+                // look live. Treat known finite CDN captures as VOD so the task does not wait forever.
+                if task.known_duration.is_some_and(|duration| duration > 0.0)
+                    || task.source.contains("growcdnssedge.com")
+                {
+                    command.arg("--live-perform-as-vod");
+                }
+                command.args([
+                    "--check-segments-count=true",
+                    "--del-after-done=true",
+                    "--write-meta-json=false",
+                    "--no-log=true",
+                    "--no-ansi-color=true",
+                    "--disable-update-check=true",
+                    "--mux-after-done=format=mp4:muxer=ffmpeg",
+                ]);
+                command
             }
         }
         DownloadKind::Torrent | DownloadKind::Magnet => {
             let mut command = tokio::process::Command::new(&tools.3);
             if let Some(proxy_url) = tools.5.as_deref() {
                 command.arg(format!("--all-proxy={proxy_url}"));
-                if let Some(username) = tools.6.as_deref() { command.arg(format!("--all-proxy-user={username}")); }
-                if let Some(password) = tools.7.as_deref() { command.arg(format!("--all-proxy-passwd={password}")); }
+                if let Some(username) = tools.6.as_deref() {
+                    command.arg(format!("--all-proxy-user={username}"));
+                }
+                if let Some(password) = tools.7.as_deref() {
+                    command.arg(format!("--all-proxy-passwd={password}"));
+                }
             }
-            command.arg(format!("--dir={}", directory.display())).arg(&task.source);
+            command
+                .arg(format!("--dir={}", directory.display()))
+                .arg(&task.source);
             command
         }
         _ => return,
@@ -696,8 +1092,18 @@ async fn run_external_download(
             let mut stderr = child.stderr.take();
             let output_app = app.clone();
             let error_app = app.clone();
-            let output = tokio::spawn(async move { match stdout.take() { Some(stream) => read_process_tail(stream, Some((output_app, id))).await, None => Vec::new() } });
-            let errors = tokio::spawn(async move { match stderr.take() { Some(stream) => read_process_tail(stream, Some((error_app, id))).await, None => Vec::new() } });
+            let output = tokio::spawn(async move {
+                match stdout.take() {
+                    Some(stream) => read_process_tail(stream, Some((output_app, id))).await,
+                    None => Vec::new(),
+                }
+            });
+            let errors = tokio::spawn(async move {
+                match stderr.take() {
+                    Some(stream) => read_process_tail(stream, Some((error_app, id))).await,
+                    None => Vec::new(),
+                }
+            });
             let status = tokio::select! {
                 biased;
                 _ = &mut cancellation => { let _ = child.kill().await; return; }
@@ -705,30 +1111,52 @@ async fn run_external_download(
             };
             let mut text = String::from_utf8_lossy(&output.await.unwrap_or_default()).into_owned();
             text.push_str(&String::from_utf8_lossy(&errors.await.unwrap_or_default()));
-            status.map_err(|error| error.to_string()).and_then(|status| {
-                if status.success() { return Ok(()); }
-                if kind == DownloadKind::MediaPage {
-                    if let Some(path) = write_yt_dlp_diagnostic(&app, id, &text, status.code()) {
-                        diagnostic_log(&app.state::<AppState>(), "INFO", "yt_dlp.report", &format!("task={id} file={}", path.display()));
+            status
+                .map_err(|error| error.to_string())
+                .and_then(|status| {
+                    if status.success() {
+                        return Ok(());
                     }
-                }
-                Err(external_error_detail(&text, status.code()))
-            })
-        },
+                    if kind == DownloadKind::MediaPage {
+                        if let Some(path) = write_yt_dlp_diagnostic(&app, id, &text, status.code())
+                        {
+                            diagnostic_log(
+                                &app.state::<AppState>(),
+                                "INFO",
+                                "yt_dlp.report",
+                                &format!("task={id} file={}", path.display()),
+                            );
+                        }
+                    }
+                    Err(external_error_detail(&text, status.code()))
+                })
+        }
         Err(error) => Err(format!("external_engine_unavailable: {error}")),
     };
     match result {
         Ok(()) => {
-            diagnostic_log(&app.state::<AppState>(), "INFO", "external.completed", &format!("task={id} engine={kind:?}"));
+            diagnostic_log(
+                &app.state::<AppState>(),
+                "INFO",
+                "external.completed",
+                &format!("task={id} engine={kind:?}"),
+            );
             update_task(&app, id, true, |item| {
                 item.progress_percent = Some(100.0);
                 item.state = DownloadState::Completed;
             });
-        },
+        }
         Err(message) => {
-            diagnostic_log(&app.state::<AppState>(), "ERROR", "external.failed", &format!("task={id} engine={kind:?} error={message}"));
-            update_task(&app, id, true, |item| item.state = DownloadState::Failed { message });
-        },
+            diagnostic_log(
+                &app.state::<AppState>(),
+                "ERROR",
+                "external.failed",
+                &format!("task={id} engine={kind:?} error={message}"),
+            );
+            update_task(&app, id, true, |item| {
+                item.state = DownloadState::Failed { message }
+            });
+        }
     }
     if let Ok(mut workers) = app.state::<AppState>().workers.lock() {
         workers.remove(&id);
@@ -746,15 +1174,28 @@ fn write_yt_dlp_diagnostic(
     let directory = state.queue_path.parent()?.join("logs");
     fs::create_dir_all(&directory).ok()?;
     let path = directory.join(format!("yt-dlp-{id}.log"));
-    let proxy_password = state.settings.lock().ok().and_then(|settings| settings.proxy_password.clone());
-    let sanitized = output.lines().map(|line| {
-        if line.to_ascii_lowercase().contains("cookie:") {
-            "[linha com cookie ocultada]".to_owned()
-        } else {
-            proxy_password.as_deref().filter(|value| !value.is_empty())
-                .map_or_else(|| sanitize_log_detail(line), |password| sanitize_log_detail(&line.replace(password, "<redacted>")))
-        }
-    }).collect::<Vec<_>>().join("\n");
+    let proxy_password = state
+        .settings
+        .lock()
+        .ok()
+        .and_then(|settings| settings.proxy_password.clone());
+    let sanitized = output
+        .lines()
+        .map(|line| {
+            if line.to_ascii_lowercase().contains("cookie:") {
+                "[linha com cookie ocultada]".to_owned()
+            } else {
+                proxy_password
+                    .as_deref()
+                    .filter(|value| !value.is_empty())
+                    .map_or_else(
+                        || sanitize_log_detail(line),
+                        |password| sanitize_log_detail(&line.replace(password, "<redacted>")),
+                    )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let contents = format!(
         "Apocalipse Download Manager - diagnóstico do yt-dlp\nTarefa: {id}\nCódigo de saída: {}\n\n{sanitized}\n",
         exit_code.map_or_else(|| "indisponível".to_owned(), |code| code.to_string()),
@@ -766,13 +1207,20 @@ fn write_yt_dlp_diagnostic(
 #[tauri::command]
 fn read_general_log(state: State<'_, AppState>) -> Result<String, String> {
     diagnostic_log(&state, "INFO", "log.viewed", "viewed_inside_application");
-    let _read_guard = state.log_write_lock.lock().map_err(|error| error.to_string())?;
+    let _read_guard = state
+        .log_write_lock
+        .lock()
+        .map_err(|error| error.to_string())?;
     match fs::read_to_string(&state.log_path) {
         Ok(contents) => {
             let start = contents.len().saturating_sub(512 * 1024);
-            let start = contents.char_indices().map(|(index, _)| index).find(|index| *index >= start).unwrap_or(0);
+            let start = contents
+                .char_indices()
+                .map(|(index, _)| index)
+                .find(|index| *index >= start)
+                .unwrap_or(0);
             Ok(contents[start..].to_owned())
-        },
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(error) => Err(error.to_string()),
     }
@@ -782,11 +1230,14 @@ fn read_general_log(state: State<'_, AppState>) -> Result<String, String> {
 fn clear_general_log(state: State<'_, AppState>) -> Result<(), String> {
     let rotated = state.log_path.with_extension("log.1");
     {
-        let _write_guard = state.log_write_lock.lock().map_err(|error| error.to_string())?;
+        let _write_guard = state
+            .log_write_lock
+            .lock()
+            .map_err(|error| error.to_string())?;
         for path in [&state.log_path, &rotated] {
             match fs::remove_file(path) {
-                Ok(()) => {},
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.to_string()),
             }
         }
@@ -797,8 +1248,14 @@ fn clear_general_log(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 fn get_log_editor(state: State<'_, AppState>) -> Result<String, String> {
-    Ok(state.settings.lock().map_err(|error| error.to_string())?.log_editor_path.as_ref()
-        .map(|path| path.to_string_lossy().into_owned()).unwrap_or_default())
+    Ok(state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .log_editor_path
+        .as_ref()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default())
 }
 
 #[tauri::command]
@@ -810,18 +1267,36 @@ fn set_log_editor(state: State<'_, AppState>, path: String) -> Result<String, St
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.log_editor_path = path;
     save_settings(&state, &settings)?;
-    Ok(settings.log_editor_path.as_ref().map(|value| value.to_string_lossy().into_owned()).unwrap_or_default())
+    Ok(settings
+        .log_editor_path
+        .as_ref()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_default())
 }
 
 #[tauri::command]
 fn open_log_external(state: State<'_, AppState>) -> Result<(), String> {
-    diagnostic_log(&state, "INFO", "log.external", "opened_with_configured_editor");
-    let editor = state.settings.lock().map_err(|error| error.to_string())?.log_editor_path.clone()
+    diagnostic_log(
+        &state,
+        "INFO",
+        "log.external",
+        "opened_with_configured_editor",
+    );
+    let editor = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .log_editor_path
+        .clone()
         .ok_or_else(|| "log_editor_not_configured".to_owned())?;
     if !editor.is_file() {
         return Err("log_editor_not_found".to_owned());
     }
-    Command::new(editor).arg(&state.log_path).spawn().map(|_| ()).map_err(|error| error.to_string())
+    Command::new(editor)
+        .arg(&state.log_path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn save_site_rules(state: &AppState, rules: &[SiteRule]) -> Result<(), String> {
@@ -829,8 +1304,11 @@ fn save_site_rules(state: &AppState, rules: &[SiteRule]) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     if state.site_rules_path.exists() {
-        fs::copy(&state.site_rules_path, state.site_rules_path.with_extension("backup.json"))
-            .map_err(|error| error.to_string())?;
+        fs::copy(
+            &state.site_rules_path,
+            state.site_rules_path.with_extension("backup.json"),
+        )
+        .map_err(|error| error.to_string())?;
     }
     let data = serde_json::to_vec_pretty(rules).map_err(|error| error.to_string())?;
     fs::write(&state.site_rules_path, data).map_err(|error| error.to_string())
@@ -844,18 +1322,27 @@ fn get_site_rules(state: State<'_, AppState>) -> Result<String, String> {
 
 #[tauri::command]
 fn set_site_rules(state: State<'_, AppState>, json: String) -> Result<String, String> {
-    let rules = serde_json::from_str::<Vec<SiteRule>>(&json).map_err(|error| format!("invalid_site_rules_json: {error}"))?;
+    let rules = serde_json::from_str::<Vec<SiteRule>>(&json)
+        .map_err(|error| format!("invalid_site_rules_json: {error}"))?;
     if rules.is_empty() || rules.len() > 100 || !rules.iter().all(valid_site_rule) {
         return Err("invalid_site_rules".to_owned());
     }
-    let mut ids = rules.iter().map(|rule| rule.id.trim().to_ascii_lowercase()).collect::<Vec<_>>();
+    let mut ids = rules
+        .iter()
+        .map(|rule| rule.id.trim().to_ascii_lowercase())
+        .collect::<Vec<_>>();
     ids.sort();
     if ids.windows(2).any(|pair| pair[0] == pair[1]) {
         return Err("duplicate_site_rule_id".to_owned());
     }
     save_site_rules(&state, &rules)?;
     *state.site_rules.lock().map_err(|error| error.to_string())? = rules;
-    diagnostic_log(&state, "INFO", "site_rules.updated", &format!("count={}", ids.len()));
+    diagnostic_log(
+        &state,
+        "INFO",
+        "site_rules.updated",
+        &format!("count={}", ids.len()),
+    );
     get_site_rules(state)
 }
 
@@ -878,15 +1365,20 @@ async fn read_process_tail(
         match stream.read(&mut chunk).await {
             Ok(0) | Err(_) => break,
             Ok(count) => {
-                if let Some(percent) = parse_external_progress(&String::from_utf8_lossy(&chunk[..count])) {
+                if let Some(percent) =
+                    parse_external_progress(&String::from_utf8_lossy(&chunk[..count]))
+                {
                     if let Some((app, id)) = progress.as_ref() {
                         update_task(app, *id, false, |task| {
-                            task.progress_percent = Some(task.progress_percent.unwrap_or(0.0).max(percent));
+                            task.progress_percent =
+                                Some(task.progress_percent.unwrap_or(0.0).max(percent));
                         });
                     }
                 }
                 tail.extend_from_slice(&chunk[..count]);
-                if tail.len() > 65_536 { tail.drain(..tail.len() - 65_536); }
+                if tail.len() > 65_536 {
+                    tail.drain(..tail.len() - 65_536);
+                }
             }
         }
     }
@@ -894,13 +1386,18 @@ async fn read_process_tail(
 }
 
 fn parse_external_progress(text: &str) -> Option<f64> {
-    text.match_indices('%').filter_map(|(end, _)| {
-        let prefix = &text[..end];
-        let start = prefix.char_indices().rev()
-            .take_while(|(_, character)| character.is_ascii_digit() || *character == '.')
-            .last().map(|(index, _)| index)?;
-        prefix[start..].parse::<f64>().ok()
-    }).rfind(|value| (0.0..=100.0).contains(value))
+    text.match_indices('%')
+        .filter_map(|(end, _)| {
+            let prefix = &text[..end];
+            let start = prefix
+                .char_indices()
+                .rev()
+                .take_while(|(_, character)| character.is_ascii_digit() || *character == '.')
+                .last()
+                .map(|(index, _)| index)?;
+            prefix[start..].parse::<f64>().ok()
+        })
+        .rfind(|value| (0.0..=100.0).contains(value))
 }
 
 fn external_error_detail(output: &str, exit_code: Option<i32>) -> String {
@@ -955,9 +1452,21 @@ fn external_error_detail(output: &str, exit_code: Option<i32>) -> String {
 }
 
 fn suggested_name(source: &str) -> String {
-    source.split(['/', '\\']).next_back().and_then(|part| part.split(['?', '#']).next())
-        .filter(|part| !part.is_empty()).unwrap_or("download").chars()
-        .map(|character| if "<>:\"/\\|?*".contains(character) { '_' } else { character }).collect()
+    source
+        .split(['/', '\\'])
+        .next_back()
+        .and_then(|part| part.split(['?', '#']).next())
+        .filter(|part| !part.is_empty())
+        .unwrap_or("download")
+        .chars()
+        .map(|character| {
+            if "<>:\"/\\|?*".contains(character) {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect()
 }
 
 fn suggested_download_name(source: &str) -> String {
@@ -975,7 +1484,13 @@ fn suggested_download_name(source: &str) -> String {
 
 fn validate_file_name(name: &str) -> Result<String, String> {
     let name = name.trim();
-    if name.is_empty() || name == "." || name == ".." || name.chars().any(|character| "<>:\"/\\|?*".contains(character)) {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name
+            .chars()
+            .any(|character| "<>:\"/\\|?*".contains(character))
+    {
         return Err("invalid_file_name".to_owned());
     }
     Ok(name.to_owned())
@@ -987,13 +1502,26 @@ fn append_source_extension(file_name: String, source: &str, kind: DownloadKind) 
         .and_then(|value| value.to_str())
         .is_some_and(|value| {
             (1..=10).contains(&value.len())
-                && value.chars().all(|character| character.is_ascii_alphanumeric())
+                && value
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric())
         });
-    if kind != DownloadKind::Http || has_extension { return file_name; }
+    if kind != DownloadKind::Http || has_extension {
+        return file_name;
+    }
     let source_name = suggested_name(source);
-    let extension = Path::new(&source_name).extension().and_then(|value| value.to_str())
-        .filter(|value| (1..=10).contains(&value.len()) && value.chars().all(|character| character.is_ascii_alphanumeric()));
-    extension.map(|extension| format!("{file_name}.{extension}")).unwrap_or(file_name)
+    let extension = Path::new(&source_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .filter(|value| {
+            (1..=10).contains(&value.len())
+                && value
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric())
+        });
+    extension
+        .map(|extension| format!("{file_name}.{extension}"))
+        .unwrap_or(file_name)
 }
 
 fn unique_destination(directory: &Path, file_name: &str) -> PathBuf {
@@ -1002,7 +1530,10 @@ fn unique_destination(directory: &Path, file_name: &str) -> PathBuf {
         return original;
     }
     let path = Path::new(file_name);
-    let stem = path.file_stem().and_then(|value| value.to_str()).unwrap_or("download");
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download");
     let extension = path.extension().and_then(|value| value.to_str());
     for index in 1..10_000 {
         let candidate_name = match extension {
@@ -1024,16 +1555,26 @@ fn suggest_download_name(url: String) -> String {
 
 #[tauri::command]
 fn list_downloads(state: State<'_, AppState>) -> Result<Vec<DownloadTask>, String> {
-    state.queue.lock().map(|queue| queue.clone()).map_err(|error| error.to_string())
+    state
+        .queue
+        .lock()
+        .map(|queue| queue.clone())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn default_download_directory(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+fn default_download_directory(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
     configured_download_directory(&app, &state).map(|path| path.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
-fn set_default_download_directory(state: State<'_, AppState>, path: String) -> Result<String, String> {
+fn set_default_download_directory(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
     let path = PathBuf::from(path.trim());
     if !path.is_absolute() {
         return Err("destination_must_be_absolute".to_owned());
@@ -1045,25 +1586,40 @@ fn set_default_download_directory(state: State<'_, AppState>, path: String) -> R
 }
 
 #[tauri::command]
-fn list_download_directories(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<DestinationChoice>, String> {
+fn list_download_directories(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<DestinationChoice>, String> {
     let default = configured_download_directory(&app, &state)?;
-    let recent = state.settings.lock().map_err(|error| error.to_string())?.recent_download_directories.clone();
+    let recent = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .recent_download_directories
+        .clone();
     let mut paths = vec![default.clone()];
     for path in recent {
-        if !paths.contains(&path) { paths.push(path); }
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
     }
-    Ok(paths.into_iter().map(|path| DestinationChoice {
-        is_default: path == default,
-        available: path.is_dir(),
-        path: path.to_string_lossy().into_owned(),
-    }).collect())
+    Ok(paths
+        .into_iter()
+        .map(|path| DestinationChoice {
+            is_default: path == default,
+            available: path.is_dir(),
+            path: path.to_string_lossy().into_owned(),
+        })
+        .collect())
 }
 
 #[tauri::command]
 fn remove_download_directory(state: State<'_, AppState>, path: String) -> Result<(), String> {
     let target = PathBuf::from(path);
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    settings.recent_download_directories.retain(|item| item != &target);
+    settings
+        .recent_download_directories
+        .retain(|item| item != &target);
     save_settings(&state, &settings)
 }
 
@@ -1080,31 +1636,89 @@ fn pick_directory(initial_directory: Option<String>) -> Option<String> {
     if let Some(path) = initial_directory.filter(|path| !path.trim().is_empty()) {
         dialog = dialog.set_directory(path);
     }
-    dialog.pick_folder().map(|path| path.to_string_lossy().into_owned())
+    dialog
+        .pick_folder()
+        .map(|path| path.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
 fn pick_executable(initial_path: Option<String>) -> Option<String> {
     let mut dialog = rfd::FileDialog::new();
     if let Some(path) = initial_path.filter(|value| !value.trim().is_empty()) {
-        if let Some(parent) = Path::new(&path).parent() { dialog = dialog.set_directory(parent); }
+        if let Some(parent) = Path::new(&path).parent() {
+            dialog = dialog.set_directory(parent);
+        }
     }
-    dialog.pick_file().map(|path| path.to_string_lossy().into_owned())
+    dialog
+        .pick_file()
+        .map(|path| path.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
 fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, String> {
     let settings = state.settings.lock().map_err(|error| error.to_string())?;
     let definitions = [
-        ("ffmpeg", configured_tool(&settings.ffmpeg_path, if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" }), ["-version"].as_slice()),
-        ("yt-dlp", configured_tool(&settings.yt_dlp_path, if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" }), ["--version"].as_slice()),
-        ("n-m3u8dl-re", configured_tool(&settings.n_m3u8dl_re_path, if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" }), ["--version"].as_slice()),
-        ("aria2", configured_tool(&settings.aria2_path, if cfg!(windows) { "aria2c.exe" } else { "aria2c" }), ["--version"].as_slice()),
+        (
+            "ffmpeg",
+            configured_tool(
+                &settings.ffmpeg_path,
+                if cfg!(windows) {
+                    "ffmpeg.exe"
+                } else {
+                    "ffmpeg"
+                },
+            ),
+            ["-version"].as_slice(),
+        ),
+        (
+            "yt-dlp",
+            configured_tool(
+                &settings.yt_dlp_path,
+                if cfg!(windows) {
+                    "yt-dlp.exe"
+                } else {
+                    "yt-dlp"
+                },
+            ),
+            ["--version"].as_slice(),
+        ),
+        (
+            "n-m3u8dl-re",
+            configured_tool(
+                &settings.n_m3u8dl_re_path,
+                if cfg!(windows) {
+                    "N_m3u8DL-RE.exe"
+                } else {
+                    "N_m3u8DL-RE"
+                },
+            ),
+            ["--version"].as_slice(),
+        ),
+        (
+            "aria2",
+            configured_tool(
+                &settings.aria2_path,
+                if cfg!(windows) {
+                    "aria2c.exe"
+                } else {
+                    "aria2c"
+                },
+            ),
+            ["--version"].as_slice(),
+        ),
     ];
-    Ok(definitions.into_iter().map(|(id, executable, args)| {
-        let version = version_line(&executable, args);
-        ToolStatus { id: id.to_owned(), path: executable.to_string_lossy().into_owned(), found: version.is_some(), version }
-    }).collect())
+    Ok(definitions
+        .into_iter()
+        .map(|(id, executable, args)| {
+            let version = version_line(&executable, args);
+            ToolStatus {
+                id: id.to_owned(),
+                path: executable.to_string_lossy().into_owned(),
+                found: version.is_some(),
+                version,
+            }
+        })
+        .collect())
 }
 
 fn optional_path(value: String) -> Option<PathBuf> {
@@ -1113,7 +1727,9 @@ fn optional_path(value: String) -> Option<PathBuf> {
 }
 
 fn external_proxy_url(url: &str, username: Option<&str>, password: Option<&str>) -> String {
-    let Ok(mut parsed) = url::Url::parse(url) else { return url.to_owned() };
+    let Ok(mut parsed) = url::Url::parse(url) else {
+        return url.to_owned();
+    };
     if let Some(username) = username.filter(|value| !value.is_empty()) {
         let _ = parsed.set_username(username);
         let _ = parsed.set_password(password);
@@ -1124,16 +1740,27 @@ fn external_proxy_url(url: &str, username: Option<&str>, password: Option<&str>)
 fn uupdump_urls(url: &str) -> Option<(String, String)> {
     let lower = url.to_ascii_lowercase();
     let prefixes = [
-        "https://uupdump.net/", "https://www.uupdump.net/",
-        "http://uupdump.net/", "http://www.uupdump.net/",
+        "https://uupdump.net/",
+        "https://www.uupdump.net/",
+        "http://uupdump.net/",
+        "http://www.uupdump.net/",
     ];
-    let prefix = prefixes.into_iter().find(|prefix| lower.starts_with(prefix))?;
+    let prefix = prefixes
+        .into_iter()
+        .find(|prefix| lower.starts_with(prefix))?;
     let remainder = &url[prefix.len()..];
     let (path, query) = remainder.split_once('?').unwrap_or((remainder, ""));
-    if !matches!(path.to_ascii_lowercase().as_str(), "download.php" | "get.php") {
+    if !matches!(
+        path.to_ascii_lowercase().as_str(),
+        "download.php" | "get.php"
+    ) {
         return None;
     }
-    let suffix = if query.is_empty() { String::new() } else { format!("?{query}") };
+    let suffix = if query.is_empty() {
+        String::new()
+    } else {
+        format!("?{query}")
+    };
     Some((
         format!("https://uupdump.net/get.php{suffix}"),
         format!("https://uupdump.net/download.php{suffix}"),
@@ -1141,7 +1768,13 @@ fn uupdump_urls(url: &str) -> Option<(String, String)> {
 }
 
 #[tauri::command]
-fn set_tool_paths(state: State<'_, AppState>, ffmpeg: String, yt_dlp: String, n_m3u8dl_re: String, aria2: String) -> Result<(), String> {
+fn set_tool_paths(
+    state: State<'_, AppState>,
+    ffmpeg: String,
+    yt_dlp: String,
+    n_m3u8dl_re: String,
+    aria2: String,
+) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.ffmpeg_path = optional_path(ffmpeg);
     settings.yt_dlp_path = optional_path(yt_dlp);
@@ -1164,7 +1797,9 @@ fn enqueue_download(
         let rules = state.site_rules.lock().map_err(|error| error.to_string())?;
         matching_site_rule(&url, &rules)
     };
-    let uupdump = site_rule.as_ref().filter(|rule| rule.action == SiteRuleAction::UupdumpPost)
+    let uupdump = site_rule
+        .as_ref()
+        .filter(|rule| rule.action == SiteRuleAction::UupdumpPost)
         .and_then(|_| uupdump_urls(&url));
     let url = uupdump.as_ref().map(|item| item.0.clone()).unwrap_or(url);
     inspect_url(url.clone())?;
@@ -1191,28 +1826,59 @@ fn enqueue_download(
         task.known_duration = context
             .known_duration
             .filter(|duration| duration.is_finite() && *duration > 0.0);
-        let cookie_header = context.cookie_header.filter(|value| value.len() <= 16_384 && !value.contains('\r') && !value.contains('\n'));
-        let user_agent = context.user_agent.filter(|value| value.len() <= 1024 && !value.contains('\r') && !value.contains('\n'));
-        let request_method = context.request_method.as_deref().unwrap_or("GET").to_ascii_uppercase();
-        let request_method = if request_method == "POST" { "POST" } else { "GET" }.to_owned();
+        let cookie_header = context.cookie_header.filter(|value| {
+            value.len() <= 16_384 && !value.contains('\r') && !value.contains('\n')
+        });
+        let user_agent = context
+            .user_agent
+            .filter(|value| value.len() <= 1024 && !value.contains('\r') && !value.contains('\n'));
+        let request_method = context
+            .request_method
+            .as_deref()
+            .unwrap_or("GET")
+            .to_ascii_uppercase();
+        let request_method = if request_method == "POST" {
+            "POST"
+        } else {
+            "GET"
+        }
+        .to_owned();
         let request_body = context.request_body.filter(|value| value.len() <= 65_536);
-        let request_content_type = context.request_content_type
+        let request_content_type = context
+            .request_content_type
             .filter(|value| value.len() <= 256 && !value.contains('\r') && !value.contains('\n'));
         if cookie_header.is_some() || user_agent.is_some() || request_method == "POST" {
-            state.request_identities.lock().map_err(|error| error.to_string())?
-                .insert(task.id, RequestIdentity { cookie_header, user_agent, request_method, request_body, request_content_type });
+            state
+                .request_identities
+                .lock()
+                .map_err(|error| error.to_string())?
+                .insert(
+                    task.id,
+                    RequestIdentity {
+                        cookie_header,
+                        user_agent,
+                        request_method,
+                        request_body,
+                        request_content_type,
+                    },
+                );
         }
     }
     if let Some((_, page_url)) = uupdump {
         task.referer = Some(page_url);
-        let mut identities = state.request_identities.lock().map_err(|error| error.to_string())?;
-        let identity = identities.entry(task.id).or_insert_with(|| RequestIdentity {
-            cookie_header: None,
-            user_agent: None,
-            request_method: "POST".to_owned(),
-            request_body: None,
-            request_content_type: None,
-        });
+        let mut identities = state
+            .request_identities
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let identity = identities
+            .entry(task.id)
+            .or_insert_with(|| RequestIdentity {
+                cookie_header: None,
+                user_agent: None,
+                request_method: "POST".to_owned(),
+                request_body: None,
+                request_content_type: None,
+            });
         identity.request_method = "POST".to_owned();
         identity.request_body = Some("autodl=2&updates=1".to_owned());
         identity.request_content_type = Some("application/x-www-form-urlencoded".to_owned());
@@ -1221,56 +1887,143 @@ fn enqueue_download(
     queue.push(task.clone());
     save_queue(&state, &queue)?;
     drop(queue);
-    diagnostic_log(&state, "INFO", "task.enqueued", &format!("task={} engine={kind:?} rule={} url={} file={}", task.id, site_rule.as_ref().map_or("none", |rule| rule.id.as_str()), redact_url(&task.source), task.destination.display()));
+    diagnostic_log(
+        &state,
+        "INFO",
+        "task.enqueued",
+        &format!(
+            "task={} engine={kind:?} rule={} url={} file={}",
+            task.id,
+            site_rule.as_ref().map_or("none", |rule| rule.id.as_str()),
+            redact_url(&task.source),
+            task.destination.display()
+        ),
+    );
     start_download(&app, &state, task.clone(), kind)?;
     Ok(task)
 }
 
-fn start_download(app: &tauri::AppHandle, state: &AppState, task: DownloadTask, kind: DownloadKind) -> Result<(), String> {
+fn start_download(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    task: DownloadTask,
+    kind: DownloadKind,
+) -> Result<(), String> {
     let mut workers = state.workers.lock().map_err(|error| error.to_string())?;
     if workers.contains_key(&task.id) {
         return Err("download_already_running".to_owned());
     }
-    let limits = state.settings.lock().map_err(|error| error.to_string())?.clone();
+    let limits = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
     if workers.len() >= limits.max_active_downloads.clamp(1, 20) {
         return Ok(());
     }
     let (cancel, cancelled) = oneshot::channel();
     workers.insert(task.id, cancel);
     drop(workers);
-    diagnostic_log(state, "INFO", "task.dispatched", &format!("task={} engine={kind:?}", task.id));
+    diagnostic_log(
+        state,
+        "INFO",
+        "task.dispatched",
+        &format!("task={} engine={kind:?}", task.id),
+    );
     if kind == DownloadKind::Http {
-        let identity = state.request_identities.lock().ok().and_then(|items| items.get(&task.id).cloned());
-        let rule = state.site_rules.lock().ok().and_then(|rules| matching_site_rule(&task.source, &rules));
-        let connections = rule.as_ref().filter(|rule| matches!(rule.action, SiteRuleAction::SingleConnection | SiteRuleAction::UupdumpPost))
-            .map_or_else(|| limits.connections_per_download.clamp(1, 32), |rule| rule.connections);
+        let identity = state
+            .request_identities
+            .lock()
+            .ok()
+            .and_then(|items| items.get(&task.id).cloned());
+        let rule = state
+            .site_rules
+            .lock()
+            .ok()
+            .and_then(|rules| matching_site_rule(&task.source, &rules));
+        let connections = rule
+            .as_ref()
+            .filter(|rule| {
+                matches!(
+                    rule.action,
+                    SiteRuleAction::SingleConnection | SiteRuleAction::UupdumpPost
+                )
+            })
+            .map_or_else(
+                || limits.connections_per_download.clamp(1, 32),
+                |rule| rule.connections,
+            );
         let mut headers = Vec::new();
-        if let Some(referer) = task.referer.as_ref() { headers.push(("Referer".to_owned(), referer.clone())); }
-        if let Some(user_agent) = identity.as_ref().and_then(|item| item.user_agent.as_ref()) { headers.push(("User-Agent".to_owned(), user_agent.clone())); }
-        if let Some(cookie) = identity.as_ref().and_then(|item| item.cookie_header.as_ref()) { headers.push(("Cookie".to_owned(), cookie.clone())); }
-        if let Some(content_type) = identity.as_ref().and_then(|item| item.request_content_type.as_ref()) { headers.push(("Content-Type".to_owned(), content_type.clone())); }
+        if let Some(referer) = task.referer.as_ref() {
+            headers.push(("Referer".to_owned(), referer.clone()));
+        }
+        if let Some(user_agent) = identity.as_ref().and_then(|item| item.user_agent.as_ref()) {
+            headers.push(("User-Agent".to_owned(), user_agent.clone()));
+        }
+        if let Some(cookie) = identity
+            .as_ref()
+            .and_then(|item| item.cookie_header.as_ref())
+        {
+            headers.push(("Cookie".to_owned(), cookie.clone()));
+        }
+        if let Some(content_type) = identity
+            .as_ref()
+            .and_then(|item| item.request_content_type.as_ref())
+        {
+            headers.push(("Content-Type".to_owned(), content_type.clone()));
+        }
         let request = DownloadRequest {
             url: task.source,
             destination: task.destination,
             overwrite: false,
             connections,
-            method: identity.as_ref().map(|item| item.request_method.clone()).unwrap_or_else(|| "GET".to_owned()),
+            method: identity
+                .as_ref()
+                .map(|item| item.request_method.clone())
+                .unwrap_or_else(|| "GET".to_owned()),
             body: identity.and_then(|item| item.request_body.map(String::into_bytes)),
             headers,
         };
         tauri::async_runtime::spawn(run_download(app.clone(), task.id, request, cancelled));
     } else {
-        tauri::async_runtime::spawn(run_external_download(app.clone(), task.id, task, kind, cancelled));
+        tauri::async_runtime::spawn(run_external_download(
+            app.clone(),
+            task.id,
+            task,
+            kind,
+            cancelled,
+        ));
     }
     Ok(())
 }
 
 fn start_next_queued(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
-    let maximum = state.settings.lock().map(|settings| settings.max_active_downloads.clamp(1, 20)).unwrap_or(0);
-    let available = state.workers.lock().map(|workers| maximum.saturating_sub(workers.len())).unwrap_or(0);
-    if available == 0 { return; }
-    let queued = state.queue.lock().map(|queue| queue.iter().filter(|task| task.state == DownloadState::Queued).take(available).cloned().collect::<Vec<_>>()).unwrap_or_default();
+    let maximum = state
+        .settings
+        .lock()
+        .map(|settings| settings.max_active_downloads.clamp(1, 20))
+        .unwrap_or(0);
+    let available = state
+        .workers
+        .lock()
+        .map(|workers| maximum.saturating_sub(workers.len()))
+        .unwrap_or(0);
+    if available == 0 {
+        return;
+    }
+    let queued = state
+        .queue
+        .lock()
+        .map(|queue| {
+            queue
+                .iter()
+                .filter(|task| task.state == DownloadState::Queued)
+                .take(available)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     for task in queued {
         if let Some(kind) = classify_url(&task.source) {
             let _ = start_download(app, &state, task, kind);
@@ -1279,12 +2032,23 @@ fn start_next_queued(app: &tauri::AppHandle) {
 }
 
 #[tauri::command]
-fn pause_download(app: tauri::AppHandle, state: State<'_, AppState>, id: DownloadId) -> Result<(), String> {
-    let cancel = state.workers.lock().map_err(|error| error.to_string())?.remove(&id)
+fn pause_download(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: DownloadId,
+) -> Result<(), String> {
+    let cancel = state
+        .workers
+        .lock()
+        .map_err(|error| error.to_string())?
+        .remove(&id)
         .ok_or_else(|| "download_not_running".to_owned())?;
     let _ = cancel.send(());
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
-    let task = queue.iter_mut().find(|task| task.id == id).ok_or_else(|| "download_not_found".to_owned())?;
+    let task = queue
+        .iter_mut()
+        .find(|task| task.id == id)
+        .ok_or_else(|| "download_not_found".to_owned())?;
     task.state = DownloadState::Paused;
     save_queue(&state, &queue)?;
     drop(queue);
@@ -1294,22 +2058,34 @@ fn pause_download(app: tauri::AppHandle, state: State<'_, AppState>, id: Downloa
 }
 
 #[tauri::command]
-fn resume_download(app: tauri::AppHandle, state: State<'_, AppState>, id: DownloadId) -> Result<(), String> {
+fn resume_download(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: DownloadId,
+) -> Result<(), String> {
     let task = {
         let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
-        let task = queue.iter_mut().find(|task| task.id == id).ok_or_else(|| "download_not_found".to_owned())?;
+        let task = queue
+            .iter_mut()
+            .find(|task| task.id == id)
+            .ok_or_else(|| "download_not_found".to_owned())?;
         match task.state {
             DownloadState::Paused | DownloadState::Failed { .. } => {
                 task.state = DownloadState::Queued;
                 let task = task.clone();
                 save_queue(&state, &queue)?;
                 task
-            },
+            }
             _ => return Err("download_not_resumable".to_owned()),
         }
     };
     let kind = classify_url(&task.source).ok_or_else(|| "unsupported_url".to_owned())?;
-    diagnostic_log(&state, "INFO", "task.resumed", &format!("task={id} engine={kind:?}"));
+    diagnostic_log(
+        &state,
+        "INFO",
+        "task.resumed",
+        &format!("task={id} engine={kind:?}"),
+    );
     start_download(&app, &state, task, kind)
 }
 
@@ -1322,15 +2098,33 @@ fn redownload_downloads(
     if ids.is_empty() {
         return Ok(Vec::new());
     }
-    let originals = state.queue.lock().map_err(|error| error.to_string())?
-        .iter().filter(|task| ids.contains(&task.id)).cloned().collect::<Vec<_>>();
-    let saved_identities = state.request_identities.lock().map_err(|error| error.to_string())?.clone();
+    let originals = state
+        .queue
+        .lock()
+        .map_err(|error| error.to_string())?
+        .iter()
+        .filter(|task| ids.contains(&task.id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let saved_identities = state
+        .request_identities
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
     let mut repeated = Vec::with_capacity(originals.len());
     let mut repeated_identities = Vec::new();
     for original in originals {
-        let directory = original.destination.parent().unwrap_or_else(|| Path::new("."));
-        let file_name = original.destination.file_name().and_then(|value| value.to_str()).unwrap_or("download");
-        let mut task = DownloadTask::new(&original.source, unique_destination(directory, file_name));
+        let directory = original
+            .destination
+            .parent()
+            .unwrap_or_else(|| Path::new("."));
+        let file_name = original
+            .destination
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("download");
+        let mut task =
+            DownloadTask::new(&original.source, unique_destination(directory, file_name));
         task.format_selection = original.format_selection.clone();
         task.referer = original.referer.clone();
         task.known_duration = original.known_duration;
@@ -1345,25 +2139,40 @@ fn redownload_downloads(
         save_queue(&state, &queue)?;
     }
     if !repeated_identities.is_empty() {
-        state.request_identities.lock().map_err(|error| error.to_string())?
+        state
+            .request_identities
+            .lock()
+            .map_err(|error| error.to_string())?
             .extend(repeated_identities);
     }
     for task in &repeated {
         let kind = classify_url(&task.source).ok_or_else(|| "unsupported_url".to_owned())?;
         start_download(&app, &state, task.clone(), kind)?;
     }
-    diagnostic_log(&state, "INFO", "task.redownload", &format!("count={} source_tasks={}", repeated.len(), ids.len()));
+    diagnostic_log(
+        &state,
+        "INFO",
+        "task.redownload",
+        &format!("count={} source_tasks={}", repeated.len(), ids.len()),
+    );
     Ok(repeated)
 }
 
 #[tauri::command]
 fn get_clipboard_monitor(state: State<'_, AppState>) -> Result<ClipboardStatus, String> {
-    let enabled = state.settings.lock().map_err(|error| error.to_string())?.capture_clipboard;
+    let enabled = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .capture_clipboard;
     Ok(ClipboardStatus { enabled })
 }
 
 #[tauri::command]
-fn set_clipboard_monitor(state: State<'_, AppState>, enabled: bool) -> Result<ClipboardStatus, String> {
+fn set_clipboard_monitor(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<ClipboardStatus, String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.capture_clipboard = enabled;
     save_settings(&state, &settings)?;
@@ -1380,7 +2189,11 @@ fn get_transfer_limits(state: State<'_, AppState>) -> Result<TransferLimits, Str
 }
 
 #[tauri::command]
-fn set_transfer_limits(state: State<'_, AppState>, max_active_downloads: usize, connections_per_download: usize) -> Result<TransferLimits, String> {
+fn set_transfer_limits(
+    state: State<'_, AppState>,
+    max_active_downloads: usize,
+    connections_per_download: usize,
+) -> Result<TransferLimits, String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.max_active_downloads = max_active_downloads.clamp(1, 20);
     settings.connections_per_download = connections_per_download.clamp(1, 32);
@@ -1393,12 +2206,21 @@ fn set_transfer_limits(state: State<'_, AppState>, max_active_downloads: usize, 
 
 #[tauri::command]
 fn get_user_agent(state: State<'_, AppState>) -> Result<UserAgentSetting, String> {
-    let value = state.settings.lock().map_err(|error| error.to_string())?.user_agent.clone().unwrap_or_default();
+    let value = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .user_agent
+        .clone()
+        .unwrap_or_default();
     Ok(UserAgentSetting { user_agent: value })
 }
 
 #[tauri::command]
-fn set_user_agent(state: State<'_, AppState>, user_agent: String) -> Result<UserAgentSetting, String> {
+fn set_user_agent(
+    state: State<'_, AppState>,
+    user_agent: String,
+) -> Result<UserAgentSetting, String> {
     let value = user_agent.trim();
     if value.len() > 1024 || value.contains('\r') || value.contains('\n') {
         return Err("invalid_user_agent".to_owned());
@@ -1406,7 +2228,9 @@ fn set_user_agent(state: State<'_, AppState>, user_agent: String) -> Result<User
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.user_agent = (!value.is_empty()).then(|| value.to_owned());
     save_settings(&state, &settings)?;
-    Ok(UserAgentSetting { user_agent: settings.user_agent.clone().unwrap_or_default() })
+    Ok(UserAgentSetting {
+        user_agent: settings.user_agent.clone().unwrap_or_default(),
+    })
 }
 
 #[tauri::command]
@@ -1416,7 +2240,10 @@ fn get_proxy_setting(state: State<'_, AppState>) -> Result<ProxySetting, String>
         enabled: settings.proxy_enabled,
         url: settings.proxy_url.clone().unwrap_or_default(),
         username: settings.proxy_username.clone().unwrap_or_default(),
-        has_password: settings.proxy_password.as_ref().is_some_and(|value| !value.is_empty()),
+        has_password: settings
+            .proxy_password
+            .as_ref()
+            .is_some_and(|value| !value.is_empty()),
     })
 }
 
@@ -1431,14 +2258,24 @@ fn set_proxy_setting(
 ) -> Result<ProxySetting, String> {
     let url = url.trim();
     let username = username.trim();
-    if url.len() > 2048 || username.len() > 512 || password.len() > 2048
-        || [url, username, password.as_str()].iter().any(|value| value.chars().any(|character| matches!(character, '\r' | '\n')))
+    if url.len() > 2048
+        || username.len() > 512
+        || password.len() > 2048
+        || [url, username, password.as_str()].iter().any(|value| {
+            value
+                .chars()
+                .any(|character| matches!(character, '\r' | '\n'))
+        })
     {
         return Err("invalid_proxy_setting".to_owned());
     }
     if enabled {
         let parsed = url::Url::parse(url).map_err(|_| "invalid_proxy_url".to_owned())?;
-        if !matches!(parsed.scheme(), "http" | "https" | "socks4" | "socks5" | "socks5h") || parsed.host().is_none() {
+        if !matches!(
+            parsed.scheme(),
+            "http" | "https" | "socks4" | "socks5" | "socks5h"
+        ) || parsed.host().is_none()
+        {
             return Err("invalid_proxy_url".to_owned());
         }
     }
@@ -1452,31 +2289,65 @@ fn set_proxy_setting(
         settings.proxy_password = Some(password);
     }
     save_settings(&state, &settings)?;
-    diagnostic_log(&state, "INFO", "proxy.updated", &format!("enabled={enabled} authenticated={}", settings.proxy_username.is_some()));
+    diagnostic_log(
+        &state,
+        "INFO",
+        "proxy.updated",
+        &format!(
+            "enabled={enabled} authenticated={}",
+            settings.proxy_username.is_some()
+        ),
+    );
     Ok(ProxySetting {
         enabled: settings.proxy_enabled,
         url: settings.proxy_url.clone().unwrap_or_default(),
         username: settings.proxy_username.clone().unwrap_or_default(),
-        has_password: settings.proxy_password.as_ref().is_some_and(|value| !value.is_empty()),
+        has_password: settings
+            .proxy_password
+            .as_ref()
+            .is_some_and(|value| !value.is_empty()),
     })
 }
 
 #[tauri::command]
-fn read_clipboard_link(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Option<String>, String> {
-    if !state.settings.lock().map_err(|error| error.to_string())?.capture_clipboard {
+fn read_clipboard_link(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    if !state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .capture_clipboard
+    {
         return Ok(None);
     }
-    let value = app.clipboard().read_text().map_err(|error| error.to_string())?;
+    let value = app
+        .clipboard()
+        .read_text()
+        .map_err(|error| error.to_string())?;
     let value = value.trim();
     Ok(classify_url(value).map(|_| value.to_owned()))
 }
 
 #[tauri::command]
 fn get_bridge_pairing(state: State<'_, AppState>) -> Result<BridgePairing, String> {
-    let token = state.settings.lock().map_err(|error| error.to_string())?.bridge_token.clone();
-    let connected = state.bridge_last_seen.lock().map_err(|error| error.to_string())?
+    let token = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .bridge_token
+        .clone();
+    let connected = state
+        .bridge_last_seen
+        .lock()
+        .map_err(|error| error.to_string())?
         .is_some_and(|seen| seen.elapsed() < Duration::from_secs(75));
-    Ok(BridgePairing { token, port: BRIDGE_PORT, connected })
+    Ok(BridgePairing {
+        token,
+        port: BRIDGE_PORT,
+        connected,
+    })
 }
 
 #[tauri::command]
@@ -1487,14 +2358,27 @@ fn regenerate_bridge_token(state: State<'_, AppState>) -> Result<BridgePairing, 
         save_settings(&state, &settings)?;
         settings.bridge_token.clone()
     };
-    if let Ok(mut seen) = state.bridge_last_seen.lock() { *seen = None; }
-    Ok(BridgePairing { token, port: BRIDGE_PORT, connected: false })
+    if let Ok(mut seen) = state.bridge_last_seen.lock() {
+        *seen = None;
+    }
+    Ok(BridgePairing {
+        token,
+        port: BRIDGE_PORT,
+        connected: false,
+    })
 }
 
 #[tauri::command]
 fn copy_bridge_token(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let token = state.settings.lock().map_err(|error| error.to_string())?.bridge_token.clone();
-    app.clipboard().write_text(token).map_err(|error| error.to_string())
+    let token = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .bridge_token
+        .clone();
+    app.clipboard()
+        .write_text(token)
+        .map_err(|error| error.to_string())
 }
 
 fn bridge_origin(headers: &str) -> Option<&str> {
@@ -1502,25 +2386,35 @@ fn bridge_origin(headers: &str) -> Option<&str> {
         let (name, value) = line.split_once(':')?;
         if name.eq_ignore_ascii_case("origin") {
             let value = value.trim();
-            (value.starts_with("chrome-extension://") || value.starts_with("moz-extension://") || value == "null").then_some(value)
-        } else { None }
+            (value.starts_with("chrome-extension://")
+                || value.starts_with("moz-extension://")
+                || value == "null")
+                .then_some(value)
+        } else {
+            None
+        }
     })
 }
 
 fn bridge_authorized(headers: &str, expected: &str) -> bool {
     headers.lines().any(|line| {
         line.split_once(':').is_some_and(|(name, value)| {
-            name.eq_ignore_ascii_case("authorization") && value.trim() == format!("Bearer {expected}")
+            name.eq_ignore_ascii_case("authorization")
+                && value.trim() == format!("Bearer {expected}")
         })
     })
 }
 
 fn bridge_content_length(headers: &str) -> usize {
-    headers.lines().find_map(|line| {
-        let (name, value) = line.split_once(':')?;
-        name.eq_ignore_ascii_case("content-length")
-            .then(|| value.trim().parse::<usize>().ok()).flatten()
-    }).unwrap_or(0)
+    headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
+        })
+        .unwrap_or(0)
 }
 
 fn read_bridge_request(stream: &mut TcpStream) -> Option<Vec<u8>> {
@@ -1529,20 +2423,28 @@ fn read_bridge_request(stream: &mut TcpStream) -> Option<Vec<u8>> {
     let mut chunk = [0_u8; 8_192];
     loop {
         let count = stream.read(&mut chunk).ok()?;
-        if count == 0 { break; }
+        if count == 0 {
+            break;
+        }
         request.extend_from_slice(&chunk[..count]);
-        if request.len() > MAX_REQUEST_SIZE { return None; }
+        if request.len() > MAX_REQUEST_SIZE {
+            return None;
+        }
         if let Some(header_end) = request.windows(4).position(|value| value == b"\r\n\r\n") {
             let body_start = header_end + 4;
             let headers = String::from_utf8_lossy(&request[..header_end]);
-            if request.len() >= body_start + bridge_content_length(&headers) { break; }
+            if request.len() >= body_start + bridge_content_length(&headers) {
+                break;
+            }
         }
     }
     (!request.is_empty()).then_some(request)
 }
 
 fn bridge_response(stream: &mut TcpStream, status: &str, origin: Option<&str>, body: &str) {
-    let cors = origin.map(|value| format!("Access-Control-Allow-Origin: {value}\r\nVary: Origin\r\n")).unwrap_or_else(|| "Access-Control-Allow-Origin: *\r\n".to_owned());
+    let cors = origin
+        .map(|value| format!("Access-Control-Allow-Origin: {value}\r\nVary: Origin\r\n"))
+        .unwrap_or_else(|| "Access-Control-Allow-Origin: *\r\n".to_owned());
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: application/json\r\n{cors}Access-Control-Allow-Headers: Authorization, Content-Type\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
@@ -1553,8 +2455,21 @@ fn bridge_response(stream: &mut TcpStream, status: &str, origin: Option<&str>, b
 fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<(), String> {
     let state = app.state::<AppState>();
     classify_url(&request.url).ok_or_else(|| "unsupported_url".to_owned())?;
-    diagnostic_log(&state, "INFO", "bridge.download", &format!("url={} method={}", redact_url(&request.url), request.request_method.as_deref().unwrap_or("GET")));
-    state.bridge_pending.lock().map_err(|error| error.to_string())?.push(request);
+    diagnostic_log(
+        &state,
+        "INFO",
+        "bridge.download",
+        &format!(
+            "url={} method={}",
+            redact_url(&request.url),
+            request.request_method.as_deref().unwrap_or("GET")
+        ),
+    );
+    state
+        .bridge_pending
+        .lock()
+        .map_err(|error| error.to_string())?
+        .push(request);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
@@ -1565,17 +2480,27 @@ fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<
 
 #[tauri::command]
 fn take_bridge_download(state: State<'_, AppState>) -> Result<Option<BridgeDownload>, String> {
-    let mut pending = state.bridge_pending.lock().map_err(|error| error.to_string())?;
+    let mut pending = state
+        .bridge_pending
+        .lock()
+        .map_err(|error| error.to_string())?;
     Ok((!pending.is_empty()).then(|| pending.remove(0)))
 }
 
 fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
-    let Some(buffer) = read_bridge_request(&mut stream) else { return };
+    let Some(buffer) = read_bridge_request(&mut stream) else {
+        return;
+    };
     let request = String::from_utf8_lossy(&buffer);
-    let Some((headers, body)) = request.split_once("\r\n\r\n") else { return };
+    let Some((headers, body)) = request.split_once("\r\n\r\n") else {
+        return;
+    };
     let origin = bridge_origin(headers);
-    let has_origin = headers.lines().any(|line| line.split_once(':').is_some_and(|(name, _)| name.eq_ignore_ascii_case("origin")));
+    let has_origin = headers.lines().any(|line| {
+        line.split_once(':')
+            .is_some_and(|(name, _)| name.eq_ignore_ascii_case("origin"))
+    });
     if has_origin && origin.is_none() {
         bridge_response(&mut stream, "403 Forbidden", None, "{\"ok\":false}");
         return;
@@ -1586,21 +2511,32 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         return;
     }
     let state = app.state::<AppState>();
-    let token = match state.settings.lock() { Ok(settings) => settings.bridge_token.clone(), Err(_) => return };
+    let token = match state.settings.lock() {
+        Ok(settings) => settings.bridge_token.clone(),
+        Err(_) => return,
+    };
     if !bridge_authorized(headers, &token) {
         bridge_response(&mut stream, "401 Unauthorized", origin, "{\"ok\":false}");
         return;
     }
-    if let Ok(mut seen) = state.bridge_last_seen.lock() { *seen = Some(Instant::now()); }
+    if let Ok(mut seen) = state.bridge_last_seen.lock() {
+        *seen = Some(Instant::now());
+    }
     if first.starts_with("GET /v1/health ") {
         bridge_response(&mut stream, "200 OK", origin, "{\"ok\":true}");
     } else if first.starts_with("GET /v1/site-rules ") {
-        let body = state.site_rules.lock().ok()
+        let body = state
+            .site_rules
+            .lock()
+            .ok()
             .and_then(|rules| serde_json::to_string(&*rules).ok())
             .unwrap_or_else(|| "[]".to_owned());
         bridge_response(&mut stream, "200 OK", origin, &body);
     } else if first.starts_with("POST /v1/download ") {
-        match serde_json::from_str::<BridgeDownload>(body).map_err(|error| error.to_string()).and_then(|request| queue_from_bridge(app, request)) {
+        match serde_json::from_str::<BridgeDownload>(body)
+            .map_err(|error| error.to_string())
+            .and_then(|request| queue_from_bridge(app, request))
+        {
             Ok(()) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
             Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
         }
@@ -1610,7 +2546,9 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
 }
 
 fn run_extension_bridge(app: tauri::AppHandle) {
-    let Ok(listener) = TcpListener::bind(("127.0.0.1", BRIDGE_PORT)) else { return };
+    let Ok(listener) = TcpListener::bind(("127.0.0.1", BRIDGE_PORT)) else {
+        return;
+    };
     for stream in listener.incoming().flatten() {
         handle_bridge_connection(&app, stream);
     }
@@ -1619,22 +2557,40 @@ fn run_extension_bridge(app: tauri::AppHandle) {
 #[tauri::command]
 fn reveal_download(state: State<'_, AppState>, id: DownloadId) -> Result<(), String> {
     let queue = state.queue.lock().map_err(|error| error.to_string())?;
-    let task = queue.iter().find(|task| task.id == id).ok_or_else(|| "download_not_found".to_owned())?;
-    let target = if task.destination.exists() { task.destination.clone() } else { partial_path(&task.destination) };
+    let task = queue
+        .iter()
+        .find(|task| task.id == id)
+        .ok_or_else(|| "download_not_found".to_owned())?;
+    let target = if task.destination.exists() {
+        task.destination.clone()
+    } else {
+        partial_path(&task.destination)
+    };
     #[cfg(target_os = "windows")]
-    let result = Command::new("explorer.exe").arg(format!("/select,{}", target.display())).spawn();
+    let result = Command::new("explorer.exe")
+        .arg(format!("/select,{}", target.display()))
+        .spawn();
     #[cfg(target_os = "macos")]
     let result = Command::new("open").arg("-R").arg(&target).spawn();
     #[cfg(target_os = "linux")]
-    let result = Command::new("xdg-open").arg(target.parent().unwrap_or(&target)).spawn();
+    let result = Command::new("xdg-open")
+        .arg(target.parent().unwrap_or(&target))
+        .spawn();
     result.map(|_| ()).map_err(|error| error.to_string())
 }
 
 #[cfg(target_os = "windows")]
 fn autostart_enabled(_: &tauri::AppHandle) -> Result<bool, String> {
     Command::new("reg.exe")
-        .args(["QUERY", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "ApocalipseDownloadManager"])
-        .status().map(|status| status.success()).map_err(|error| error.to_string())
+        .args([
+            "QUERY",
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+            "/v",
+            "ApocalipseDownloadManager",
+        ])
+        .status()
+        .map(|status| status.success())
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(target_os = "windows")]
@@ -1642,18 +2598,39 @@ fn configure_autostart(_: &tauri::AppHandle, enabled: bool) -> Result<(), String
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let mut command = Command::new("reg.exe");
     command.args(if enabled {
-        vec!["ADD".into(), r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run".into(), "/v".into(), "ApocalipseDownloadManager".into(), "/t".into(), "REG_SZ".into(), "/d".into(), format!("\"{}\" --hidden", executable.display()), "/f".into()]
+        vec![
+            "ADD".into(),
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run".into(),
+            "/v".into(),
+            "ApocalipseDownloadManager".into(),
+            "/t".into(),
+            "REG_SZ".into(),
+            "/d".into(),
+            format!("\"{}\" --hidden", executable.display()),
+            "/f".into(),
+        ]
     } else {
-        vec!["DELETE".into(), r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run".into(), "/v".into(), "ApocalipseDownloadManager".into(), "/f".into()]
+        vec![
+            "DELETE".into(),
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run".into(),
+            "/v".into(),
+            "ApocalipseDownloadManager".into(),
+            "/f".into(),
+        ]
     });
     let status = command.status().map_err(|error| error.to_string())?;
-    if enabled && !status.success() { return Err("autostart_update_failed".to_owned()); }
+    if enabled && !status.success() {
+        return Err("autostart_update_failed".to_owned());
+    }
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
 fn autostart_entry(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    app.path().config_dir().map(|path| path.join("autostart/apocalipse-download-manager.desktop")).map_err(|error| error.to_string())
+    app.path()
+        .config_dir()
+        .map(|path| path.join("autostart/apocalipse-download-manager.desktop"))
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(target_os = "linux")]
@@ -1666,7 +2643,9 @@ fn configure_autostart(app: &tauri::AppHandle, enabled: bool) -> Result<(), Stri
     let entry = autostart_entry(app)?;
     if enabled {
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-        if let Some(parent) = entry.parent() { fs::create_dir_all(parent).map_err(|error| error.to_string())?; }
+        if let Some(parent) = entry.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
         let escaped = executable.to_string_lossy().replace('"', "\\\"");
         fs::write(entry, format!("[Desktop Entry]\nType=Application\nName=Apocalipse Download Manager\nExec=\"{escaped}\" --hidden\nTerminal=false\nX-GNOME-Autostart-enabled=true\n" )).map_err(|error| error.to_string())?;
     } else if entry.exists() {
@@ -1677,7 +2656,10 @@ fn configure_autostart(app: &tauri::AppHandle, enabled: bool) -> Result<(), Stri
 
 #[cfg(target_os = "macos")]
 fn autostart_entry(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    app.path().home_dir().map(|path| path.join("Library/LaunchAgents/com.linuxhell.apocalipse.plist")).map_err(|error| error.to_string())
+    app.path()
+        .home_dir()
+        .map(|path| path.join("Library/LaunchAgents/com.linuxhell.apocalipse.plist"))
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -1690,8 +2672,14 @@ fn configure_autostart(app: &tauri::AppHandle, enabled: bool) -> Result<(), Stri
     let entry = autostart_entry(app)?;
     if enabled {
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-        if let Some(parent) = entry.parent() { fs::create_dir_all(parent).map_err(|error| error.to_string())?; }
-        let escaped = executable.to_string_lossy().replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        if let Some(parent) = entry.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let escaped = executable
+            .to_string_lossy()
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
         let plist = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>com.linuxhell.apocalipse</string><key>ProgramArguments</key><array><string>{escaped}</string><string>--hidden</string></array><key>RunAtLoad</key><true/></dict></plist>\n");
         fs::write(entry, plist).map_err(|error| error.to_string())?;
     } else if entry.exists() {
@@ -1702,7 +2690,9 @@ fn configure_autostart(app: &tauri::AppHandle, enabled: bool) -> Result<(), Stri
 
 #[tauri::command]
 fn get_autostart(app: tauri::AppHandle) -> Result<AutostartStatus, String> {
-    Ok(AutostartStatus { enabled: autostart_enabled(&app)? })
+    Ok(AutostartStatus {
+        enabled: autostart_enabled(&app)?,
+    })
 }
 
 #[tauri::command]
@@ -1712,7 +2702,11 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<AutostartStatus
 }
 
 #[tauri::command]
-async fn remove_downloads(state: State<'_, AppState>, ids: Vec<DownloadId>, delete_files: bool) -> Result<usize, String> {
+async fn remove_downloads(
+    state: State<'_, AppState>,
+    ids: Vec<DownloadId>,
+    delete_files: bool,
+) -> Result<usize, String> {
     if ids.is_empty() {
         return Ok(0);
     }
@@ -1728,8 +2722,14 @@ async fn remove_downloads(state: State<'_, AppState>, ids: Vec<DownloadId>, dele
     if cancelled_active {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
-    let removed = state.queue.lock().map_err(|error| error.to_string())?
-        .iter().filter(|task| ids.contains(&task.id)).cloned().collect::<Vec<_>>();
+    let removed = state
+        .queue
+        .lock()
+        .map_err(|error| error.to_string())?
+        .iter()
+        .filter(|task| ids.contains(&task.id))
+        .cloned()
+        .collect::<Vec<_>>();
     if delete_files {
         for task in &removed {
             for path in download_paths(task) {
@@ -1749,11 +2749,18 @@ async fn remove_downloads(state: State<'_, AppState>, ids: Vec<DownloadId>, dele
 fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
     let partial = partial_path(&task.destination);
     let mut paths = vec![task.destination.clone(), partial];
-    let stem = task.destination.file_stem().and_then(|value| value.to_str());
+    let stem = task
+        .destination
+        .file_stem()
+        .and_then(|value| value.to_str());
     if let (Some(parent), Some(stem)) = (task.destination.parent(), stem) {
-        for extension in ["mp4", "mkv", "ts", "webm", "m4a", "mp3", "wav", "flac", "opus", "aac"] {
+        for extension in [
+            "mp4", "mkv", "ts", "webm", "m4a", "mp3", "wav", "flac", "opus", "aac",
+        ] {
             let candidate = parent.join(format!("{stem}.{extension}"));
-            if !paths.contains(&candidate) { paths.push(candidate); }
+            if !paths.contains(&candidate) {
+                paths.push(candidate);
+            }
         }
     }
     paths
@@ -1801,20 +2808,22 @@ fn main() {
                 site_rules: Mutex::new(initial_site_rules),
                 site_rules_path,
             });
-            diagnostic_log(&app.state::<AppState>(), "INFO", "application.started", env!("CARGO_PKG_VERSION"));
+            diagnostic_log(
+                &app.state::<AppState>(),
+                "INFO",
+                "application.started",
+                env!("CARGO_PKG_VERSION"),
+            );
             let bridge_app = app.handle().clone();
-            std::thread::Builder::new().name("apocalipse-extension-bridge".into())
+            std::thread::Builder::new()
+                .name("apocalipse-extension-bridge".into())
                 .spawn(move || run_extension_bridge(bridge_app))?;
             let show = MenuItem::with_id(app, "show", "Show Apocalipse", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
             // The detailed application artwork loses definition at the 16–24 px sizes used by
             // system trays. Keep a simplified, high-contrast asset specifically for this role.
-            let icon = Image::new_owned(
-                include_bytes!("../icons/tray.rgba").to_vec(),
-                32,
-                32,
-            );
+            let icon = Image::new_owned(include_bytes!("../icons/tray.rgba").to_vec(), 32, 32);
             TrayIconBuilder::new()
                 .icon(icon)
                 .tooltip("Apocalipse Download Manager")
@@ -1831,7 +2840,9 @@ fn main() {
                 })
                 .build(app)?;
             if std::env::args().any(|argument| argument == "--hidden") {
-                if let Some(window) = app.get_webview_window("main") { window.hide()?; }
+                if let Some(window) = app.get_webview_window("main") {
+                    window.hide()?;
+                }
             }
             Ok(())
         })
@@ -1906,7 +2917,8 @@ mod tests {
 
     #[tokio::test]
     async fn removing_a_missing_file_is_already_successful() {
-        let path = std::env::temp_dir().join(format!("apocalipse-missing-{}.mp4", uuid::Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("apocalipse-missing-{}.mp4", uuid::Uuid::new_v4()));
         assert!(remove_file_with_retry(&path).await.is_ok());
     }
 
@@ -1924,17 +2936,29 @@ mod tests {
 
     #[test]
     fn parses_bridge_content_length_case_insensitively() {
-        assert_eq!(bridge_content_length("POST / HTTP/1.1\r\nContent-Length: 123"), 123);
-        assert_eq!(bridge_content_length("GET / HTTP/1.1\r\ncontent-length: 0"), 0);
+        assert_eq!(
+            bridge_content_length("POST / HTTP/1.1\r\nContent-Length: 123"),
+            123
+        );
+        assert_eq!(
+            bridge_content_length("GET / HTTP/1.1\r\ncontent-length: 0"),
+            0
+        );
     }
 
     #[test]
     fn normalizes_uupdump_download_to_required_post_endpoint() {
-        let (download, referer) = uupdump_urls(
-            "https://uupdump.net/download.php?id=abc&pack=pt-br&edition=professional",
-        ).expect("UUP dump URL");
-        assert_eq!(download, "https://uupdump.net/get.php?id=abc&pack=pt-br&edition=professional");
-        assert_eq!(referer, "https://uupdump.net/download.php?id=abc&pack=pt-br&edition=professional");
+        let (download, referer) =
+            uupdump_urls("https://uupdump.net/download.php?id=abc&pack=pt-br&edition=professional")
+                .expect("UUP dump URL");
+        assert_eq!(
+            download,
+            "https://uupdump.net/get.php?id=abc&pack=pt-br&edition=professional"
+        );
+        assert_eq!(
+            referer,
+            "https://uupdump.net/download.php?id=abc&pack=pt-br&edition=professional"
+        );
     }
 
     #[test]
@@ -1943,8 +2967,14 @@ mod tests {
             redact_url("https://example.com/file.zip?id=123&token=secret#part"),
             "https://example.com/file.zip?id=<redacted>&token=<redacted>",
         );
-        assert_eq!(redact_url("https://example.com/file.zip#part"), "https://example.com/file.zip");
-        assert_eq!(redact_url("http://user:secret@proxy.example:8080/file"), "http://proxy.example:8080/file");
+        assert_eq!(
+            redact_url("https://example.com/file.zip#part"),
+            "https://example.com/file.zip"
+        );
+        assert_eq!(
+            redact_url("http://user:secret@proxy.example:8080/file"),
+            "http://proxy.example:8080/file"
+        );
     }
 
     #[test]
@@ -1959,8 +2989,18 @@ mod tests {
     #[test]
     fn site_rules_match_exact_hosts_and_subdomains() {
         let rules = default_site_rules();
-        assert_eq!(matching_site_rule("https://uupdump.net/get.php?id=1", &rules).unwrap().id, "uupdump");
-        assert_eq!(matching_site_rule("https://www.uupdump.net/download.php", &rules).unwrap().id, "uupdump");
+        assert_eq!(
+            matching_site_rule("https://uupdump.net/get.php?id=1", &rules)
+                .unwrap()
+                .id,
+            "uupdump"
+        );
+        assert_eq!(
+            matching_site_rule("https://www.uupdump.net/download.php", &rules)
+                .unwrap()
+                .id,
+            "uupdump"
+        );
         assert!(matching_site_rule("https://example.com/uupdump.net/file", &rules).is_none());
     }
 
@@ -1978,7 +3018,7 @@ mod tests {
     fn external_proxy_credentials_are_url_encoded() {
         assert_eq!(
             external_proxy_url("socks5h://127.0.0.1:1080", Some("user name"), Some("p@ss")),
-            "socks5h://user%20name:p%40ss@127.0.0.1:1080/",
+            "socks5h://user%20name:p%40ss@127.0.0.1:1080",
         );
     }
 }
