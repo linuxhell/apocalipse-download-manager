@@ -229,6 +229,11 @@ h1 {
 .task-select {
   accent-color: var(--cyan);
 }
+.diagnostic-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
 .ghost:disabled,
 .primary:disabled {
   cursor: not-allowed;

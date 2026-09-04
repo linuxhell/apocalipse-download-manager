@@ -5,7 +5,7 @@ use apocalipse_core::{
     DownloadId, DownloadKind, DownloadRequest, DownloadState, DownloadTask,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, io::{Read, Write}, net::{TcpListener, TcpStream}, path::{Path, PathBuf}, process::{Command, Stdio}, sync::Mutex, time::{Duration, Instant}};
+use std::{collections::HashMap, fs, fs::OpenOptions, io::{Read, Write}, net::{TcpListener, TcpStream}, path::{Path, PathBuf}, process::{Command, Stdio}, sync::Mutex, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 use tauri::{image::Image, menu::{Menu, MenuItem}, tray::TrayIconBuilder, Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::{io::AsyncReadExt, sync::{mpsc, oneshot}};
@@ -19,6 +19,7 @@ struct AppState {
     bridge_last_seen: Mutex<Option<Instant>>,
     bridge_pending: Mutex<Vec<BridgeDownload>>,
     request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
+    log_path: PathBuf,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -266,6 +267,48 @@ fn save_settings(state: &AppState, settings: &UserSettings) -> Result<(), String
     fs::write(&state.settings_path, data).map_err(|error| error.to_string())
 }
 
+fn redact_url(url: &str) -> String {
+    let (base, query) = match url.split_once('?') {
+        Some(parts) => parts,
+        None => return url.split('#').next().unwrap_or(url).to_owned(),
+    };
+    let parameters = query.split('#').next().unwrap_or_default().split('&').filter(|item| !item.is_empty())
+        .map(|item| format!("{}=<redacted>", item.split_once('=').map_or(item, |(name, _)| name)))
+        .collect::<Vec<_>>();
+    if parameters.is_empty() { base.to_owned() } else { format!("{base}?{}", parameters.join("&")) }
+}
+
+fn sanitize_log_detail(detail: &str) -> String {
+    let lowered = detail.to_ascii_lowercase();
+    if ["cookie:", "cookie=", "authorization:", "authorization=", "password:", "password=", "passwd:", "passwd="]
+        .iter().any(|marker| lowered.contains(marker))
+    {
+        return "<redacted>".to_owned();
+    }
+    detail.split_whitespace().map(|part| {
+        if let Some(index) = part.find("http://").or_else(|| part.find("https://")) {
+            let (prefix, url) = part.split_at(index);
+            return format!("{prefix}{}", redact_url(url));
+        }
+        part.to_owned()
+    }).collect::<Vec<_>>().join(" ")
+}
+
+fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
+    if let Some(parent) = state.log_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if fs::metadata(&state.log_path).is_ok_and(|metadata| metadata.len() > 2 * 1024 * 1024) {
+        let rotated = state.log_path.with_extension("log.1");
+        let _ = fs::remove_file(&rotated);
+        let _ = fs::rename(&state.log_path, rotated);
+    }
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |value| value.as_secs());
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&state.log_path) {
+        let _ = writeln!(file, "[{timestamp}] {level} {event} {}", sanitize_log_detail(detail));
+    }
+}
+
 fn remember_download_directory(state: &AppState, directory: &Path) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.recent_download_directories.retain(|path| path != directory);
@@ -301,10 +344,12 @@ async fn run_download(
     request: DownloadRequest,
     mut cancellation: oneshot::Receiver<()>,
 ) {
+    diagnostic_log(&app.state::<AppState>(), "INFO", "http.start", &format!("task={id} url={}", redact_url(&request.url)));
     update_task(&app, id, true, |task| task.state = DownloadState::Inspecting);
     let engine = match DownloadEngine::new() {
         Ok(engine) => engine,
         Err(error) => {
+            diagnostic_log(&app.state::<AppState>(), "ERROR", "http.engine", &format!("task={id} error={error}"));
             update_task(&app, id, true, |task| task.state = DownloadState::Failed { message: error.to_string() });
             return;
         }
@@ -321,8 +366,14 @@ async fn run_download(
             },
             result = &mut download => {
                 match result {
-                    Ok(()) => update_task(&app, id, true, |task| task.state = DownloadState::Completed),
-                    Err(error) => update_task(&app, id, true, |task| task.state = DownloadState::Failed { message: error.to_string() }),
+                    Ok(()) => {
+                        diagnostic_log(&app.state::<AppState>(), "INFO", "http.completed", &format!("task={id}"));
+                        update_task(&app, id, true, |task| task.state = DownloadState::Completed);
+                    },
+                    Err(error) => {
+                        diagnostic_log(&app.state::<AppState>(), "ERROR", "http.failed", &format!("task={id} error={error}"));
+                        update_task(&app, id, true, |task| task.state = DownloadState::Failed { message: error.to_string() });
+                    },
                 }
                 break;
             }
@@ -360,6 +411,7 @@ async fn run_external_download(
     kind: DownloadKind,
     mut cancellation: oneshot::Receiver<()>,
 ) {
+    diagnostic_log(&app.state::<AppState>(), "INFO", "external.start", &format!("task={id} engine={kind:?} url={}", redact_url(&task.source)));
     update_task(&app, id, true, |item| {
         item.state = DownloadState::Downloading;
         item.progress_percent = Some(0.0);
@@ -506,11 +558,17 @@ async fn run_external_download(
         Err(error) => Err(format!("external_engine_unavailable: {error}")),
     };
     match result {
-        Ok(()) => update_task(&app, id, true, |item| {
-            item.progress_percent = Some(100.0);
-            item.state = DownloadState::Completed;
-        }),
-        Err(message) => update_task(&app, id, true, |item| item.state = DownloadState::Failed { message }),
+        Ok(()) => {
+            diagnostic_log(&app.state::<AppState>(), "INFO", "external.completed", &format!("task={id} engine={kind:?}"));
+            update_task(&app, id, true, |item| {
+                item.progress_percent = Some(100.0);
+                item.state = DownloadState::Completed;
+            });
+        },
+        Err(message) => {
+            diagnostic_log(&app.state::<AppState>(), "ERROR", "external.failed", &format!("task={id} engine={kind:?} error={message}"));
+            update_task(&app, id, true, |item| item.state = DownloadState::Failed { message });
+        },
     }
     if let Ok(mut workers) = app.state::<AppState>().workers.lock() {
         workers.remove(&id);
@@ -548,8 +606,36 @@ fn open_diagnostic_log(path: &Path) {
     let _ = Command::new("notepad.exe").arg(path).spawn();
 }
 
-#[cfg(not(target_os = "windows"))]
-fn open_diagnostic_log(_path: &Path) {}
+#[cfg(target_os = "macos")]
+fn open_diagnostic_log(path: &Path) {
+    let _ = Command::new("open").arg(path).spawn();
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn open_diagnostic_log(path: &Path) {
+    let _ = Command::new("xdg-open").arg(path).spawn();
+}
+
+#[tauri::command]
+fn open_general_log(state: State<'_, AppState>) -> Result<String, String> {
+    diagnostic_log(&state, "INFO", "log.opened", "opened_by_user");
+    open_diagnostic_log(&state.log_path);
+    Ok(state.log_path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn clear_general_log(state: State<'_, AppState>) -> Result<(), String> {
+    let rotated = state.log_path.with_extension("log.1");
+    for path in [&state.log_path, &rotated] {
+        match fs::remove_file(path) {
+            Ok(()) => {},
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    diagnostic_log(&state, "INFO", "log.cleared", "cleared_by_user");
+    Ok(())
+}
 
 async fn read_process_tail(
     mut stream: impl tokio::io::AsyncRead + Unpin,
@@ -890,6 +976,7 @@ fn enqueue_download(
     queue.push(task.clone());
     save_queue(&state, &queue)?;
     drop(queue);
+    diagnostic_log(&state, "INFO", "task.enqueued", &format!("task={} engine={kind:?} url={} file={}", task.id, redact_url(&task.source), task.destination.display()));
     start_download(&app, &state, task.clone(), kind)?;
     Ok(task)
 }
@@ -906,6 +993,7 @@ fn start_download(app: &tauri::AppHandle, state: &AppState, task: DownloadTask, 
     let (cancel, cancelled) = oneshot::channel();
     workers.insert(task.id, cancel);
     drop(workers);
+    diagnostic_log(state, "INFO", "task.dispatched", &format!("task={} engine={kind:?}", task.id));
     if kind == DownloadKind::Http {
         let identity = state.request_identities.lock().ok().and_then(|items| items.get(&task.id).cloned());
         let connections = if task.source.starts_with("https://uupdump.net/get.php") { 1 } else { limits.connections_per_download.clamp(1, 32) };
@@ -953,6 +1041,7 @@ fn pause_download(app: tauri::AppHandle, state: State<'_, AppState>, id: Downloa
     task.state = DownloadState::Paused;
     save_queue(&state, &queue)?;
     drop(queue);
+    diagnostic_log(&state, "INFO", "task.paused", &format!("task={id}"));
     start_next_queued(&app);
     Ok(())
 }
@@ -973,6 +1062,7 @@ fn resume_download(app: tauri::AppHandle, state: State<'_, AppState>, id: Downlo
         }
     };
     let kind = classify_url(&task.source).ok_or_else(|| "unsupported_url".to_owned())?;
+    diagnostic_log(&state, "INFO", "task.resumed", &format!("task={id} engine={kind:?}"));
     start_download(&app, &state, task, kind)
 }
 
@@ -1015,6 +1105,7 @@ fn redownload_downloads(
         let kind = classify_url(&task.source).ok_or_else(|| "unsupported_url".to_owned())?;
         start_download(&app, &state, task.clone(), kind)?;
     }
+    diagnostic_log(&state, "INFO", "task.redownload", &format!("count={} source_tasks={}", repeated.len(), ids.len()));
     Ok(repeated)
 }
 
@@ -1163,6 +1254,7 @@ fn bridge_response(stream: &mut TcpStream, status: &str, origin: Option<&str>, b
 fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<(), String> {
     let state = app.state::<AppState>();
     classify_url(&request.url).ok_or_else(|| "unsupported_url".to_owned())?;
+    diagnostic_log(&state, "INFO", "bridge.download", &format!("url={} method={}", redact_url(&request.url), request.request_method.as_deref().unwrap_or("GET")));
     state.bridge_pending.lock().map_err(|error| error.to_string())?.push(request);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -1381,8 +1473,10 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
-            let queue_path = app.path().app_data_dir()?.join("queue.json");
-            let settings_path = app.path().app_data_dir()?.join("settings.json");
+            let app_data = app.path().app_data_dir()?;
+            let queue_path = app_data.join("queue.json");
+            let settings_path = app_data.join("settings.json");
+            let log_path = app_data.join("logs").join("apocalipse.log");
             app.manage(AppState {
                 queue: Mutex::new(load_queue(&queue_path)),
                 queue_path,
@@ -1392,7 +1486,9 @@ fn main() {
                 bridge_last_seen: Mutex::new(None),
                 bridge_pending: Mutex::new(Vec::new()),
                 request_identities: Mutex::new(HashMap::new()),
+                log_path,
             });
+            diagnostic_log(&app.state::<AppState>(), "INFO", "application.started", env!("CARGO_PKG_VERSION"));
             let bridge_app = app.handle().clone();
             std::thread::Builder::new().name("apocalipse-extension-bridge".into())
                 .spawn(move || run_extension_bridge(bridge_app))?;
@@ -1445,6 +1541,8 @@ fn main() {
             set_tool_paths,
             suggest_download_name,
             remove_downloads,
+            open_general_log,
+            clear_general_log,
             pause_download,
             resume_download,
             redownload_downloads,
@@ -1516,5 +1614,23 @@ mod tests {
         ).expect("UUP dump URL");
         assert_eq!(download, "https://uupdump.net/get.php?id=abc&pack=pt-br&edition=professional");
         assert_eq!(referer, "https://uupdump.net/download.php?id=abc&pack=pt-br&edition=professional");
+    }
+
+    #[test]
+    fn diagnostic_urls_hide_query_values_and_fragments() {
+        assert_eq!(
+            redact_url("https://example.com/file.zip?id=123&token=secret#part"),
+            "https://example.com/file.zip?id=<redacted>&token=<redacted>",
+        );
+        assert_eq!(redact_url("https://example.com/file.zip#part"), "https://example.com/file.zip");
+    }
+
+    #[test]
+    fn diagnostic_details_remove_credentials() {
+        assert_eq!(sanitize_log_detail("Cookie: secret"), "<redacted>");
+        assert_eq!(
+            sanitize_log_detail("url=https://example.com/a?h=secret&e=123"),
+            "url=https://example.com/a?h=<redacted>&e=<redacted>",
+        );
     }
 }

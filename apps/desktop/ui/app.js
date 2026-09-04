@@ -77,6 +77,10 @@ const catalogs = {
     missing: "Not found",
     checkTools: "Check versions",
     removeFailed: "Could not remove the selected files",
+    diagnostics: "Diagnostics",
+    diagnosticsHint: "Safe activity log with credentials and URL parameters hidden",
+    openLog: "Open diagnostic log",
+    clearLog: "Clear log",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -157,6 +161,10 @@ const catalogs = {
     missing: "Não encontrado",
     checkTools: "Verificar versões",
     removeFailed: "Não foi possível apagar os arquivos selecionados",
+    diagnostics: "Diagnóstico",
+    diagnosticsHint: "Log seguro de atividades com credenciais e parâmetros das URLs ocultados",
+    openLog: "Abrir log de diagnóstico",
+    clearLog: "Limpar log",
   },
   "zh-CN": {
     downloads: "下载",
@@ -236,6 +244,10 @@ const catalogs = {
     missing: "未找到",
     checkTools: "检查版本",
     removeFailed: "无法删除所选文件",
+    diagnostics: "诊断",
+    diagnosticsHint: "隐藏凭据和网址参数的安全活动日志",
+    openLog: "打开诊断日志",
+    clearLog: "清除日志",
   },
 };
 
@@ -717,6 +729,14 @@ document.querySelector("#save-settings").onclick = async () => {
   }
 };
 document.querySelector("#check-tools").onclick = refreshToolStatuses;
+document.querySelector("#open-log").onclick = () => invoke("open_general_log").catch(console.error);
+document.querySelector("#clear-log").onclick = async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try { await invoke("clear_general_log"); }
+  catch (error) { console.error(error); }
+  finally { button.disabled = false; }
+};
 document.querySelectorAll("[data-tool-pick]").forEach((button) => {
   button.onclick = async () => {
     const input = document.querySelector(`#tool-${button.dataset.toolPick}`);
