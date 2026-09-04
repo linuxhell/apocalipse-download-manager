@@ -75,6 +75,7 @@ const catalogs = {
     checkTools: "Check versions",
     errorDetails: "Error details",
     copyError: "Copy error",
+    removeFailed: "Could not remove the selected files",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -153,6 +154,7 @@ const catalogs = {
     checkTools: "Verificar versões",
     errorDetails: "Detalhes do erro",
     copyError: "Copiar erro",
+    removeFailed: "Não foi possível apagar os arquivos selecionados",
   },
   "zh-CN": {
     downloads: "下载",
@@ -230,6 +232,7 @@ const catalogs = {
     checkTools: "检查版本",
     errorDetails: "错误详情",
     copyError: "复制错误",
+    removeFailed: "无法删除所选文件",
   },
 };
 
@@ -601,6 +604,7 @@ document.querySelectorAll("[data-clear-mode]").forEach((button) => {
       await refreshDownloads();
     } catch (error) {
       console.error(error);
+      window.alert(`${t("removeFailed")}: ${error}`);
     } finally {
       button.disabled = false;
     }
