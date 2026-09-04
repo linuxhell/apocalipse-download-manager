@@ -1664,6 +1664,11 @@ fn main() {
             let settings_path = app_data.join("settings.json");
             let log_path = app_data.join("logs").join("apocalipse.log");
             let site_rules_path = app_data.join("site-rules.json");
+            let initial_site_rules = load_site_rules(&site_rules_path);
+            if !site_rules_path.exists() {
+                let data = serde_json::to_vec_pretty(&initial_site_rules)?;
+                fs::write(&site_rules_path, data)?;
+            }
             app.manage(AppState {
                 queue: Mutex::new(load_queue(&queue_path)),
                 queue_path,
@@ -1675,7 +1680,7 @@ fn main() {
                 request_identities: Mutex::new(HashMap::new()),
                 log_path,
                 log_write_lock: Mutex::new(()),
-                site_rules: Mutex::new(load_site_rules(&site_rules_path)),
+                site_rules: Mutex::new(initial_site_rules),
                 site_rules_path,
             });
             diagnostic_log(&app.state::<AppState>(), "INFO", "application.started", env!("CARGO_PKG_VERSION"));
