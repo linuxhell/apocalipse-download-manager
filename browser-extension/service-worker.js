@@ -27,6 +27,22 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === HEARTBEAT_ALARM) bridgeRequest("/v1/health").catch(() => {});
 });
 
+async function hlsDuration(url, depth = 0) {
+  if (depth > 1) return null;
+  const response = await fetch(url, { credentials: "include", redirect: "follow" });
+  if (!response.ok) return null;
+  const text = await response.text();
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const variant = lines.findIndex((line) => line.startsWith("#EXT-X-STREAM-INF"));
+  if (variant >= 0) {
+    const child = lines.slice(variant + 1).find((line) => !line.startsWith("#"));
+    return child ? hlsDuration(new URL(child, url).href, depth + 1) : null;
+  }
+  const durations = lines.filter((line) => line.startsWith("#EXTINF:"))
+    .map((line) => Number.parseFloat(line.slice(8))).filter(Number.isFinite);
+  return durations.length ? durations.reduce((total, value) => total + value, 0) : null;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "APOCALIPSE_MEDIA" && sender.tab?.id) {
     chrome.storage.session.set({ [`media:${sender.tab.id}`]: message.media });
@@ -38,6 +54,17 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         contentType: response.headers.get("content-type") || "",
       }))
       .catch(() => reply({ size: null }));
+    return true;
+  }
+  if (message?.type === "APOCALIPSE_SELECT_HLS") {
+    Promise.all((message.urls || []).slice(-20).map(async (url) => ({ url, duration: await hlsDuration(url).catch(() => null) })))
+      .then((items) => {
+        const valid = items.filter((item) => Number.isFinite(item.duration));
+        const expected = Number(message.expectedDuration);
+        if (Number.isFinite(expected) && expected > 0) valid.sort((a, b) => Math.abs(a.duration - expected) - Math.abs(b.duration - expected));
+        else valid.sort((a, b) => b.duration - a.duration);
+        reply(valid[0] || { url: message.urls?.at(-1) || null, duration: null });
+      });
     return true;
   }
   if (message?.type === "APOCALIPSE_PAIR") {

@@ -31,29 +31,37 @@
     performance.getEntriesByType("resource").forEach((entry) => {
       if (/\.m3u8(?:$|[?#])/i.test(entry.name)) add(entry.name, "video", null, document.querySelector("video")?.poster || "");
     });
-    const found = [...items.values()];
-    if (/(^|\.)hdsex\.org$/.test(location.hostname)) {
-      const hls = found.filter((item) => item.kind === "video" && /\.m3u8(?:$|[?#])/i.test(item.url));
-      const master = hls.filter((item) => /(?:\/master\/|master\.m3u8)/i.test(item.url)).at(-1) || hls.at(-1);
-      if (master) return found.filter((item) => item.kind !== "video" || !/\.m3u8(?:$|[?#])/i.test(item.url) || item === master);
-    }
-    return found;
+    return [...items.values()];
   };
   const downloadLabel = () => {
     const value = (navigator.language || "en").toLowerCase();
     return value.startsWith("zh") ? "下载" : value.startsWith("pt") ? "Baixar" : "Download";
   };
   const hlsForPage = () => {
-    const urls = performance.getEntriesByType("resource").map((entry) => entry.name)
-      .filter((url) => /\.m3u8(?:$|[?#])/i.test(url));
-    return urls.filter((url) => /(?:\/master\/|master\.m3u8)/i.test(url)).at(-1) || urls.at(-1) || null;
+    const urls = [...new Set(performance.getEntriesByType("resource").map((entry) => entry.name)
+      .filter((url) => /\.m3u8(?:$|[?#])/i.test(url)))];
+    const masters = urls.filter((url) => /(?:\/master\/|master\.m3u8)/i.test(url));
+    return { candidates: masters.length ? masters : urls, fallback: masters.at(-1) || urls.at(-1) || null };
   };
   const downloadUrlFor = (element) => {
     if (element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch") return location.href;
     const direct = absolute(element.currentSrc || element.src);
     if (direct && /^https?:/.test(direct)) return direct;
-    if (element.tagName === "VIDEO") return hlsForPage();
+    if (element.tagName === "VIDEO") return hlsForPage().fallback;
     return null;
+  };
+  const resolveDownloadUrl = async (element) => {
+    const immediate = downloadUrlFor(element);
+    if (element.tagName !== "VIDEO" || !immediate || !/\.m3u8(?:$|[?#])/i.test(immediate)) return immediate;
+    const hls = hlsForPage();
+    try {
+      const selected = await chrome.runtime.sendMessage({
+        type: "APOCALIPSE_SELECT_HLS",
+        urls: hls.candidates,
+        expectedDuration: Number.isFinite(element.duration) ? element.duration : null,
+      });
+      return selected?.url || immediate;
+    } catch { return immediate; }
   };
   let overlayTimer;
   const installOverlays = () => {
@@ -69,10 +77,10 @@
       button.className = "apocalipse-media-download";
       button.textContent = `⇩ ${downloadLabel()}`;
       button.title = "Apocalipse Download Manager";
-      button.addEventListener("click", (event) => {
+      button.addEventListener("click", async (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const currentUrl = downloadUrlFor(element) || (isYouTubeVideo ? location.href : url);
+        const currentUrl = await resolveDownloadUrl(element) || (isYouTubeVideo ? location.href : url);
         if (!currentUrl) return;
         chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, kind: element.tagName.toLowerCase(), title: document.title, thumbnail: thumbnailFor(element, "video") } });
       });
@@ -102,13 +110,21 @@
   chrome.runtime.onMessage.addListener((message, _sender, reply) => {
     if (message?.type !== "APOCALIPSE_SCAN") return;
     const found = collect();
-    Promise.all(found.map(async (item) => {
+    (async () => {
+      let selectedItems = found;
+      const hls = found.filter((item) => item.kind === "video" && /\.m3u8(?:$|[?#])/i.test(item.url));
+      if (hls.length > 1) {
+        const selected = await chrome.runtime.sendMessage({ type: "APOCALIPSE_SELECT_HLS", urls: hls.map((item) => item.url), expectedDuration: Number.isFinite(document.querySelector("video")?.duration) ? document.querySelector("video").duration : null });
+        selectedItems = found.filter((item) => !/\.m3u8(?:$|[?#])/i.test(item.url) || item.url === selected?.url);
+      }
+      return Promise.all(selectedItems.map(async (item) => {
       try {
         return { ...item, ...(await chrome.runtime.sendMessage({ type: "APOCALIPSE_PROBE", url: item.url })) };
       } catch {
         return item;
       }
-    })).then((media) => reply({ pageUrl: location.href, media }));
+      }));
+    })().then((media) => reply({ pageUrl: location.href, media })).catch(() => reply({ pageUrl: location.href, media: found }));
     return true;
   });
 })();
