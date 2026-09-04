@@ -112,11 +112,12 @@
     if ((event.ctrlKey || event.shiftKey || event.altKey) && !force) return;
     const anchor = event.target.closest?.("a[href]");
     const anchorUrl = absolute(anchor?.href);
-    if (!force && anchorUrl && /(^|\.)filespayouts\.com$/i.test(location.hostname)
-      && anchor?.hasAttribute("download")) {
-      // Filespayouts marks its generator page as a download. A regular click
-      // therefore downloads the HTML; navigation (the same behavior as Open
-      // link in new tab) lets the page resolve the temporary CDN address.
+    let anchorHost = "";
+    try { anchorHost = new URL(anchorUrl).hostname; } catch {}
+    if (!force && anchorUrl && /(^|\.)filespayouts\.com$/i.test(anchorHost)) {
+      // A Filespayouts URL ending in a file extension is still a generator
+      // page. Navigation (the same behavior as Open link in new tab) lets it
+      // resolve the temporary CDN address before interception.
       event.preventDefault();
       event.stopImmediatePropagation();
       window.open(anchorUrl, "_blank", "noopener");
