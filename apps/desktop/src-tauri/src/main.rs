@@ -2639,7 +2639,7 @@ fn take_bridge_download(
 }
 
 fn decode_hex(value: &str) -> Result<Vec<u8>, String> {
-    if value.len() > 131_072 || value.len() % 2 != 0 {
+    if value.len() > 131_072 || !value.len().is_multiple_of(2) {
         return Err("invalid_blob_chunk".to_owned());
     }
     (0..value.len())
