@@ -1,8 +1,8 @@
 let media = [], selected = "video", locale = "en";
 const messages = {
-  en: { mediaIntelligence: "Media intelligence", video: "Video", audio: "Audio", images: "Images", download: "Download", empty: "No media detected in this tab.", unknownSize: "Size unavailable", connected: "Connected to Apocalipse", disconnected: "Disconnected", pairingToken: "Pairing token", connect: "Connect", recommended: "Recommended" },
-  pt_BR: { mediaIntelligence: "Inteligência de mídia", video: "Vídeo", audio: "Áudio", images: "Imagens", download: "Download", empty: "Nenhuma mídia detectada nesta aba.", unknownSize: "Tamanho indisponível", connected: "Conectada ao Apocalipse", disconnected: "Desconectada", pairingToken: "Token de pareamento", connect: "Conectar", recommended: "Recomendada" },
-  zh_CN: { mediaIntelligence: "媒体智能", video: "视频", audio: "音频", images: "图片", download: "下载", empty: "此标签页未检测到媒体。", unknownSize: "大小未知", connected: "已连接到 Apocalipse", disconnected: "未连接", pairingToken: "配对令牌", connect: "连接", recommended: "推荐" }
+  en: { mediaIntelligence: "Media intelligence", video: "Video", audio: "Audio", images: "Images", download: "Download", empty: "No media detected in this tab.", unknownSize: "Size unavailable", connected: "Connected to Apocalipse", disconnected: "Disconnected", pairingToken: "Pairing token", connect: "Connect", recommended: "Recommended", forceShortcut: "Force Apocalipse", bypassShortcut: "Bypass Apocalipse" },
+  pt_BR: { mediaIntelligence: "Inteligência de mídia", video: "Vídeo", audio: "Áudio", images: "Imagens", download: "Download", empty: "Nenhuma mídia detectada nesta aba.", unknownSize: "Tamanho indisponível", connected: "Conectada ao Apocalipse", disconnected: "Desconectada", pairingToken: "Token de pareamento", connect: "Conectar", recommended: "Recomendada", forceShortcut: "Forçar Apocalipse", bypassShortcut: "Ignorar Apocalipse" },
+  zh_CN: { mediaIntelligence: "媒体智能", video: "视频", audio: "音频", images: "图片", download: "下载", empty: "此标签页未检测到媒体。", unknownSize: "大小未知", connected: "已连接到 Apocalipse", disconnected: "未连接", pairingToken: "配对令牌", connect: "连接", recommended: "推荐", forceShortcut: "强制使用 Apocalipse", bypassShortcut: "绕过 Apocalipse" }
 };
 const t = (key) => messages[locale]?.[key] || messages.en[key] || key;
 const formatBytes = (bytes) => {
@@ -92,6 +92,21 @@ chrome.storage.local.get({ pairingToken: "" }, ({ pairingToken }) => {
   document.querySelector("#pairing-token").value = pairingToken;
   chrome.runtime.sendMessage({ type: "APOCALIPSE_BRIDGE_STATUS" }, (status) => setBridgeStatus(Boolean(status?.connected)));
 });
+chrome.storage.local.get({ forceShortcut: "Shift", bypassShortcut: "Alt" }, (value) => {
+  document.querySelector("#force-shortcut").value = value.forceShortcut;
+  document.querySelector("#bypass-shortcut").value = value.bypassShortcut;
+});
+const saveShortcuts = (changed) => {
+  const force = document.querySelector("#force-shortcut");
+  const bypass = document.querySelector("#bypass-shortcut");
+  if (force.value === bypass.value) {
+    if (changed === "force") bypass.value = force.value === "Alt" ? "Shift" : "Alt";
+    else force.value = bypass.value === "Shift" ? "Alt" : "Shift";
+  }
+  chrome.storage.local.set({ forceShortcut: force.value, bypassShortcut: bypass.value });
+};
+document.querySelector("#force-shortcut").onchange = () => saveShortcuts("force");
+document.querySelector("#bypass-shortcut").onchange = () => saveShortcuts("bypass");
 setInterval(() => {
   chrome.runtime.sendMessage({ type: "APOCALIPSE_BRIDGE_STATUS" }, (status) => {
     if (chrome.runtime.lastError) return;

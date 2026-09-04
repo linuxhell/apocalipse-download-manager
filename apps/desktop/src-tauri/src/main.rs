@@ -363,10 +363,16 @@ async fn run_external_download(
         DownloadKind::MediaPage => {
             let mut command = tokio::process::Command::new(&tools.1);
             let selection = task.format_selection.as_deref().unwrap_or("bestvideo+bestaudio/best");
-            command.arg("--no-playlist");
+            command.args(["--no-playlist", "--newline", "--verbose"]);
             if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
-                command.args(["--cookies-from-browser", "chrome", "--retries", "10", "--fragment-retries", "10", "--retry-sleep", "fragment:exp=1:8"]);
+                if let Some(cookie) = identity.as_ref().and_then(|value| value.cookie_header.as_deref()).filter(|value| !value.is_empty()) {
+                    command.args(["--add-headers", &format!("Cookie:{cookie}")]);
+                } else {
+                    command.args(["--cookies-from-browser", "chrome"]);
+                }
+                command.args(["--retries", "10", "--fragment-retries", "10", "--retry-sleep", "fragment:exp=1:8"]);
             }
+            command.args(["--user-agent", user_agent]);
             if let Some(referer) = task.referer.as_deref() { command.args(["--referer", referer]); }
             if let Some(audio_format) = selection.strip_prefix("audio:") {
                 command.args(["-f", "bestaudio/best", "-x", "--audio-format", audio_format]);

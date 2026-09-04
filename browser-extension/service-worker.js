@@ -1,19 +1,32 @@
 const BRIDGE = "http://127.0.0.1:17654";
 const HEARTBEAT_ALARM = "apocalipse-bridge-heartbeat";
+let bridgeConnected = false;
+let bypassHeld = false;
+let bypassUntil = 0;
+let forceHeld = false;
 
 async function bridgeRequest(path, options = {}, suppliedToken = null) {
   const { pairingToken = "" } = suppliedToken === null ? await chrome.storage.local.get({ pairingToken: "" }) : { pairingToken: suppliedToken };
-  if (!pairingToken) throw new Error("not_paired");
-  const response = await fetch(`${BRIDGE}${path}`, {
-    ...options,
-    headers: {
-      "Authorization": `Bearer ${pairingToken}`,
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  if (!response.ok) throw new Error(`bridge_http_${response.status}`);
-  return response.json();
+  if (!pairingToken) {
+    bridgeConnected = false;
+    throw new Error("not_paired");
+  }
+  try {
+    const response = await fetch(`${BRIDGE}${path}`, {
+      ...options,
+      headers: {
+        "Authorization": `Bearer ${pairingToken}`,
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+    if (!response.ok) throw new Error(`bridge_http_${response.status}`);
+    bridgeConnected = true;
+    return response.json();
+  } catch (error) {
+    bridgeConnected = false;
+    throw error;
+  }
 }
 
 function ensureHeartbeat() {
@@ -89,8 +102,11 @@ const eraseBrowserDownload = (id) => new Promise((resolve) => {
 async function takeBrowserDownload(item, eraseFromHistory = false) {
   const url = item.finalUrl || item.url;
   if (!item.id || !/^https?:/i.test(url)) return;
+  if (!bridgeConnected || bypassHeld || Date.now() < bypassUntil) return;
+  let cancelled = false;
   try {
     await cancelBrowserDownload(item.id);
+    cancelled = true;
     if (eraseFromHistory) await eraseBrowserDownload(item.id);
     const pageUrl = item.referrer || null;
     await bridgeRequest("/v1/download", {
@@ -104,7 +120,12 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
         userAgent: navigator.userAgent,
       }),
     });
-  } catch {}
+  } catch {
+    if (cancelled) {
+      bypassUntil = Date.now() + 2000;
+      chrome.downloads.download({ url, saveAs: false }, () => void chrome.runtime.lastError);
+    }
+  }
 }
 
 if (chrome.downloads.onDeterminingFilename?.addListener) {
@@ -119,6 +140,14 @@ if (chrome.downloads.onDeterminingFilename?.addListener) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.type === "APOCALIPSE_SHORTCUT_STATE") {
+    const wasBypassHeld = bypassHeld;
+    bypassHeld = Boolean(message.bypassPressed);
+    forceHeld = Boolean(message.forcePressed);
+    if (wasBypassHeld && !bypassHeld) bypassUntil = Date.now() + 2000;
+    reply({ ok: true, forceHeld });
+    return;
+  }
   if (message?.type === "APOCALIPSE_MEDIA" && sender.tab?.id) {
     chrome.storage.session.set({ [`media:${sender.tab.id}`]: message.media });
   }

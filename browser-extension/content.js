@@ -1,4 +1,27 @@
 (() => {
+  let shortcutKeys = { force: "Shift", bypass: "Alt" };
+  chrome.storage.local.get({ forceShortcut: "Shift", bypassShortcut: "Alt" }, (value) => {
+    shortcutKeys = { force: value.forceShortcut, bypass: value.bypassShortcut };
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes.forceShortcut) shortcutKeys.force = changes.forceShortcut.newValue;
+    if (changes.bypassShortcut) shortcutKeys.bypass = changes.bypassShortcut.newValue;
+  });
+  const modifierPressed = (event, key) => ({ Alt: event.altKey, Shift: event.shiftKey, Control: event.ctrlKey }[key] || false);
+  const sendShortcutState = (event) => chrome.runtime.sendMessage({
+    type: "APOCALIPSE_SHORTCUT_STATE",
+    bypassPressed: modifierPressed(event, shortcutKeys.bypass),
+    forcePressed: modifierPressed(event, shortcutKeys.force),
+  }).catch(() => {});
+  document.addEventListener("keydown", sendShortcutState, true);
+  document.addEventListener("keyup", sendShortcutState, true);
+  window.addEventListener("blur", () => chrome.runtime.sendMessage({
+    type: "APOCALIPSE_SHORTCUT_STATE",
+    bypassPressed: false,
+    forcePressed: false,
+  }).catch(() => {}));
+
   const absolute = (value) => {
     try { return new URL(value, location.href).href; } catch { return null; }
   };
@@ -48,9 +71,12 @@
     try { return decodeURIComponent(value); } catch { return value; }
   };
   document.addEventListener("click", (event) => {
-    if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey) return;
+    const bypass = modifierPressed(event, shortcutKeys.bypass);
+    const force = modifierPressed(event, shortcutKeys.force);
+    if (bypass || ((event.ctrlKey || event.shiftKey || event.altKey) && !force)) return;
     const anchor = event.target.closest?.("a[href]");
-    const url = downloadableLink(anchor);
+    const url = force ? absolute(anchor?.href) : downloadableLink(anchor);
     if (!url) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -119,7 +145,10 @@
         if (!element.isConnected) { button.remove(); return; }
         const rect = element.getBoundingClientRect();
         button.style.left = `${Math.max(6, rect.left + scrollX + 8)}px`;
-        button.style.top = `${Math.max(6, rect.top + scrollY + 8)}px`;
+        const top = isYouTubeVideo
+          ? rect.top + scrollY - button.offsetHeight - 8
+          : rect.top + scrollY + 8;
+        button.style.top = `${Math.max(6, top)}px`;
         button.hidden = rect.width < 100 || rect.height < 55;
       };
       document.documentElement.append(button);

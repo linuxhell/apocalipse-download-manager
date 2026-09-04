@@ -10,6 +10,9 @@ header span, small { color: #8aa3ad; }
 .pairing button { border: 0; border-radius: 7px; padding: 8px 10px; background: #19cce8; color: #00151a; font-weight: 700; }
 .language { padding: 8px 8px 0; text-align: right; }
 .language select { background: #18222e; color: #dffaff; border: 1px solid #29404e; border-radius: 7px; padding: 5px; }
+.shortcuts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #1b3240; }
+.shortcuts label { display: grid; gap: 5px; color: #9eb3bd; font-size: 11px; }
+.shortcuts select { background: #18222e; color: #dffaff; border: 1px solid #29404e; border-radius: 7px; padding: 6px; }
 nav { display: flex; padding: 8px; gap: 6px; }
 nav button { flex: 1; border: 0; border-radius: 8px; padding: 8px; background: #18222e; color: #9eb3bd; }
 nav button.active { background: #0d5264; color: #69efff; }
