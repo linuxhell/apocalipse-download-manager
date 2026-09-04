@@ -752,10 +752,11 @@ async fn run_download(
                     settings.proxy_password.clone(),
                 )
             });
-            let dns = settings
-                .dns_enabled
-                .then(|| settings.dns_servers.clone())
-                .unwrap_or_default();
+            let dns = if settings.dns_enabled {
+                settings.dns_servers.clone()
+            } else {
+                Vec::new()
+            };
             (proxy, dns)
         });
     let engine_result = match network {
@@ -891,10 +892,11 @@ async fn run_external_download(
                     .flatten(),
                 settings.proxy_username.clone(),
                 settings.proxy_password.clone(),
-                settings
-                    .dns_enabled
-                    .then(|| settings.dns_servers.clone())
-                    .unwrap_or_default(),
+                if settings.dns_enabled {
+                    settings.dns_servers.clone()
+                } else {
+                    Vec::new()
+                },
             )
         })
         .unwrap_or_else(|_| {
