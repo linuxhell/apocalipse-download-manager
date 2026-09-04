@@ -228,6 +228,38 @@
   scheduleOverlays();
   setInterval(scheduleOverlays, 2000);
   chrome.runtime.onMessage.addListener((message, _sender, reply) => {
+    if (message?.type === "APOCALIPSE_UPLOAD_BLOB" && /^blob:/i.test(message.url || "")) {
+      (async () => {
+        const response = await fetch(message.url);
+        const blob = await response.blob();
+        const begin = await chrome.runtime.sendMessage({
+          type: "APOCALIPSE_BLOB_BEGIN",
+          request: { fileName: message.fileName, total: blob.size, source: location.href },
+        });
+        if (!begin?.uploadId) throw new Error(begin?.error || "blob_begin_failed");
+        reply({ started: true });
+        const chunkSize = 64 * 1024;
+        for (let offset = 0; offset < blob.size; offset += chunkSize) {
+          const bytes = new Uint8Array(await blob.slice(offset, offset + chunkSize).arrayBuffer());
+          let data = "";
+          for (const byte of bytes) data += byte.toString(16).padStart(2, "0");
+          const result = await chrome.runtime.sendMessage({
+            type: "APOCALIPSE_BLOB_CHUNK",
+            request: { uploadId: begin.uploadId, data },
+          });
+          if (result?.error) throw new Error(result.error);
+        }
+        const result = await chrome.runtime.sendMessage({
+          type: "APOCALIPSE_BLOB_END",
+          request: { uploadId: begin.uploadId },
+        });
+        if (result?.error) throw new Error(result.error);
+      })().catch((error) => {
+        console.error("Apocalipse Telegram adapter", error);
+        reply({ started: false, error: String(error) });
+      });
+      return true;
+    }
     if (message?.type !== "APOCALIPSE_SCAN") return;
     const found = collect();
     (async () => {

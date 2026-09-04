@@ -36,6 +36,7 @@ struct AppState {
     settings_path: PathBuf,
     bridge_last_seen: Mutex<Option<Instant>>,
     bridge_pending: Mutex<Vec<BridgeDownload>>,
+    blob_uploads: Mutex<HashMap<uuid::Uuid, BlobUpload>>,
     request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
@@ -337,6 +338,35 @@ struct BridgeDownload {
     request_method: Option<String>,
     request_body: Option<String>,
     request_content_type: Option<String>,
+}
+
+struct BlobUpload {
+    task_id: DownloadId,
+    partial: PathBuf,
+    destination: PathBuf,
+    received: u64,
+    total: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BlobBegin {
+    file_name: String,
+    total: u64,
+    source: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BlobChunk {
+    upload_id: uuid::Uuid,
+    data: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BlobFinish {
+    upload_id: uuid::Uuid,
 }
 
 #[derive(Deserialize)]
@@ -2608,6 +2638,114 @@ fn take_bridge_download(
     }
 }
 
+fn decode_hex(value: &str) -> Result<Vec<u8>, String> {
+    if value.len() > 131_072 || value.len() % 2 != 0 {
+        return Err("invalid_blob_chunk".to_owned());
+    }
+    (0..value.len())
+        .step_by(2)
+        .map(|index| {
+            u8::from_str_radix(&value[index..index + 2], 16)
+                .map_err(|_| "invalid_blob_chunk".to_owned())
+        })
+        .collect()
+}
+
+fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid::Uuid, String> {
+    if request.total == 0 {
+        return Err("empty_blob".to_owned());
+    }
+    let state = app.state::<AppState>();
+    let directory = configured_download_directory(app, &state)?;
+    let file_name = validate_file_name(&request.file_name)?;
+    let destination = unique_destination(&directory, &file_name);
+    let partial = partial_path(&destination);
+    fs::File::create(&partial).map_err(|error| error.to_string())?;
+    let mut task = DownloadTask::new(request.source, destination.clone());
+    task.state = DownloadState::Downloading;
+    task.total = Some(request.total);
+    let task_id = task.id;
+    {
+        let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+        queue.push(task);
+        save_queue(&state, &queue)?;
+    }
+    let upload_id = uuid::Uuid::new_v4();
+    state
+        .blob_uploads
+        .lock()
+        .map_err(|error| error.to_string())?
+        .insert(
+            upload_id,
+            BlobUpload {
+                task_id,
+                partial,
+                destination,
+                received: 0,
+                total: request.total,
+            },
+        );
+    diagnostic_log(
+        &state,
+        "INFO",
+        "blob.start",
+        &format!("task={task_id} bytes={}", request.total),
+    );
+    Ok(upload_id)
+}
+
+fn append_blob_chunk(app: &tauri::AppHandle, request: BlobChunk) -> Result<(), String> {
+    let data = decode_hex(&request.data)?;
+    let state = app.state::<AppState>();
+    let (task_id, received, total) = {
+        let mut uploads = state.blob_uploads.lock().map_err(|error| error.to_string())?;
+        let upload = uploads
+            .get_mut(&request.upload_id)
+            .ok_or_else(|| "blob_upload_not_found".to_owned())?;
+        if upload.received + data.len() as u64 > upload.total {
+            return Err("blob_too_large".to_owned());
+        }
+        OpenOptions::new()
+            .append(true)
+            .open(&upload.partial)
+            .and_then(|mut file| file.write_all(&data))
+            .map_err(|error| error.to_string())?;
+        upload.received += data.len() as u64;
+        (upload.task_id, upload.received, upload.total)
+    };
+    update_task(app, task_id, false, |task| {
+        task.received = received;
+        task.progress_percent = Some(received as f64 * 100.0 / total as f64);
+    });
+    Ok(())
+}
+
+fn finish_blob_upload(app: &tauri::AppHandle, request: BlobFinish) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let upload = state
+        .blob_uploads
+        .lock()
+        .map_err(|error| error.to_string())?
+        .remove(&request.upload_id)
+        .ok_or_else(|| "blob_upload_not_found".to_owned())?;
+    if upload.received != upload.total {
+        return Err("incomplete_blob".to_owned());
+    }
+    fs::rename(&upload.partial, &upload.destination).map_err(|error| error.to_string())?;
+    update_task(app, upload.task_id, true, |task| {
+        task.received = upload.received;
+        task.progress_percent = Some(100.0);
+        task.state = DownloadState::Completed;
+    });
+    diagnostic_log(
+        &state,
+        "INFO",
+        "blob.completed",
+        &format!("task={} bytes={}", upload.task_id, upload.received),
+    );
+    Ok(())
+}
+
 fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
     let Some(buffer) = read_bridge_request(&mut stream) else {
@@ -2659,6 +2797,35 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             .and_then(|request| queue_from_bridge(app, request))
         {
             Ok(()) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
+            Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
+        }
+    } else if first.starts_with("POST /v1/blob/begin ") {
+        match serde_json::from_str::<BlobBegin>(body)
+            .map_err(|error| error.to_string())
+            .and_then(|request| begin_blob_upload(app, request))
+        {
+            Ok(upload_id) => bridge_response(
+                &mut stream,
+                "202 Accepted",
+                origin,
+                &format!("{{\"uploadId\":\"{upload_id}\"}}"),
+            ),
+            Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
+        }
+    } else if first.starts_with("POST /v1/blob/chunk ") {
+        match serde_json::from_str::<BlobChunk>(body)
+            .map_err(|error| error.to_string())
+            .and_then(|request| append_blob_chunk(app, request))
+        {
+            Ok(()) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
+            Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
+        }
+    } else if first.starts_with("POST /v1/blob/end ") {
+        match serde_json::from_str::<BlobFinish>(body)
+            .map_err(|error| error.to_string())
+            .and_then(|request| finish_blob_upload(app, request))
+        {
+            Ok(()) => bridge_response(&mut stream, "200 OK", origin, "{\"ok\":true}"),
             Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
         }
     } else {
@@ -2923,6 +3090,7 @@ fn main() {
                 settings_path,
                 bridge_last_seen: Mutex::new(None),
                 bridge_pending: Mutex::new(Vec::new()),
+                blob_uploads: Mutex::new(HashMap::new()),
                 request_identities: Mutex::new(HashMap::new()),
                 log_path,
                 log_write_lock: Mutex::new(()),

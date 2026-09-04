@@ -110,6 +110,22 @@ async function sourcePageUrl(sender) {
 
 const fileNameFromPath = (path) => String(path || "").split(/[\\/]/).pop() || null;
 
+async function handOffTelegramBlob(item) {
+  const tabs = await chrome.tabs.query({ url: ["https://web.telegram.org/*"] }).catch(() => []);
+  for (const tab of tabs) {
+    if (!tab.id) continue;
+    try {
+      const result = await chrome.tabs.sendMessage(tab.id, {
+        type: "APOCALIPSE_UPLOAD_BLOB",
+        url: item.finalUrl || item.url,
+        fileName: fileNameFromPath(item.filename) || "telegram-download",
+      });
+      if (result?.started) return true;
+    } catch {}
+  }
+  return false;
+}
+
 function uupDumpPost(url) {
   try {
     const parsed = new URL(url);
@@ -149,7 +165,20 @@ const eraseBrowserDownload = (id) => new Promise((resolve) => {
 
 async function takeBrowserDownload(item, eraseFromHistory = false) {
   let url = item.finalUrl || item.url;
-  if (!item.id || !/^https?:/i.test(url)) return;
+  if (!item.id) return;
+  if (/^blob:https:\/\/web\.telegram\.org\//i.test(url)) {
+    if (Date.now() < bypassNextUntil) {
+      bypassNextUntil = 0;
+      return;
+    }
+    if (!bridgeConnected || bypassHeld || Date.now() < bypassUntil) return;
+    if (await handOffTelegramBlob(item)) {
+      await cancelBrowserDownload(item.id).catch(() => {});
+      if (eraseFromHistory) await eraseBrowserDownload(item.id);
+    }
+    return;
+  }
+  if (!/^https?:/i.test(url)) return;
   const pageUrl = item.referrer || null;
   const now = Date.now();
   const expectedName = fileNameFromPath(item.filename)?.toLowerCase() || "";
@@ -239,6 +268,21 @@ if (chrome.downloads.onDeterminingFilename?.addListener) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.type === "APOCALIPSE_BLOB_BEGIN") {
+    bridgeRequest("/v1/blob/begin", { method: "POST", body: JSON.stringify(message.request) }).then(reply)
+      .catch((error) => reply({ error: String(error) }));
+    return true;
+  }
+  if (message?.type === "APOCALIPSE_BLOB_CHUNK") {
+    bridgeRequest("/v1/blob/chunk", { method: "POST", body: JSON.stringify(message.request) }).then(reply)
+      .catch((error) => reply({ error: String(error) }));
+    return true;
+  }
+  if (message?.type === "APOCALIPSE_BLOB_END") {
+    bridgeRequest("/v1/blob/end", { method: "POST", body: JSON.stringify(message.request) }).then(reply)
+      .catch((error) => reply({ error: String(error) }));
+    return true;
+  }
   if (message?.type === "APOCALIPSE_FORM_SUBMIT" && message.request?.method === "POST") {
     lastFormSubmission = message.request;
     reply({ ok: true });
