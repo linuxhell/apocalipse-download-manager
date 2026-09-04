@@ -788,10 +788,14 @@ document.querySelector("#analyze").onclick = async () => {
   box.textContent = "…";
   try {
     const plan = await invoke("inspect_url", { url: url.value });
-    document.querySelector("#file-name").value = await invoke(
+    const fileName = document.querySelector("#file-name");
+    const suggestedFileName = await invoke(
       "suggest_download_name",
       { url: url.value },
     );
+    if (plan.primary !== "NativeHttp" || !fileName.value.trim()) {
+      fileName.value = suggestedFileName;
+    }
     box.textContent = `${plan.primary} · ${plan.reason}`;
     if (plan.primary === "YtDlp") await showMediaInspection(url.value);
     else if (plan.primary === "NM3u8DlRe") {
