@@ -1127,8 +1127,8 @@ setInterval(async () => {
 }, 750);
 setInterval(async () => {
   try {
-    if (dialog.open) return;
-    const request = await invoke("take_bridge_download");
+    const currentUrl = dialog.open ? document.querySelector("#url").value : null;
+    const request = await invoke("take_bridge_download", { currentUrl });
     if (!request) return;
     pendingReferer = request.pageUrl || null;
     pendingDuration = Number.isFinite(request.duration) ? request.duration : null;

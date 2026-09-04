@@ -2581,12 +2581,31 @@ fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<
 }
 
 #[tauri::command]
-fn take_bridge_download(state: State<'_, AppState>) -> Result<Option<BridgeDownload>, String> {
+fn take_bridge_download(
+    state: State<'_, AppState>,
+    current_url: Option<String>,
+) -> Result<Option<BridgeDownload>, String> {
     let mut pending = state
         .bridge_pending
         .lock()
         .map_err(|error| error.to_string())?;
-    Ok((!pending.is_empty()).then(|| pending.remove(0)))
+    let index = current_url
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .and_then(|current| {
+            let current = current.trim().trim_end_matches('#');
+            pending.iter().position(|request| {
+                request
+                    .page_url
+                    .as_deref()
+                    .is_some_and(|page| page.trim().trim_end_matches('#') == current)
+            })
+        });
+    if current_url.is_some() {
+        Ok(index.map(|index| pending.remove(index)))
+    } else {
+        Ok((!pending.is_empty()).then(|| pending.remove(0)))
+    }
 }
 
 fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
