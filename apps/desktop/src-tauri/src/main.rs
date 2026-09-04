@@ -32,6 +32,14 @@ struct UserSettings {
     bridge_token: String,
     #[serde(default)]
     recent_download_directories: Vec<PathBuf>,
+    #[serde(default)]
+    ffmpeg_path: Option<PathBuf>,
+    #[serde(default)]
+    yt_dlp_path: Option<PathBuf>,
+    #[serde(default)]
+    n_m3u8dl_re_path: Option<PathBuf>,
+    #[serde(default)]
+    aria2_path: Option<PathBuf>,
 }
 
 const fn default_max_active() -> usize { 3 }
@@ -47,6 +55,10 @@ impl Default for UserSettings {
             connections_per_download: default_connections(),
             bridge_token: default_bridge_token(),
             recent_download_directories: Vec::new(),
+            ffmpeg_path: None,
+            yt_dlp_path: None,
+            n_m3u8dl_re_path: None,
+            aria2_path: None,
         }
     }
 }
@@ -70,6 +82,21 @@ struct MediaInspection {
     duration: Option<f64>,
     suggested_file_name: String,
     formats: Vec<MediaFormat>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolStatus { id: String, path: String, found: bool, version: Option<String> }
+
+fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
+    path.clone().filter(|value| !value.as_os_str().is_empty()).unwrap_or_else(|| PathBuf::from(fallback))
+}
+
+fn version_line(executable: &Path, args: &[&str]) -> Option<String> {
+    let output = Command::new(executable).args(args).output().ok()?;
+    if !output.status.success() { return None; }
+    String::from_utf8_lossy(&output.stdout).lines().next()
+        .or_else(|| String::from_utf8_lossy(&output.stderr).lines().next()).map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned)
 }
 
 #[derive(Serialize)]
@@ -132,8 +159,9 @@ fn inspect_url(url: String) -> Result<PlanResponse, String> {
 }
 
 #[tauri::command]
-async fn inspect_media_formats(url: String) -> Result<MediaInspection, String> {
-    let output = tokio::process::Command::new("yt-dlp")
+async fn inspect_media_formats(state: State<'_, AppState>, url: String) -> Result<MediaInspection, String> {
+    let executable = configured_tool(&state.settings.lock().map_err(|error| error.to_string())?.yt_dlp_path, "yt-dlp");
+    let output = tokio::process::Command::new(executable)
         .args(["--dump-single-json", "--no-playlist", "--skip-download", "--no-warnings"])
         .arg(&url).output().await.map_err(|error| format!("yt_dlp_unavailable: {error}"))?;
     if !output.status.success() { return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned()); }
@@ -280,9 +308,15 @@ async fn run_external_download(
     update_task(&app, id, true, |item| item.state = DownloadState::Downloading);
     let directory = task.destination.parent().unwrap_or_else(|| Path::new("."));
     let file_name = task.destination.file_name().and_then(|value| value.to_str()).unwrap_or("download");
+    let tools = app.state::<AppState>().settings.lock().map(|settings| (
+        configured_tool(&settings.ffmpeg_path, "ffmpeg"),
+        configured_tool(&settings.yt_dlp_path, "yt-dlp"),
+        configured_tool(&settings.n_m3u8dl_re_path, if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" }),
+        configured_tool(&settings.aria2_path, if cfg!(windows) { "aria2c.exe" } else { "aria2c" }),
+    )).unwrap_or_else(|_| ("ffmpeg".into(), "yt-dlp".into(), "N_m3u8DL-RE".into(), "aria2c".into()));
     let mut command = match kind {
         DownloadKind::MediaPage => {
-            let mut command = tokio::process::Command::new("yt-dlp");
+            let mut command = tokio::process::Command::new(&tools.1);
             let selection = task.format_selection.as_deref().unwrap_or("bestvideo+bestaudio/best");
             command.arg("--no-playlist");
             if let Some(audio_format) = selection.strip_prefix("audio:") {
@@ -295,7 +329,7 @@ async fn run_external_download(
         }
         DownloadKind::Hls => {
             if let Some(audio_format) = task.format_selection.as_deref().and_then(|value| value.strip_prefix("audio:")) {
-                let mut command = tokio::process::Command::new("ffmpeg");
+                let mut command = tokio::process::Command::new(&tools.0);
                 command.args(["-y", "-i"]).arg(&task.source).arg("-vn");
                 match audio_format {
                     "mp3" => { command.args(["-c:a", "libmp3lame", "-q:a", "2"]); }
@@ -307,15 +341,14 @@ async fn run_external_download(
                 command.arg(&task.destination);
                 command
             } else {
-            let executable = if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" };
-            let mut command = tokio::process::Command::new(executable);
+            let mut command = tokio::process::Command::new(&tools.2);
             let stem = task.destination.file_stem().and_then(|value| value.to_str()).unwrap_or("download");
             command.arg(&task.source).arg("--save-dir").arg(directory).args(["--save-name", stem, "--auto-select"]);
             command
             }
         }
         DownloadKind::Torrent | DownloadKind::Magnet => {
-            let mut command = tokio::process::Command::new("aria2c");
+            let mut command = tokio::process::Command::new(&tools.3);
             command.arg(format!("--dir={}", directory.display())).arg(&task.source);
             command
         }
@@ -444,6 +477,45 @@ fn pick_directory(initial_directory: Option<String>) -> Option<String> {
         dialog = dialog.set_directory(path);
     }
     dialog.pick_folder().map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn pick_executable(initial_path: Option<String>) -> Option<String> {
+    let mut dialog = rfd::FileDialog::new();
+    if let Some(path) = initial_path.filter(|value| !value.trim().is_empty()) {
+        if let Some(parent) = Path::new(&path).parent() { dialog = dialog.set_directory(parent); }
+    }
+    dialog.pick_file().map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    let definitions = [
+        ("ffmpeg", configured_tool(&settings.ffmpeg_path, if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" }), ["-version"].as_slice()),
+        ("yt-dlp", configured_tool(&settings.yt_dlp_path, if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" }), ["--version"].as_slice()),
+        ("n-m3u8dl-re", configured_tool(&settings.n_m3u8dl_re_path, if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" }), ["--version"].as_slice()),
+        ("aria2", configured_tool(&settings.aria2_path, if cfg!(windows) { "aria2c.exe" } else { "aria2c" }), ["--version"].as_slice()),
+    ];
+    Ok(definitions.into_iter().map(|(id, executable, args)| {
+        let version = version_line(&executable, args);
+        ToolStatus { id: id.to_owned(), path: executable.to_string_lossy().into_owned(), found: version.is_some(), version }
+    }).collect())
+}
+
+fn optional_path(value: String) -> Option<PathBuf> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| PathBuf::from(value))
+}
+
+#[tauri::command]
+fn set_tool_paths(state: State<'_, AppState>, ffmpeg: String, yt_dlp: String, n_m3u8dl_re: String, aria2: String) -> Result<(), String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.ffmpeg_path = optional_path(ffmpeg);
+    settings.yt_dlp_path = optional_path(yt_dlp);
+    settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
+    settings.aria2_path = optional_path(aria2);
+    save_settings(&state, &settings)
 }
 
 #[tauri::command]
@@ -904,6 +976,9 @@ fn main() {
             default_download_directory,
             set_default_download_directory,
             pick_directory,
+            pick_executable,
+            get_tool_statuses,
+            set_tool_paths,
             suggest_download_name,
             remove_downloads,
             pause_download,

@@ -68,6 +68,11 @@ const catalogs = {
     audioOnly: "Audio only",
     duration: "Duration",
     mediaUnavailable: "Media details are unavailable; the default format can still be used.",
+    externalTools: "Required media and transfer tools",
+    toolsHint: "Configure each executable. Apocalipse uses these exact paths for downloads.",
+    installed: "Detected",
+    missing: "Not found",
+    checkTools: "Check versions",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -139,6 +144,11 @@ const catalogs = {
     audioOnly: "Somente áudio",
     duration: "Duração",
     mediaUnavailable: "Os detalhes da mídia não estão disponíveis; ainda é possível usar o formato padrão.",
+    externalTools: "Ferramentas obrigatórias de mídia e transferência",
+    toolsHint: "Configure cada executável. O Apocalipse usa exatamente estes caminhos nos downloads.",
+    installed: "Detectado",
+    missing: "Não encontrado",
+    checkTools: "Verificar versões",
   },
   "zh-CN": {
     downloads: "下载",
@@ -209,6 +219,11 @@ const catalogs = {
     audioOnly: "仅音频",
     duration: "时长",
     mediaUnavailable: "媒体详情不可用；仍可使用默认格式。",
+    externalTools: "必需的媒体和传输工具",
+    toolsHint: "配置每个可执行文件。Apocalipse 将在下载时使用这些确切路径。",
+    installed: "已检测",
+    missing: "未找到",
+    checkTools: "检查版本",
   },
 };
 
@@ -428,6 +443,20 @@ async function refreshDownloads() {
 const dialog = document.querySelector("#add-dialog");
 const clearDialog = document.querySelector("#clear-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
+async function refreshToolStatuses() {
+  const button = document.querySelector("#check-tools");
+  button.disabled = true;
+  try {
+    const tools = await invoke("get_tool_statuses");
+    for (const tool of tools) {
+      document.querySelector(`#tool-${tool.id}`).value = tool.path;
+      const status = document.querySelector(`[data-tool="${tool.id}"] > span small`);
+      status.textContent = tool.found ? `${t("installed")} · ${tool.version}` : t("missing");
+      status.classList.toggle("tool-found", tool.found);
+    }
+  } catch (error) { console.error(error); }
+  finally { button.disabled = false; }
+}
 async function refreshDestinationHistory() {
   try {
     const destinations = await invoke("list_download_directories");
@@ -567,6 +596,7 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
     document.querySelector("#connections").value = limits.connectionsPerDownload;
     updateLimitLabels();
     document.querySelector("#pairing-token").value = pairing.token;
+    await refreshToolStatuses();
     settingsDialog.showModal();
   } catch (error) {
     console.error(error);
@@ -592,6 +622,12 @@ document.querySelector("#save-settings").onclick = async () => {
       maxActiveDownloads: Number(document.querySelector("#max-tasks").value),
       connectionsPerDownload: Number(document.querySelector("#connections").value),
     });
+    await invoke("set_tool_paths", {
+      ffmpeg: document.querySelector("#tool-ffmpeg").value,
+      ytDlp: document.querySelector("#tool-yt-dlp").value,
+      nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
+      aria2: document.querySelector("#tool-aria2").value,
+    });
     settingsDialog.close();
   } catch (error) {
     console.error(error);
@@ -599,6 +635,18 @@ document.querySelector("#save-settings").onclick = async () => {
     button.disabled = false;
   }
 };
+document.querySelector("#check-tools").onclick = refreshToolStatuses;
+document.querySelectorAll("[data-tool-pick]").forEach((button) => {
+  button.onclick = async () => {
+    const input = document.querySelector(`#tool-${button.dataset.toolPick}`);
+    button.disabled = true;
+    try {
+      const selected = await invoke("pick_executable", { initialPath: input.value });
+      if (selected) input.value = selected;
+    } catch (error) { console.error(error); }
+    finally { button.disabled = false; }
+  };
+});
 function updateLimitLabels() {
   document.querySelector("#max-tasks-value").value = document.querySelector("#max-tasks").value;
   document.querySelector("#connections-value").value = document.querySelector("#connections").value;

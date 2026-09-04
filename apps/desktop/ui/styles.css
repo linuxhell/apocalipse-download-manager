@@ -440,6 +440,16 @@ dialog input:focus {
   padding: 7px 13px;
   cursor: pointer;
 }
+.tool-settings { display: grid; gap: 9px; margin-top: 14px; padding: 15px; border: 1px solid var(--line); border-radius: 11px; background: #0b1319; }
+.tool-settings > small { color: var(--muted); }
+#tool-list { display: grid; gap: 9px; }
+#tool-list label { margin: 0; display: grid; gap: 4px; }
+#tool-list label > span { display: flex; justify-content: space-between; font-weight: 700; }
+#tool-list label > span small { color: var(--muted); font-weight: 400; }
+#tool-list label > div { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+#tool-list button, #check-tools { border: 1px solid #29424f; border-radius: 8px; background: #111d25; color: #bcd1d9; padding: 7px 13px; cursor: pointer; }
+#check-tools { justify-self: end; }
+#settings-dialog form { max-height: min(820px, 88vh); overflow-y: auto; }
 .destination-history {
   margin-top: 13px;
   border: 1px solid var(--line);

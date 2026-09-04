@@ -287,6 +287,17 @@
           </div>
           <button id="regenerate-pairing" type="button" data-i18n="regenerate">Regenerate</button>
         </section>
+        <section class="tool-settings">
+          <b data-i18n="externalTools">Required media and transfer tools</b>
+          <small data-i18n="toolsHint">Configure each executable. Apocalipse uses these exact paths for downloads.</small>
+          <div id="tool-list">
+            <label data-tool="ffmpeg"><span>FFmpeg <small></small></span><div><input id="tool-ffmpeg" type="text" /><button type="button" data-tool-pick="ffmpeg" data-i18n="browse">Browse…</button></div></label>
+            <label data-tool="yt-dlp"><span>yt-dlp <small></small></span><div><input id="tool-yt-dlp" type="text" /><button type="button" data-tool-pick="yt-dlp" data-i18n="browse">Browse…</button></div></label>
+            <label data-tool="n-m3u8dl-re"><span>N_m3u8DL-RE <small></small></span><div><input id="tool-n-m3u8dl-re" type="text" /><button type="button" data-tool-pick="n-m3u8dl-re" data-i18n="browse">Browse…</button></div></label>
+            <label data-tool="aria2"><span>aria2c <small></small></span><div><input id="tool-aria2" type="text" /><button type="button" data-tool-pick="aria2" data-i18n="browse">Browse…</button></div></label>
+          </div>
+          <button id="check-tools" type="button" data-i18n="checkTools">Check versions</button>
+        </section>
         <div class="dialog-actions">
           <button type="button" data-settings-close data-i18n="cancel">
             Cancel
