@@ -438,7 +438,9 @@ async fn run_external_download(
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        command.as_std_mut().creation_flags(0x08000000);
+        if kind != DownloadKind::MediaPage {
+            command.as_std_mut().creation_flags(0x08000000);
+        }
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     command.kill_on_drop(true);
