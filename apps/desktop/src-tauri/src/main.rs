@@ -45,6 +45,8 @@ struct UserSettings {
     aria2_path: Option<PathBuf>,
     #[serde(default)]
     user_agent: Option<String>,
+    #[serde(default)]
+    log_editor_path: Option<PathBuf>,
 }
 
 const fn default_max_active() -> usize { 3 }
@@ -65,6 +67,7 @@ impl Default for UserSettings {
             n_m3u8dl_re_path: None,
             aria2_path: None,
             user_agent: None,
+            log_editor_path: None,
         }
     }
 }
@@ -549,7 +552,7 @@ async fn run_external_download(
                 if status.success() { return Ok(()); }
                 if kind == DownloadKind::MediaPage {
                     if let Some(path) = write_yt_dlp_diagnostic(&app, id, &text, status.code()) {
-                        open_diagnostic_log(&path);
+                        diagnostic_log(&app.state::<AppState>(), "INFO", "yt_dlp.report", &format!("task={id} file={}", path.display()));
                     }
                 }
                 Err(external_error_detail(&text, status.code()))
@@ -601,28 +604,6 @@ fn write_yt_dlp_diagnostic(
     Some(path)
 }
 
-#[cfg(target_os = "windows")]
-fn open_diagnostic_log(path: &Path) {
-    let _ = Command::new("notepad.exe").arg(path).spawn();
-}
-
-#[cfg(target_os = "macos")]
-fn open_diagnostic_log(path: &Path) {
-    let _ = Command::new("open").arg(path).spawn();
-}
-
-#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-fn open_diagnostic_log(path: &Path) {
-    let _ = Command::new("xdg-open").arg(path).spawn();
-}
-
-#[tauri::command]
-fn open_general_log(state: State<'_, AppState>) -> Result<String, String> {
-    diagnostic_log(&state, "INFO", "log.opened", "opened_by_user");
-    open_diagnostic_log(&state.log_path);
-    Ok(state.log_path.to_string_lossy().into_owned())
-}
-
 #[tauri::command]
 fn read_general_log(state: State<'_, AppState>) -> Result<String, String> {
     diagnostic_log(&state, "INFO", "log.viewed", "viewed_inside_application");
@@ -649,6 +630,35 @@ fn clear_general_log(state: State<'_, AppState>) -> Result<(), String> {
     }
     diagnostic_log(&state, "INFO", "log.cleared", "cleared_by_user");
     Ok(())
+}
+
+#[tauri::command]
+fn get_log_editor(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.settings.lock().map_err(|error| error.to_string())?.log_editor_path.as_ref()
+        .map(|path| path.to_string_lossy().into_owned()).unwrap_or_default())
+}
+
+#[tauri::command]
+fn set_log_editor(state: State<'_, AppState>, path: String) -> Result<String, String> {
+    let path = optional_path(path);
+    if path.as_ref().is_some_and(|value| !value.is_file()) {
+        return Err("log_editor_not_found".to_owned());
+    }
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.log_editor_path = path;
+    save_settings(&state, &settings)?;
+    Ok(settings.log_editor_path.as_ref().map(|value| value.to_string_lossy().into_owned()).unwrap_or_default())
+}
+
+#[tauri::command]
+fn open_log_external(state: State<'_, AppState>) -> Result<(), String> {
+    diagnostic_log(&state, "INFO", "log.external", "opened_with_configured_editor");
+    let editor = state.settings.lock().map_err(|error| error.to_string())?.log_editor_path.clone()
+        .ok_or_else(|| "log_editor_not_configured".to_owned())?;
+    if !editor.is_file() {
+        return Err("log_editor_not_found".to_owned());
+    }
+    Command::new(editor).arg(&state.log_path).spawn().map(|_| ()).map_err(|error| error.to_string())
 }
 
 async fn read_process_tail(
@@ -1555,9 +1565,11 @@ fn main() {
             set_tool_paths,
             suggest_download_name,
             remove_downloads,
-            open_general_log,
             read_general_log,
             clear_general_log,
+            get_log_editor,
+            set_log_editor,
+            open_log_external,
             pause_download,
             resume_download,
             redownload_downloads,

@@ -84,6 +84,11 @@ const catalogs = {
     refreshLog: "Refresh",
     closeLog: "Close",
     emptyLog: "No diagnostic events recorded yet.",
+    logEditor: "Log editor",
+    logEditorHint: "Choose an editor executable, including a portable application",
+    chooseEditor: "Choose editor…",
+    removeEditor: "Remove editor",
+    openExternal: "Open in editor",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -171,6 +176,11 @@ const catalogs = {
     refreshLog: "Atualizar",
     closeLog: "Fechar",
     emptyLog: "Ainda não há eventos de diagnóstico registrados.",
+    logEditor: "Editor de log",
+    logEditorHint: "Escolha o executável de um editor, inclusive um aplicativo portátil",
+    chooseEditor: "Escolher editor…",
+    removeEditor: "Remover editor",
+    openExternal: "Abrir no editor",
   },
   "zh-CN": {
     downloads: "下载",
@@ -257,6 +267,11 @@ const catalogs = {
     refreshLog: "刷新",
     closeLog: "关闭",
     emptyLog: "尚未记录诊断事件。",
+    logEditor: "日志编辑器",
+    logEditorHint: "选择编辑器可执行文件，包括便携式应用程序",
+    chooseEditor: "选择编辑器…",
+    removeEditor: "移除编辑器",
+    openExternal: "在编辑器中打开",
   },
 };
 
@@ -499,6 +514,11 @@ const dialog = document.querySelector("#add-dialog");
 const clearDialog = document.querySelector("#clear-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
 const logDialog = document.querySelector("#log-dialog");
+function updateLogEditorControls() {
+  const configured = Boolean(document.querySelector("#log-editor").value.trim());
+  document.querySelector("#remove-log-editor").disabled = !configured;
+  document.querySelector("#open-log-external").disabled = !configured;
+}
 document.querySelector("#download-list").addEventListener("pointerdown", (event) => {
   if (event.target.closest?.(".task-select")) selectionPointerActive = true;
 });
@@ -680,13 +700,14 @@ document.querySelectorAll("[data-clear-mode]").forEach((button) => {
 });
 document.querySelector('[data-page="settings"]').onclick = async () => {
   try {
-    const [autostart, directory, clipboard, limits, pairing, userAgent] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
       invoke("get_transfer_limits"),
       invoke("get_bridge_pairing"),
       invoke("get_user_agent"),
+      invoke("get_log_editor"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
     document.querySelector("#default-directory").value = directory;
@@ -696,6 +717,8 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
     updateLimitLabels();
     document.querySelector("#pairing-token").value = pairing.token;
     document.querySelector("#user-agent").value = userAgent.userAgent;
+    document.querySelector("#log-editor").value = logEditor;
+    updateLogEditorControls();
     await refreshToolStatuses();
     settingsDialog.showModal();
   } catch (error) {
@@ -762,6 +785,23 @@ document.querySelector("#clear-log").onclick = async (event) => {
   finally { button.disabled = false; }
 };
 document.querySelector("#refresh-log").onclick = () => refreshDiagnosticLog().catch(console.error);
+document.querySelector("#open-log-external").onclick = () => invoke("open_log_external").catch(console.error);
+document.querySelector("#pick-log-editor").onclick = async () => {
+  const input = document.querySelector("#log-editor");
+  try {
+    const selected = await invoke("pick_executable", { initialPath: input.value });
+    if (selected) {
+      input.value = await invoke("set_log_editor", { path: selected });
+      updateLogEditorControls();
+    }
+  } catch (error) { console.error(error); }
+};
+document.querySelector("#remove-log-editor").onclick = async () => {
+  try {
+    document.querySelector("#log-editor").value = await invoke("set_log_editor", { path: "" });
+    updateLogEditorControls();
+  } catch (error) { console.error(error); }
+};
 document.querySelectorAll("[data-log-close]").forEach((button) => {
   button.onclick = () => logDialog.close();
 });

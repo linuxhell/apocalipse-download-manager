@@ -311,9 +311,16 @@
         <section class="pairing-settings">
           <b data-i18n="diagnostics">Diagnostics</b>
           <small data-i18n="diagnosticsHint">Safe activity log with credentials and URL parameters hidden</small>
+          <label for="log-editor" data-i18n="logEditor">Log editor</label>
+          <small data-i18n="logEditorHint">Choose an editor executable, including a portable application</small>
+          <div class="path-picker">
+            <input id="log-editor" type="text" readonly />
+            <button id="pick-log-editor" type="button" data-i18n="chooseEditor">Choose editor…</button>
+          </div>
           <div class="diagnostic-actions">
             <button id="open-log" type="button" data-i18n="openLog">Open diagnostic log</button>
             <button id="clear-log" type="button" data-i18n="clearLog">Clear log</button>
+            <button id="remove-log-editor" type="button" data-i18n="removeEditor">Remove editor</button>
           </div>
         </section>
         <div class="dialog-actions">
@@ -343,6 +350,7 @@
         <pre id="diagnostic-log"></pre>
         <div class="dialog-actions">
           <button id="refresh-log" type="button" data-i18n="refreshLog">Refresh</button>
+          <button id="open-log-external" type="button" data-i18n="openExternal">Open in editor</button>
           <button type="button" data-log-close data-i18n="closeLog">Close</button>
         </div>
       </form>
