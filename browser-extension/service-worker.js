@@ -69,6 +69,32 @@ async function sourcePageUrl(sender) {
   return tab?.url || null;
 }
 
+const fileNameFromPath = (path) => String(path || "").split(/[\\/]/).pop() || null;
+
+chrome.downloads.onCreated.addListener(async (item) => {
+  const url = item.finalUrl || item.url;
+  if (!item.id || !/^https?:/i.test(url)) return;
+  try {
+    await chrome.downloads.pause(item.id);
+    const pageUrl = item.referrer || null;
+    await bridgeRequest("/v1/download", {
+      method: "POST",
+      body: JSON.stringify({
+        url,
+        fileName: fileNameFromPath(item.filename),
+        pageUrl,
+        duration: null,
+        cookieHeader: await cookieHeaderFor([url, item.url, pageUrl]),
+        userAgent: navigator.userAgent,
+      }),
+    });
+    await chrome.downloads.cancel(item.id);
+    await chrome.downloads.erase({ id: item.id });
+  } catch {
+    chrome.downloads.resume(item.id).catch(() => {});
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "APOCALIPSE_MEDIA" && sender.tab?.id) {
     chrome.storage.session.set({ [`media:${sender.tab.id}`]: message.media });
