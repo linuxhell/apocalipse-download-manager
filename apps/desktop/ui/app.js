@@ -1125,7 +1125,10 @@ setInterval(async () => {
     console.error(error);
   }
 }, 750);
-setInterval(async () => {
+let consumingBridgeDownload = false;
+async function consumeBridgeDownload() {
+  if (consumingBridgeDownload) return;
+  consumingBridgeDownload = true;
   try {
     const currentUrl = dialog.open ? document.querySelector("#url").value : null;
     const request = await invoke("take_bridge_download", { currentUrl });
@@ -1145,10 +1148,13 @@ setInterval(async () => {
     resetMediaInspection();
     document.querySelector("#destination").value = await invoke("default_download_directory");
     await refreshDestinationHistory();
-    dialog.showModal();
+    if (!dialog.open) dialog.showModal();
     document.querySelector("#url").focus();
   } catch (error) { console.error(error); }
-}, 400);
+  finally { consumingBridgeDownload = false; }
+}
+setInterval(consumeBridgeDownload, 400);
+window.__TAURI__?.event?.listen?.("bridge-download-ready", consumeBridgeDownload).catch(console.error);
 async function refreshBridgeStatus() {
   try {
     const status = await invoke("get_bridge_pairing");

@@ -20,7 +20,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Manager, State,
+    Emitter, Manager, State,
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::{
@@ -2611,6 +2611,13 @@ fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<
         .map_err(|error| error.to_string())?
         .push(request);
     show_main_window(app);
+    let _ = app.emit("bridge-download-ready", ());
+    let restored_app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(350));
+        show_main_window(&restored_app);
+        let _ = restored_app.emit("bridge-download-ready", ());
+    });
     Ok(())
 }
 
@@ -2635,9 +2642,19 @@ fn take_bridge_download(
                     .is_some_and(|page| page.trim().trim_end_matches('#') == current)
             })
         });
-    Ok(index
+    let request = index
         .or_else(|| (!pending.is_empty()).then_some(0))
-        .map(|index| pending.remove(index)))
+        .map(|index| pending.remove(index));
+    drop(pending);
+    if let Some(request) = request.as_ref() {
+        diagnostic_log(
+            &state,
+            "INFO",
+            "bridge.prompt",
+            &format!("url={}", redact_url(&request.url)),
+        );
+    }
+    Ok(request)
 }
 
 fn decode_hex(value: &str) -> Result<Vec<u8>, String> {
