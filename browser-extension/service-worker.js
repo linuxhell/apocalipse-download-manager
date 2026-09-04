@@ -104,6 +104,20 @@ const eraseBrowserDownload = (id) => new Promise((resolve) => {
 async function takeBrowserDownload(item, eraseFromHistory = false) {
   const url = item.finalUrl || item.url;
   if (!item.id || !/^https?:/i.test(url)) return;
+  const pageUrl = item.referrer || null;
+  const pendingPost = lastFormSubmission && Date.now() - lastFormSubmission.capturedAt < 30000
+    ? lastFormSubmission
+    : null;
+  if (pendingPost) {
+    let sameRequest = pageUrl === pendingPost.pageUrl;
+    try {
+      sameRequest ||= new URL(url).origin === new URL(pendingPost.url).origin;
+    } catch {}
+    if (sameRequest) {
+      lastFormSubmission = null;
+      return;
+    }
+  }
   if (Date.now() < bypassNextUntil) {
     bypassNextUntil = 0;
     return;
@@ -114,7 +128,6 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     await cancelBrowserDownload(item.id);
     cancelled = true;
     if (eraseFromHistory) await eraseBrowserDownload(item.id);
-    const pageUrl = item.referrer || null;
     const formRequest = lastFormSubmission
       && Date.now() - lastFormSubmission.capturedAt < 30000
       && pageUrl === lastFormSubmission.pageUrl
