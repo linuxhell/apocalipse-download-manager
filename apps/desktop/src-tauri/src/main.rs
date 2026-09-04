@@ -412,8 +412,7 @@ async fn run_external_download(
             text.push_str(&String::from_utf8_lossy(&errors.await.unwrap_or_default()));
             status.map_err(|error| error.to_string()).and_then(|status| {
                 if status.success() { Ok(()) } else {
-                    let detail = text.lines().filter(|line| !line.trim().is_empty()).rev().take(6).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" | ");
-                    Err(if detail.is_empty() { format!("external_engine_exit_{:?}", status.code()) } else { detail })
+                    Err(external_error_detail(&text, status.code()))
                 }
             })
         },
@@ -442,6 +441,57 @@ async fn read_process_tail(mut stream: impl tokio::io::AsyncRead + Unpin) -> Vec
         }
     }
     tail
+}
+
+fn external_error_detail(output: &str, exit_code: Option<i32>) -> String {
+    let lines = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let diagnostic = lines
+        .iter()
+        .copied()
+        .filter(|line| {
+            let lowered = line.to_ascii_lowercase();
+            !lowered.starts_with("at ")
+                && !lowered.contains("end of stack trace")
+                && (lowered.contains("error")
+                    || lowered.contains("exception")
+                    || lowered.contains("failed")
+                    || lowered.contains("forbidden")
+                    || lowered.contains("unauthorized")
+                    || lowered.contains("status code")
+                    || lowered.contains("timed out")
+                    || lowered.contains("not supported"))
+        })
+        .rev()
+        .take(12)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
+    if !diagnostic.is_empty() {
+        return diagnostic.join("\n");
+    }
+    let fallback = lines
+        .into_iter()
+        .filter(|line| {
+            let lowered = line.to_ascii_lowercase();
+            !lowered.starts_with("at ") && !lowered.contains("end of stack trace")
+        })
+        .rev()
+        .take(30)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n");
+    if fallback.is_empty() {
+        format!("external_engine_exit_{exit_code:?}")
+    } else {
+        fallback
+    }
 }
 
 fn suggested_name(source: &str) -> String {
