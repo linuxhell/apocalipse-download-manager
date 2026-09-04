@@ -114,8 +114,9 @@
       let selectedItems = found;
       const hls = found.filter((item) => item.kind === "video" && /\.m3u8(?:$|[?#])/i.test(item.url));
       if (hls.length > 1) {
-        const selected = await chrome.runtime.sendMessage({ type: "APOCALIPSE_SELECT_HLS", urls: hls.map((item) => item.url), expectedDuration: Number.isFinite(document.querySelector("video")?.duration) ? document.querySelector("video").duration : null });
-        selectedItems = found.filter((item) => !/\.m3u8(?:$|[?#])/i.test(item.url) || item.url === selected?.url);
+        const analyzed = await chrome.runtime.sendMessage({ type: "APOCALIPSE_ANALYZE_HLS", urls: hls.map((item) => item.url), expectedDuration: Number.isFinite(document.querySelector("video")?.duration) ? document.querySelector("video").duration : null });
+        const details = new Map((analyzed || []).map((item) => [item.url, item]));
+        selectedItems = found.map((item) => details.has(item.url) ? { ...item, ...details.get(item.url) } : item);
       }
       return Promise.all(selectedItems.map(async (item) => {
       try {

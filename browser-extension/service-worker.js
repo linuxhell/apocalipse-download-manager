@@ -43,6 +43,16 @@ async function hlsDuration(url, depth = 0) {
   return durations.length ? durations.reduce((total, value) => total + value, 0) : null;
 }
 
+async function analyzeHls(urls, expectedDuration) {
+  const items = await Promise.all((urls || []).slice(-20).map(async (url) => ({ url, duration: await hlsDuration(url).catch(() => null) })));
+  const expected = Number(expectedDuration);
+  const valid = items.filter((item) => Number.isFinite(item.duration));
+  if (Number.isFinite(expected) && expected > 0) valid.sort((a, b) => Math.abs(a.duration - expected) - Math.abs(b.duration - expected));
+  else valid.sort((a, b) => b.duration - a.duration);
+  const recommendedUrl = valid[0]?.url || items.at(-1)?.url || null;
+  return items.map((item) => ({ ...item, recommended: item.url === recommendedUrl }));
+}
+
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "APOCALIPSE_MEDIA" && sender.tab?.id) {
     chrome.storage.session.set({ [`media:${sender.tab.id}`]: message.media });
@@ -57,14 +67,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return true;
   }
   if (message?.type === "APOCALIPSE_SELECT_HLS") {
-    Promise.all((message.urls || []).slice(-20).map(async (url) => ({ url, duration: await hlsDuration(url).catch(() => null) })))
-      .then((items) => {
-        const valid = items.filter((item) => Number.isFinite(item.duration));
-        const expected = Number(message.expectedDuration);
-        if (Number.isFinite(expected) && expected > 0) valid.sort((a, b) => Math.abs(a.duration - expected) - Math.abs(b.duration - expected));
-        else valid.sort((a, b) => b.duration - a.duration);
-        reply(valid[0] || { url: message.urls?.at(-1) || null, duration: null });
-      });
+    analyzeHls(message.urls, message.expectedDuration).then((items) => reply(items.find((item) => item.recommended) || null));
+    return true;
+  }
+  if (message?.type === "APOCALIPSE_ANALYZE_HLS") {
+    analyzeHls(message.urls, message.expectedDuration).then(reply);
     return true;
   }
   if (message?.type === "APOCALIPSE_PAIR") {
