@@ -1060,38 +1060,48 @@ async fn remove_downloads(state: State<'_, AppState>, ids: Vec<DownloadId>, dele
         }
     }
     if cancelled_active {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
-    let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
-    let mut removed = Vec::new();
-    queue.retain(|task| {
-        if ids.contains(&task.id) {
-            removed.push(task.clone());
-            false
-        } else {
-            true
-        }
-    });
+    let removed = state.queue.lock().map_err(|error| error.to_string())?
+        .iter().filter(|task| ids.contains(&task.id)).cloned().collect::<Vec<_>>();
     if delete_files {
         for task in &removed {
-            let partial = partial_path(&task.destination);
-            let mut paths = vec![task.destination.clone(), partial];
-            let stem = task.destination.file_stem().and_then(|value| value.to_str());
-            if let (Some(parent), Some(stem)) = (task.destination.parent(), stem) {
-                for extension in ["mp4", "mkv", "ts", "webm", "m4a", "mp3", "wav", "flac", "opus", "aac"] {
-                    let candidate = parent.join(format!("{stem}.{extension}"));
-                    if !paths.contains(&candidate) { paths.push(candidate); }
-                }
-            }
-            for path in &paths {
-                if path.is_file() {
-                    fs::remove_file(path).map_err(|error| format!("{}: {error}", path.display()))?;
-                }
+            for path in download_paths(task) {
+                remove_file_with_retry(&path).await?;
             }
         }
     }
+    let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+    queue.retain(|task| !ids.contains(&task.id));
     save_queue(&state, &queue)?;
     Ok(removed.len())
+}
+
+fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
+    let partial = partial_path(&task.destination);
+    let mut paths = vec![task.destination.clone(), partial];
+    let stem = task.destination.file_stem().and_then(|value| value.to_str());
+    if let (Some(parent), Some(stem)) = (task.destination.parent(), stem) {
+        for extension in ["mp4", "mkv", "ts", "webm", "m4a", "mp3", "wav", "flac", "opus", "aac"] {
+            let candidate = parent.join(format!("{stem}.{extension}"));
+            if !paths.contains(&candidate) { paths.push(candidate); }
+        }
+    }
+    paths
+}
+
+async fn remove_file_with_retry(path: &Path) -> Result<(), String> {
+    for attempt in 0..5 {
+        match tokio::fs::remove_file(path).await {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied && attempt < 4 => {
+                tokio::time::sleep(std::time::Duration::from_millis(100 * (attempt + 1))).await;
+            }
+            Err(error) => return Err(format!("{}: {error}", path.display())),
+        }
+    }
+    Ok(())
 }
 
 fn main() {
@@ -1181,4 +1191,26 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Apocalipse Download Manager");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn download_paths_include_hls_output_and_partial_file() {
+        let task = DownloadTask::new(
+            "https://edge-hls.growcdnssedge.com/hls/157651625/master/157651625.m3u8",
+            PathBuf::from("C:/Downloads/157651625.mp4"),
+        );
+        let paths = download_paths(&task);
+        assert!(paths.contains(&PathBuf::from("C:/Downloads/157651625.mp4")));
+        assert!(paths.contains(&partial_path(&task.destination)));
+    }
+
+    #[tokio::test]
+    async fn removing_a_missing_file_is_already_successful() {
+        let path = std::env::temp_dir().join(format!("apocalipse-missing-{}.mp4", uuid::Uuid::new_v4()));
+        assert!(remove_file_with_retry(&path).await.is_ok());
+    }
 }
