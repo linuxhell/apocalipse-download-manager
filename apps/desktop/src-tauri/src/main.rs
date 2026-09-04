@@ -751,7 +751,7 @@ fn enqueue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Resul
     let kind = classify_url(&request.url).ok_or_else(|| "unsupported_url".to_owned())?;
     let directory = configured_download_directory(app, &state)?;
     let proposed = request.file_name.filter(|name| !name.trim().is_empty()).unwrap_or_else(|| suggested_name(&request.url));
-    let file_name = validate_file_name(&append_source_extension(suggested_name(&proposed), &request.url, kind.clone()))?;
+    let file_name = validate_file_name(&append_source_extension(suggested_name(&proposed), &request.url, kind))?;
     remember_download_directory(&state, &directory)?;
     let task = DownloadTask::new(&request.url, unique_destination(&directory, &file_name));
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
