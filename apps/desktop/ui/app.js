@@ -75,8 +75,6 @@ const catalogs = {
     installed: "Detected",
     missing: "Not found",
     checkTools: "Check versions",
-    errorDetails: "Error details",
-    copyError: "Copy error",
     removeFailed: "Could not remove the selected files",
   },
   "pt-BR": {
@@ -156,8 +154,6 @@ const catalogs = {
     installed: "Detectado",
     missing: "Não encontrado",
     checkTools: "Verificar versões",
-    errorDetails: "Detalhes do erro",
-    copyError: "Copiar erro",
     removeFailed: "Não foi possível apagar os arquivos selecionados",
   },
   "zh-CN": {
@@ -236,8 +232,6 @@ const catalogs = {
     installed: "已检测",
     missing: "未找到",
     checkTools: "检查版本",
-    errorDetails: "错误详情",
-    copyError: "复制错误",
     removeFailed: "无法删除所选文件",
   },
 };
@@ -355,13 +349,21 @@ function renderDownloads() {
     const progress = document.createElement("div");
     progress.className = "task-progress";
     const bar = document.createElement("i");
-    const percent = task.total
-      ? Math.min(100, (task.received / task.total) * 100)
-      : 0;
+    const hasReportedPercent = task.progress_percent !== null
+      && task.progress_percent !== undefined
+      && Number.isFinite(Number(task.progress_percent));
+    const reportedPercent = hasReportedPercent ? Number(task.progress_percent) : 0;
+    const percent = hasReportedPercent
+      ? Math.min(100, Math.max(0, reportedPercent))
+      : task.total
+        ? Math.min(100, (task.received / task.total) * 100)
+        : 0;
     bar.style.width = `${percent}%`;
     const details = document.createElement("small");
     const speed = speedSamples.get(task.id)?.speed || 0;
-    const progressText = task.total
+    const progressText = hasReportedPercent && !task.total
+      ? `${percent.toFixed(1)}%`
+      : task.total
       ? `${formatBytes(task.received)} / ${formatBytes(task.total)} · ${percent.toFixed(1)}%`
       : formatBytes(task.received);
     details.textContent =
@@ -370,22 +372,6 @@ function renderDownloads() {
         : progressText;
     progress.append(bar);
     info.append(progress, details);
-    const failureMessage = typeof task.state === "object" ? task.state.failed?.message : null;
-    if (failureMessage) {
-      const error = document.createElement("details");
-      error.className = "task-error";
-      error.open = true;
-      const summary = document.createElement("summary");
-      summary.textContent = t("errorDetails");
-      const message = document.createElement("pre");
-      message.textContent = failureMessage;
-      const copy = document.createElement("button");
-      copy.type = "button";
-      copy.textContent = t("copyError");
-      copy.onclick = () => navigator.clipboard.writeText(failureMessage).catch(console.error);
-      error.append(summary, message, copy);
-      info.append(error);
-    }
     const state = Object.assign(document.createElement("span"), {
       className: "download-state",
       textContent: stateName(task.state),

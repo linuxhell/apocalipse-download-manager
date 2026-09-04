@@ -229,10 +229,6 @@ h1 {
 .task-select {
   accent-color: var(--cyan);
 }
-.task-error { margin-top: 8px; padding: 8px 10px; color: #ffaaaa; background: #25151a; border: 1px solid #66313b; border-radius: 8px; }
-.task-error summary { cursor: pointer; font-weight: 700; }
-.task-error pre { max-height: 150px; margin: 8px 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: #ffd3d3; font: 12px/1.45 ui-monospace, Consolas, monospace; }
-.task-error button { border: 1px solid #74404a; border-radius: 6px; padding: 5px 8px; background: #321c22; color: #ffd3d3; cursor: pointer; }
 .ghost:disabled,
 .primary:disabled {
   cursor: not-allowed;

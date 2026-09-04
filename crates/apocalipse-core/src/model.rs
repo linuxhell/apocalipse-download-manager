@@ -25,6 +25,8 @@ pub struct DownloadTask {
     pub received: u64,
     pub total: Option<u64>,
     #[serde(default)]
+    pub progress_percent: Option<f64>,
+    #[serde(default)]
     pub format_selection: Option<String>,
     #[serde(default)]
     pub referer: Option<String>,
@@ -41,6 +43,7 @@ impl DownloadTask {
             state: DownloadState::Queued,
             received: 0,
             total: None,
+            progress_percent: None,
             format_selection: None,
             referer: None,
             known_duration: None,

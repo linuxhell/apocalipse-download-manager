@@ -339,7 +339,10 @@ async fn run_external_download(
     kind: DownloadKind,
     mut cancellation: oneshot::Receiver<()>,
 ) {
-    update_task(&app, id, true, |item| item.state = DownloadState::Downloading);
+    update_task(&app, id, true, |item| {
+        item.state = DownloadState::Downloading;
+        item.progress_percent = Some(0.0);
+    });
     let directory = task.destination.parent().unwrap_or_else(|| Path::new("."));
     let file_name = task.destination.file_name().and_then(|value| value.to_str()).unwrap_or("download");
     let tools = app.state::<AppState>().settings.lock().map(|settings| (
@@ -443,8 +446,10 @@ async fn run_external_download(
         Ok(mut child) => {
             let mut stdout = child.stdout.take();
             let mut stderr = child.stderr.take();
-            let output = tokio::spawn(async move { match stdout.take() { Some(stream) => read_process_tail(stream).await, None => Vec::new() } });
-            let errors = tokio::spawn(async move { match stderr.take() { Some(stream) => read_process_tail(stream).await, None => Vec::new() } });
+            let output_app = app.clone();
+            let error_app = app.clone();
+            let output = tokio::spawn(async move { match stdout.take() { Some(stream) => read_process_tail(stream, Some((output_app, id))).await, None => Vec::new() } });
+            let errors = tokio::spawn(async move { match stderr.take() { Some(stream) => read_process_tail(stream, Some((error_app, id))).await, None => Vec::new() } });
             let status = tokio::select! {
                 biased;
                 _ = &mut cancellation => { let _ = child.kill().await; return; }
@@ -461,7 +466,10 @@ async fn run_external_download(
         Err(error) => Err(format!("external_engine_unavailable: {error}")),
     };
     match result {
-        Ok(()) => update_task(&app, id, true, |item| item.state = DownloadState::Completed),
+        Ok(()) => update_task(&app, id, true, |item| {
+            item.progress_percent = Some(100.0);
+            item.state = DownloadState::Completed;
+        }),
         Err(message) => update_task(&app, id, true, |item| item.state = DownloadState::Failed { message }),
     }
     if let Ok(mut workers) = app.state::<AppState>().workers.lock() {
@@ -470,19 +478,39 @@ async fn run_external_download(
     start_next_queued(&app);
 }
 
-async fn read_process_tail(mut stream: impl tokio::io::AsyncRead + Unpin) -> Vec<u8> {
+async fn read_process_tail(
+    mut stream: impl tokio::io::AsyncRead + Unpin,
+    progress: Option<(tauri::AppHandle, DownloadId)>,
+) -> Vec<u8> {
     let mut tail = Vec::new();
     let mut chunk = [0_u8; 4096];
     loop {
         match stream.read(&mut chunk).await {
             Ok(0) | Err(_) => break,
             Ok(count) => {
+                if let Some(percent) = parse_external_progress(&String::from_utf8_lossy(&chunk[..count])) {
+                    if let Some((app, id)) = progress.as_ref() {
+                        update_task(app, *id, false, |task| {
+                            task.progress_percent = Some(task.progress_percent.unwrap_or(0.0).max(percent));
+                        });
+                    }
+                }
                 tail.extend_from_slice(&chunk[..count]);
                 if tail.len() > 65_536 { tail.drain(..tail.len() - 65_536); }
             }
         }
     }
     tail
+}
+
+fn parse_external_progress(text: &str) -> Option<f64> {
+    text.match_indices('%').filter_map(|(end, _)| {
+        let prefix = &text[..end];
+        let start = prefix.char_indices().rev()
+            .take_while(|(_, character)| character.is_ascii_digit() || *character == '.')
+            .last().map(|(index, _)| index)?;
+        prefix[start..].parse::<f64>().ok()
+    }).filter(|value| (0.0..=100.0).contains(value)).last()
 }
 
 fn external_error_detail(output: &str, exit_code: Option<i32>) -> String {
@@ -1270,5 +1298,17 @@ mod tests {
     async fn removing_a_missing_file_is_already_successful() {
         let path = std::env::temp_dir().join(format!("apocalipse-missing-{}.mp4", uuid::Uuid::new_v4()));
         assert!(remove_file_with_retry(&path).await.is_ok());
+    }
+
+    #[test]
+    fn reads_simplified_external_engine_progress() {
+        assert_eq!(parse_external_progress("Vid Kbps: 23%\r"), Some(23.0));
+        assert_eq!(parse_external_progress("Aud Kbps: 7.5%"), Some(7.5));
+    }
+
+    #[test]
+    fn uses_latest_valid_percentage_in_a_progress_chunk() {
+        assert_eq!(parse_external_progress("Vid: 42% Aud: 41%"), Some(41.0));
+        assert_eq!(parse_external_progress("HTTP 403%"), None);
     }
 }
