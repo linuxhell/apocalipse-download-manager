@@ -95,8 +95,8 @@ fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
 fn version_line(executable: &Path, args: &[&str]) -> Option<String> {
     let output = Command::new(executable).args(args).output().ok()?;
     if !output.status.success() { return None; }
-    String::from_utf8_lossy(&output.stdout).lines().next()
-        .or_else(|| String::from_utf8_lossy(&output.stderr).lines().next()).map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned)
+    let text = if output.stdout.is_empty() { String::from_utf8_lossy(&output.stderr) } else { String::from_utf8_lossy(&output.stdout) };
+    text.lines().next().map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned)
 }
 
 #[derive(Serialize)]
