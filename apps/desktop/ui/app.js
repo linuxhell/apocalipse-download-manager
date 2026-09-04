@@ -1133,6 +1133,7 @@ async function consumeBridgeDownload() {
     const currentUrl = dialog.open ? document.querySelector("#url").value : null;
     const request = await invoke("take_bridge_download", { currentUrl });
     if (!request) return;
+    lastClipboardLink = request.url;
     pendingReferer = request.pageUrl || null;
     pendingDuration = Number.isFinite(request.duration) ? request.duration : null;
     pendingCookieHeader = request.cookieHeader || null;

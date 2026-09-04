@@ -310,8 +310,15 @@
           setTimeout(() => { button.textContent = originalText; }, 2500);
           return;
         }
+        let copiedToClipboard = false;
+        if (isFacebookVideo) {
+          try {
+            await navigator.clipboard.writeText(currentUrl);
+            copiedToClipboard = true;
+          } catch {}
+        }
         chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls: resolved?.requestUrls || [], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
-          const failed = chrome.runtime.lastError || result?.target !== "apocalipse";
+          const failed = !copiedToClipboard && (chrome.runtime.lastError || result?.target !== "apocalipse");
           button.textContent = failed ? "⚠" : "✓";
           if (failed) button.title = result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable";
           setTimeout(() => { button.textContent = originalText; }, 1500);
