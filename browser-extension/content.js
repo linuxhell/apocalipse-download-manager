@@ -85,8 +85,6 @@
   const downloadableLink = (anchor) => {
     const url = absolute(anchor?.href);
     if (!url || !/^https?:/i.test(url)) return null;
-    if (anchor.hasAttribute("download")) return url;
-    if (!/\.(?:7z|apk|bin|bz2|cab|deb|dmg|exe|gz|img|iso|msi|msix|pkg|rar|rpm|tar|tbz2|tgz|txz|xz|zip)(?:$|[?#])/i.test(url)) return null;
     // A same-origin URL that looks like a file can still be a generator/landing
     // page (Filespayouts is one example). Let the site's click handler run so
     // downloads.onDeterminingFilename receives the final CDN URL and headers.
@@ -96,7 +94,8 @@
     } catch {
       return null;
     }
-    return url;
+    if (anchor.hasAttribute("download")) return url;
+    return /\.(?:7z|apk|bin|bz2|cab|deb|dmg|exe|gz|img|iso|msi|msix|pkg|rar|rpm|tar|tbz2|tgz|txz|xz|zip)(?:$|[?#])/i.test(url) ? url : null;
   };
   const fileNameForUrl = (url) => {
     const value = new URL(url).pathname.split("/").pop() || "download";
