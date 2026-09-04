@@ -977,6 +977,48 @@ fn resume_download(app: tauri::AppHandle, state: State<'_, AppState>, id: Downlo
 }
 
 #[tauri::command]
+fn redownload_downloads(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    ids: Vec<DownloadId>,
+) -> Result<Vec<DownloadTask>, String> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let originals = state.queue.lock().map_err(|error| error.to_string())?
+        .iter().filter(|task| ids.contains(&task.id)).cloned().collect::<Vec<_>>();
+    let saved_identities = state.request_identities.lock().map_err(|error| error.to_string())?.clone();
+    let mut repeated = Vec::with_capacity(originals.len());
+    let mut repeated_identities = Vec::new();
+    for original in originals {
+        let directory = original.destination.parent().unwrap_or_else(|| Path::new("."));
+        let file_name = original.destination.file_name().and_then(|value| value.to_str()).unwrap_or("download");
+        let mut task = DownloadTask::new(&original.source, unique_destination(directory, file_name));
+        task.format_selection = original.format_selection.clone();
+        task.referer = original.referer.clone();
+        task.known_duration = original.known_duration;
+        if let Some(identity) = saved_identities.get(&original.id) {
+            repeated_identities.push((task.id, identity.clone()));
+        }
+        repeated.push(task);
+    }
+    {
+        let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+        queue.extend(repeated.iter().cloned());
+        save_queue(&state, &queue)?;
+    }
+    if !repeated_identities.is_empty() {
+        state.request_identities.lock().map_err(|error| error.to_string())?
+            .extend(repeated_identities);
+    }
+    for task in &repeated {
+        let kind = classify_url(&task.source).ok_or_else(|| "unsupported_url".to_owned())?;
+        start_download(&app, &state, task.clone(), kind)?;
+    }
+    Ok(repeated)
+}
+
+#[tauri::command]
 fn get_clipboard_monitor(state: State<'_, AppState>) -> Result<ClipboardStatus, String> {
     let enabled = state.settings.lock().map_err(|error| error.to_string())?.capture_clipboard;
     Ok(ClipboardStatus { enabled })
@@ -1405,6 +1447,7 @@ fn main() {
             remove_downloads,
             pause_download,
             resume_download,
+            redownload_downloads,
             reveal_download,
             get_autostart,
             set_autostart,

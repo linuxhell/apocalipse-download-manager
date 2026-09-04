@@ -17,6 +17,7 @@ const catalogs = {
     clearFinished: "Clear finished",
     selectAll: "Select all",
     removeSelected: "Remove selected",
+    redownloadSelected: "Download again",
     manageList: "MANAGE LIST",
     removeChoice: "What do you want to remove?",
     listOnly: "Clear from list",
@@ -95,6 +96,7 @@ const catalogs = {
     clearFinished: "Limpar concluídos",
     selectAll: "Selecionar todos",
     removeSelected: "Remover selecionados",
+    redownloadSelected: "Baixar novamente",
     manageList: "GERENCIAR LISTA",
     removeChoice: "O que você deseja remover?",
     listOnly: "Limpar somente da lista",
@@ -174,6 +176,7 @@ const catalogs = {
     clearFinished: "清除已完成",
     selectAll: "全选",
     removeSelected: "移除所选项目",
+    redownloadSelected: "重新下载",
     manageList: "管理列表",
     removeChoice: "您想移除哪些内容？",
     listOnly: "仅从列表中清除",
@@ -442,6 +445,7 @@ function updateSelectionControls() {
   selectAll.indeterminate =
     visible.some((task) => selectedIds.has(task.id)) && !selectAll.checked;
   document.querySelector("#manage-list").disabled = selectedIds.size === 0;
+  document.querySelector("#redownload-selected").disabled = selectedIds.size === 0;
 }
 
 function translate() {
@@ -609,6 +613,19 @@ document.querySelector("#select-all").onchange = (event) => {
   renderDownloads();
 };
 document.querySelector("#manage-list").onclick = () => clearDialog.showModal();
+document.querySelector("#redownload-selected").onclick = async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    await invoke("redownload_downloads", { ids: [...selectedIds] });
+    selectedIds.clear();
+    await refreshDownloads();
+  } catch (error) {
+    console.error(error);
+  } finally {
+    updateSelectionControls();
+  }
+};
 document.querySelector("#clear-destinations").onclick = async () => {
   try {
     await invoke("clear_download_directories");
