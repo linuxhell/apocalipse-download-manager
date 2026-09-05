@@ -53,9 +53,22 @@ jobs:
         run: |
           $package = "dist/Apocalipse Download Manager"
           New-Item -ItemType Directory -Force "$package/browser extensions" | Out-Null
+          New-Item -ItemType Directory -Force "$package/Data/ed2k" | Out-Null
           Copy-Item "target/release/apocalipse-desktop.exe" "$package/Apocalipse Download Manager.exe"
           Copy-Item "browser-extension" "$package/browser extensions/unpacked-development-extension" -Recurse
           if (Test-Path "packaging/firefox/*.xpi") { Copy-Item "packaging/firefox/*.xpi" "$package/browser extensions/" }
+          $amuleVersion = "3.0.1"
+          $amuleArchive = "$env:RUNNER_TEMP/amule-$amuleVersion.zip"
+          $amuleExtract = "$env:RUNNER_TEMP/amule-$amuleVersion"
+          Invoke-WebRequest "https://github.com/amule-org/amule/releases/download/$amuleVersion/aMule-$amuleVersion-Windows-x64.zip" -OutFile $amuleArchive
+          $expectedHash = "4864F0B2AD0FADF82B433800120144133F9A71D0A0C147AC9F3743B5C9538389"
+          $actualHash = (Get-FileHash $amuleArchive -Algorithm SHA256).Hash
+          if ($actualHash -ne $expectedHash) {
+            throw "aMule archive checksum mismatch: $actualHash"
+          }
+          Expand-Archive $amuleArchive -DestinationPath $amuleExtract
+          Copy-Item "$amuleExtract/amule-portable-x64/bin/*" "$package/Data/ed2k/" -Recurse
+          Copy-Item "packaging/ed2k/README.txt" "$package/Data/ed2k/"
           Copy-Item "README.md","LICENSE" $package
           Compress-Archive -Path $package -DestinationPath "dist/${{ matrix.artifact }}.zip"
 

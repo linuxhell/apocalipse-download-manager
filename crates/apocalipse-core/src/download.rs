@@ -42,9 +42,18 @@ pub struct DownloadRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DownloadEvent {
-    Started { resumed_at: u64, total: Option<u64>, connections: usize },
-    Progress { received: u64, total: Option<u64> },
-    Completed { bytes: u64 },
+    Started {
+        resumed_at: u64,
+        total: Option<u64>,
+        connections: usize,
+    },
+    Progress {
+        received: u64,
+        total: Option<u64>,
+    },
+    Completed {
+        bytes: u64,
+    },
 }
 
 #[derive(Clone)]
@@ -97,7 +106,10 @@ impl DownloadEngine {
             .redirect(reqwest::redirect::Policy::limited(10))
             .pool_max_idle_per_host(32)
             .tcp_nodelay(true)
-            .user_agent(concat!("ApocalipseDownloadManager/", env!("CARGO_PKG_VERSION")));
+            .user_agent(concat!(
+                "ApocalipseDownloadManager/",
+                env!("CARGO_PKG_VERSION")
+            ));
         if let Some(url) = proxy_url.map(str::trim).filter(|value| !value.is_empty()) {
             let mut proxy = reqwest::Proxy::all(url).context("invalid proxy URL")?;
             if let Some(user) = username.filter(|value| !value.is_empty()) {
@@ -153,8 +165,7 @@ impl DownloadEngine {
                         .and_then(content_range_total)
                         .or(total);
                     if let Some(total) = range_total {
-                        let useful_connections =
-                            requested.min(total.div_ceil(4_194_304) as usize);
+                        let useful_connections = requested.min(total.div_ceil(4_194_304) as usize);
                         if useful_connections > 1 {
                             return self
                                 .download_segmented(request, events, total, useful_connections)
@@ -514,7 +525,10 @@ mod tests {
 
     #[test]
     fn reads_total_size_from_content_range() {
-        assert_eq!(content_range_total("bytes 0-0/5368709120"), Some(5_368_709_120));
+        assert_eq!(
+            content_range_total("bytes 0-0/5368709120"),
+            Some(5_368_709_120)
+        );
         assert_eq!(content_range_total("bytes */4096"), Some(4096));
         assert_eq!(content_range_total("bytes 0-0/*"), None);
     }
@@ -541,10 +555,8 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_only_removes_chunks_for_the_exact_destination() {
-        let root = std::env::temp_dir().join(format!(
-            "apocalipse-chunk-cleanup-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("apocalipse-chunk-cleanup-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let destination = root.join("image.iso");
         let chunk = legacy_chunk_path(&destination, 1);

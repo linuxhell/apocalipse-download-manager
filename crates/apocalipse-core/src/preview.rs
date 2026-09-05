@@ -16,9 +16,18 @@ pub struct PlayerConfig {
 impl PlayerConfig {
     pub fn validate(&self) -> Result<()> {
         if !self.executable.is_file() {
-            bail!("media player executable does not exist: {}", self.executable.display());
+            bail!(
+                "media player executable does not exist: {}",
+                self.executable.display()
+            );
         }
-        if self.arguments.iter().filter(|arg| arg.contains("{file}")).count() > 1 {
+        if self
+            .arguments
+            .iter()
+            .filter(|arg| arg.contains("{file}"))
+            .count()
+            > 1
+        {
             bail!("the player argument template may contain only one {{file}} placeholder");
         }
         Ok(())
@@ -27,9 +36,16 @@ impl PlayerConfig {
     fn resolved_arguments(&self, media: &Path) -> Vec<String> {
         let file = media.to_string_lossy();
         if self.arguments.iter().any(|arg| arg.contains("{file}")) {
-            self.arguments.iter().map(|arg| arg.replace("{file}", &file)).collect()
+            self.arguments
+                .iter()
+                .map(|arg| arg.replace("{file}", &file))
+                .collect()
         } else {
-            self.arguments.iter().cloned().chain([file.into_owned()]).collect()
+            self.arguments
+                .iter()
+                .cloned()
+                .chain([file.into_owned()])
+                .collect()
         }
     }
 }
@@ -43,7 +59,12 @@ pub async fn launch_player(config: &PlayerConfig, media: &Path) -> Result<Child>
         .args(config.resolved_arguments(media))
         .kill_on_drop(false)
         .spawn()
-        .with_context(|| format!("could not start media player at {}", config.executable.display()))
+        .with_context(|| {
+            format!(
+                "could not start media player at {}",
+                config.executable.display()
+            )
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,8 +92,13 @@ pub struct PreviewReadiness {
 }
 
 impl PreviewReadiness {
-    pub fn calculate(file_size: u64, available_contiguous_bytes: u64, metadata_ready: bool) -> Self {
-        let required = (file_size / 100).clamp(MINIMUM_PREFIX.min(file_size), MAXIMUM_PREFIX.min(file_size));
+    pub fn calculate(
+        file_size: u64,
+        available_contiguous_bytes: u64,
+        metadata_ready: bool,
+    ) -> Self {
+        let required =
+            (file_size / 100).clamp(MINIMUM_PREFIX.min(file_size), MAXIMUM_PREFIX.min(file_size));
         Self {
             ready: metadata_ready && available_contiguous_bytes >= required,
             required_contiguous_bytes: required,

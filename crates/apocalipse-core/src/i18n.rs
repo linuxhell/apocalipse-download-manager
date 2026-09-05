@@ -12,17 +12,31 @@ pub enum Language {
 }
 
 impl Language {
-    pub const ALL: [Self; 3] = [Self::English, Self::PortugueseBrazil, Self::ChineseSimplified];
+    pub const ALL: [Self; 3] = [
+        Self::English,
+        Self::PortugueseBrazil,
+        Self::ChineseSimplified,
+    ];
     pub const fn code(self) -> &'static str {
-        match self { Self::English => "en", Self::PortugueseBrazil => "pt-BR", Self::ChineseSimplified => "zh-CN" }
+        match self {
+            Self::English => "en",
+            Self::PortugueseBrazil => "pt-BR",
+            Self::ChineseSimplified => "zh-CN",
+        }
     }
 }
 
-pub struct Translator { language: Language }
+pub struct Translator {
+    language: Language,
+}
 
 impl Translator {
-    pub const fn new(language: Language) -> Self { Self { language } }
-    pub const fn language(&self) -> Language { self.language }
+    pub const fn new(language: Language) -> Self {
+        Self { language }
+    }
+    pub const fn language(&self) -> Language {
+        self.language
+    }
     pub fn text<'a>(&self, key: &'a str) -> &'a str {
         match (self.language, key) {
             (Language::PortugueseBrazil, "downloads") => "Downloads",
@@ -77,7 +91,23 @@ mod tests {
         assert_eq!(Language::default(), Language::English);
         for language in Language::ALL {
             let tr = Translator::new(language);
-            for key in ["downloads", "settings", "video", "audio", "images", "convert_ts", "fast_remux", "compatibility_mode", "watch_while_downloading", "media_player", "site_credentials", "add_site", "remove_site"] { assert_ne!(tr.text(key), key); }
+            for key in [
+                "downloads",
+                "settings",
+                "video",
+                "audio",
+                "images",
+                "convert_ts",
+                "fast_remux",
+                "compatibility_mode",
+                "watch_while_downloading",
+                "media_player",
+                "site_credentials",
+                "add_site",
+                "remove_site",
+            ] {
+                assert_ne!(tr.text(key), key);
+            }
         }
     }
 }

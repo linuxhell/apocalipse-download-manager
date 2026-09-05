@@ -25,6 +25,9 @@
         <button data-page="torrents">
           <span>◉</span><b data-i18n="torrents">Torrents</b>
         </button>
+        <button data-page="ed2k">
+          <span>↯</span><b data-i18n="ed2k">ED2K</b>
+        </button>
         <button data-page="link"><span>↔</span><b>Apocalipse Link</b></button>
         <button data-page="matrix"><span>◆</span><b>Matrix Ultimate v2 AI</b><i id="matrix-alert" class="matrix-alert" hidden>0</i></button>
         <button data-page="tools">
@@ -100,6 +103,31 @@
         <p data-i18n="matrixDescription">Matrix analyzes local failures and proposes safe rules. No rule executes website code.</p>
         <div id="matrix-proposals"></div>
       </section>
+      <section id="ed2k-panel" class="ed2k-panel" hidden>
+        <header class="ed2k-head">
+          <div><b data-i18n="ed2kEngine">aMule 3.0.1 engine</b><small id="ed2k-engine-status" data-i18n="ed2kChecking">Checking components…</small></div>
+          <span><button id="ed2k-start" type="button" data-i18n="ed2kStart">Start engine</button><button id="ed2k-connect" class="primary" type="button" data-i18n="ed2kConnect">Connect networks</button><button id="open-amule" type="button" data-i18n="openAmule">Open aMule</button></span>
+        </header>
+        <section class="ed2k-network-cards">
+          <article><small>ED2K</small><b id="ed2k-server-state" data-i18n="disconnected">Disconnected</b></article>
+          <article><small>KAD</small><b id="ed2k-kad-state" data-i18n="disconnected">Disconnected</b></article>
+          <article><small data-i18n="downloadSpeed">DOWNLOAD SPEED</small><b id="ed2k-download-speed">0 B/s</b></article>
+          <article><small data-i18n="uploadSpeed">UPLOAD SPEED</small><b id="ed2k-upload-speed">0 B/s</b></article>
+          <article><small data-i18n="ed2kSources">SOURCES</small><b id="ed2k-source-count">0</b></article>
+        </section>
+        <details class="ed2k-connection"><summary data-i18n="ed2kConnection">Engine connection</summary><div>
+          <label><span data-i18n="ed2kHost">Host</span><input id="ed2k-host" value="127.0.0.1" /></label>
+          <label><span data-i18n="ed2kPort">EC port</span><input id="ed2k-port" type="number" min="1" max="65535" value="4712" /></label>
+          <label><span data-i18n="proxyPassword">Password</span><input id="ed2k-password" type="password" data-i18n-placeholder="ed2kPasswordHint" /></label>
+          <button id="ed2k-save-connection" type="button" data-i18n="save">Save</button>
+        </div></details>
+        <section class="ed2k-search">
+          <header><div><b data-i18n="ed2kSearchTitle">Search ED2K/Kad</b><small data-i18n="ed2kSearchHint">Search the decentralized networks and choose a result.</small></div></header>
+          <form id="ed2k-search-form"><input id="ed2k-query" type="search" required minlength="2" data-i18n-placeholder="ed2kSearchPlaceholder" /><select id="ed2k-search-network"><option value="global" data-i18n="ed2kGlobal">Global</option><option value="kad">Kad</option><option value="local">ED2K</option></select><select id="ed2k-file-type"><option value="" data-i18n="all">All</option><option value="Video" data-i18n="ed2kVideo">Video</option><option value="Audio" data-i18n="ed2kAudio">Audio</option><option value="Image" data-i18n="ed2kImage">Image</option><option value="Doc" data-i18n="ed2kDocument">Document</option><option value="Pro" data-i18n="ed2kProgram">Program</option><option value="Arc" data-i18n="ed2kArchive">Archive</option><option value="Iso">ISO</option></select><button class="primary" type="submit" data-i18n="search">Search</button></form>
+          <small id="ed2k-search-status"></small><div id="ed2k-search-results" class="ed2k-results"></div>
+        </section>
+        <section class="ed2k-transfers"><header><div><b data-i18n="ed2kTransfers">Transfers</b><small data-i18n="ed2kTransfersHint">Real progress reported by the aMule engine.</small></div><button id="ed2k-refresh" type="button" data-i18n="refreshLog">Refresh</button></header><div id="ed2k-transfer-list"></div></section>
+      </section>
       <section class="panel">
         <div class="toolbar">
           <div class="tabs">
@@ -154,7 +182,7 @@
         <span class="bridge-waiting"
           ><i></i
           ><b data-i18n="bridgeStatus">Extension bridge not configured</b></span
-        ><span>v0.4.0</span>
+        ><span>v0.4.1</span>
       </footer>
     </main>
     <dialog id="add-dialog">
@@ -295,6 +323,14 @@
             <option value="graphite">Graphite Steel</option>
             <option value="deepsea">Deep Sea</option>
             <option value="eclipse">Purple Eclipse</option>
+            <option value="hazard">Hazard Black &amp; Yellow</option>
+            <option value="cyberstorm">Cyber Storm</option>
+            <option value="ultraviolet">Ultraviolet Pulse</option>
+            <option value="emeraldgold">Emerald &amp; Gold</option>
+            <option value="scarletice">Scarlet Ice</option>
+            <option value="coppernavy">Copper Navy</option>
+            <option value="matrixcode">Matrix Code</option>
+            <option value="solarizednight">Solarized Night</option>
           </select>
           <small data-i18n="themeHint">Colors and text contrast are adjusted together for readability.</small>
         </section>
@@ -330,6 +366,7 @@
           <label class="setting-toggle compact-toggle"><input type="checkbox" data-association="magnet" /><span><b>magnet:</b><small>Magnet links</small></span></label>
           <label class="setting-toggle compact-toggle"><input type="checkbox" data-association="ftp" /><span><b>ftp:</b><small>FTP links</small></span></label>
           <label class="setting-toggle compact-toggle"><input type="checkbox" data-association="sftp" /><span><b>sftp:</b><small>SFTP links</small></span></label>
+          <label class="setting-toggle compact-toggle"><input type="checkbox" data-association="ed2k" /><span><b>ed2k:</b><small data-i18n="ed2kLinks">eD2K file, server and server-list links</small></span></label>
         </section>
         <label for="default-directory" data-i18n="defaultDirectory"
           >Default download directory</label
@@ -445,6 +482,7 @@
             <label data-tool="yt-dlp"><span>yt-dlp <small></small></span><div><input id="tool-yt-dlp" type="text" /><button type="button" data-tool-pick="yt-dlp" data-i18n="browse">Browse…</button><button type="button" data-tool-update="yt-dlp" data-i18n="update">Update</button></div></label>
             <label data-tool="n-m3u8dl-re"><span>N_m3u8DL-RE <small></small></span><div><input id="tool-n-m3u8dl-re" type="text" /><button type="button" data-tool-pick="n-m3u8dl-re" data-i18n="browse">Browse…</button><button type="button" data-tool-update="n-m3u8dl-re" data-i18n="update">Update</button></div></label>
             <label data-tool="aria2"><span>aria2c <small></small></span><div><input id="tool-aria2" type="text" /><button type="button" data-tool-pick="aria2" data-i18n="browse">Browse…</button><button type="button" data-tool-update="aria2" data-i18n="update">Update</button></div></label>
+            <label data-tool="ed2k"><span>eD2K / aMule 3 <small></small></span><div><input id="tool-ed2k" type="text" placeholder="ed2k.exe" /><button type="button" data-tool-pick="ed2k" data-i18n="browse">Browse…</button><button type="button" data-tool-update="ed2k" data-i18n="update">Update</button></div></label>
           </div>
           <label for="media-player" data-i18n="mediaPlayer">VLC / mpv / player</label>
           <div class="path-picker"><input id="media-player" type="text" /><button id="pick-media-player" type="button" data-i18n="browse">Browse…</button></div>

@@ -48,8 +48,40 @@ impl TsToMp4Request {
             self.input.to_string_lossy().into_owned(),
         ];
         match self.mode {
-            ConversionMode::Remux => args.extend(["-map", "0", "-c", "copy", "-movflags", "+faststart", "-avoid_negative_ts", "make_zero"].map(str::to_owned)),
-            ConversionMode::Compatible => args.extend(["-map", "0:v:0?", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"].map(str::to_owned)),
+            ConversionMode::Remux => args.extend(
+                [
+                    "-map",
+                    "0",
+                    "-c",
+                    "copy",
+                    "-movflags",
+                    "+faststart",
+                    "-avoid_negative_ts",
+                    "make_zero",
+                ]
+                .map(str::to_owned),
+            ),
+            ConversionMode::Compatible => args.extend(
+                [
+                    "-map",
+                    "0:v:0?",
+                    "-map",
+                    "0:a:0?",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "medium",
+                    "-crf",
+                    "20",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    "-movflags",
+                    "+faststart",
+                ]
+                .map(str::to_owned),
+            ),
         }
         args.push(self.output.to_string_lossy().into_owned());
         args
@@ -78,7 +110,9 @@ pub async fn convert_ts_to_mp4(request: &TsToMp4Request) -> Result<()> {
 }
 
 fn has_extension(path: &Path, expected: &str) -> bool {
-    path.extension().and_then(|value| value.to_str()).is_some_and(|value| value.eq_ignore_ascii_case(expected))
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case(expected))
 }
 
 #[cfg(test)]
@@ -87,16 +121,30 @@ mod tests {
 
     #[test]
     fn remux_keeps_streams_and_enables_fast_start() {
-        let request = TsToMp4Request { ffmpeg: "ffmpeg".into(), input: "movie.ts".into(), output: "movie.mp4".into(), mode: ConversionMode::Remux, overwrite: false };
+        let request = TsToMp4Request {
+            ffmpeg: "ffmpeg".into(),
+            input: "movie.ts".into(),
+            output: "movie.mp4".into(),
+            mode: ConversionMode::Remux,
+            overwrite: false,
+        };
         let args = request.arguments();
-        assert!(args.windows(2).any(|pair| pair[0] == "-c" && pair[1] == "copy"));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair[0] == "-c" && pair[1] == "copy"));
         assert!(args.iter().any(|arg| arg == "+faststart"));
         assert_eq!(args.last().map(String::as_str), Some("movie.mp4"));
     }
 
     #[test]
     fn compatibility_mode_uses_h264_and_aac() {
-        let request = TsToMp4Request { ffmpeg: "ffmpeg".into(), input: "movie.ts".into(), output: "movie.mp4".into(), mode: ConversionMode::Compatible, overwrite: true };
+        let request = TsToMp4Request {
+            ffmpeg: "ffmpeg".into(),
+            input: "movie.ts".into(),
+            output: "movie.mp4".into(),
+            mode: ConversionMode::Compatible,
+            overwrite: true,
+        };
         let args = request.arguments();
         assert!(args.iter().any(|arg| arg == "libx264"));
         assert!(args.iter().any(|arg| arg == "aac"));
