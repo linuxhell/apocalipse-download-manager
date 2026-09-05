@@ -44,6 +44,7 @@ const catalogs = {
     resume: "Resume",
     retry: "Retry",
     openFolder: "Open folder",
+    preview: "Preview",
     preferences: "PREFERENCES",
     appearanceTheme: "Interface theme",
     themeHint: "Colors and text contrast are adjusted together for readability.",
@@ -161,6 +162,7 @@ const catalogs = {
     resume: "Continuar",
     retry: "Tentar novamente",
     openFolder: "Abrir pasta",
+    preview: "Pré-visualizar",
     preferences: "PREFERÊNCIAS",
     appearanceTheme: "Tema da interface",
     themeHint: "As cores e o contraste do texto são ajustados juntos para manter a leitura.",
@@ -277,6 +279,7 @@ const catalogs = {
     resume: "继续",
     retry: "重试",
     openFolder: "打开文件夹",
+    preview: "预览",
     preferences: "偏好设置",
     appearanceTheme: "界面主题",
     themeHint: "颜色与文字对比度会同步调整，以保持清晰易读。",
@@ -504,10 +507,12 @@ function renderDownloads() {
       : task.total
       ? `${formatBytes(task.received)} / ${formatBytes(task.total)} · ${percent.toFixed(1)}%`
       : formatBytes(task.received);
+    const torrentStats = task.torrent_seeders !== null && task.torrent_seeders !== undefined
+      ? ` · S:${task.torrent_seeders} L:${task.torrent_leechers || 0}${task.torrent_eta ? ` · ETA ${task.torrent_eta}` : ""}` : "";
     details.textContent =
       speed && task.state === "downloading"
-        ? `${progressText} · ↓ ${formatBytes(speed)}/s${uploadSpeed ? ` · ↑ ${formatBytes(uploadSpeed)}/s` : ""}`
-        : progressText;
+        ? `${progressText} · ↓ ${formatBytes(speed)}/s · ↑ ${formatBytes(uploadSpeed)}/s${torrentStats}`
+        : `${progressText}${torrentStats}`;
     progress.append(bar);
     info.append(progress, details);
     const state = Object.assign(document.createElement("span"), {
@@ -565,6 +570,8 @@ function renderDownloads() {
       };
       actions.append(exportButton);
     }
+    if (/^(?:magnet:)|\.torrent(?:$|[?#])/i.test(task.source) && ["downloading", "paused", "completed"].includes(key))
+      addAction(t("preview"), "preview_torrent");
     addAction(t("openFolder"), "reveal_download");
     const status = document.createElement("div");
     status.className = "task-status";
@@ -732,6 +739,24 @@ function resetMediaInspection() {
   document.querySelector("#media-title").textContent = "";
   document.querySelector("#media-duration").textContent = "";
   document.querySelector("#media-format").replaceChildren();
+  document.querySelector("#torrent-inspection").hidden = true;
+  document.querySelector("#torrent-files").replaceChildren();
+}
+
+async function showTorrentInspection(source) {
+  const torrent = await invoke("inspect_torrent_metadata", { source });
+  document.querySelector("#torrent-title").textContent = torrent.name;
+  document.querySelector("#torrent-total").textContent = formatBytes(torrent.totalSize);
+  const root = document.querySelector("#torrent-files");
+  root.replaceChildren();
+  for (const file of torrent.files) {
+    const row = document.createElement("label");
+    const input = Object.assign(document.createElement("input"), { type: "checkbox", checked: true });
+    input.dataset.torrentIndex = file.index;
+    row.append(input, Object.assign(document.createElement("span"), { textContent: file.path }), Object.assign(document.createElement("small"), { textContent: formatBytes(file.size) }));
+    root.append(row);
+  }
+  document.querySelector("#torrent-inspection").hidden = false;
 }
 document.querySelectorAll("#add,#empty-add").forEach(
   (button) =>
@@ -841,7 +866,7 @@ document.querySelector("#dns-preset").onchange = (event) => {
 };
 document.querySelector('[data-page="settings"]').onclick = async () => {
   try {
-    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations, mediaPlayer] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
@@ -852,6 +877,7 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
       invoke("get_proxy_setting"),
       invoke("get_dns_setting"),
       invoke("get_associations"),
+      invoke("get_media_player"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
     document.querySelector("#theme").value = document.documentElement.dataset.theme;
@@ -869,6 +895,7 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
     document.querySelector("#pairing-token").value = pairing.token;
     document.querySelector("#user-agent").value = userAgent.userAgent;
     document.querySelector("#log-editor").value = logEditor;
+    document.querySelector("#media-player").value = mediaPlayer;
     document.querySelector("#proxy-enabled").checked = proxy.enabled;
     document.querySelector("#proxy-url").value = proxy.url;
     document.querySelector("#proxy-username").value = proxy.username;
@@ -948,6 +975,7 @@ document.querySelector("#save-settings").onclick = async () => {
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
       aria2: document.querySelector("#tool-aria2").value,
     });
+    await invoke("set_media_player", { path: document.querySelector("#media-player").value });
     settingsDialog.close();
   } catch (error) {
     console.error(error);
@@ -1070,6 +1098,15 @@ document.querySelectorAll("[data-tool-pick]").forEach((button) => {
     finally { button.disabled = false; }
   };
 });
+document.querySelector("#pick-media-player").onclick = async (event) => {
+  event.currentTarget.disabled = true;
+  try {
+    const input = document.querySelector("#media-player");
+    const selected = await invoke("pick_executable", { initialPath: input.value });
+    if (selected) input.value = selected;
+  } catch (error) { console.error(error); }
+  finally { event.currentTarget.disabled = false; }
+};
 function updateLimitLabels() {
   document.querySelector("#max-tasks-value").value = document.querySelector("#max-tasks").value;
   document.querySelector("#connections-value").value = document.querySelector("#connections").value;
@@ -1163,6 +1200,7 @@ document.querySelector("#analyze").onclick = async () => {
     }
     box.textContent = `${plan.primary} · ${plan.reason}`;
     if (plan.primary === "YtDlp") await showMediaInspection(url.value);
+    else if (plan.primary === "Aria2Rpc" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) await showTorrentInspection(url.value);
     else if (plan.primary === "NM3u8DlRe") {
       const panel = document.querySelector("#media-inspection");
       const select = document.querySelector("#media-format");
@@ -1186,12 +1224,16 @@ document.querySelector("#enqueue").onclick = async () => {
   const button = document.querySelector("#enqueue");
   button.disabled = true;
   try {
+    const torrentSelection = document.querySelector("#torrent-inspection").hidden
+      ? null : [...document.querySelectorAll("[data-torrent-index]:checked")].map((input) => Number(input.dataset.torrentIndex));
+    if (torrentSelection && !torrentSelection.length) throw new Error("Selecione pelo menos um arquivo do torrent.");
     downloads.push(
       await invoke("enqueue_download", {
         url: url.value,
         destinationDirectory: document.querySelector("#destination").value,
         fileName: document.querySelector("#file-name").value,
         formatSelection: document.querySelector("#media-inspection").hidden ? null : document.querySelector("#media-format").value,
+        torrentSelection,
         context: {
           referer: pendingReferer,
           knownDuration: pendingDuration,

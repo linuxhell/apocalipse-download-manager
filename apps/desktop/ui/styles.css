@@ -534,6 +534,10 @@ dialog input:focus {
   overflow: hidden;
   background: #0a1117;
 }
+#torrent-files { max-height: 240px; overflow: auto; display: grid; gap: 6px; }
+#torrent-files label { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; }
+#torrent-files label span { overflow-wrap: anywhere; }
+#torrent-files label small { color: var(--muted); white-space: nowrap; }
 .destination-history > div:first-child {
   display: flex;
   align-items: center;

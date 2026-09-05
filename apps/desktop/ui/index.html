@@ -165,6 +165,10 @@
             <select id="media-format"></select>
           </div>
         </section>
+        <section id="torrent-inspection" class="destination-history" hidden>
+          <div><b id="torrent-title"></b><small id="torrent-total"></small></div>
+          <div id="torrent-files"></div>
+        </section>
         <label for="file-name" data-i18n="fileName">File name</label>
         <input id="file-name" type="text" required />
         <label for="destination" data-i18n="saveTo">Save to</label>
@@ -376,6 +380,8 @@
             <label data-tool="n-m3u8dl-re"><span>N_m3u8DL-RE <small></small></span><div><input id="tool-n-m3u8dl-re" type="text" /><button type="button" data-tool-pick="n-m3u8dl-re" data-i18n="browse">Browse…</button><button type="button" data-tool-update="n-m3u8dl-re">Update</button></div></label>
             <label data-tool="aria2"><span>aria2c <small></small></span><div><input id="tool-aria2" type="text" /><button type="button" data-tool-pick="aria2" data-i18n="browse">Browse…</button><button type="button" data-tool-update="aria2">Update</button></div></label>
           </div>
+          <label for="media-player">VLC / mpv / player</label>
+          <div class="path-picker"><input id="media-player" type="text" /><button id="pick-media-player" type="button" data-i18n="browse">Browse…</button></div>
         </section>
         <section class="pairing-settings">
           <b data-i18n="diagnostics">Diagnostics</b>

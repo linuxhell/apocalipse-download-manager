@@ -31,6 +31,14 @@ pub struct DownloadTask {
     #[serde(default)]
     pub upload_speed: Option<u64>,
     #[serde(default)]
+    pub torrent_selection: Vec<usize>,
+    #[serde(default)]
+    pub torrent_seeders: Option<u64>,
+    #[serde(default)]
+    pub torrent_leechers: Option<u64>,
+    #[serde(default)]
+    pub torrent_eta: Option<String>,
+    #[serde(default)]
     pub format_selection: Option<String>,
     #[serde(default)]
     pub referer: Option<String>,
@@ -50,6 +58,10 @@ impl DownloadTask {
             progress_percent: None,
             download_speed: None,
             upload_speed: None,
+            torrent_selection: Vec::new(),
+            torrent_seeders: None,
+            torrent_leechers: None,
+            torrent_eta: None,
             format_selection: None,
             referer: None,
             known_duration: None,

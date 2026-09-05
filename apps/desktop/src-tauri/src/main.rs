@@ -155,6 +155,8 @@ struct UserSettings {
     #[serde(default)]
     aria2_path: Option<PathBuf>,
     #[serde(default)]
+    media_player_path: Option<PathBuf>,
+    #[serde(default)]
     user_agent: Option<String>,
     #[serde(default)]
     log_editor_path: Option<PathBuf>,
@@ -197,6 +199,7 @@ impl Default for UserSettings {
             yt_dlp_path: None,
             n_m3u8dl_re_path: None,
             aria2_path: None,
+            media_player_path: None,
             user_agent: None,
             log_editor_path: None,
             proxy_enabled: false,
@@ -248,6 +251,48 @@ struct MediaInspection {
     duration: Option<f64>,
     suggested_file_name: String,
     formats: Vec<MediaFormat>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TorrentFileInfo { index: usize, path: String, size: u64 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TorrentInspection { name: String, files: Vec<TorrentFileInfo>, total_size: u64 }
+
+enum BValue { Int(i64), Bytes(Vec<u8>), List(Vec<BValue>), Dict(HashMap<Vec<u8>, BValue>) }
+
+fn parse_bencode(data: &[u8], position: &mut usize) -> Result<BValue, String> {
+    let byte = *data.get(*position).ok_or_else(|| "invalid_torrent".to_owned())?;
+    match byte {
+        b'i' => { *position += 1; let end = data[*position..].iter().position(|value| *value == b'e').ok_or_else(|| "invalid_torrent".to_owned())? + *position; let value = std::str::from_utf8(&data[*position..end]).map_err(|_| "invalid_torrent")?.parse().map_err(|_| "invalid_torrent")?; *position = end + 1; Ok(BValue::Int(value)) }
+        b'l' => { *position += 1; let mut values = Vec::new(); while data.get(*position) != Some(&b'e') { values.push(parse_bencode(data, position)?); } *position += 1; Ok(BValue::List(values)) }
+        b'd' => { *position += 1; let mut values = HashMap::new(); while data.get(*position) != Some(&b'e') { let BValue::Bytes(key) = parse_bencode(data, position)? else { return Err("invalid_torrent".to_owned()); }; values.insert(key, parse_bencode(data, position)?); } *position += 1; Ok(BValue::Dict(values)) }
+        b'0'..=b'9' => { let colon = data[*position..].iter().position(|value| *value == b':').ok_or_else(|| "invalid_torrent".to_owned())? + *position; let length: usize = std::str::from_utf8(&data[*position..colon]).map_err(|_| "invalid_torrent")?.parse().map_err(|_| "invalid_torrent")?; let start = colon + 1; let end = start.checked_add(length).filter(|end| *end <= data.len()).ok_or_else(|| "invalid_torrent".to_owned())?; *position = end; Ok(BValue::Bytes(data[start..end].to_vec())) }
+        _ => Err("invalid_torrent".to_owned()),
+    }
+}
+
+fn btext(value: Option<&BValue>) -> String { match value { Some(BValue::Bytes(bytes)) => String::from_utf8_lossy(bytes).into_owned(), _ => String::new() } }
+
+fn inspect_torrent_file(path: &Path) -> Result<TorrentInspection, String> {
+    let data = fs::read(path).map_err(|error| error.to_string())?;
+    let mut position = 0;
+    let BValue::Dict(root) = parse_bencode(&data, &mut position)? else { return Err("invalid_torrent".to_owned()); };
+    let Some(BValue::Dict(info)) = root.get(b"info".as_slice()) else { return Err("invalid_torrent".to_owned()); };
+    let name = btext(info.get(b"name.utf-8".as_slice()).or_else(|| info.get(b"name".as_slice())));
+    let mut files = Vec::new();
+    if let Some(BValue::List(entries)) = info.get(b"files".as_slice()) {
+        for (offset, entry) in entries.iter().enumerate() {
+            let BValue::Dict(file) = entry else { continue; };
+            let size = match file.get(b"length".as_slice()) { Some(BValue::Int(value)) if *value >= 0 => *value as u64, _ => 0 };
+            let parts = match file.get(b"path.utf-8".as_slice()).or_else(|| file.get(b"path".as_slice())) { Some(BValue::List(parts)) => parts.iter().map(|part| btext(Some(part))).filter(|part| !part.is_empty()).collect::<Vec<_>>(), _ => Vec::new() };
+            files.push(TorrentFileInfo { index: offset + 1, path: parts.join("/"), size });
+        }
+    } else if let Some(BValue::Int(length)) = info.get(b"length".as_slice()) { files.push(TorrentFileInfo { index: 1, path: name.clone(), size: (*length).max(0) as u64 }); }
+    if files.is_empty() { return Err("torrent_has_no_files".to_owned()); }
+    Ok(TorrentInspection { total_size: files.iter().map(|file| file.size).sum(), name, files })
 }
 
 #[derive(Serialize)]
@@ -1163,9 +1208,18 @@ async fn run_external_download(
                     "--console-log-level=notice",
                     "--show-console-readout=true",
                     "--download-result=hide",
+                    "--continue=true",
+                    "--enable-dht=true",
+                    "--enable-peer-exchange=true",
+                    "--bt-enable-lpd=true",
+                    "--bt-max-peers=100",
+                    "--file-allocation=trunc",
                     "--seed-time=0",
-                ])
-                .arg(&task.source);
+                ]);
+            if !task.torrent_selection.is_empty() {
+                command.arg(format!("--select-file={}", task.torrent_selection.iter().map(ToString::to_string).collect::<Vec<_>>().join(",")));
+            }
+            command.arg(&task.source);
             command
         }
         _ => return,
@@ -1459,13 +1513,16 @@ async fn read_process_tail(
                 let text = String::from_utf8_lossy(&chunk[..count]);
                 if let Some((app, id, kind)) = progress.as_ref() {
                     if matches!(*kind, DownloadKind::Torrent | DownloadKind::Magnet | DownloadKind::Ftp) {
-                        if let Some((received, total, percent, download_speed, upload_speed)) = parse_aria2_progress(&text) {
+                        if let Some((received, total, percent, download_speed, upload_speed, seeders, leechers, eta)) = parse_aria2_progress(&text) {
                             update_task(app, *id, false, |task| {
                                 task.received = received;
                                 task.total = Some(total);
                                 task.progress_percent = Some(percent);
                                 task.download_speed = Some(download_speed);
                                 task.upload_speed = Some(upload_speed);
+                                task.torrent_seeders = Some(seeders);
+                                task.torrent_leechers = Some(leechers);
+                                task.torrent_eta = eta;
                             });
                         }
                     } else if let Some(percent) = parse_external_progress(&text) {
@@ -1500,7 +1557,8 @@ fn parse_aria2_size(value: &str) -> Option<u64> {
     Some((number * multiplier) as u64)
 }
 
-fn parse_aria2_progress(text: &str) -> Option<(u64, u64, f64, u64, u64)> {
+#[allow(clippy::type_complexity)]
+fn parse_aria2_progress(text: &str) -> Option<(u64, u64, f64, u64, u64, u64, u64, Option<String>)> {
     text.lines().rev().find_map(|line| {
       let ratio = line.split_whitespace().find_map(|token| {
         let slash = token.find('/')?;
@@ -1518,7 +1576,11 @@ fn parse_aria2_progress(text: &str) -> Option<(u64, u64, f64, u64, u64)> {
       let field = |prefix: &str| line.split_whitespace().find_map(|token| {
           token.strip_prefix(prefix).and_then(parse_aria2_size)
       }).unwrap_or(0);
-      Some((ratio.0, ratio.1, ratio.2, field("DL:"), field("UL:")))
+      let count = |prefix: &str| line.split_whitespace().find_map(|token| token.strip_prefix(prefix)?.trim_end_matches(']').parse::<u64>().ok()).unwrap_or(0);
+      let connections = count("CN:");
+      let seeders = count("SD:");
+      let eta = line.split_whitespace().find_map(|token| token.strip_prefix("ETA:").map(|value| value.trim_end_matches(']').to_owned()));
+      Some((ratio.0, ratio.1, ratio.2, field("DL:"), field("UL:"), seeders, connections.saturating_sub(seeders), eta))
     })
 }
 
@@ -1930,6 +1992,56 @@ fn set_tool_paths(
 }
 
 #[tauri::command]
+fn get_media_player(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.settings.lock().map_err(|error| error.to_string())?.media_player_path.as_ref().map(|path| path.to_string_lossy().into_owned()).unwrap_or_default())
+}
+
+#[tauri::command]
+fn set_media_player(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.media_player_path = optional_path(path);
+    save_settings(&state, &settings)
+}
+
+fn find_video_file(root: &Path, depth: usize) -> Option<PathBuf> {
+    if depth > 6 { return None; }
+    let mut best: Option<(u64, PathBuf)> = None;
+    for entry in fs::read_dir(root).ok()?.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(candidate) = find_video_file(&path, depth + 1) {
+                if let Ok(metadata) = candidate.metadata() {
+                    let size = metadata.len();
+                    if best.as_ref().is_none_or(|(current, _)| size > *current) { best = Some((size, candidate)); }
+                }
+            }
+        } else if path.extension().and_then(|value| value.to_str()).is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts")) {
+            if let Ok(metadata) = path.metadata() {
+                let size = metadata.len();
+                if best.as_ref().is_none_or(|(current, _)| size > *current) { best = Some((size, path)); }
+            }
+        }
+    }
+    best.map(|(_, path)| path)
+}
+
+#[tauri::command]
+fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), String> {
+    let (root, player) = {
+        let queue = state.queue.lock().map_err(|error| error.to_string())?;
+        let task = queue.iter().find(|task| task.id == id).ok_or_else(|| "download_not_found".to_owned())?;
+        if !matches!(classify_url(&task.source), Some(DownloadKind::Torrent | DownloadKind::Magnet)) { return Err("not_a_torrent".to_owned()); }
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        (task.destination.clone(), settings.media_player_path.clone())
+    };
+    let video = if root.is_file() { root } else { find_video_file(&root, 0).ok_or_else(|| "torrent_video_not_available".to_owned())? };
+    let mut command = Command::new(player.unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "vlc.exe" } else { "vlc" })));
+    command.arg(video);
+    #[cfg(target_os = "windows")] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
+    command.spawn().map(|_| ()).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, String> {
     if id != "yt-dlp" {
         return Err("manual_update_required: this engine has no safe in-place updater".to_owned());
@@ -1967,6 +2079,35 @@ fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, String>
 }
 
 #[tauri::command]
+async fn inspect_torrent_metadata(state: State<'_, AppState>, source: String) -> Result<TorrentInspection, String> {
+    match classify_url(&source) {
+        Some(DownloadKind::Torrent) => inspect_torrent_file(Path::new(&source)),
+        Some(DownloadKind::Magnet) => {
+            let (aria2, root) = {
+                let settings = state.settings.lock().map_err(|error| error.to_string())?;
+                let root = state.queue_path.parent().unwrap_or(Path::new(".")).join("torrent-metadata").join(uuid::Uuid::new_v4().to_string());
+                (configured_tool(&settings.aria2_path, if cfg!(windows) { "aria2c.exe" } else { "aria2c" }), root)
+            };
+            fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+            let mut command = tokio::process::Command::new(aria2);
+            command.args(["--bt-metadata-only=true", "--bt-save-metadata=true", "--seed-time=0", "--summary-interval=0"])
+                .arg(format!("--dir={}", root.display())).arg(&source);
+            #[cfg(target_os = "windows")] { use std::os::windows::process::CommandExt; command.as_std_mut().creation_flags(0x08000000); }
+            let output = tokio::time::timeout(Duration::from_secs(120), command.output()).await.map_err(|_| "torrent_metadata_timeout".to_owned())?.map_err(|error| error.to_string())?;
+            if !output.status.success() { let _ = fs::remove_dir_all(&root); return Err(external_error_detail(&String::from_utf8_lossy(&output.stderr), output.status.code())); }
+            let torrent = fs::read_dir(&root).map_err(|error| error.to_string())?.flatten().map(|entry| entry.path())
+                .find(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("torrent")))
+                .ok_or_else(|| "torrent_metadata_missing".to_owned())?;
+            let result = inspect_torrent_file(&torrent);
+            let _ = fs::remove_dir_all(&root);
+            result
+        }
+        _ => Err("not_a_torrent".to_owned()),
+    }
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn enqueue_download(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -1974,6 +2115,7 @@ fn enqueue_download(
     destination_directory: Option<String>,
     file_name: Option<String>,
     format_selection: Option<String>,
+    torrent_selection: Option<Vec<usize>>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
     let site_rule = {
@@ -2002,6 +2144,7 @@ fn enqueue_download(
     remember_download_directory(&state, &download_dir)?;
     let mut task = DownloadTask::new(&url, unique_destination(&download_dir, &file_name));
     task.format_selection = format_selection.filter(|value| !value.trim().is_empty());
+    task.torrent_selection = torrent_selection.unwrap_or_default().into_iter().filter(|index| *index > 0).collect();
     if let Some(context) = context {
         task.referer = context
             .referer
@@ -3547,6 +3690,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             inspect_url,
             inspect_media_formats,
+            inspect_torrent_metadata,
             list_downloads,
             enqueue_download,
             default_download_directory,
@@ -3557,6 +3701,9 @@ fn main() {
             open_paypal_donation,
             get_tool_statuses,
             set_tool_paths,
+            get_media_player,
+            set_media_player,
+            preview_torrent,
             update_tool,
             suggest_download_name,
             remove_downloads,
@@ -3654,7 +3801,7 @@ mod tests {
     fn parses_real_aria2_transfer_progress() {
         assert_eq!(
             parse_aria2_progress("[#abc 5.0MiB/20MiB(25%) CN:4 SD:2 DL:1MiB ETA:15s]"),
-            Some((5 * 1024 * 1024, 20 * 1024 * 1024, 25.0, 1024 * 1024, 0))
+            Some((5 * 1024 * 1024, 20 * 1024 * 1024, 25.0, 1024 * 1024, 0, 2, 2, Some("15s".to_owned())))
         );
         assert_eq!(parse_aria2_progress("[#abc 0B/0B CN:1 DL:0B]"), None);
     }
