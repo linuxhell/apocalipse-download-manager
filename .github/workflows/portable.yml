@@ -53,22 +53,9 @@ jobs:
         run: |
           $package = "dist/Apocalipse Download Manager"
           New-Item -ItemType Directory -Force "$package/browser extensions" | Out-Null
-          New-Item -ItemType Directory -Force "$package/Data/ed2k" | Out-Null
           Copy-Item "target/release/apocalipse-desktop.exe" "$package/Apocalipse Download Manager.exe"
           Copy-Item "browser-extension" "$package/browser extensions/unpacked-development-extension" -Recurse
           if (Test-Path "packaging/firefox/*.xpi") { Copy-Item "packaging/firefox/*.xpi" "$package/browser extensions/" }
-          $amuleVersion = "3.0.1"
-          $amuleArchive = "$env:RUNNER_TEMP/amule-$amuleVersion.zip"
-          $amuleExtract = "$env:RUNNER_TEMP/amule-$amuleVersion"
-          Invoke-WebRequest "https://github.com/amule-org/amule/releases/download/$amuleVersion/aMule-$amuleVersion-Windows-x64.zip" -OutFile $amuleArchive
-          $expectedHash = "4864F0B2AD0FADF82B433800120144133F9A71D0A0C147AC9F3743B5C9538389"
-          $actualHash = (Get-FileHash $amuleArchive -Algorithm SHA256).Hash
-          if ($actualHash -ne $expectedHash) {
-            throw "aMule archive checksum mismatch: $actualHash"
-          }
-          Expand-Archive $amuleArchive -DestinationPath $amuleExtract
-          Copy-Item "$amuleExtract/amule-portable-x64/bin/*" "$package/Data/ed2k/" -Recurse
-          Copy-Item "packaging/ed2k/README.txt" "$package/Data/ed2k/"
           Copy-Item "README.md","LICENSE" $package
           Compress-Archive -Path $package -DestinationPath "dist/${{ matrix.artifact }}.zip"
 
@@ -77,20 +64,10 @@ jobs:
         shell: bash
         run: |
           package="dist/Apocalipse Download Manager"
-          mkdir -p "$package/browser extensions" "$package/Data/ed2k"
+          mkdir -p "$package/browser extensions"
           install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
           cp -R browser-extension "$package/browser extensions/unpacked-development-extension"
           cp packaging/firefox/*.xpi "$package/browser extensions/" 2>/dev/null || true
-          amule_archive="$RUNNER_TEMP/aMule-3.0.1-Linux-x64.AppImage"
-          curl -fL --retry 3 -o "$amule_archive" "https://github.com/amule-org/amule/releases/download/3.0.1/aMule-3.0.1-Linux-x64.AppImage"
-          echo "fc74df9f66a924a067fa0f0c946561a70e261e4a74bd476cc97a2f6b758b59cf  $amule_archive" | sha256sum -c -
-          chmod +x "$amule_archive"
-          (cd "$RUNNER_TEMP" && "$amule_archive" --appimage-extract >/dev/null)
-          cp -R "$RUNNER_TEMP/squashfs-root/." "$package/Data/ed2k/"
-          cp packaging/ed2k/README.txt "$package/Data/ed2k/"
-          test -x "$package/Data/ed2k/usr/bin/ed2k"
-          test -x "$package/Data/ed2k/usr/bin/amulecmd"
-          test -x "$package/Data/ed2k/usr/bin/amuled"
           cp README.md LICENSE "$package/"
           tar -C dist -czf "dist/${{ matrix.artifact }}.tar.gz" "Apocalipse Download Manager"
 
@@ -99,27 +76,12 @@ jobs:
         shell: bash
         run: |
           app="dist/Apocalipse Download Manager.app"
-          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/browser extensions" "$app/Contents/Resources/Data/ed2k"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/browser extensions"
           cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
           chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
           cp packaging/macos/Info.plist "$app/Contents/Info.plist"
           cp -R browser-extension "$app/Contents/Resources/browser extensions/unpacked-development-extension"
           cp packaging/firefox/*.xpi "$app/Contents/Resources/browser extensions/" 2>/dev/null || true
-          amule_dmg="$RUNNER_TEMP/aMule-3.0.1-macOS-universal2.dmg"
-          curl -fL --retry 3 -o "$amule_dmg" "https://github.com/amule-org/amule/releases/download/3.0.1/aMule-3.0.1-macOS-universal2.dmg"
-          echo "8c80590e00f62ff0eac9d7e2c136c16af0abf158ab9eb50f35bd9fca2e851629  $amule_dmg" | shasum -a 256 -c -
-          mount_point=$(hdiutil attach -nobrowse -readonly "$amule_dmg" | awk '/\/Volumes\// { sub(/^.*\/Volumes\//, "/Volumes/"); print; exit }')
-          test -n "$mount_point"
-          trap 'hdiutil detach "$mount_point" >/dev/null' EXIT
-          amule_app=$(find "$mount_point" -maxdepth 2 -type d -name '*.app' -print -quit)
-          test -n "$amule_app"
-          cp -R "$amule_app" "$app/Contents/Resources/Data/ed2k/"
-          cp packaging/ed2k/README.txt "$app/Contents/Resources/Data/ed2k/"
-          find "$app/Contents/Resources/Data/ed2k" -type f -name ed2k -perm +111 | grep -q .
-          find "$app/Contents/Resources/Data/ed2k" -type f -name amulecmd -perm +111 | grep -q .
-          find "$app/Contents/Resources/Data/ed2k" -type f -name amuled -perm +111 | grep -q .
-          hdiutil detach "$mount_point" >/dev/null
-          trap - EXIT
           cp README.md LICENSE "$app/Contents/Resources/"
           ditto -c -k --sequesterRsrc --keepParent "$app" "dist/${{ matrix.artifact }}.zip"
 

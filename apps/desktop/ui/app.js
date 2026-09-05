@@ -4,22 +4,12 @@ const catalogs = {
     media: "Media",
     recordings: "Recordings",
     torrents: "Torrents",
-    ed2k: "ED2K",
     tools: "Tools",
     settings: "Settings",
     downloadsDescription: "Manage direct downloads, progress, speed and completed files.",
     mediaDescription: "Videos, audio, recordings and exports detected by Apocalipse.",
     recordingsDescription: "Follow active recordings, stop and save, export or open completed captures.",
     torrentsDescription: "Manage torrents, file selection, peers and previews.",
-    ed2kDescription: "Search ED2K/Kad and manage decentralized transfers through the aMule 3 engine.",
-    ed2kEngine: "aMule 3.0.1 engine", ed2kChecking: "Checking components…", ed2kSync: "Synchronize aMule", ed2kStart: "Start engine", ed2kConnect: "Connect networks", openAmule: "Open aMule",
-    ed2kSources: "SOURCES", connected: "Connected", disconnected: "Disconnected", ed2kHighId: "High ID", ed2kLowId: "Low ID / firewalled",
-    ed2kConnection: "Engine connection", ed2kHost: "Host", ed2kPort: "EC port", ed2kPasswordHint: "Enter the External Connections password",
-    ed2kSearchTitle: "Search ED2K/Kad", ed2kSearchHint: "Search the decentralized networks and choose a result.", ed2kSearchPlaceholder: "File name…", ed2kGlobal: "Global", search: "Search",
-    ed2kVideo: "Video", ed2kAudio: "Audio", ed2kImage: "Image", ed2kDocument: "Document", ed2kProgram: "Program", ed2kArchive: "Archive",
-    ed2kSearching: "Searching…", ed2kWaitingResults: "Waiting for network results…", ed2kNoResults: "No results yet.", ed2kDownload: "Download", ed2kTransfers: "Transfers", ed2kTransfersHint: "Real progress reported by the aMule engine.", ed2kNoTransfers: "No ED2K transfers.", ed2kCancel: "Cancel", ed2kPriority: "Priority",
-    ed2kReady: "Engine ready", ed2kIncomplete: "Select the official aMule 3.0.1 package in Tools.", ed2kPasswordRequired: "Configure the External Connections password.", ed2kConnectionSaved: "Connection saved.", ed2kSyncing: "Synchronizing with aMule…", ed2kSynced: "aMule synchronized. Transfers will now appear here.", ed2kRestartConfirm: "aMule must restart once to enable secure local synchronization. Active transfers will resume automatically. Restart now?", ed2kSyncStarting: "Synchronization configured. aMule is starting; wait a few seconds.",
-    ed2kLinks: "ED2K file, server and server-list links",
     linkDescription: "Transfer files securely between this computer and a remote Apocalipse.",
     matrixPageDescription: "Continuous diagnostics and isolated site corrections with individual rollback.",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
@@ -197,22 +187,12 @@ const catalogs = {
     media: "Mídia",
     recordings: "Gravações",
     torrents: "Torrents",
-    ed2k: "ED2K",
     tools: "Ferramentas",
     settings: "Configurações",
     downloadsDescription: "Gerencie downloads diretos, progresso, velocidade e arquivos concluídos.",
     mediaDescription: "Vídeos, áudios, gravações e exportações detectados pelo Apocalipse.",
     recordingsDescription: "Acompanhe gravações ativas, pare e salve, exporte ou abra capturas concluídas.",
     torrentsDescription: "Gerencie torrents, escolha de arquivos, pares e pré-visualizações.",
-    ed2kDescription: "Pesquise nas redes ED2K/Kad e gerencie transferências descentralizadas pelo motor aMule 3.",
-    ed2kEngine: "Motor aMule 3.0.1", ed2kChecking: "Verificando componentes…", ed2kSync: "Sincronizar aMule", ed2kStart: "Iniciar motor", ed2kConnect: "Conectar redes", openAmule: "Abrir aMule",
-    ed2kSources: "FONTES", connected: "Conectado", disconnected: "Desconectado", ed2kHighId: "ID alto", ed2kLowId: "ID baixo / com firewall",
-    ed2kConnection: "Conexão com o motor", ed2kHost: "Servidor", ed2kPort: "Porta EC", ed2kPasswordHint: "Digite a senha de Conexões Externas",
-    ed2kSearchTitle: "Pesquisar em ED2K/Kad", ed2kSearchHint: "Pesquise nas redes descentralizadas e escolha um resultado.", ed2kSearchPlaceholder: "Nome do arquivo…", ed2kGlobal: "Global", search: "Pesquisar",
-    ed2kVideo: "Vídeo", ed2kAudio: "Áudio", ed2kImage: "Imagem", ed2kDocument: "Documento", ed2kProgram: "Programa", ed2kArchive: "Arquivo compactado",
-    ed2kSearching: "Pesquisando…", ed2kWaitingResults: "Aguardando resultados da rede…", ed2kNoResults: "Ainda não há resultados.", ed2kDownload: "Baixar", ed2kTransfers: "Transferências", ed2kTransfersHint: "Progresso real informado pelo motor aMule.", ed2kNoTransfers: "Nenhuma transferência ED2K.", ed2kCancel: "Cancelar", ed2kPriority: "Prioridade",
-    ed2kReady: "Motor pronto", ed2kIncomplete: "Selecione o pacote oficial aMule 3.0.1 em Ferramentas.", ed2kPasswordRequired: "Configure a senha de Conexões Externas.", ed2kConnectionSaved: "Conexão salva.", ed2kSyncing: "Sincronizando com o aMule…", ed2kSynced: "aMule sincronizado. As transferências agora aparecerão aqui.", ed2kRestartConfirm: "O aMule precisa reiniciar uma vez para ativar a sincronização local segura. As transferências ativas continuarão automaticamente. Reiniciar agora?", ed2kSyncStarting: "Sincronização configurada. O aMule está iniciando; aguarde alguns segundos.",
-    ed2kLinks: "Links de arquivo, servidor e lista de servidores ED2K",
     linkDescription: "Transfira arquivos com segurança entre este computador e um Apocalipse remoto.",
     matrixPageDescription: "Diagnóstico contínuo e correções isoladas por site, com reversão individual.",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
@@ -391,22 +371,12 @@ const catalogs = {
     media: "媒体",
     recordings: "录制",
     torrents: "种子",
-    ed2k: "ED2K",
     tools: "工具",
     settings: "设置",
     downloadsDescription: "管理直接下载、进度、速度和已完成文件。",
     mediaDescription: "管理 Apocalipse 检测到的视频、音频、录制和导出。",
     recordingsDescription: "查看正在录制的内容、停止并保存、导出或打开已完成的录制。",
     torrentsDescription: "管理种子、文件选择、节点和预览。",
-    ed2kDescription: "通过 aMule 3 引擎搜索 ED2K/Kad 网络并管理去中心化传输。",
-    ed2kEngine: "aMule 3.0.1 引擎", ed2kChecking: "正在检查组件…", ed2kSync: "同步 aMule", ed2kStart: "启动引擎", ed2kConnect: "连接网络", openAmule: "打开 aMule",
-    ed2kSources: "来源", connected: "已连接", disconnected: "未连接", ed2kHighId: "高 ID", ed2kLowId: "低 ID / 防火墙限制",
-    ed2kConnection: "引擎连接", ed2kHost: "主机", ed2kPort: "EC 端口", ed2kPasswordHint: "输入外部连接密码",
-    ed2kSearchTitle: "搜索 ED2K/Kad", ed2kSearchHint: "搜索去中心化网络并选择结果。", ed2kSearchPlaceholder: "文件名…", ed2kGlobal: "全局", search: "搜索",
-    ed2kVideo: "视频", ed2kAudio: "音频", ed2kImage: "图像", ed2kDocument: "文档", ed2kProgram: "程序", ed2kArchive: "压缩包",
-    ed2kSearching: "正在搜索…", ed2kWaitingResults: "正在等待网络结果…", ed2kNoResults: "暂无结果。", ed2kDownload: "下载", ed2kTransfers: "传输", ed2kTransfersHint: "由 aMule 引擎报告的真实进度。", ed2kNoTransfers: "没有 ED2K 传输。", ed2kCancel: "取消", ed2kPriority: "优先级",
-    ed2kReady: "引擎就绪", ed2kIncomplete: "请在工具中选择官方 aMule 3.0.1 软件包。", ed2kPasswordRequired: "请配置外部连接密码。", ed2kConnectionSaved: "连接已保存。", ed2kSyncing: "正在与 aMule 同步…", ed2kSynced: "aMule 已同步，传输任务现在会显示在这里。", ed2kRestartConfirm: "aMule 需要重启一次以启用安全的本地同步。活动传输将自动继续。现在重启吗？", ed2kSyncStarting: "同步已配置。aMule 正在启动，请稍候。",
-    ed2kLinks: "ED2K 文件、服务器和服务器列表链接",
     linkDescription: "在本机与远程 Apocalipse 之间安全传输文件。",
     matrixPageDescription: "持续诊断及可单独回滚的网站修正规则。",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
@@ -673,7 +643,6 @@ function updateSpeeds(tasks) {
 function visibleDownloads() {
   let visible = downloads;
   if (activePage === "torrents") visible = visible.filter((task) => /^(?:magnet:)|\.torrent(?:$|[?#])/i.test(task.source));
-  if (activePage === "ed2k") visible = visible.filter((task) => /^ed2k:/i.test(task.source));
   if (activePage === "media") visible = visible.filter((task) => !/\.recording\.webm$/i.test(`${task.source} ${task.destination}`) && /(?:\.m3u8(?:$|[?#])|youtube\.com|youtu\.be|facebook\.com|fb\.watch|tiktok\.com|instagram\.com)/i.test(`${task.source} ${task.destination}`));
   if (activePage === "recordings") visible = visible.filter((task) => /\.recording\.webm$/i.test(`${task.source} ${task.destination}`));
   if (activePage === "link") visible = visible.filter((task) => /^(?:ftp|sftp):/i.test(task.source));
@@ -866,7 +835,7 @@ function translate() {
     .querySelectorAll("[data-i18n-placeholder]")
     .forEach((element) => (element.placeholder = t(element.dataset.i18nPlaceholder)));
   document.querySelector("#language").value = locale;
-  const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", ed2k: "ed2kDescription", link: "linkDescription", matrix: "matrixPageDescription" };
+  const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", matrix: "matrixPageDescription" };
   document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
   renderDownloads();
   if (activePage === "matrix") refreshMatrix().catch(console.error);
@@ -923,13 +892,12 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelectorAll("nav [data-page]").forEach((item) => item.classList.toggle("active", item === button));
     const heading = button.querySelector("b")?.textContent || t("downloads");
     document.querySelector("header h1").textContent = heading;
-    const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", ed2k: "ed2kDescription", link: "linkDescription", matrix: "matrixPageDescription" };
+    const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", matrix: "matrixPageDescription" };
     document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
     document.querySelector("#apocalipse-link-panel").hidden = activePage !== "link";
     document.querySelector("#matrix-panel").hidden = activePage !== "matrix";
-    document.querySelector("#ed2k-panel").hidden = activePage !== "ed2k";
-    document.querySelector(".metrics").hidden = ["link", "matrix", "ed2k"].includes(activePage);
-    document.querySelector(".panel").hidden = ["link", "matrix", "ed2k"].includes(activePage);
+    document.querySelector(".metrics").hidden = ["link", "matrix"].includes(activePage);
+    document.querySelector(".panel").hidden = ["link", "matrix"].includes(activePage);
     renderDownloads();
   };
 });
@@ -1093,119 +1061,6 @@ async function refreshMatrix() {
 }
 document.querySelector('[data-page="matrix"]').addEventListener("click", () => refreshMatrix().catch(console.error));
 
-let ed2kSearchId = null;
-let ed2kRefreshTimer = null;
-function ed2kError(error) {
-  const value = String(error);
-  if (value.includes("ed2k_password_required")) return t("ed2kPasswordRequired");
-  if (value.includes("ed2k_sync_starting")) return t("ed2kSyncStarting");
-  return value;
-}
-function renderEd2kResults(results) {
-  const root = document.querySelector("#ed2k-search-results");
-  root.replaceChildren();
-  if (!results.length) {
-    root.append(Object.assign(document.createElement("small"), { textContent: t("ed2kNoResults") }));
-    return;
-  }
-  for (const result of results) {
-    const row = document.createElement("article");
-    row.className = "ed2k-result";
-    const info = document.createElement("div");
-    info.append(Object.assign(document.createElement("strong"), { textContent: result.name }), Object.assign(document.createElement("small"), { textContent: `${result.sizeMib.toFixed(2)} MiB · ${t("ed2kSources")}: ${result.sources}` }));
-    const button = Object.assign(document.createElement("button"), { className: "primary", textContent: t("ed2kDownload") });
-    button.onclick = async () => {
-      button.disabled = true;
-      try { await invoke("ed2k_download_result", { number: result.number }); await refreshEd2kTransfers(); }
-      catch (error) { document.querySelector("#ed2k-search-status").textContent = ed2kError(error); }
-      finally { button.disabled = false; }
-    };
-    row.append(info, button); root.append(row);
-  }
-}
-async function refreshEd2kResults() {
-  const response = await invoke("ed2k_search_results", { searchId: ed2kSearchId });
-  renderEd2kResults(response.results || []);
-  document.querySelector("#ed2k-search-status").textContent = response.results?.length ? `${response.results.length} ${t("ed2kSources").toLocaleLowerCase()}` : t("ed2kWaitingResults");
-}
-function ed2kActionButton(label, action, hash) {
-  const button = Object.assign(document.createElement("button"), { textContent: label });
-  button.onclick = async () => { button.disabled = true; try { await invoke("control_ed2k_transfer", { action, hash }); await refreshEd2kTransfers(); } catch (error) { console.error(error); } finally { button.disabled = false; } };
-  return button;
-}
-async function refreshEd2kTransfers() {
-  const root = document.querySelector("#ed2k-transfer-list");
-  const transfers = await invoke("list_ed2k_transfers");
-  root.replaceChildren();
-  if (!transfers.length) { root.append(Object.assign(document.createElement("small"), { textContent: t("ed2kNoTransfers") })); return; }
-  for (const transfer of transfers) {
-    const row = document.createElement("article"); row.className = "ed2k-transfer";
-    const info = document.createElement("div");
-    const progress = document.createElement("span"); progress.className = "ed2k-transfer-progress";
-    progress.append(Object.assign(document.createElement("i"), { style: `width:${Math.max(0, Math.min(100, transfer.percent))}%` }));
-    info.append(Object.assign(document.createElement("strong"), { textContent: transfer.name }), progress, Object.assign(document.createElement("small"), { textContent: `${transfer.percent.toFixed(1)}% · ${transfer.activeSources}/${transfer.totalSources} ${t("ed2kSources").toLocaleLowerCase()} · ${transfer.speed || transfer.status} · ${t("ed2kPriority")}: ${transfer.priority}` }));
-    const actions = document.createElement("span"); actions.className = "ed2k-transfer-actions";
-    const paused = /paused|stopped/i.test(transfer.status);
-    actions.append(ed2kActionButton(paused ? t("resume") : t("pause"), paused ? "resume" : "pause", transfer.hash), ed2kActionButton(t("ed2kCancel"), "cancel", transfer.hash));
-    row.append(info, actions); root.append(row);
-  }
-}
-async function refreshEd2kStatus() {
-  const engine = await invoke("get_ed2k_engine_status");
-  const complete = engine.helperFound && engine.controllerFound && engine.daemonFound;
-  document.querySelector("#ed2k-engine-status").textContent = complete ? `${t("ed2kReady")} · ${engine.version || "aMule 3"}` : t("ed2kIncomplete");
-  if (!engine.connected) return;
-  const status = await invoke("ed2k_network_status");
-  document.querySelector("#ed2k-server-state").textContent = status.ed2kConnected ? `${t("connected")} · ${status.highId ? t("ed2kHighId") : t("ed2kLowId")}` : t("disconnected");
-  document.querySelector("#ed2k-kad-state").textContent = status.kadConnected ? `${t("connected")}${status.firewalled ? ` · ${t("ed2kLowId")}` : ""}` : t("disconnected");
-  document.querySelector("#ed2k-download-speed").textContent = status.downloadSpeed || "0 B/s";
-  document.querySelector("#ed2k-upload-speed").textContent = status.uploadSpeed || "0 B/s";
-  document.querySelector("#ed2k-source-count").textContent = status.sources;
-}
-async function loadEd2kPage() {
-  const connection = await invoke("get_ed2k_connection");
-  document.querySelector("#ed2k-host").value = connection.host;
-  document.querySelector("#ed2k-port").value = connection.port;
-  document.querySelector("#ed2k-password").placeholder = connection.passwordConfigured ? "••••••••" : t("ed2kPasswordHint");
-  await refreshEd2kStatus().catch((error) => document.querySelector("#ed2k-engine-status").textContent = ed2kError(error));
-  await refreshEd2kTransfers().catch(() => {});
-  clearInterval(ed2kRefreshTimer);
-  ed2kRefreshTimer = setInterval(() => { if (activePage === "ed2k") { refreshEd2kStatus().catch(() => {}); refreshEd2kTransfers().catch(() => {}); } }, 2500);
-}
-document.querySelector('[data-page="ed2k"]').addEventListener("click", () => loadEd2kPage().catch(console.error));
-document.querySelector("#ed2k-sync").onclick = async () => {
-  const button = document.querySelector("#ed2k-sync");
-  const status = document.querySelector("#ed2k-engine-status");
-  button.disabled = true; status.textContent = t("ed2kSyncing");
-  try {
-    let result;
-    try { result = await invoke("synchronize_ed2k_engine", { restartRunning: false }); }
-    catch (error) {
-      if (!String(error).includes("ed2k_restart_confirmation_required") || !confirm(t("ed2kRestartConfirm"))) throw error;
-      result = await invoke("synchronize_ed2k_engine", { restartRunning: true });
-    }
-    status.textContent = result.connected ? t("ed2kSynced") : t("ed2kSyncStarting");
-    await loadEd2kPage();
-  } catch (error) { status.textContent = ed2kError(error); }
-  finally { button.disabled = false; }
-};
-document.querySelector("#ed2k-save-connection").onclick = async () => {
-  try { await invoke("set_ed2k_connection", { host: document.querySelector("#ed2k-host").value, port: Number(document.querySelector("#ed2k-port").value), password: document.querySelector("#ed2k-password").value }); document.querySelector("#ed2k-password").value = ""; document.querySelector("#ed2k-search-status").textContent = t("ed2kConnectionSaved"); }
-  catch (error) { document.querySelector("#ed2k-search-status").textContent = ed2kError(error); }
-};
-document.querySelector("#ed2k-start").onclick = async () => { try { await invoke("start_ed2k_engine"); setTimeout(() => refreshEd2kStatus().catch(() => {}), 1800); } catch (error) { document.querySelector("#ed2k-engine-status").textContent = ed2kError(error); } };
-document.querySelector("#ed2k-connect").onclick = async () => { try { await invoke("connect_ed2k_networks"); await refreshEd2kStatus(); } catch (error) { document.querySelector("#ed2k-engine-status").textContent = ed2kError(error); } };
-document.querySelector("#ed2k-refresh").onclick = () => Promise.all([refreshEd2kStatus(), refreshEd2kTransfers()]).catch(console.error);
-document.querySelector("#open-amule").onclick = () => invoke("open_amule").catch((error) => document.querySelector("#ed2k-engine-status").textContent = ed2kError(error));
-document.querySelector("#ed2k-search-form").onsubmit = async (event) => {
-  event.preventDefault(); const button = event.submitter; button.disabled = true;
-  const status = document.querySelector("#ed2k-search-status"); status.textContent = t("ed2kSearching");
-  try {
-    const response = await invoke("ed2k_search", { query: document.querySelector("#ed2k-query").value, searchType: document.querySelector("#ed2k-search-network").value, fileType: document.querySelector("#ed2k-file-type").value });
-    ed2kSearchId = response.searchId; status.textContent = t("ed2kWaitingResults");
-    setTimeout(() => refreshEd2kResults().catch((error) => status.textContent = ed2kError(error)), 1800);
-  } catch (error) { status.textContent = ed2kError(error); } finally { button.disabled = false; }
-};
 refreshMatrix().catch(console.error);
 setInterval(() => refreshMatrix().catch(console.error), 5000);
 document.querySelector("#matrix-scan").onclick = async () => {
@@ -1636,7 +1491,6 @@ document.querySelector("#save-tools").onclick = async (event) => {
       ytDlp: document.querySelector("#tool-yt-dlp").value,
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
       aria2: document.querySelector("#tool-aria2").value,
-      ed2k: document.querySelector("#tool-ed2k").value,
     });
     await invoke("set_media_player", { path: document.querySelector("#media-player").value });
     toolsDialog.close();

@@ -10,7 +10,6 @@ pub enum Engine {
     NativeHls,
     NM3u8dlRe,
     NativeTorrent,
-    AMule,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -19,7 +18,6 @@ pub struct Capabilities {
     pub yt_dlp: bool,
     pub n_m3u8dl_re: bool,
     pub torrent: bool,
-    pub amule: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,15 +78,6 @@ pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<Strategy
                 .into_iter()
                 .collect(),
             reason: "peer_to_peer",
-        },
-        DownloadKind::Ed2k => StrategyPlan {
-            primary: Engine::AMule,
-            fallbacks: Vec::new(),
-            reason: if capabilities.amule {
-                "ed2k_adapter_available"
-            } else {
-                "ed2k_adapter_required"
-            },
         },
     };
     Some(plan)

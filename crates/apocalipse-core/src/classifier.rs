@@ -8,15 +8,11 @@ pub enum DownloadKind {
     Hls,
     MediaPage,
     Ftp,
-    Ed2k,
 }
 
 pub fn classify_url(input: &str) -> Option<DownloadKind> {
     if input.starts_with("magnet:?") {
         return Some(DownloadKind::Magnet);
-    }
-    if input.starts_with("ed2k://") {
-        return Some(DownloadKind::Ed2k);
     }
     let local_path = input
         .split(['?', '#'])
@@ -95,10 +91,7 @@ mod tests {
             Some(DownloadKind::MediaPage)
         );
         assert_eq!(classify_url("file:///tmp/a"), None);
-        assert_eq!(
-            classify_url("ed2k://|file|example.iso|42|abc|/"),
-            Some(DownloadKind::Ed2k)
-        );
+        assert_eq!(classify_url("ed2k://|file|example.iso|42|abc|/"), None);
         assert_eq!(
             classify_url("ftp://example.test/file.iso"),
             Some(DownloadKind::Ftp)

@@ -13,10 +13,10 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     fs::OpenOptions,
-    io::{BufRead, BufReader, Read, Write},
+    io::{Read, Write},
     net::{TcpListener, TcpStream, UdpSocket},
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    process::{Command, Stdio},
     sync::Mutex,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -47,23 +47,8 @@ struct AppState {
     log_write_lock: Mutex<()>,
     site_rules: Mutex<Vec<SiteRule>>,
     site_rules_path: PathBuf,
-    ed2k_search: Mutex<Option<Ed2kSearchSession>>,
 }
 
-struct Ed2kSearchSession {
-    child: Child,
-    input: ChildStdin,
-    output: BufReader<ChildStdout>,
-}
-
-impl Drop for Ed2kSearchSession {
-    fn drop(&mut self) {
-        let _ = self.input.write_all(b"quit\n");
-        let _ = self.input.flush();
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -217,14 +202,6 @@ struct UserSettings {
     #[serde(default)]
     aria2_path: Option<PathBuf>,
     #[serde(default)]
-    ed2k_path: Option<PathBuf>,
-    #[serde(default = "default_ed2k_host")]
-    ed2k_host: String,
-    #[serde(default = "default_ed2k_port")]
-    ed2k_port: u16,
-    #[serde(default)]
-    ed2k_password: String,
-    #[serde(default)]
     media_player_path: Option<PathBuf>,
     #[serde(default)]
     user_agent: Option<String>,
@@ -265,12 +242,6 @@ fn default_bridge_token() -> String {
 fn default_link_password() -> String {
     uuid::Uuid::new_v4().simple().to_string()[..8].to_ascii_uppercase()
 }
-fn default_ed2k_host() -> String {
-    "127.0.0.1".to_owned()
-}
-const fn default_ed2k_port() -> u16 {
-    4712
-}
 
 impl Default for UserSettings {
     fn default() -> Self {
@@ -286,10 +257,6 @@ impl Default for UserSettings {
             yt_dlp_path: None,
             n_m3u8dl_re_path: None,
             aria2_path: None,
-            ed2k_path: None,
-            ed2k_host: default_ed2k_host(),
-            ed2k_port: default_ed2k_port(),
-            ed2k_password: String::new(),
             media_player_path: None,
             user_agent: None,
             log_editor_path: None,
@@ -740,800 +707,10 @@ struct ToolStatus {
     version: Option<String>,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Ed2kEngineStatus {
-    helper_found: bool,
-    controller_found: bool,
-    daemon_found: bool,
-    version: Option<String>,
-    connected: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Ed2kConnectionSetting {
-    host: String,
-    port: u16,
-    password_configured: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Ed2kSyncResult {
-    connected: bool,
-    restarted: bool,
-    config_path: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Ed2kNetworkStatus {
-    ed2k_connected: bool,
-    kad_connected: bool,
-    high_id: bool,
-    firewalled: bool,
-    download_speed: String,
-    upload_speed: String,
-    sources: u64,
-    raw: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Ed2kSearchResult {
-    number: u64,
-    name: String,
-    size_mib: f64,
-    sources: u64,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Ed2kSearchResponse {
-    search_id: Option<u64>,
-    results: Vec<Ed2kSearchResult>,
-    raw: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Ed2kTransfer {
-    hash: String,
-    name: String,
-    percent: f64,
-    active_sources: u64,
-    total_sources: u64,
-    status: String,
-    priority: String,
-    speed: String,
-}
-
-fn amule_component(helper: &Path, names: &[&str]) -> Option<PathBuf> {
-    let directory = helper
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    names
-        .iter()
-        .map(|name| directory.join(name))
-        .find(|path| path.is_file())
-}
-
-#[tauri::command]
-fn get_ed2k_engine_status(state: State<'_, AppState>) -> Result<Ed2kEngineStatus, String> {
-    let settings = state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    let helper = configured_ed2k_tool(&settings);
-    let version = version_line(&helper, &["--version"]);
-    let connected = amule_command(&settings, "status").is_ok();
-    Ok(Ed2kEngineStatus {
-        helper_found: version.is_some(),
-        controller_found: amule_component(
-            &helper,
-            &[if cfg!(windows) {
-                "amulecmd.exe"
-            } else {
-                "amulecmd"
-            }],
-        )
-        .is_some(),
-        daemon_found: amule_component(
-            &helper,
-            &[
-                if cfg!(windows) {
-                    "amuled.exe"
-                } else {
-                    "amuled"
-                },
-                if cfg!(windows) { "amule.exe" } else { "amule" },
-            ],
-        )
-        .is_some(),
-        version,
-        connected,
-    })
-}
-
-fn amule_controller(settings: &UserSettings) -> PathBuf {
-    let helper = configured_ed2k_tool(settings);
-    amule_component(
-        &helper,
-        &[if cfg!(windows) {
-            "amulecmd.exe"
-        } else {
-            "amulecmd"
-        }],
-    )
-    .unwrap_or_else(|| {
-        PathBuf::from(if cfg!(windows) {
-            "amulecmd.exe"
-        } else {
-            "amulecmd"
-        })
-    })
-}
-
-fn configure_amule_command(command: &mut Command, settings: &UserSettings) -> Result<(), String> {
-    if settings.ed2k_password.is_empty() {
-        return Err("ed2k_password_required".to_owned());
-    }
-    command.args([
-        "-h",
-        &settings.ed2k_host,
-        "-p",
-        &settings.ed2k_port.to_string(),
-        "-P",
-        &settings.ed2k_password,
-        "-l",
-        "en",
-    ]);
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
-    Ok(())
-}
-
-fn amule_command(settings: &UserSettings, instruction: &str) -> Result<String, String> {
-    let mut command = Command::new(amule_controller(settings));
-    configure_amule_command(&mut command, settings)?;
-    let output = command
-        .args(["--command", instruction])
-        .output()
-        .map_err(|error| format!("amulecmd_not_found: {error}"))?;
-    let text = if output.stdout.is_empty() {
-        String::from_utf8_lossy(&output.stderr).into_owned()
-    } else {
-        String::from_utf8_lossy(&output.stdout).into_owned()
-    };
-    if output.status.success()
-        && !text.contains("Connection Failed")
-        && !text.contains("Request failed")
-    {
-        Ok(text)
-    } else {
-        Err(text.trim().to_owned())
-    }
-}
-
-fn parse_after_label<'a>(text: &'a str, label: &str) -> &'a str {
-    text.lines()
-        .find_map(|line| line.split_once(label).map(|(_, value)| value.trim()))
-        .unwrap_or("")
-}
-
-#[tauri::command]
-fn get_ed2k_connection(state: State<'_, AppState>) -> Result<Ed2kConnectionSetting, String> {
-    let settings = state.settings.lock().map_err(|error| error.to_string())?;
-    Ok(Ed2kConnectionSetting {
-        host: settings.ed2k_host.clone(),
-        port: settings.ed2k_port,
-        password_configured: !settings.ed2k_password.is_empty(),
-    })
-}
-
-#[tauri::command]
-fn set_ed2k_connection(
-    state: State<'_, AppState>,
-    host: String,
-    port: u16,
-    password: String,
-) -> Result<(), String> {
-    if host.trim().is_empty() || port == 0 {
-        return Err("invalid_ed2k_connection".to_owned());
-    }
-    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    settings.ed2k_host = host.trim().to_owned();
-    settings.ed2k_port = port;
-    if !password.is_empty() {
-        settings.ed2k_password = password;
-    }
-    *state
-        .ed2k_search
-        .lock()
-        .map_err(|error| error.to_string())? = None;
-    save_settings(&state, &settings)
-}
-
-fn amule_config_path(settings: &UserSettings) -> Result<PathBuf, String> {
-    let helper = configured_ed2k_tool(settings);
-    let mut candidates = Vec::new();
-    if let Some(directory) = helper.parent() {
-        candidates.push(directory.join("config/amule.conf"));
-    }
-    #[cfg(target_os = "windows")]
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        candidates.push(PathBuf::from(appdata).join("aMule/amule.conf"));
-    }
-    #[cfg(target_os = "macos")]
-    if let Some(home) = std::env::var_os("HOME") {
-        candidates.push(PathBuf::from(home).join("Library/Application Support/aMule/amule.conf"));
-    }
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    if let Some(home) = std::env::var_os("HOME") {
-        candidates.push(PathBuf::from(home).join(".aMule/amule.conf"));
-    }
-    candidates
-        .iter()
-        .find(|path| path.is_file())
-        .cloned()
-        .or_else(|| candidates.into_iter().next())
-        .ok_or_else(|| "amule_config_not_found".to_owned())
-}
-
-fn amule_process_running() -> bool {
-    #[cfg(target_os = "windows")]
-    let output = Command::new("tasklist")
-        .args(["/NH", "/FO", "CSV"])
-        .output();
-    #[cfg(not(target_os = "windows"))]
-    let output = Command::new("pgrep").args(["-x", "amule|amuled"]).output();
-    output.is_ok_and(|result| {
-        let text = String::from_utf8_lossy(&result.stdout).to_ascii_lowercase();
-        result.status.success() && (text.contains("amule") || cfg!(not(target_os = "windows")))
-    })
-}
-
-fn stop_amule_for_sync() -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    let status = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "$p=Get-Process amule,amuled -ErrorAction SilentlyContinue; if($p){$p | ForEach-Object {$null=$_.CloseMainWindow()}; $p | Wait-Process -Timeout 8 -ErrorAction SilentlyContinue}",
-        ])
-        .status();
-    #[cfg(not(target_os = "windows"))]
-    let status = Command::new("pkill")
-        .args(["-TERM", "-x", "amule|amuled"])
-        .status();
-    status.map_err(|error| format!("amule_restart_failed: {error}"))?;
-    for _ in 0..40 {
-        if !amule_process_running() {
-            return Ok(());
-        }
-        std::thread::sleep(Duration::from_millis(200));
-    }
-    Err("amule_did_not_close".to_owned())
-}
-
-fn update_ini_section(source: &str, section: &str, values: &[(&str, String)]) -> String {
-    let newline = if source.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
-    let mut lines = source.lines().map(str::to_owned).collect::<Vec<_>>();
-    let header = format!("[{section}]");
-    let start = lines
-        .iter()
-        .position(|line| line.trim().eq_ignore_ascii_case(&header));
-    let (start, end) = match start {
-        Some(index) => {
-            let end = lines[index + 1..]
-                .iter()
-                .position(|line| line.trim_start().starts_with('['))
-                .map_or(lines.len(), |offset| index + 1 + offset);
-            (index + 1, end)
-        }
-        None => {
-            if !lines.is_empty() && !lines.last().is_some_and(String::is_empty) {
-                lines.push(String::new());
-            }
-            lines.push(header);
-            let index = lines.len();
-            (index, index)
-        }
-    };
-    let mut insert_at = end;
-    for (key, value) in values {
-        if let Some(index) = (start..end).find(|index| {
-            lines[*index]
-                .split_once('=')
-                .is_some_and(|(existing, _)| existing.trim().eq_ignore_ascii_case(key))
-        }) {
-            lines[index] = format!("{key}={value}");
-        } else {
-            lines.insert(insert_at, format!("{key}={value}"));
-            insert_at += 1;
-        }
-    }
-    let mut result = lines.join(newline);
-    result.push_str(newline);
-    result
-}
-
-fn configure_amule_ec(settings: &UserSettings) -> Result<PathBuf, String> {
-    let path = amule_config_path(settings)?;
-    let source = fs::read_to_string(&path).unwrap_or_default();
-    let password_hash = format!("{:X}", md5::compute(settings.ed2k_password.as_bytes()));
-    let updated = update_ini_section(
-        &source,
-        "ExternalConnect",
-        &[
-            ("AcceptExternalConnections", "1".to_owned()),
-            ("ECAddress", "127.0.0.1".to_owned()),
-            ("ECPort", settings.ed2k_port.to_string()),
-            ("ECPassword", password_hash),
-            ("UPnPECEnabled", "0".to_owned()),
-        ],
-    );
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let backup = path.with_extension("conf.apocalipse-backup");
-    if path.is_file() && !backup.exists() {
-        fs::copy(&path, &backup).map_err(|error| error.to_string())?;
-    }
-    let temporary = path.with_extension("conf.apocalipse-new");
-    fs::write(&temporary, updated).map_err(|error| error.to_string())?;
-    if path.exists() {
-        fs::remove_file(&path).map_err(|error| error.to_string())?;
-    }
-    if let Err(error) = fs::rename(&temporary, &path) {
-        if backup.is_file() {
-            let _ = fs::copy(&backup, &path);
-        }
-        return Err(error.to_string());
-    }
-    Ok(path)
-}
-
-#[tauri::command]
-fn synchronize_ed2k_engine(
-    state: State<'_, AppState>,
-    restart_running: bool,
-) -> Result<Ed2kSyncResult, String> {
-    let mut settings = state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    settings.ed2k_host = "127.0.0.1".to_owned();
-    settings.ed2k_port = default_ed2k_port();
-    if settings.ed2k_password.is_empty() {
-        settings.ed2k_password = uuid::Uuid::new_v4().simple().to_string();
-    }
-    if amule_command(&settings, "status").is_ok() {
-        let path = amule_config_path(&settings)?;
-        let mut locked = state.settings.lock().map_err(|error| error.to_string())?;
-        *locked = settings;
-        save_settings(&state, &locked)?;
-        return Ok(Ed2kSyncResult {
-            connected: true,
-            restarted: false,
-            config_path: path.to_string_lossy().into_owned(),
-        });
-    }
-    let running = amule_process_running();
-    if running && !restart_running {
-        return Err("ed2k_restart_confirmation_required".to_owned());
-    }
-    if running {
-        stop_amule_for_sync()?;
-    }
-    let path = configure_amule_ec(&settings)?;
-    {
-        let mut locked = state.settings.lock().map_err(|error| error.to_string())?;
-        *locked = settings.clone();
-        save_settings(&state, &locked)?;
-    }
-    start_ed2k_engine(state)?;
-    for _ in 0..30 {
-        std::thread::sleep(Duration::from_millis(250));
-        if amule_command(&settings, "status").is_ok() {
-            return Ok(Ed2kSyncResult {
-                connected: true,
-                restarted: running,
-                config_path: path.to_string_lossy().into_owned(),
-            });
-        }
-    }
-    Err("ed2k_sync_starting".to_owned())
-}
-
-#[tauri::command]
-fn start_ed2k_engine(state: State<'_, AppState>) -> Result<(), String> {
-    let settings = state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    if amule_command(&settings, "status").is_ok() || amule_process_running() {
-        return Ok(());
-    }
-    let helper = configured_ed2k_tool(&settings);
-    let daemon = amule_component(
-        &helper,
-        &[
-            if cfg!(windows) { "amule.exe" } else { "amule" },
-            if cfg!(windows) {
-                "amuled.exe"
-            } else {
-                "amuled"
-            },
-        ],
-    )
-    .ok_or_else(|| "amule_engine_not_found".to_owned())?;
-    let mut command = Command::new(daemon);
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
-    command
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn connect_ed2k_networks(state: State<'_, AppState>) -> Result<(), String> {
-    let settings = state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    amule_command(&settings, "connect")?;
-    Ok(())
-}
-
-#[tauri::command]
-fn ed2k_network_status(state: State<'_, AppState>) -> Result<Ed2kNetworkStatus, String> {
-    let settings = state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    let raw = amule_command(&settings, "status")?;
-    let ed2k_line = parse_after_label(&raw, "eD2k:");
-    let kad_line = parse_after_label(&raw, "Kad:");
-    Ok(Ed2kNetworkStatus {
-        ed2k_connected: ed2k_line.starts_with("Connected"),
-        kad_connected: kad_line.starts_with("Connected"),
-        high_id: ed2k_line.contains("HighID"),
-        firewalled: kad_line.contains("firewalled") || ed2k_line.contains("LowID"),
-        download_speed: parse_after_label(&raw, "Download:").to_owned(),
-        upload_speed: parse_after_label(&raw, "Upload:").to_owned(),
-        sources: parse_after_label(&raw, "Total sources:")
-            .parse()
-            .unwrap_or(0),
-        raw,
-    })
-}
-
-fn start_search_session(settings: &UserSettings) -> Result<Ed2kSearchSession, String> {
-    let mut command = Command::new(amule_controller(settings));
-    configure_amule_command(&mut command, settings)?;
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("amulecmd_not_found: {error}"))?;
-    let input = child
-        .stdin
-        .take()
-        .ok_or_else(|| "amulecmd_stdin".to_owned())?;
-    let output = BufReader::new(
-        child
-            .stdout
-            .take()
-            .ok_or_else(|| "amulecmd_stdout".to_owned())?,
-    );
-    let mut session = Ed2kSearchSession {
-        child,
-        input,
-        output,
-    };
-    read_amule_prompt(&mut session)?;
-    Ok(session)
-}
-
-fn read_amule_prompt(session: &mut Ed2kSearchSession) -> Result<String, String> {
-    let mut bytes = Vec::new();
-    loop {
-        let available = session
-            .output
-            .fill_buf()
-            .map_err(|error| error.to_string())?;
-        if available.is_empty() {
-            return Err("amulecmd_closed".to_owned());
-        }
-        let take = available.len();
-        bytes.extend_from_slice(&available[..take]);
-        session.output.consume(take);
-        if bytes.ends_with(b"aMulecmd$ ") {
-            break;
-        }
-        if bytes.len() > 4 * 1024 * 1024 {
-            return Err("amulecmd_output_too_large".to_owned());
-        }
-    }
-    Ok(String::from_utf8_lossy(&bytes)
-        .trim_end_matches("aMulecmd$ ")
-        .to_owned())
-}
-
-fn interactive_amule(session: &mut Ed2kSearchSession, instruction: &str) -> Result<String, String> {
-    if instruction
-        .chars()
-        .any(|value| matches!(value, '\r' | '\n'))
-    {
-        return Err("invalid_ed2k_command".to_owned());
-    }
-    writeln!(session.input, "{instruction}")
-        .and_then(|_| session.input.flush())
-        .map_err(|error| error.to_string())?;
-    read_amule_prompt(session)
-}
-
-fn parse_search_results(raw: &str) -> Vec<Ed2kSearchResult> {
-    raw.lines()
-        .filter_map(|line| {
-            let (number, rest) = line.trim_start().split_once('.')?;
-            let number = number.parse().ok()?;
-            let mut tail = rest.trim().rsplitn(3, char::is_whitespace);
-            let sources = tail.next()?.parse().ok()?;
-            let size_mib = tail.next()?.parse().ok()?;
-            let name = tail.next()?.trim().to_owned();
-            (!name.is_empty()).then_some(Ed2kSearchResult {
-                number,
-                name,
-                size_mib,
-                sources,
-            })
-        })
-        .collect()
-}
-
-#[tauri::command]
-fn ed2k_search(
-    state: State<'_, AppState>,
-    query: String,
-    search_type: String,
-    file_type: String,
-) -> Result<Ed2kSearchResponse, String> {
-    let query = query.trim();
-    if query.len() < 2 || query.chars().any(|value| matches!(value, '\r' | '\n')) {
-        return Err("invalid_ed2k_search".to_owned());
-    }
-    let network = match search_type.as_str() {
-        "kad" => "kad",
-        "local" => "local",
-        _ => "global",
-    };
-    let filter = match file_type.as_str() {
-        "Audio" | "Video" | "Image" | "Doc" | "Pro" | "Arc" | "Iso" => {
-            format!(" --type {file_type}")
-        }
-        _ => String::new(),
-    };
-    let settings = state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    let mut guard = state
-        .ed2k_search
-        .lock()
-        .map_err(|error| error.to_string())?;
-    if guard
-        .as_mut()
-        .is_some_and(|session| session.child.try_wait().ok().flatten().is_some())
-    {
-        *guard = None;
-    }
-    if guard.is_none() {
-        *guard = Some(start_search_session(&settings)?);
-    }
-    let raw = interactive_amule(
-        guard.as_mut().unwrap(),
-        &format!("search {network}{filter} {query}"),
-    )?;
-    let search_id = raw
-        .split("Search started (id ")
-        .nth(1)
-        .and_then(|value| value.split(')').next())
-        .and_then(|value| value.parse().ok());
-    Ok(Ed2kSearchResponse {
-        search_id,
-        results: Vec::new(),
-        raw,
-    })
-}
-
-#[tauri::command]
-fn ed2k_search_results(
-    state: State<'_, AppState>,
-    search_id: Option<u64>,
-) -> Result<Ed2kSearchResponse, String> {
-    let mut guard = state
-        .ed2k_search
-        .lock()
-        .map_err(|error| error.to_string())?;
-    let session = guard
-        .as_mut()
-        .ok_or_else(|| "ed2k_search_not_started".to_owned())?;
-    let raw = interactive_amule(
-        session,
-        &search_id.map_or_else(|| "results".to_owned(), |id| format!("results {id}")),
-    )?;
-    Ok(Ed2kSearchResponse {
-        search_id,
-        results: parse_search_results(&raw),
-        raw,
-    })
-}
-
-#[tauri::command]
-fn ed2k_download_result(state: State<'_, AppState>, number: u64) -> Result<(), String> {
-    let mut guard = state
-        .ed2k_search
-        .lock()
-        .map_err(|error| error.to_string())?;
-    let session = guard
-        .as_mut()
-        .ok_or_else(|| "ed2k_search_not_started".to_owned())?;
-    interactive_amule(session, &format!("download {number}"))?;
-    Ok(())
-}
-
-#[tauri::command]
-fn list_ed2k_transfers(state: State<'_, AppState>) -> Result<Vec<Ed2kTransfer>, String> {
-    let settings = state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    let raw = amule_command(&settings, "show dl")?;
-    let mut transfers = Vec::new();
-    let mut lines = raw.lines().peekable();
-    while let Some(line) = lines.next() {
-        let clean = line.trim_start_matches(" > ");
-        let Some((hash, name)) = clean.split_once('\t') else {
-            continue;
-        };
-        if hash.len() != 32 {
-            continue;
-        }
-        let detail = lines.next().unwrap_or("").trim_start_matches(" > ").trim();
-        let fields = detail.split('\t').map(str::trim).collect::<Vec<_>>();
-        let percent = fields
-            .first()
-            .and_then(|value| {
-                value
-                    .trim_matches(|character| matches!(character, '[' | ']' | '%'))
-                    .parse()
-                    .ok()
-            })
-            .unwrap_or(0.0);
-        let (active_sources, total_sources) = fields
-            .get(1)
-            .and_then(|value| value.split_once('/'))
-            .map(|(a, b)| (a.trim().parse().unwrap_or(0), b.trim().parse().unwrap_or(0)))
-            .unwrap_or((0, 0));
-        transfers.push(Ed2kTransfer {
-            hash: hash.to_owned(),
-            name: name.to_owned(),
-            percent,
-            active_sources,
-            total_sources,
-            status: fields.get(4).unwrap_or(&"").to_string(),
-            priority: fields.get(6).unwrap_or(&"").to_string(),
-            speed: fields.last().unwrap_or(&"").to_string(),
-        });
-    }
-    Ok(transfers)
-}
-
-#[tauri::command]
-fn control_ed2k_transfer(
-    state: State<'_, AppState>,
-    action: String,
-    hash: String,
-) -> Result<(), String> {
-    if hash.len() != 32 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("invalid_ed2k_hash".to_owned());
-    }
-    let instruction = match action.as_str() {
-        "pause" => "pause",
-        "resume" => "resume",
-        "cancel" => "cancel",
-        "low" => "priority low",
-        "normal" => "priority normal",
-        "high" => "priority high",
-        "auto" => "priority auto",
-        _ => return Err("invalid_ed2k_action".to_owned()),
-    };
-    let settings = state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    amule_command(&settings, &format!("{instruction} {hash}"))?;
-    Ok(())
-}
-
 fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
     path.clone()
         .filter(|value| !value.as_os_str().is_empty())
         .unwrap_or_else(|| PathBuf::from(fallback))
-}
-
-fn bundled_ed2k_helper() -> Option<PathBuf> {
-    let executable_directory = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(Path::to_path_buf))?;
-    let file_name = if cfg!(windows) { "ed2k.exe" } else { "ed2k" };
-    let mut roots = ["Data", "data"]
-        .into_iter()
-        .map(|directory| executable_directory.join(directory).join("ed2k"))
-        .collect::<Vec<_>>();
-    if let Some(contents_directory) = executable_directory.parent() {
-        roots.extend(["Data", "data"].into_iter().map(|directory| {
-            contents_directory
-                .join("Resources")
-                .join(directory)
-                .join("ed2k")
-        }));
-    }
-    roots
-        .iter()
-        .find_map(|root| find_bundled_component(root, file_name, 6))
-}
-
-fn find_bundled_component(root: &Path, file_name: &str, depth: usize) -> Option<PathBuf> {
-    if depth == 0 || !root.is_dir() {
-        return None;
-    }
-    let direct = root.join(file_name);
-    if direct.is_file() {
-        return Some(direct);
-    }
-    fs::read_dir(root).ok()?.flatten().find_map(|entry| {
-        entry
-            .file_type()
-            .ok()
-            .filter(|kind| kind.is_dir())
-            .and_then(|_| find_bundled_component(&entry.path(), file_name, depth - 1))
-    })
-}
-
-fn configured_ed2k_tool(settings: &UserSettings) -> PathBuf {
-    settings
-        .ed2k_path
-        .clone()
-        .filter(|value| !value.as_os_str().is_empty())
-        .or_else(bundled_ed2k_helper)
-        .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "ed2k.exe" } else { "ed2k" }))
 }
 
 fn http_origin(url: &str) -> Option<&str> {
@@ -1961,7 +1138,6 @@ fn inspect_url(url: String) -> Result<PlanResponse, String> {
         yt_dlp: true,
         n_m3u8dl_re: true,
         torrent: false,
-        amule: false,
     };
     let plan = plan_download(&url, capabilities).ok_or_else(|| "unsupported_url".to_owned())?;
     Ok(PlanResponse {
@@ -2156,10 +1332,12 @@ fn save_queue(state: &AppState, queue: &[DownloadTask]) -> Result<(), String> {
 }
 
 fn load_settings(path: &Path) -> UserSettings {
-    fs::read(path)
+    let mut settings = fs::read(path)
         .ok()
         .and_then(|data| serde_json::from_slice(&data).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    settings.associations.remove("ed2k");
+    settings
 }
 
 fn save_settings(state: &AppState, settings: &UserSettings) -> Result<(), String> {
@@ -2512,7 +1690,6 @@ async fn run_external_download(
                         "aria2c"
                     },
                 ),
-                configured_ed2k_tool(&settings),
                 settings.connections_per_download.clamp(1, 32),
                 settings
                     .proxy_enabled
@@ -2533,7 +1710,6 @@ async fn run_external_download(
                 "yt-dlp".into(),
                 "N_m3u8DL-RE".into(),
                 "aria2c".into(),
-                "ed2k".into(),
                 8,
                 None,
                 None,
@@ -2566,9 +1742,9 @@ async fn run_external_download(
         .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_deref()))
         .unwrap_or("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36");
     let proxy_url = tools
-        .6
+        .5
         .as_deref()
-        .map(|url| external_proxy_url(url, tools.7.as_deref(), tools.8.as_deref()));
+        .map(|url| external_proxy_url(url, tools.6.as_deref(), tools.7.as_deref()));
     let mut command = match kind {
         DownloadKind::MediaPage => {
             let mut command = tokio::process::Command::new(&tools.1);
@@ -2582,7 +1758,7 @@ async fn run_external_download(
             command.args(["--no-playlist", "--newline", "--verbose"]);
             command
                 .arg("--concurrent-fragments")
-                .arg(tools.5.to_string());
+                .arg(tools.4.to_string());
             let quickjs_name = if cfg!(windows) { "qjs.exe" } else { "qjs" };
             let adjacent_quickjs = tools
                 .1
@@ -2700,7 +1876,7 @@ async fn run_external_download(
                         "30",
                     ])
                     .arg("--thread-count")
-                    .arg(tools.5.to_string())
+                    .arg(tools.4.to_string())
                     .arg("--ffmpeg-binary-path")
                     .arg(&tools.0);
                 if let Some(referer) = task.referer.as_deref() {
@@ -2752,23 +1928,23 @@ async fn run_external_download(
         }
         DownloadKind::Torrent | DownloadKind::Magnet | DownloadKind::Ftp => {
             let mut command = tokio::process::Command::new(&tools.3);
-            if !tools.9.is_empty() {
+            if !tools.8.is_empty() {
                 command.arg(format!(
                     "--async-dns-server={}",
                     tools
-                        .9
+                        .8
                         .iter()
                         .map(ToString::to_string)
                         .collect::<Vec<_>>()
                         .join(",")
                 ));
             }
-            if let Some(proxy_url) = tools.6.as_deref() {
+            if let Some(proxy_url) = tools.5.as_deref() {
                 command.arg(format!("--all-proxy={proxy_url}"));
-                if let Some(username) = tools.7.as_deref() {
+                if let Some(username) = tools.6.as_deref() {
                     command.arg(format!("--all-proxy-user={username}"));
                 }
-                if let Some(password) = tools.8.as_deref() {
+                if let Some(password) = tools.7.as_deref() {
                     command.arg(format!("--all-proxy-passwd={password}"));
                 }
             }
@@ -2804,36 +1980,6 @@ async fn run_external_download(
                 ));
             }
             command.arg(&task.source);
-            command
-        }
-        DownloadKind::Ed2k => {
-            let settings = app
-                .state::<AppState>()
-                .settings
-                .lock()
-                .map(|value| value.clone())
-                .unwrap_or_default();
-            if settings.ed2k_password.is_empty() {
-                update_task(&app, id, true, |item| {
-                    item.state = DownloadState::Failed {
-                        message: "ed2k_password_required".to_owned(),
-                    }
-                });
-                return;
-            }
-            let mut command = tokio::process::Command::new(amule_controller(&settings));
-            command.args([
-                "-h",
-                &settings.ed2k_host,
-                "-p",
-                &settings.ed2k_port.to_string(),
-                "-P",
-                &settings.ed2k_password,
-                "-l",
-                "en",
-                "--command",
-                &format!("add {}", task.source),
-            ]);
             command
         }
         _ => return,
@@ -3498,7 +2644,6 @@ fn external_error_detail(output: &str, exit_code: Option<i32>) -> String {
 }
 
 fn suggested_name(source: &str) -> String {
-    let ed2k_name = parse_ed2k_file_link(source).map(|(name, _)| name);
     let magnet_name = (classify_url(source) == Some(DownloadKind::Magnet))
         .then(|| {
             url::Url::parse(source)
@@ -3508,9 +2653,8 @@ fn suggested_name(source: &str) -> String {
                 .map(|(_, value)| value.into_owned())
         })
         .flatten();
-    ed2k_name
+    magnet_name
         .as_deref()
-        .or(magnet_name.as_deref())
         .unwrap_or(source)
         .split(['/', '\\'])
         .next_back()
@@ -3526,30 +2670,6 @@ fn suggested_name(source: &str) -> String {
             }
         })
         .collect()
-}
-
-fn parse_ed2k_file_link(source: &str) -> Option<(String, u64)> {
-    let fields = source.split('|').collect::<Vec<_>>();
-    if fields.len() < 6 || fields[0] != "ed2k://" || !fields[1].eq_ignore_ascii_case("file") {
-        return None;
-    }
-    let mut decoded = Vec::with_capacity(fields[2].len());
-    let bytes = fields[2].as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%' && index + 2 < bytes.len() {
-            if let Ok(value) = u8::from_str_radix(&fields[2][index + 1..index + 3], 16) {
-                decoded.push(value);
-                index += 3;
-                continue;
-            }
-        }
-        decoded.push(bytes[index]);
-        index += 1;
-    }
-    let name = String::from_utf8_lossy(&decoded).replace(['/', '\\'], "_");
-    let size = fields[3].parse::<u64>().ok()?;
-    (!name.trim().is_empty() && size > 0).then_some((name, size))
 }
 
 fn suggested_download_name(source: &str) -> String {
@@ -3819,11 +2939,6 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
             ),
             ["--version"].as_slice(),
         ),
-        (
-            "ed2k",
-            configured_ed2k_tool(&settings),
-            ["--version"].as_slice(),
-        ),
     ];
     Ok(definitions
         .into_iter()
@@ -3892,14 +3007,12 @@ fn set_tool_paths(
     yt_dlp: String,
     n_m3u8dl_re: String,
     aria2: String,
-    ed2k: String,
 ) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.ffmpeg_path = optional_path(ffmpeg);
     settings.yt_dlp_path = optional_path(yt_dlp);
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
     settings.aria2_path = optional_path(aria2);
-    settings.ed2k_path = optional_path(ed2k);
     save_settings(&state, &settings)
 }
 
@@ -4038,30 +3151,6 @@ fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
 
 #[tauri::command]
 fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, String> {
-    if id == "ed2k" {
-        let settings = state
-            .settings
-            .lock()
-            .map_err(|error| error.to_string())?
-            .clone();
-        let executable = configured_ed2k_tool(&settings);
-        let directory = executable
-            .parent()
-            .filter(|path| !path.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        let updater = ["amule-updater.exe", "amule-updater", "updater.exe"]
-            .into_iter()
-            .map(|name| directory.join(name))
-            .find(|path| path.is_file());
-        if let Some(updater) = updater {
-            Command::new(updater)
-                .spawn()
-                .map_err(|error| error.to_string())?;
-            return Ok("aMule updater started; the configured ed2k helper will be refreshed with its matching package".to_owned());
-        }
-        open_external_url("https://github.com/amule-org/amule/releases/latest")?;
-        return Ok("Official aMule release opened. Replace the complete portable package so ed2k and its matching libraries stay compatible".to_owned());
-    }
     if id != "yt-dlp" {
         return Err("manual_update_required: this engine has no safe in-place updater".to_owned());
     }
@@ -4115,81 +3204,6 @@ fn open_external_url(url: &str) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     let result = Command::new("xdg-open").arg(url).spawn();
     result.map(|_| ()).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn open_amule(state: State<'_, AppState>) -> Result<(), String> {
-    let settings = state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    let helper = configured_ed2k_tool(&settings);
-    let directory = helper
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let remote_gui = amule_component(
-        &helper,
-        &[if cfg!(windows) {
-            "amulegui.exe"
-        } else {
-            "amulegui"
-        }],
-    );
-    let connected = amule_command(&settings, "status").is_ok();
-    let (executable, skip_dialog) = if connected {
-        match remote_gui {
-            Some(executable) => {
-                configure_amule_remote_gui(&settings)?;
-                (executable, true)
-            }
-            None => (
-                directory.join(if cfg!(windows) { "amule.exe" } else { "amule" }),
-                false,
-            ),
-        }
-    } else {
-        (
-            [
-                directory.join(if cfg!(windows) { "amule.exe" } else { "amule" }),
-                directory.join(if cfg!(windows) { "aMule.exe" } else { "aMule" }),
-            ]
-            .into_iter()
-            .find(|path| path.is_file())
-            .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "amule.exe" } else { "amule" })),
-            false,
-        )
-    };
-    let mut command = Command::new(executable);
-    if skip_dialog {
-        command.arg("--skip");
-    }
-    command
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("amule_not_found: {error}"))
-}
-
-fn configure_amule_remote_gui(settings: &UserSettings) -> Result<(), String> {
-    let path = amule_config_path(settings)?.with_file_name("remote.conf");
-    let source = fs::read_to_string(&path).unwrap_or_default();
-    let password_hash = format!("{:X}", md5::compute(settings.ed2k_password.as_bytes()));
-    let updated = update_ini_section(
-        &source,
-        "EC",
-        &[
-            ("Host", "127.0.0.1".to_owned()),
-            ("Port", settings.ed2k_port.to_string()),
-            ("Password", password_hash),
-            ("ZLIB", "1".to_owned()),
-            ("ForceZLIB", "0".to_owned()),
-        ],
-    );
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    fs::write(path, updated).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -4318,9 +3332,6 @@ fn enqueue_download(
     let file_name = validate_file_name(&append_source_extension(proposed, &url, kind))?;
     remember_download_directory(&state, &download_dir)?;
     let mut task = DownloadTask::new(&url, unique_destination(&download_dir, &file_name));
-    if let Some((_, size)) = parse_ed2k_file_link(&url) {
-        task.total = Some(size);
-    }
     task.format_selection = format_selection.filter(|value| !value.trim().is_empty());
     task.torrent_selection = torrent_selection
         .unwrap_or_default()
@@ -5272,8 +4283,6 @@ fn association_id(source: &str) -> Option<&'static str> {
     let lower = source.to_ascii_lowercase();
     if lower.starts_with("magnet:") {
         Some("magnet")
-    } else if lower.starts_with("ed2k:") {
-        Some("ed2k")
     } else if lower.starts_with("sftp:") {
         Some("sftp")
     } else if lower.starts_with("ftp:") {
@@ -5971,7 +4980,37 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<AutostartStatus
     get_autostart(app)
 }
 
-const ASSOCIATION_IDS: [&str; 6] = ["m3u8", "torrent", "magnet", "ftp", "sftp", "ed2k"];
+const ASSOCIATION_IDS: [&str; 5] = ["m3u8", "torrent", "magnet", "ftp", "sftp"];
+
+#[cfg(target_os = "windows")]
+fn cleanup_removed_associations() {
+    for key in [
+        r"HKCU\Software\Classes\ed2k",
+        r"HKCU\Software\Classes\Apocalipse.ed2k",
+    ] {
+        let _ = Command::new("reg.exe").args(["DELETE", key, "/f"]).status();
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn cleanup_removed_associations() {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return;
+    };
+    let entry = home.join(".local/share/applications/apocalipse-download-manager.desktop");
+    let Ok(source) = fs::read_to_string(&entry) else {
+        return;
+    };
+    let updated = source.replace("x-scheme-handler/ed2k;", "");
+    if updated != source && fs::write(&entry, updated).is_ok() {
+        let _ = Command::new("update-desktop-database")
+            .arg(entry.parent().unwrap_or(Path::new(".")))
+            .status();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn cleanup_removed_associations() {}
 
 #[cfg(target_os = "windows")]
 fn configure_association(id: &str, enabled: bool, _: &HashMap<String, bool>) -> Result<(), String> {
@@ -6064,7 +5103,6 @@ fn configure_association(
         ("magnet", "x-scheme-handler/magnet"),
         ("ftp", "x-scheme-handler/ftp"),
         ("sftp", "x-scheme-handler/sftp"),
-        ("ed2k", "x-scheme-handler/ed2k"),
     ];
     let enabled = definitions
         .iter()
@@ -6247,6 +5285,7 @@ fn main() {
                 fs::write(&site_rules_path, data)?;
             }
             let initial_settings = load_settings(&settings_path);
+            cleanup_removed_associations();
             let arguments = std::env::args().collect::<Vec<_>>();
             let associated_source = arguments
                 .iter()
@@ -6281,7 +5320,6 @@ fn main() {
                 log_write_lock: Mutex::new(()),
                 site_rules: Mutex::new(initial_site_rules),
                 site_rules_path,
-                ed2k_search: Mutex::new(None),
             });
             diagnostic_log(
                 &app.state::<AppState>(),
@@ -6365,22 +5403,9 @@ fn main() {
             activate_main_window,
             open_paypal_donation,
             get_tool_statuses,
-            get_ed2k_engine_status,
-            get_ed2k_connection,
-            set_ed2k_connection,
-            synchronize_ed2k_engine,
-            start_ed2k_engine,
-            connect_ed2k_networks,
-            ed2k_network_status,
-            ed2k_search,
-            ed2k_search_results,
-            ed2k_download_result,
-            list_ed2k_transfers,
-            control_ed2k_transfer,
             set_tool_paths,
             get_media_player,
             set_media_player,
-            open_amule,
             preview_torrent,
             update_tool,
             suggest_download_name,
@@ -6682,35 +5707,4 @@ mod tests {
         assert!(parse_dns_servers(&["not-an-address".to_owned()]).is_err());
     }
 
-    #[test]
-    fn updates_existing_amule_external_connection_section() {
-        let source = "[eMule]\nNick=Apocalipse\n\n[ExternalConnect]\nAcceptExternalConnections=0\nECPort=4662\nECPassword=old\n\n[WebServer]\nEnabled=0\n";
-        let updated = update_ini_section(
-            source,
-            "ExternalConnect",
-            &[
-                ("AcceptExternalConnections", "1".to_owned()),
-                ("ECAddress", "127.0.0.1".to_owned()),
-                ("ECPort", "4712".to_owned()),
-                ("ECPassword", "newhash".to_owned()),
-            ],
-        );
-        assert!(updated.contains("AcceptExternalConnections=1"));
-        assert!(updated.contains("ECAddress=127.0.0.1"));
-        assert!(updated.contains("ECPort=4712"));
-        assert!(updated.contains("ECPassword=newhash"));
-        assert!(updated.contains("[WebServer]\nEnabled=0"));
-        assert!(!updated.contains("ECPassword=old"));
-    }
-
-    #[test]
-    fn creates_amule_external_connection_section_without_losing_crlf() {
-        let updated = update_ini_section(
-            "[eMule]\r\nNick=Apocalipse\r\n",
-            "ExternalConnect",
-            &[("AcceptExternalConnections", "1".to_owned())],
-        );
-        assert!(updated.contains("\r\n[ExternalConnect]\r\n"));
-        assert!(updated.ends_with("AcceptExternalConnections=1\r\n"));
-    }
 }

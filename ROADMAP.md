@@ -28,5 +28,4 @@
 - ARM64 builds for Windows and Linux and native Apple Silicon validation
 - AppImage and optional native installers
 - Direct internet connectivity through an encrypted resumable relay
-- ED2K/Kademlia integration through an optional aMule adapter
 - Further Matrix versions with signed, reviewable rule updates
