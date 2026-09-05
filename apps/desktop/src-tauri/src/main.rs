@@ -5,6 +5,7 @@ use apocalipse_core::{
     DownloadEngine, DownloadEvent, DownloadId, DownloadKind, DownloadRequest, DownloadState,
     DownloadTask,
 };
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -230,6 +231,8 @@ struct UserSettings {
     #[serde(default)]
     proxy_password: Option<String>,
     #[serde(default)]
+    website_credentials: Vec<WebsiteCredential>,
+    #[serde(default)]
     dns_enabled: bool,
     #[serde(default)]
     dns_servers: Vec<std::net::IpAddr>,
@@ -286,12 +289,27 @@ impl Default for UserSettings {
             proxy_url: None,
             proxy_username: None,
             proxy_password: None,
+            website_credentials: Vec::new(),
             dns_enabled: false,
             dns_servers: Vec::new(),
             associations: HashMap::new(),
             link_password: default_link_password(),
         }
     }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct WebsiteCredential {
+    host: String,
+    username: String,
+    password: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebsiteCredentialSummary {
+    host: String,
+    username: String,
 }
 
 #[derive(Serialize)]
@@ -1146,12 +1164,12 @@ fn start_ed2k_engine(state: State<'_, AppState>) -> Result<(), String> {
     let daemon = amule_component(
         &helper,
         &[
+            if cfg!(windows) { "amule.exe" } else { "amule" },
             if cfg!(windows) {
                 "amuled.exe"
             } else {
                 "amuled"
             },
-            if cfg!(windows) { "amule.exe" } else { "amule" },
         ],
     )
     .ok_or_else(|| "amule_engine_not_found".to_owned())?;
@@ -1954,14 +1972,13 @@ async fn inspect_media_formats(
     state: State<'_, AppState>,
     url: String,
 ) -> Result<MediaInspection, String> {
-    let executable = configured_tool(
-        &state
-            .settings
-            .lock()
-            .map_err(|error| error.to_string())?
-            .yt_dlp_path,
-        "yt-dlp",
-    );
+    let (executable, credential) = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        (
+            configured_tool(&settings.yt_dlp_path, "yt-dlp"),
+            website_credential_for_url(&settings, &url).cloned(),
+        )
+    };
     let mut command = tokio::process::Command::new(executable);
     command
         .args([
@@ -1971,6 +1988,13 @@ async fn inspect_media_formats(
             "--no-warnings",
         ])
         .arg(&url);
+    if let Some(credential) = credential {
+        command
+            .arg("--username")
+            .arg(credential.username)
+            .arg("--password")
+            .arg(credential.password);
+    }
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -2521,6 +2545,12 @@ async fn run_external_download(
         .lock()
         .ok()
         .and_then(|settings| settings.user_agent.clone());
+    let website_credential = app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .ok()
+        .and_then(|settings| website_credential_for_url(&settings, &task.source).cloned());
     let user_agent = configured_user_agent.as_deref()
         .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_deref()))
         .unwrap_or("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36");
@@ -2575,6 +2605,13 @@ async fn run_external_download(
                 ]);
             }
             command.args(["--user-agent", user_agent]);
+            if let Some(credential) = website_credential.as_ref() {
+                command
+                    .arg("--username")
+                    .arg(&credential.username)
+                    .arg("--password")
+                    .arg(&credential.password);
+            }
             if let Some(referer) = task.referer.as_deref() {
                 command.args(["--referer", referer]);
             }
@@ -2601,7 +2638,13 @@ async fn run_external_download(
                 if let Some(proxy_url) = proxy_url.as_deref() {
                     command.arg("-http_proxy").arg(proxy_url);
                 }
-                command.args(["-y", "-i"]).arg(&task.source).arg("-vn");
+                command.arg("-y");
+                if let Some(credential) = website_credential.as_ref() {
+                    let basic =
+                        BASE64.encode(format!("{}:{}", credential.username, credential.password));
+                    command.args(["-headers", &format!("Authorization: Basic {basic}\r\n")]);
+                }
+                command.arg("-i").arg(&task.source).arg("-vn");
                 match audio_format {
                     "mp3" => {
                         command.args(["-c:a", "libmp3lame", "-q:a", "2"]);
@@ -2656,6 +2699,13 @@ async fn run_external_download(
                     }
                 }
                 command.arg("-H").arg(format!("User-Agent: {user_agent}"));
+                if let Some(credential) = website_credential.as_ref() {
+                    let basic =
+                        BASE64.encode(format!("{}:{}", credential.username, credential.password));
+                    command
+                        .arg("-H")
+                        .arg(format!("Authorization: Basic {basic}"));
+                }
                 if let Some(cookie) = identity
                     .as_ref()
                     .and_then(|value| value.cookie_header.as_deref())
@@ -2709,6 +2759,13 @@ async fn run_external_download(
                 }
                 if let Some(password) = tools.8.as_deref() {
                     command.arg(format!("--all-proxy-passwd={password}"));
+                }
+            }
+            if kind == DownloadKind::Ftp {
+                if let Some(credential) = website_credential.as_ref() {
+                    command
+                        .arg(format!("--ftp-user={}", credential.username))
+                        .arg(format!("--ftp-passwd={}", credential.password));
                 }
             }
             command.arg(format!("--dir={}", directory.display())).args([
@@ -4061,23 +4118,67 @@ fn open_amule(state: State<'_, AppState>) -> Result<(), String> {
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    let candidates = if cfg!(windows) {
-        vec![directory.join("amule.exe"), directory.join("aMule.exe")]
+    let remote_gui = amule_component(
+        &helper,
+        &[if cfg!(windows) {
+            "amulegui.exe"
+        } else {
+            "amulegui"
+        }],
+    );
+    let connected = amule_command(&settings, "status").is_ok();
+    let (executable, skip_dialog) = if connected {
+        match remote_gui {
+            Some(executable) => {
+                configure_amule_remote_gui(&settings)?;
+                (executable, true)
+            }
+            None => (
+                directory.join(if cfg!(windows) { "amule.exe" } else { "amule" }),
+                false,
+            ),
+        }
     } else {
-        vec![
-            directory.join("amule"),
-            directory.join("aMule"),
-            PathBuf::from("amule"),
-        ]
+        (
+            [
+                directory.join(if cfg!(windows) { "amule.exe" } else { "amule" }),
+                directory.join(if cfg!(windows) { "aMule.exe" } else { "aMule" }),
+            ]
+            .into_iter()
+            .find(|path| path.is_file())
+            .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "amule.exe" } else { "amule" })),
+            false,
+        )
     };
-    let executable = candidates
-        .into_iter()
-        .find(|path| path.is_file())
-        .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "amule.exe" } else { "amule" }));
-    Command::new(executable)
+    let mut command = Command::new(executable);
+    if skip_dialog {
+        command.arg("--skip");
+    }
+    command
         .spawn()
         .map(|_| ())
         .map_err(|error| format!("amule_not_found: {error}"))
+}
+
+fn configure_amule_remote_gui(settings: &UserSettings) -> Result<(), String> {
+    let path = amule_config_path(settings)?.with_file_name("remote.conf");
+    let source = fs::read_to_string(&path).unwrap_or_default();
+    let password_hash = format!("{:X}", md5::compute(settings.ed2k_password.as_bytes()));
+    let updated = update_ini_section(
+        &source,
+        "EC",
+        &[
+            ("Host", "127.0.0.1".to_owned()),
+            ("Port", settings.ed2k_port.to_string()),
+            ("Password", password_hash),
+            ("ZLIB", "1".to_owned()),
+            ("ForceZLIB", "0".to_owned()),
+        ],
+    );
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::write(path, updated).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -4382,6 +4483,10 @@ fn start_download(
         {
             headers.push(("Content-Type".to_owned(), content_type.clone()));
         }
+        if let Some(credential) = website_credential_for_url(&limits, &task.source) {
+            let basic = BASE64.encode(format!("{}:{}", credential.username, credential.password));
+            headers.push(("Authorization".to_owned(), format!("Basic {basic}")));
+        }
         let mirrors = task.mirrors.clone();
         let request = DownloadRequest {
             url: task.source,
@@ -4674,6 +4779,128 @@ fn get_proxy_setting(state: State<'_, AppState>) -> Result<ProxySetting, String>
             .as_ref()
             .is_some_and(|value| !value.is_empty()),
     })
+}
+
+fn normalize_credential_host(value: &str) -> Result<String, String> {
+    let candidate = value.trim().trim_end_matches('/');
+    let parsed = if candidate.contains("://") {
+        url::Url::parse(candidate)
+    } else {
+        url::Url::parse(&format!("https://{candidate}"))
+    }
+    .map_err(|_| "invalid_credential_host".to_owned())?;
+    if !matches!(parsed.scheme(), "http" | "https" | "ftp")
+        || parsed.port().is_some()
+        || parsed.path() != "/"
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err("invalid_credential_host".to_owned());
+    }
+    parsed
+        .host_str()
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(|| "invalid_credential_host".to_owned())
+}
+
+fn website_credential_for_url<'a>(
+    settings: &'a UserSettings,
+    source: &str,
+) -> Option<&'a WebsiteCredential> {
+    let host = url::Url::parse(source)
+        .ok()?
+        .host_str()?
+        .to_ascii_lowercase();
+    settings.website_credentials.iter().find(|credential| {
+        host == credential.host || host.ends_with(&format!(".{}", credential.host))
+    })
+}
+
+#[tauri::command]
+fn list_website_credentials(
+    state: State<'_, AppState>,
+) -> Result<Vec<WebsiteCredentialSummary>, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    Ok(settings
+        .website_credentials
+        .iter()
+        .map(|credential| WebsiteCredentialSummary {
+            host: credential.host.clone(),
+            username: credential.username.clone(),
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn save_website_credential(
+    state: State<'_, AppState>,
+    host: String,
+    username: String,
+    password: String,
+) -> Result<Vec<WebsiteCredentialSummary>, String> {
+    let host = normalize_credential_host(&host)?;
+    let username = username.trim();
+    if username.is_empty()
+        || password.is_empty()
+        || username.len() > 512
+        || password.len() > 2048
+        || username
+            .chars()
+            .any(|character| matches!(character, '\r' | '\n'))
+        || password
+            .chars()
+            .any(|character| matches!(character, '\r' | '\n'))
+    {
+        return Err("invalid_website_credential".to_owned());
+    }
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    if let Some(existing) = settings
+        .website_credentials
+        .iter_mut()
+        .find(|credential| credential.host == host)
+    {
+        existing.username = username.to_owned();
+        existing.password = password;
+    } else {
+        settings.website_credentials.push(WebsiteCredential {
+            host,
+            username: username.to_owned(),
+            password,
+        });
+    }
+    settings
+        .website_credentials
+        .sort_by(|left, right| left.host.cmp(&right.host));
+    save_settings(&state, &settings)?;
+    Ok(settings
+        .website_credentials
+        .iter()
+        .map(|credential| WebsiteCredentialSummary {
+            host: credential.host.clone(),
+            username: credential.username.clone(),
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn remove_website_credential(
+    state: State<'_, AppState>,
+    host: String,
+) -> Result<Vec<WebsiteCredentialSummary>, String> {
+    let host = normalize_credential_host(&host)?;
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings
+        .website_credentials
+        .retain(|credential| credential.host != host);
+    save_settings(&state, &settings)?;
+    Ok(settings
+        .website_credentials
+        .iter()
+        .map(|credential| WebsiteCredentialSummary {
+            host: credential.host.clone(),
+            username: credential.username.clone(),
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -6152,6 +6379,9 @@ fn main() {
             set_user_agent,
             get_proxy_setting,
             set_proxy_setting,
+            list_website_credentials,
+            save_website_credential,
+            remove_website_credential,
             get_dns_setting,
             set_dns_setting,
             get_bridge_pairing,
@@ -6181,6 +6411,27 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalizes_site_credential_domains_and_matches_subdomains() {
+        assert_eq!(
+            normalize_credential_host("https://Example.COM/").as_deref(),
+            Ok("example.com")
+        );
+        assert!(normalize_credential_host("https://example.com/login").is_err());
+        let mut settings = UserSettings::default();
+        settings.website_credentials.push(WebsiteCredential {
+            host: "example.com".into(),
+            username: "user".into(),
+            password: "secret".into(),
+        });
+        assert_eq!(
+            website_credential_for_url(&settings, "https://cdn.example.com/file")
+                .map(|credential| credential.username.as_str()),
+            Some("user")
+        );
+        assert!(website_credential_for_url(&settings, "https://notexample.com/file").is_none());
+    }
 
     #[test]
     fn media_page_names_always_receive_mp4_extension() {
