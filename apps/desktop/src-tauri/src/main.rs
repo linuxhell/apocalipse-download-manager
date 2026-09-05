@@ -417,7 +417,7 @@ fn inspect_url(url: String) -> Result<PlanResponse, String> {
         aria2: true,
         yt_dlp: true,
         n_m3u8dl_re: true,
-        torrent: true,
+        torrent: false,
         amule: false,
     };
     let plan = plan_download(&url, capabilities).ok_or_else(|| "unsupported_url".to_owned())?;
@@ -1158,6 +1158,12 @@ async fn run_external_download(
             }
             command
                 .arg(format!("--dir={}", directory.display()))
+                .args([
+                    "--summary-interval=1",
+                    "--console-log-level=notice",
+                    "--show-console-readout=true",
+                    "--download-result=hide",
+                ])
                 .arg(&task.source);
             command
         }
@@ -1178,13 +1184,13 @@ async fn run_external_download(
             let error_app = app.clone();
             let output = tokio::spawn(async move {
                 match stdout.take() {
-                    Some(stream) => read_process_tail(stream, Some((output_app, id))).await,
+                    Some(stream) => read_process_tail(stream, Some((output_app, id, kind))).await,
                     None => Vec::new(),
                 }
             });
             let errors = tokio::spawn(async move {
                 match stderr.take() {
-                    Some(stream) => read_process_tail(stream, Some((error_app, id))).await,
+                    Some(stream) => read_process_tail(stream, Some((error_app, id, kind))).await,
                     None => Vec::new(),
                 }
             });
@@ -1441,7 +1447,7 @@ fn reset_site_rules(state: State<'_, AppState>) -> Result<String, String> {
 
 async fn read_process_tail(
     mut stream: impl tokio::io::AsyncRead + Unpin,
-    progress: Option<(tauri::AppHandle, DownloadId)>,
+    progress: Option<(tauri::AppHandle, DownloadId, DownloadKind)>,
 ) -> Vec<u8> {
     let mut tail = Vec::new();
     let mut chunk = [0_u8; 4096];
@@ -1449,13 +1455,21 @@ async fn read_process_tail(
         match stream.read(&mut chunk).await {
             Ok(0) | Err(_) => break,
             Ok(count) => {
-                if let Some(percent) =
-                    parse_external_progress(&String::from_utf8_lossy(&chunk[..count]))
-                {
-                    if let Some((app, id)) = progress.as_ref() {
+                let text = String::from_utf8_lossy(&chunk[..count]);
+                if let Some((app, id, kind)) = progress.as_ref() {
+                    if matches!(*kind, DownloadKind::Torrent | DownloadKind::Magnet | DownloadKind::Ftp) {
+                        if let Some((received, total, percent, download_speed, upload_speed)) = parse_aria2_progress(&text) {
+                            update_task(app, *id, false, |task| {
+                                task.received = received;
+                                task.total = Some(total);
+                                task.progress_percent = Some(percent);
+                                task.download_speed = Some(download_speed);
+                                task.upload_speed = Some(upload_speed);
+                            });
+                        }
+                    } else if let Some(percent) = parse_external_progress(&text) {
                         update_task(app, *id, false, |task| {
-                            task.progress_percent =
-                                Some(task.progress_percent.unwrap_or(0.0).max(percent));
+                            task.progress_percent = Some(task.progress_percent.unwrap_or(0.0).max(percent));
                         });
                     }
                 }
@@ -1467,6 +1481,44 @@ async fn read_process_tail(
         }
     }
     tail
+}
+
+fn parse_aria2_size(value: &str) -> Option<u64> {
+    let value = value.trim_start_matches(|character: char| !character.is_ascii_digit() && character != '.');
+    let split = value.find(|character: char| !character.is_ascii_digit() && character != '.').unwrap_or(value.len());
+    let number = value[..split].parse::<f64>().ok()?;
+    let unit = value[split..].to_ascii_lowercase();
+    let multiplier = match unit.as_str() {
+        "" | "b" => 1.0,
+        "k" | "kb" | "kib" => 1024.0,
+        "m" | "mb" | "mib" => 1024.0 * 1024.0,
+        "g" | "gb" | "gib" => 1024.0 * 1024.0 * 1024.0,
+        "t" | "tb" | "tib" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        _ => return None,
+    };
+    Some((number * multiplier) as u64)
+}
+
+fn parse_aria2_progress(text: &str) -> Option<(u64, u64, f64, u64, u64)> {
+    text.lines().rev().find_map(|line| {
+      let ratio = line.split_whitespace().find_map(|token| {
+        let slash = token.find('/')?;
+        let open = token[slash + 1..].find('(').map(|index| slash + 1 + index)?;
+        let close = token[open + 1..].find('%').map(|index| open + 1 + index)?;
+        let received = parse_aria2_size(&token[..slash])?;
+        let total = parse_aria2_size(&token[slash + 1..open])?;
+        let percent = token[open + 1..close].parse::<f64>().ok()?;
+        if total > 0 && received <= total && (0.0..=100.0).contains(&percent) {
+            Some((received, total, percent))
+        } else {
+            None
+        }
+      })?;
+      let field = |prefix: &str| line.split_whitespace().find_map(|token| {
+          token.strip_prefix(prefix).and_then(parse_aria2_size)
+      }).unwrap_or(0);
+      Some((ratio.0, ratio.1, ratio.2, field("DL:"), field("UL:")))
+    })
 }
 
 fn parse_external_progress(text: &str) -> Option<f64> {
@@ -2657,6 +2709,18 @@ fn activate_main_window(app: tauri::AppHandle) {
     show_main_window(&app);
 }
 
+#[tauri::command]
+fn open_paypal_donation() -> Result<(), String> {
+    const URL: &str = "https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL";
+    #[cfg(target_os = "windows")]
+    let result = Command::new("explorer.exe").arg(URL).spawn();
+    #[cfg(target_os = "macos")]
+    let result = Command::new("open").arg(URL).spawn();
+    #[cfg(target_os = "linux")]
+    let result = Command::new("xdg-open").arg(URL).spawn();
+    result.map(|_| ()).map_err(|error| error.to_string())
+}
+
 fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<(), String> {
     let state = app.state::<AppState>();
     classify_url(&request.url).ok_or_else(|| "unsupported_url".to_owned())?;
@@ -2950,13 +3014,28 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     }
 }
 
-fn run_extension_bridge(app: tauri::AppHandle) {
-    let Ok(listener) = TcpListener::bind(("127.0.0.1", BRIDGE_PORT)) else {
-        return;
-    };
+fn run_extension_bridge(app: tauri::AppHandle, listener: TcpListener) {
     for stream in listener.incoming().flatten() {
         handle_bridge_connection(&app, stream);
     }
+}
+
+fn forward_to_running_instance(source: &str, token: &str) -> bool {
+    let Ok(mut stream) = TcpStream::connect(("127.0.0.1", BRIDGE_PORT)) else { return false; };
+    let request = BridgeDownload {
+        url: source.to_owned(), file_name: None, page_url: None, duration: None,
+        cookie_header: None, user_agent: None, request_method: None,
+        request_body: None, request_content_type: None,
+    };
+    let Ok(body) = serde_json::to_string(&request) else { return false; };
+    let message = format!(
+        "POST /v1/download HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    if stream.write_all(message.as_bytes()).is_err() { return false; }
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let mut response = String::new();
+    stream.read_to_string(&mut response).is_ok() && response.starts_with("HTTP/1.1 202")
 }
 
 #[tauri::command]
@@ -3362,11 +3441,28 @@ fn main() {
                 let data = serde_json::to_vec_pretty(&initial_site_rules)?;
                 fs::write(&site_rules_path, data)?;
             }
+            let initial_settings = load_settings(&settings_path);
+            let arguments = std::env::args().collect::<Vec<_>>();
+            let associated_source = arguments.iter().position(|argument| argument == "--open")
+                .and_then(|index| arguments.get(index + 1))
+                .filter(|value| classify_url(value).is_some())
+                .cloned();
+            let bridge_listener = match TcpListener::bind(("127.0.0.1", BRIDGE_PORT)) {
+                Ok(listener) => Some(listener),
+                Err(_) => {
+                    if associated_source.as_deref().is_some_and(|source|
+                        forward_to_running_instance(source, &initial_settings.bridge_token)) {
+                        app.exit(0);
+                        return Ok(());
+                    }
+                    None
+                }
+            };
             app.manage(AppState {
                 queue: Mutex::new(load_queue(&queue_path)),
                 queue_path,
                 workers: Mutex::new(HashMap::new()),
-                settings: Mutex::new(load_settings(&settings_path)),
+                settings: Mutex::new(initial_settings),
                 settings_path,
                 bridge_last_seen: Mutex::new(None),
                 bridge_pending: Mutex::new(Vec::new()),
@@ -3383,15 +3479,14 @@ fn main() {
                 "application.started",
                 env!("CARGO_PKG_VERSION"),
             );
-            let bridge_app = app.handle().clone();
-            std::thread::Builder::new()
-                .name("apocalipse-extension-bridge".into())
-                .spawn(move || run_extension_bridge(bridge_app))?;
-            let arguments = std::env::args().collect::<Vec<_>>();
-            if let Some(index) = arguments.iter().position(|argument| argument == "--open") {
-                if let Some(source) = arguments.get(index + 1).filter(|value| classify_url(value).is_some()) {
-                    queue_associated_source(app.handle(), source.clone()).map_err(std::io::Error::other)?;
-                }
+            if let Some(listener) = bridge_listener {
+                let bridge_app = app.handle().clone();
+                std::thread::Builder::new()
+                    .name("apocalipse-extension-bridge".into())
+                    .spawn(move || run_extension_bridge(bridge_app, listener))?;
+            }
+            if let Some(source) = associated_source {
+                queue_associated_source(app.handle(), source).map_err(std::io::Error::other)?;
             }
             let show = MenuItem::with_id(app, "show", "Show Apocalipse", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -3444,6 +3539,7 @@ fn main() {
             pick_directory,
             pick_executable,
             activate_main_window,
+            open_paypal_donation,
             get_tool_statuses,
             set_tool_paths,
             update_tool,
@@ -3537,6 +3633,15 @@ mod tests {
     fn uses_latest_valid_percentage_in_a_progress_chunk() {
         assert_eq!(parse_external_progress("Vid: 42% Aud: 41%"), Some(41.0));
         assert_eq!(parse_external_progress("HTTP 403%"), None);
+    }
+
+    #[test]
+    fn parses_real_aria2_transfer_progress() {
+        assert_eq!(
+            parse_aria2_progress("[#abc 5.0MiB/20MiB(25%) CN:4 SD:2 DL:1MiB ETA:15s]"),
+            Some((5 * 1024 * 1024, 20 * 1024 * 1024, 25.0, 1024 * 1024, 0))
+        );
+        assert_eq!(parse_aria2_progress("[#abc 0B/0B CN:1 DL:0B]"), None);
     }
 
     #[test]

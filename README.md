@@ -4,6 +4,10 @@
 
 <h1 align="center">Apocalipse Download Manager</h1>
 
+<p align="center"><a href="#english">English</a> · <a href="#português-do-brasil">Português do Brasil</a> · <a href="#简体中文">简体中文</a></p>
+
+<a id="english"></a>
+
 <p align="center"><strong>A powerful, intelligent and open-source download manager for Windows, Linux and macOS.</strong></p>
 
 > [!IMPORTANT]
@@ -64,6 +68,32 @@ cargo test --workspace
 ```
 
 See [ROADMAP.md](ROADMAP.md) for delivery milestones and [SECURITY.md](SECURITY.md) for the security model.
+
+## Support the project
+
+If Apocalipse helps you, [donate via PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL) to support continued development.
+
+## Português do Brasil
+
+O Apocalipse é um gerenciador de downloads livre para Windows, Linux e macOS. Ele reúne downloads HTTP retomáveis, detecção de mídia, yt-dlp, FFmpeg, HLS, torrents, associações de links e integração com extensões do navegador. Sites protegidos por DRM ou controles de acesso não são contornados. Baixe somente conteúdos que você tenha autorização para salvar.
+
+- Downloads portáteis para Windows, Linux e macOS
+- Extensões para Chrome, Edge e Firefox
+- Melhor vídeo e melhor áudio selecionados por padrão
+- Pausa, retomada, filas, temas, proxy e DNS personalizado
+
+Se o Apocalipse for útil para você, [faça uma doação pelo PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL) e ajude a manter o desenvolvimento.
+
+## 简体中文
+
+Apocalipse 是一款适用于 Windows、Linux 和 macOS 的自由开源下载管理器。它集成了可恢复 HTTP 下载、媒体检测、yt-dlp、FFmpeg、HLS、种子下载、链接关联和浏览器扩展。程序不会绕过 DRM 或访问控制；请只下载您有权保存的内容。
+
+- Windows、Linux 和 macOS 便携版本
+- Chrome、Edge 和 Firefox 扩展
+- 默认选择最佳视频和最佳音频
+- 支持暂停、继续、队列、主题、代理和自定义 DNS
+
+如果 Apocalipse 对您有帮助，请[通过 PayPal 捐赠](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL)，支持项目继续开发。
 
 ## License
 

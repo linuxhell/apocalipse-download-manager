@@ -27,6 +27,10 @@ pub struct DownloadTask {
     #[serde(default)]
     pub progress_percent: Option<f64>,
     #[serde(default)]
+    pub download_speed: Option<u64>,
+    #[serde(default)]
+    pub upload_speed: Option<u64>,
+    #[serde(default)]
     pub format_selection: Option<String>,
     #[serde(default)]
     pub referer: Option<String>,
@@ -44,6 +48,8 @@ impl DownloadTask {
             received: 0,
             total: None,
             progress_percent: None,
+            download_speed: None,
+            upload_speed: None,
             format_selection: None,
             referer: None,
             known_duration: None,

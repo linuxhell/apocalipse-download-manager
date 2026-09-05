@@ -5,6 +5,7 @@ const catalogs = {
     torrents: "Torrents",
     tools: "Tools",
     settings: "Settings",
+    donatePaypal: "Donate via PayPal",
     overview: "OVERVIEW",
     engineReady: "Engine ready",
     addDownload: "Add download",
@@ -120,6 +121,7 @@ const catalogs = {
     torrents: "Torrents",
     tools: "Ferramentas",
     settings: "Configurações",
+    donatePaypal: "Faça uma doação pelo PayPal",
     overview: "VISÃO GERAL",
     engineReady: "Motor pronto",
     addDownload: "Adicionar download",
@@ -236,6 +238,7 @@ const catalogs = {
     torrents: "种子",
     tools: "工具",
     settings: "设置",
+    donatePaypal: "通过 PayPal 捐赠",
     overview: "概览",
     engineReady: "引擎已就绪",
     addDownload: "添加下载",
@@ -364,6 +367,7 @@ let downloads = [];
 let activeFilter = "all";
 let activePage = "downloads";
 let overallSpeed = 0;
+let overallUploadSpeed = 0;
 let lastClipboardLink = "";
 let clipboardMonitorPrimed = false;
 const busyIds = new Set();
@@ -399,6 +403,7 @@ function updateSpeeds(tasks) {
   const now = performance.now();
   const currentIds = new Set(tasks.map((task) => task.id));
   overallSpeed = 0;
+  overallUploadSpeed = 0;
   for (const [id] of speedSamples)
     if (!currentIds.has(id)) speedSamples.delete(id);
   for (const task of tasks) {
@@ -420,7 +425,10 @@ function updateSpeeds(tasks) {
       bytes: task.received,
       speed,
     });
-    if (active) overallSpeed += speed;
+    if (active) {
+      overallSpeed += Number(task.download_speed) || speed;
+      overallUploadSpeed += Number(task.upload_speed) || 0;
+    }
   }
 }
 
@@ -484,7 +492,8 @@ function renderDownloads() {
         : 0;
     bar.style.width = `${percent}%`;
     const details = document.createElement("small");
-    const speed = speedSamples.get(task.id)?.speed || 0;
+    const speed = Number(task.download_speed) || speedSamples.get(task.id)?.speed || 0;
+    const uploadSpeed = Number(task.upload_speed) || 0;
     const progressText = hasReportedPercent && !task.total
       ? `${percent.toFixed(1)}%`
       : task.total
@@ -492,7 +501,7 @@ function renderDownloads() {
       : formatBytes(task.received);
     details.textContent =
       speed && task.state === "downloading"
-        ? `${progressText} · ${formatBytes(speed)}/s`
+        ? `${progressText} · ↓ ${formatBytes(speed)}/s${uploadSpeed ? ` · ↑ ${formatBytes(uploadSpeed)}/s` : ""}`
         : progressText;
     progress.append(bar);
     info.append(progress, details);
@@ -564,6 +573,8 @@ function renderDownloads() {
     downloads.filter((task) => task.state === "completed").length;
   document.querySelector(".metrics article:first-child strong").textContent =
     `${formatBytes(overallSpeed)}/s`;
+  document.querySelector(".metrics article:nth-child(2) strong").textContent =
+    `${formatBytes(overallUploadSpeed)}/s`;
   updateSelectionControls();
 }
 
@@ -638,7 +649,7 @@ window.addEventListener("pointerup", finishSelectionPointer);
 window.addEventListener("pointercancel", finishSelectionPointer);
 async function refreshToolStatuses() {
   const button = document.querySelector("#check-tools");
-  button.disabled = true;
+  if (button) button.disabled = true;
   try {
     const tools = await invoke("get_tool_statuses");
     for (const tool of tools) {
@@ -648,7 +659,7 @@ async function refreshToolStatuses() {
       status.classList.toggle("tool-found", tool.found);
     }
   } catch (error) { console.error(error); }
-  finally { button.disabled = false; }
+  finally { if (button) button.disabled = false; }
 }
 async function refreshDestinationHistory() {
   try {
@@ -939,7 +950,6 @@ document.querySelector("#save-settings").onclick = async () => {
     button.disabled = false;
   }
 };
-document.querySelector("#check-tools").onclick = refreshToolStatuses;
 document.querySelectorAll("[data-tool-update]").forEach((button) => {
   button.onclick = async () => {
     button.disabled = true;
@@ -955,6 +965,7 @@ document.querySelectorAll("[data-tool-update]").forEach((button) => {
   };
 });
 document.querySelectorAll("[data-export-close]").forEach((button) => button.onclick = () => exportDialog.close());
+document.querySelector("#donate-paypal").onclick = () => invoke("open_paypal_donation").catch(console.error);
 document.querySelector("#export-format").onchange = (event) => {
   document.querySelector("#export-video-codec").disabled = ["mp3", "m4a", "opus", "flac", "wav"].includes(event.target.value);
 };
