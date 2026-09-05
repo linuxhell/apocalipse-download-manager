@@ -61,6 +61,29 @@
     input.remove();
     return copied;
   };
+  const uploadBlob = async (blob, fileName) => {
+    const begin = await chrome.runtime.sendMessage({
+      type: "APOCALIPSE_BLOB_BEGIN",
+      request: { fileName, total: blob.size, source: location.href },
+    });
+    if (!begin?.uploadId) throw new Error(begin?.error || "blob_begin_failed");
+    const chunkSize = 64 * 1024;
+    for (let offset = 0; offset < blob.size; offset += chunkSize) {
+      const bytes = new Uint8Array(await blob.slice(offset, offset + chunkSize).arrayBuffer());
+      let data = "";
+      for (const byte of bytes) data += byte.toString(16).padStart(2, "0");
+      const result = await chrome.runtime.sendMessage({
+        type: "APOCALIPSE_BLOB_CHUNK",
+        request: { uploadId: begin.uploadId, data },
+      });
+      if (result?.error) throw new Error(result.error);
+    }
+    const result = await chrome.runtime.sendMessage({
+      type: "APOCALIPSE_BLOB_END",
+      request: { uploadId: begin.uploadId },
+    });
+    if (result?.error) throw new Error(result.error);
+  };
   const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
   const thumbnailFor = (element, kind) => {
     if (kind === "audio") return "";
@@ -333,6 +356,7 @@
       button.className = "apocalipse-media-download";
       button.textContent = `⇩ ${downloadLabel()}`;
       button.title = "Apocalipse Download Manager";
+      let recordButton = null;
       button.addEventListener("click", async (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -361,10 +385,67 @@
           setTimeout(() => { button.textContent = originalText; }, 1500);
         });
       });
+      if (element.tagName === "VIDEO") {
+        const record = document.createElement("button");
+        recordButton = record;
+        record.type = "button";
+        record.className = "apocalipse-media-download apocalipse-media-record";
+        record.textContent = "● REC";
+        record.title = "Gravar o vídeo inteiro e exportar depois";
+        let recorder = null;
+        let cancelled = false;
+        let previousLoop = false;
+        record.addEventListener("click", async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (recorder?.state === "recording") {
+            cancelled = true;
+            recorder.stop();
+            record.textContent = "● REC";
+            return;
+          }
+          try {
+            const capture = element.captureStream?.bind(element) || element.webkitCaptureStream?.bind(element);
+            if (!capture || !globalThis.MediaRecorder) throw new Error("capture_not_supported");
+            if (Number.isFinite(element.duration)) element.currentTime = 0;
+            previousLoop = element.loop;
+            element.loop = false;
+            const stream = capture();
+            const mimeType = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
+              .find((type) => MediaRecorder.isTypeSupported(type)) || "";
+            const chunks = [];
+            cancelled = false;
+            recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+            recorder.ondataavailable = ({ data }) => { if (data.size) chunks.push(data); };
+            recorder.onstop = async () => {
+              stream.getTracks().forEach((track) => track.stop());
+              element.loop = previousLoop;
+              if (cancelled || !element.ended) return;
+              record.textContent = "⇧";
+              const safeTitle = (document.title || "recording").replace(/[<>:\"/\\|?*]+/g, "_").slice(0, 120);
+              await uploadBlob(new Blob(chunks, { type: recorder.mimeType || "video/webm" }), `${safeTitle}.recording.webm`);
+              record.textContent = "✓";
+              setTimeout(() => { record.textContent = "● REC"; }, 1800);
+            };
+            element.addEventListener("ended", () => {
+              if (recorder?.state === "recording") recorder.stop();
+            }, { once: true });
+            recorder.start(1000);
+            await element.play();
+            record.textContent = "■ CANCELAR";
+          } catch (error) {
+            console.error("Apocalipse recorder", error);
+            record.textContent = "⚠";
+            setTimeout(() => { record.textContent = "● REC"; }, 2000);
+          }
+        });
+        button.after(record);
+      }
       let positionTimer = null;
       const position = () => {
         if (!element.isConnected) {
           button.remove();
+          recordButton?.remove();
           if (positionTimer) clearInterval(positionTimer);
           return;
         }
@@ -378,6 +459,11 @@
           : rect.top + scrollY + 8;
         button.style.top = `${Math.max(6, top)}px`;
         button.hidden = rect.width < 100 || rect.height < 55;
+        if (recordButton) {
+          recordButton.style.left = `${Math.max(6, rect.left + scrollX + 90)}px`;
+          recordButton.style.top = `${Math.max(6, top)}px`;
+          recordButton.hidden = button.hidden;
+        }
       };
       document.documentElement.append(button);
       position();
@@ -391,7 +477,7 @@
     overlayTimer = setTimeout(installOverlays, 250);
   };
   const style = document.createElement("style");
-  style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:1px solid #4c6470!important;border-radius:7px!important;padding:6px 9px!important;background:#111a20e8!important;color:#f3fbff!important;font:600 12px system-ui!important;box-shadow:0 3px 12px #0008!important;backdrop-filter:blur(5px)!important;cursor:pointer!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download:hover{border-color:#31d9ee!important;background:#15262eeF!important;box-shadow:0 3px 14px #00cce755!important}";
+  style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:1px solid #4c6470!important;border-radius:7px!important;padding:6px 9px!important;background:#111a20e8!important;color:#f3fbff!important;font:600 12px system-ui!important;box-shadow:0 3px 12px #0008!important;backdrop-filter:blur(5px)!important;cursor:pointer!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download:hover{border-color:#31d9ee!important;background:#15262eef!important;box-shadow:0 3px 14px #00cce755!important}.apocalipse-media-record{margin-left:82px!important;border-color:#73404a!important;color:#ffb7c3!important}";
   document.documentElement.append(style);
   new MutationObserver(scheduleOverlays).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "poster"] });
   scheduleOverlays();
@@ -401,28 +487,8 @@
       (async () => {
         const response = await fetch(message.url);
         const blob = await response.blob();
-        const begin = await chrome.runtime.sendMessage({
-          type: "APOCALIPSE_BLOB_BEGIN",
-          request: { fileName: message.fileName, total: blob.size, source: location.href },
-        });
-        if (!begin?.uploadId) throw new Error(begin?.error || "blob_begin_failed");
         reply({ started: true });
-        const chunkSize = 64 * 1024;
-        for (let offset = 0; offset < blob.size; offset += chunkSize) {
-          const bytes = new Uint8Array(await blob.slice(offset, offset + chunkSize).arrayBuffer());
-          let data = "";
-          for (const byte of bytes) data += byte.toString(16).padStart(2, "0");
-          const result = await chrome.runtime.sendMessage({
-            type: "APOCALIPSE_BLOB_CHUNK",
-            request: { uploadId: begin.uploadId, data },
-          });
-          if (result?.error) throw new Error(result.error);
-        }
-        const result = await chrome.runtime.sendMessage({
-          type: "APOCALIPSE_BLOB_END",
-          request: { uploadId: begin.uploadId },
-        });
-        if (result?.error) throw new Error(result.error);
+        await uploadBlob(blob, message.fileName);
       })().catch((error) => {
         console.error("Apocalipse Telegram adapter", error);
         reply({ started: false, error: String(error) });

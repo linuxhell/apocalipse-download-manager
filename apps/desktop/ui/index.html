@@ -147,7 +147,7 @@
         <label data-i18n="sourceUrl">Source URL</label
         ><input
           id="url"
-          type="url"
+          type="text"
           placeholder="https://…"
           required
           autofocus
@@ -438,6 +438,19 @@
           <button type="button" data-site-rules-close data-i18n="cancel">Cancel</button>
           <button id="save-site-rules" type="button" class="primary" data-i18n="saveRules">Validate and save</button>
         </div>
+      </form>
+    </dialog>
+    <dialog id="export-dialog">
+      <form method="dialog">
+        <div class="dialog-head"><div><small>MEDIA LAB</small><h2 data-i18n="exportRecording">Export completed recording</h2></div><button type="button" class="close" data-export-close>×</button></div>
+        <p class="dialog-copy" id="export-source"></p>
+        <label for="export-format" data-i18n="outputFormat">Output format</label>
+        <select id="export-format"><option>mp4</option><option>mkv</option><option>webm</option><option>mp3</option><option>m4a</option><option>opus</option><option>flac</option><option>wav</option></select>
+        <label for="export-video-codec" data-i18n="videoCodec">Video codec</label>
+        <select id="export-video-codec"><option value="copy">Copy — original quality</option><option value="h264">H.264</option><option value="hevc">H.265 / HEVC</option><option value="vp9">VP9</option><option value="av1">AV1</option></select>
+        <label for="export-audio-codec" data-i18n="audioCodec">Audio codec</label>
+        <select id="export-audio-codec"><option value="copy">Copy — original quality</option><option value="aac">AAC</option><option value="opus">Opus</option><option value="mp3">MP3</option><option value="flac">FLAC</option></select>
+        <div class="dialog-actions"><button type="button" data-export-close data-i18n="cancel">Cancel</button><button id="export-recording" type="button" class="primary" data-i18n="export">Export</button></div>
       </form>
     </dialog>
     <script src="app.js"></script>

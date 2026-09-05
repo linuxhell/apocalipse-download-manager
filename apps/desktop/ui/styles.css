@@ -423,6 +423,7 @@ dialog input {
   padding: 12px;
   outline: none;
 }
+dialog > form > select { width: 100%; margin-bottom: 14px; padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--input); color: var(--text); }
 dialog input:focus {
   border-color: #27d9ee;
 }

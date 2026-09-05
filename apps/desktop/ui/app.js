@@ -112,6 +112,7 @@ const catalogs = {
     manageRules: "Manage rules",
     saveRules: "Validate and save",
     resetRules: "Restore defaults",
+    exportRecording: "Export completed recording", outputFormat: "Output format", videoCodec: "Video codec", audioCodec: "Audio codec", export: "Export",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -227,6 +228,7 @@ const catalogs = {
     manageRules: "Gerenciar regras",
     saveRules: "Validar e salvar",
     resetRules: "Restaurar padrões",
+    exportRecording: "Exportar gravação concluída", outputFormat: "Formato de saída", videoCodec: "Codec de vídeo", audioCodec: "Codec de áudio", export: "Exportar",
   },
   "zh-CN": {
     downloads: "下载",
@@ -341,6 +343,7 @@ const catalogs = {
     manageRules: "管理规则",
     saveRules: "验证并保存",
     resetRules: "恢复默认值",
+    exportRecording: "导出已完成的录制", outputFormat: "输出格式", videoCodec: "视频编码", audioCodec: "音频编码", export: "导出",
   },
 };
 
@@ -359,6 +362,7 @@ let pendingRequestBody = null;
 let pendingRequestContentType = null;
 let downloads = [];
 let activeFilter = "all";
+let activePage = "downloads";
 let overallSpeed = 0;
 let lastClipboardLink = "";
 let clipboardMonitorPrimed = false;
@@ -421,11 +425,13 @@ function updateSpeeds(tasks) {
 }
 
 function visibleDownloads() {
-  if (activeFilter === "completed")
-    return downloads.filter((task) => task.state === "completed");
-  if (activeFilter === "active")
-    return downloads.filter((task) => task.state !== "completed");
-  return downloads;
+  let visible = downloads;
+  if (activePage === "torrents") visible = visible.filter((task) => /^(?:magnet:)|\.torrent(?:$|[?#])/i.test(task.source));
+  if (activePage === "media") visible = visible.filter((task) => /(?:\.m3u8(?:$|[?#])|\.recording\.webm$|youtube\.com|youtu\.be|facebook\.com|fb\.watch|tiktok\.com|instagram\.com)/i.test(`${task.source} ${task.destination}`));
+  if (activePage === "link") visible = visible.filter((task) => /^(?:ftp|sftp):/i.test(task.source));
+  if (activeFilter === "completed") return visible.filter((task) => task.state === "completed");
+  if (activeFilter === "active") return visible.filter((task) => task.state !== "completed");
+  return visible;
 }
 
 function renderDownloads() {
@@ -531,6 +537,20 @@ function renderDownloads() {
       addAction(t("pause"), "pause_download");
     if (key === "paused") addAction(t("resume"), "resume_download");
     if (key === "failed") addAction(t("retry"), "resume_download");
+    if (key === "completed" && /\.recording\.webm$/i.test(task.destination)) {
+      const exportButton = document.createElement("button");
+      exportButton.className = "task-action";
+      exportButton.textContent = t("export");
+      exportButton.onclick = () => {
+        exportTaskId = task.id;
+        document.querySelector("#export-source").textContent = task.destination;
+        document.querySelector("#export-format").value = "mkv";
+        document.querySelector("#export-video-codec").value = "copy";
+        document.querySelector("#export-audio-codec").value = "copy";
+        exportDialog.showModal();
+      };
+      actions.append(exportButton);
+    }
     addAction(t("openFolder"), "reveal_download");
     const status = document.createElement("div");
     status.className = "task-status";
@@ -590,6 +610,17 @@ const clearDialog = document.querySelector("#clear-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
 const logDialog = document.querySelector("#log-dialog");
 const siteRulesDialog = document.querySelector("#site-rules-dialog");
+const exportDialog = document.querySelector("#export-dialog");
+let exportTaskId = null;
+document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data-page="tools"])').forEach((button) => {
+  button.onclick = () => {
+    activePage = button.dataset.page;
+    document.querySelectorAll("nav [data-page]").forEach((item) => item.classList.toggle("active", item === button));
+    const heading = button.querySelector("b")?.textContent || t("downloads");
+    document.querySelector("header h1").textContent = heading;
+    renderDownloads();
+  };
+});
 function updateLogEditorControls() {
   const configured = Boolean(document.querySelector("#log-editor").value.trim());
   document.querySelector("#remove-log-editor").disabled = !configured;
@@ -909,6 +940,24 @@ document.querySelector("#save-settings").onclick = async () => {
   }
 };
 document.querySelector("#check-tools").onclick = refreshToolStatuses;
+document.querySelectorAll("[data-export-close]").forEach((button) => button.onclick = () => exportDialog.close());
+document.querySelector("#export-format").onchange = (event) => {
+  document.querySelector("#export-video-codec").disabled = ["mp3", "m4a", "opus", "flac", "wav"].includes(event.target.value);
+};
+document.querySelector("#export-recording").onclick = async (event) => {
+  event.currentTarget.disabled = true;
+  try {
+    await invoke("export_recording", {
+      id: exportTaskId,
+      format: document.querySelector("#export-format").value,
+      videoCodec: document.querySelector("#export-video-codec").value,
+      audioCodec: document.querySelector("#export-audio-codec").value,
+    });
+    exportDialog.close();
+    await refreshDownloads();
+  } catch (error) { console.error(error); }
+  finally { event.currentTarget.disabled = false; }
+};
 async function refreshDiagnosticLog() {
   const output = document.querySelector("#diagnostic-log");
   const contents = await invoke("read_general_log");

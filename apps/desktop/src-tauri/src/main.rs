@@ -1590,7 +1590,13 @@ fn append_source_extension(file_name: String, source: &str, kind: DownloadKind) 
                     .chars()
                     .all(|character| character.is_ascii_alphanumeric())
         });
-    if kind != DownloadKind::Http || has_extension {
+    if has_extension {
+        return file_name;
+    }
+    if kind == DownloadKind::MediaPage {
+        return format!("{file_name}.mp4");
+    }
+    if kind != DownloadKind::Http {
         return file_name;
     }
     let source_name = suggested_name(source);
@@ -2936,6 +2942,64 @@ fn reveal_download(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
     result.map(|_| ()).map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn export_recording(
+    state: State<'_, AppState>,
+    id: DownloadId,
+    format: String,
+    video_codec: String,
+    audio_codec: String,
+) -> Result<String, String> {
+    const FORMATS: [&str; 8] = ["mp4", "mkv", "webm", "mp3", "m4a", "opus", "flac", "wav"];
+    if !FORMATS.contains(&format.as_str()) { return Err("unsupported_export_format".to_owned()); }
+    let source = {
+        let queue = state.queue.lock().map_err(|error| error.to_string())?;
+        let task = queue.iter().find(|task| task.id == id).ok_or_else(|| "download_not_found".to_owned())?;
+        if task.state != DownloadState::Completed || !task.destination.to_string_lossy().ends_with(".recording.webm") {
+            return Err("recording_not_complete".to_owned());
+        }
+        task.destination.clone()
+    };
+    let ffmpeg = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        configured_tool(&settings.ffmpeg_path, if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" })
+    };
+    let stem = source.file_name().and_then(|value| value.to_str()).unwrap_or("recording.recording.webm")
+        .trim_end_matches(".recording.webm");
+    let output = unique_destination(source.parent().unwrap_or(Path::new(".")), &format!("{stem}.{format}"));
+    let audio_only = matches!(format.as_str(), "mp3" | "m4a" | "opus" | "flac" | "wav");
+    let mut command = tokio::process::Command::new(ffmpeg);
+    command.args(["-y", "-i"]).arg(&source);
+    if audio_only {
+        command.arg("-vn");
+    } else {
+        let codec = match video_codec.as_str() {
+            "copy" => "copy", "h264" => "libx264", "hevc" => "libx265", "vp9" => "libvpx-vp9", "av1" => "libaom-av1",
+            _ => return Err("unsupported_video_codec".to_owned()),
+        };
+        command.args(["-c:v", codec]);
+    }
+    let codec = match audio_codec.as_str() {
+        "copy" => "copy", "aac" => "aac", "opus" => "libopus", "mp3" => "libmp3lame", "flac" => "flac",
+        _ => return Err("unsupported_audio_codec".to_owned()),
+    };
+    command.args(["-c:a", codec]).arg(&output);
+    #[cfg(target_os = "windows")]
+    { use std::os::windows::process::CommandExt; command.as_std_mut().creation_flags(0x08000000); }
+    let result = command.output().await.map_err(|error| error.to_string())?;
+    if !result.status.success() { return Err(String::from_utf8_lossy(&result.stderr).trim().to_owned()); }
+    let size = fs::metadata(&output).map(|metadata| metadata.len()).unwrap_or(0);
+    let mut exported = DownloadTask::new(source.to_string_lossy(), output.clone());
+    exported.state = DownloadState::Completed;
+    exported.received = size;
+    exported.total = Some(size);
+    exported.progress_percent = Some(100.0);
+    let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+    queue.push(exported);
+    save_queue(&state, &queue)?;
+    Ok(output.to_string_lossy().into_owned())
+}
+
 #[cfg(target_os = "windows")]
 fn autostart_enabled(_: &tauri::AppHandle) -> Result<bool, String> {
     Command::new("reg.exe")
@@ -3353,6 +3417,7 @@ fn main() {
             resume_download,
             redownload_downloads,
             reveal_download,
+            export_recording,
             get_autostart,
             set_autostart,
             get_associations,
@@ -3393,6 +3458,12 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_page_names_always_receive_mp4_extension() {
+        assert_eq!(append_source_extension("TikTok video".into(), "https://www.tiktok.com/@creator/video/123", DownloadKind::MediaPage), "TikTok video.mp4");
+        assert_eq!(append_source_extension("video.mkv".into(), "https://example.test/video", DownloadKind::MediaPage), "video.mkv");
+    }
 
     #[test]
     fn download_paths_include_hls_output_and_partial_file() {
