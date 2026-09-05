@@ -1794,9 +1794,10 @@ fn matrix_analyze(state: State<'_, AppState>) -> Result<MatrixStatus, String> {
         let source = line
             .split_whitespace()
             .find_map(|field| field.strip_prefix("url="));
-        if let (Some(task), Some(source)) = (task, source)
-            && let Some(host) = host_from_url(source)
-        {
+        let identified = task
+            .zip(source)
+            .and_then(|(task, source)| host_from_url(source).map(|host| (task, host)));
+        if let Some((task, host)) = identified {
             task_hosts.insert(task.to_owned(), host);
         }
     }
@@ -1804,9 +1805,8 @@ fn matrix_analyze(state: State<'_, AppState>) -> Result<MatrixStatus, String> {
         let task = line
             .split_whitespace()
             .find_map(|field| field.strip_prefix("task="));
-        if let Some(task) = task
-            && let Some(host) = task_hosts.get(task)
-        {
+        let identified = task.and_then(|task| task_hosts.get(task).map(|host| (task, host)));
+        if let Some((task, host)) = identified {
             failures
                 .entry(host.clone())
                 .or_default()
