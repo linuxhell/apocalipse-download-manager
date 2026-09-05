@@ -20,6 +20,12 @@ jobs:
           cp dist/apocalipse-chrome.zip dist/apocalipse-edge.zip
       - name: Build Firefox XPI
         run: |
+          version=$(python3 -c "import json; print(json.load(open('browser-extension/manifest.json'))['version'])")
+          signed="packaging/firefox/apocalipse-firefox-${version}.xpi"
+          if [ -f "$signed" ]; then
+            cp "$signed" dist/apocalipse-firefox-signed.xpi
+            exit 0
+          fi
           cp -R browser-extension firefox-extension
           python3 - <<'PY'
           import json

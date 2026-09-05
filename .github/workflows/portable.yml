@@ -55,6 +55,7 @@ jobs:
           New-Item -ItemType Directory -Force "$package/browser extensions" | Out-Null
           Copy-Item "target/release/apocalipse-desktop.exe" "$package/Apocalipse Download Manager.exe"
           Copy-Item "browser-extension" "$package/browser extensions/unpacked-development-extension" -Recurse
+          if (Test-Path "packaging/firefox/*.xpi") { Copy-Item "packaging/firefox/*.xpi" "$package/browser extensions/" }
           Copy-Item "README.md","LICENSE" $package
           Compress-Archive -Path $package -DestinationPath "dist/${{ matrix.artifact }}.zip"
 
@@ -66,6 +67,7 @@ jobs:
           mkdir -p "$package/browser extensions"
           install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
           cp -R browser-extension "$package/browser extensions/unpacked-development-extension"
+          cp packaging/firefox/*.xpi "$package/browser extensions/" 2>/dev/null || true
           cp README.md LICENSE "$package/"
           tar -C dist -czf "dist/${{ matrix.artifact }}.tar.gz" "Apocalipse Download Manager"
 
@@ -79,6 +81,7 @@ jobs:
           chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
           cp packaging/macos/Info.plist "$app/Contents/Info.plist"
           cp -R browser-extension "$app/Contents/Resources/browser extensions/unpacked-development-extension"
+          cp packaging/firefox/*.xpi "$app/Contents/Resources/browser extensions/" 2>/dev/null || true
           cp README.md LICENSE "$app/Contents/Resources/"
           ditto -c -k --sequesterRsrc --keepParent "$app" "dist/${{ matrix.artifact }}.zip"
 
