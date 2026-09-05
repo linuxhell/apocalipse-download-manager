@@ -31,7 +31,14 @@ jobs:
           manifest['browser_specific_settings'] = {
               'gecko': {
                   'id': 'apocalipse-download-manager@linuxhell',
-                  'strict_min_version': '121.0'
+                  'strict_min_version': '140.0',
+                  'data_collection_permissions': {
+                      'required': [
+                          'authenticationInfo',
+                          'browsingActivity',
+                          'websiteContent'
+                      ]
+                  }
               }
           }
           with open(path, 'w', encoding='utf-8') as stream:
