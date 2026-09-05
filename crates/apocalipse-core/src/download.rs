@@ -7,24 +7,26 @@ use hickory_resolver::{
 };
 use reqwest::{
     dns::{Addrs, Name, Resolve, Resolving},
-    header, Client, StatusCode,
+    header, Client, RequestBuilder, StatusCode,
 };
 use std::{
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
 };
 use tokio::{
     fs,
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt, BufWriter},
     sync::mpsc,
 };
 
 use crate::validation::{validate_payload, PayloadExpectation};
+
+const SEGMENT_CHUNK_SIZE: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct DownloadRequest {
@@ -39,7 +41,7 @@ pub struct DownloadRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DownloadEvent {
-    Started { resumed_at: u64, total: Option<u64> },
+    Started { resumed_at: u64, total: Option<u64>, connections: usize },
     Progress { received: u64, total: Option<u64> },
     Completed { bytes: u64 },
 }
@@ -92,7 +94,9 @@ impl DownloadEngine {
             .connect_timeout(Duration::from_secs(15))
             .read_timeout(Duration::from_secs(60))
             .redirect(reqwest::redirect::Policy::limited(10))
-            .user_agent("ApocalipseDownloadManager/0.1");
+            .pool_max_idle_per_host(32)
+            .tcp_nodelay(true)
+            .user_agent(concat!("ApocalipseDownloadManager/", env!("CARGO_PKG_VERSION")));
         if let Some(url) = proxy_url.map(str::trim).filter(|value| !value.is_empty()) {
             let mut proxy = reqwest::Proxy::all(url).context("invalid proxy URL")?;
             if let Some(user) = username.filter(|value| !value.is_empty()) {
@@ -125,31 +129,38 @@ impl DownloadEngine {
         }
         let can_segment = request.method.eq_ignore_ascii_case("GET") && request.body.is_none();
         let head = if can_segment {
-            self.client.head(&request.url).send().await.ok()
+            apply_headers(self.client.head(&request.url), &request.headers)
+                .send()
+                .await
+                .ok()
         } else {
             None
         };
         let total = head.as_ref().and_then(|response| response.content_length());
-        let accepts_ranges = head
-            .as_ref()
-            .and_then(|response| response.headers().get(header::ACCEPT_RANGES))
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.eq_ignore_ascii_case("bytes"));
         let requested = request.connections.clamp(1, 32);
-        let useful_connections = total
-            .map(|size| requested.min(size.div_ceil(4_194_304) as usize))
-            .unwrap_or(1);
-        if can_segment && accepts_ranges && useful_connections > 1 {
-            let probe = self
-                .client
-                .get(&request.url)
+        if can_segment && requested > 1 {
+            let probe = apply_headers(self.client.get(&request.url), &request.headers)
                 .header(header::RANGE, "bytes=0-0")
                 .send()
-                .await?;
-            if probe.status() == StatusCode::PARTIAL_CONTENT {
-                return self
-                    .download_segmented(request, events, total.unwrap(), useful_connections)
-                    .await;
+                .await;
+            if let Ok(probe) = probe {
+                if probe.status() == StatusCode::PARTIAL_CONTENT {
+                    let range_total = probe
+                        .headers()
+                        .get(header::CONTENT_RANGE)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(content_range_total)
+                        .or(total);
+                    if let Some(total) = range_total {
+                        let useful_connections =
+                            requested.min(total.div_ceil(4_194_304) as usize);
+                        if useful_connections > 1 {
+                            return self
+                                .download_segmented(request, events, total, useful_connections)
+                                .await;
+                        }
+                    }
+                }
             }
         }
         self.download_single(request, events).await
@@ -191,13 +202,15 @@ impl DownloadEngine {
             .send(DownloadEvent::Started {
                 resumed_at: start,
                 total,
+                connections: 1,
             })
             .await;
-        let mut file = if resumed {
+        let file = if resumed {
             fs::OpenOptions::new().append(true).open(&partial).await?
         } else {
             fs::File::create(&partial).await?
         };
+        let mut file = BufWriter::with_capacity(1024 * 1024, file);
         let mut received = start;
         let mut stream = response.bytes_stream();
         let mut inspected = resumed;
@@ -209,9 +222,7 @@ impl DownloadEngine {
             }
             file.write_all(&chunk).await?;
             received += chunk.len() as u64;
-            let _ = events
-                .send(DownloadEvent::Progress { received, total })
-                .await;
+            let _ = events.try_send(DownloadEvent::Progress { received, total });
         }
         file.flush().await?;
         finish_download(&request, &partial, received, total, &events).await
@@ -225,52 +236,82 @@ impl DownloadEngine {
         connections: usize,
     ) -> Result<()> {
         let progress = Arc::new(AtomicU64::new(0));
-        let mut jobs = FuturesUnordered::new();
-        for index in 0..connections {
-            let start = total * index as u64 / connections as u64;
-            let end = total * (index as u64 + 1) / connections as u64 - 1;
-            let segment = segment_path(&request.destination, index);
-            let existing = fs::metadata(&segment)
+        let chunk_count = total.div_ceil(SEGMENT_CHUNK_SIZE) as usize;
+        let worker_count = connections.min(chunk_count);
+        let next_chunk = Arc::new(AtomicUsize::new(0));
+
+        for index in 0..chunk_count {
+            let start = index as u64 * SEGMENT_CHUNK_SIZE;
+            let expected = (total - start).min(SEGMENT_CHUNK_SIZE);
+            let chunk = chunk_path(&request.destination, index);
+            let existing = fs::metadata(&chunk)
                 .await
                 .map(|metadata| metadata.len())
-                .unwrap_or(0)
-                .min(end - start + 1);
-            progress.fetch_add(existing, Ordering::Relaxed);
-            if existing == end - start + 1 {
-                continue;
+                .unwrap_or(0);
+            if existing <= expected {
+                progress.fetch_add(existing, Ordering::Relaxed);
+            } else {
+                fs::remove_file(chunk).await?;
             }
+        }
+
+        let mut jobs = FuturesUnordered::new();
+        for _ in 0..worker_count {
             let client = self.client.clone();
             let url = request.url.clone();
+            let headers = request.headers.clone();
+            let destination = request.destination.clone();
             let sender = events.clone();
             let shared = progress.clone();
+            let cursor = next_chunk.clone();
             jobs.push(async move {
-                let response = client
-                    .get(url)
-                    .header(header::RANGE, format!("bytes={}-{}", start + existing, end))
-                    .send()
-                    .await?;
-                if response.status() != StatusCode::PARTIAL_CONTENT {
-                    bail!("server stopped supporting byte ranges");
-                }
-                let mut file = if existing > 0 {
-                    fs::OpenOptions::new().append(true).open(&segment).await?
-                } else {
-                    fs::File::create(&segment).await?
-                };
-                let mut stream = response.bytes_stream();
-                while let Some(chunk) = stream.next().await {
-                    let chunk = chunk.context("segmented network stream failed")?;
-                    file.write_all(&chunk).await?;
-                    let received = shared.fetch_add(chunk.len() as u64, Ordering::Relaxed)
-                        + chunk.len() as u64;
-                    let _ = sender
-                        .send(DownloadEvent::Progress {
+                loop {
+                    let index = cursor.fetch_add(1, Ordering::Relaxed);
+                    if index >= chunk_count {
+                        break;
+                    }
+                    let start = index as u64 * SEGMENT_CHUNK_SIZE;
+                    let end = (start + SEGMENT_CHUNK_SIZE).min(total) - 1;
+                    let expected = end - start + 1;
+                    let segment = chunk_path(&destination, index);
+                    let existing = fs::metadata(&segment)
+                        .await
+                        .map(|metadata| metadata.len())
+                        .unwrap_or(0);
+                    if existing == expected {
+                        continue;
+                    }
+                    let response = apply_headers(client.get(&url), &headers)
+                        .header(header::RANGE, format!("bytes={}-{}", start + existing, end))
+                        .send()
+                        .await?;
+                    if response.status() != StatusCode::PARTIAL_CONTENT {
+                        bail!("server stopped supporting byte ranges");
+                    }
+                    let file = if existing > 0 {
+                        fs::OpenOptions::new().append(true).open(&segment).await?
+                    } else {
+                        fs::File::create(&segment).await?
+                    };
+                    let mut file = BufWriter::with_capacity(1024 * 1024, file);
+                    let mut downloaded = existing;
+                    let mut stream = response.bytes_stream();
+                    while let Some(chunk) = stream.next().await {
+                        let chunk = chunk.context("segmented network stream failed")?;
+                        file.write_all(&chunk).await?;
+                        downloaded += chunk.len() as u64;
+                        let received = shared.fetch_add(chunk.len() as u64, Ordering::Relaxed)
+                            + chunk.len() as u64;
+                        let _ = sender.try_send(DownloadEvent::Progress {
                             received,
                             total: Some(total),
-                        })
-                        .await;
+                        });
+                    }
+                    file.flush().await?;
+                    if downloaded != expected {
+                        bail!("incomplete segment: received {downloaded} of {expected} bytes");
+                    }
                 }
-                file.flush().await?;
                 Result::<()>::Ok(())
             });
         }
@@ -279,6 +320,7 @@ impl DownloadEngine {
             .send(DownloadEvent::Started {
                 resumed_at: resumed,
                 total: Some(total),
+                connections: worker_count,
             })
             .await;
         while let Some(result) = jobs.next().await {
@@ -286,9 +328,9 @@ impl DownloadEngine {
         }
         let partial = partial_path(&request.destination);
         let mut output = fs::File::create(&partial).await?;
-        let mut buffer = vec![0_u8; 256 * 1024];
-        for index in 0..connections {
-            let segment = segment_path(&request.destination, index);
+        let mut buffer = vec![0_u8; 4 * 1024 * 1024];
+        for index in 0..chunk_count {
+            let segment = chunk_path(&request.destination, index);
             let mut input = fs::File::open(&segment).await?;
             loop {
                 let count = input.read(&mut buffer).await?;
@@ -299,9 +341,29 @@ impl DownloadEngine {
             }
             fs::remove_file(segment).await?;
         }
+        for index in 0..32 {
+            let _ = fs::remove_file(segment_path(&request.destination, index)).await;
+        }
         output.flush().await?;
         finish_download(&request, &partial, total, Some(total), &events).await
     }
+}
+
+fn apply_headers(mut builder: RequestBuilder, headers: &[(String, String)]) -> RequestBuilder {
+    for (name, value) in headers {
+        if ["range", "content-length", "connection", "host"]
+            .iter()
+            .any(|blocked| name.eq_ignore_ascii_case(blocked))
+        {
+            continue;
+        }
+        builder = builder.header(name.as_str(), value.as_str());
+    }
+    builder
+}
+
+fn content_range_total(value: &str) -> Option<u64> {
+    value.rsplit_once('/')?.1.trim().parse().ok()
 }
 
 fn payload_expectation(destination: &Path) -> PayloadExpectation {
@@ -354,6 +416,10 @@ pub fn segment_path(destination: &Path, index: usize) -> PathBuf {
     PathBuf::from(format!("{}.part.{index:02}", destination.display()))
 }
 
+fn chunk_path(destination: &Path, index: usize) -> PathBuf {
+    PathBuf::from(format!("{}.part.chunk.{index:06}", destination.display()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,6 +433,25 @@ mod tests {
         assert_eq!(
             segment_path(Path::new("video.mp4"), 7),
             PathBuf::from("video.mp4.part.07")
+        );
+    }
+
+    #[test]
+    fn reads_total_size_from_content_range() {
+        assert_eq!(content_range_total("bytes 0-0/5368709120"), Some(5_368_709_120));
+        assert_eq!(content_range_total("bytes */4096"), Some(4096));
+        assert_eq!(content_range_total("bytes 0-0/*"), None);
+    }
+
+    #[test]
+    fn adaptive_chunk_names_do_not_collide_with_legacy_segments() {
+        assert_eq!(
+            chunk_path(Path::new("image.iso"), 42),
+            PathBuf::from("image.iso.part.chunk.000042")
+        );
+        assert_ne!(
+            chunk_path(Path::new("image.iso"), 0),
+            segment_path(Path::new("image.iso"), 0)
         );
     }
 }

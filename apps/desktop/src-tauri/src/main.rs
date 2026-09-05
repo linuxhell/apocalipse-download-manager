@@ -1101,11 +1101,14 @@ async fn run_download(
                 break;
             }
             event = receiver.recv() => match event {
-                Some(DownloadEvent::Started { resumed_at, total }) => update_task(&app, id, true, |task| {
-                    task.state = DownloadState::Downloading;
-                    task.received = resumed_at;
-                    task.total = total;
-                }),
+                Some(DownloadEvent::Started { resumed_at, total, connections }) => {
+                    diagnostic_log(&app.state::<AppState>(), "INFO", "http.mode", &format!("task={id} connections={connections} segmented={}", connections > 1));
+                    update_task(&app, id, true, |task| {
+                        task.state = DownloadState::Downloading;
+                        task.received = resumed_at;
+                        task.total = total;
+                    });
+                },
                 Some(DownloadEvent::Progress { received, total }) => update_task(&app, id, false, |task| {
                     task.received = received;
                     task.total = total;
