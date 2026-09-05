@@ -355,6 +355,29 @@ async fn download_remote_link_file(id: String, password: String, path: String) -
     Ok(destination.to_string_lossy().into_owned())
 }
 
+#[tauri::command]
+async fn upload_remote_link_file(id: String, password: String, remote_directory: String) -> Result<String, String> {
+    let Some(source) = rfd::FileDialog::new().pick_file() else { return Err("cancelled".to_owned()); };
+    tokio::task::spawn_blocking(move || {
+        let name = source.file_name().and_then(|value| value.to_str()).ok_or_else(|| "invalid_file_name".to_owned())?;
+        let remote_path = format!("{}/{}", remote_directory.trim_end_matches(['/', '\\']), name);
+        let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
+        let parsed = url::Url::parse(&if id.starts_with("http://") { id } else { format!("http://{id}") }).map_err(|error| error.to_string())?;
+        let host = parsed.host_str().ok_or_else(|| "invalid_remote_id".to_owned())?;
+        let port = parsed.port().unwrap_or(LINK_PORT);
+        let mut stream = TcpStream::connect((host, port)).map_err(|error| error.to_string())?;
+        let mut file = fs::File::open(&source).map_err(|error| error.to_string())?;
+        let size = file.metadata().map_err(|error| error.to_string())?.len();
+        let header = format!("PUT /v1/link/file?path={encoded} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {password}\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n");
+        stream.write_all(header.as_bytes()).map_err(|error| error.to_string())?;
+        std::io::copy(&mut file, &mut stream).map_err(|error| error.to_string())?;
+        let mut response = String::new();
+        stream.read_to_string(&mut response).map_err(|error| error.to_string())?;
+        if !response.starts_with("HTTP/1.1 200") { return Err("remote_upload_failed".to_owned()); }
+        Ok(remote_path)
+    }).await.map_err(|error| error.to_string())?
+}
+
 enum BValue { Int(i64), Bytes(Vec<u8>), List(Vec<BValue>), Dict(HashMap<Vec<u8>, BValue>) }
 
 fn parse_bencode(data: &[u8], position: &mut usize) -> Result<BValue, String> {
@@ -559,7 +582,40 @@ fn local_link_ip() -> std::net::IpAddr {
 }
 
 fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
-    let Some(buffer) = read_bridge_request(&mut stream) else { return; };
+    let mut buffer = Vec::with_capacity(8192);
+    let mut chunk = [0_u8; 4096];
+    let header_end = loop {
+        let Ok(count) = stream.read(&mut chunk) else { return; };
+        if count == 0 || buffer.len() + count > 65_536 { return; }
+        buffer.extend_from_slice(&chunk[..count]);
+        if let Some(position) = buffer.windows(4).position(|window| window == b"\r\n\r\n") { break position; }
+    };
+    let headers = String::from_utf8_lossy(&buffer[..header_end + 4]).into_owned();
+    if headers.starts_with("PUT /v1/link/file?") {
+        let state = app.state::<AppState>();
+        let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
+        if !bridge_authorized(&headers, &settings.link_password) { bridge_response(&mut stream, "401 Unauthorized", None, ""); return; }
+        drop(settings);
+        let request_target = headers.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("");
+        let path = url::Url::parse(&format!("http://localhost{request_target}")).ok().and_then(|url| url.query_pairs().find(|(key, _)| key == "path").map(|(_, value)| value.into_owned()));
+        let Some(path) = path.and_then(|value| safe_link_path(&value).ok()) else { bridge_response(&mut stream, "400 Bad Request", None, ""); return; };
+        let length = bridge_content_length(&headers);
+        let Ok(mut file) = fs::File::create(path) else { bridge_response(&mut stream, "403 Forbidden", None, ""); return; };
+        let body_start = header_end + 4;
+        let initial = &buffer[body_start..];
+        if file.write_all(initial).is_err() { return; }
+        let remaining = length.saturating_sub(initial.len());
+        if std::io::copy(&mut stream.by_ref().take(remaining as u64), &mut file).is_err() { return; }
+        bridge_response(&mut stream, "200 OK", None, "{\"ok\":true}");
+        return;
+    }
+    let length = bridge_content_length(&headers);
+    let body_start = header_end + 4;
+    while buffer.len() < body_start + length {
+        let Ok(count) = stream.read(&mut chunk) else { return; };
+        if count == 0 { return; }
+        buffer.extend_from_slice(&chunk[..count]);
+    }
     let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") else { return; };
     let headers = String::from_utf8_lossy(&buffer[..header_end + 4]);
     if headers.starts_with("GET /v1/link/file?") {
@@ -3881,6 +3937,7 @@ fn main() {
             list_local_link_files,
             list_remote_link_files,
             download_remote_link_file,
+            upload_remote_link_file,
             list_downloads,
             enqueue_download,
             default_download_directory,

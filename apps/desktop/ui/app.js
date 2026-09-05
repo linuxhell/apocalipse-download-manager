@@ -703,6 +703,7 @@ async function openLocalLink(path = "") {
 }
 async function openRemoteLink(path = "") {
   linkRemotePath = path;
+  document.querySelector("#link-upload-local").disabled = !path;
   document.querySelector("#link-remote-path").textContent = path || "Unidades";
   const entries = await invoke("list_remote_link_files", { id: linkRemoteId, password: linkRemotePassword, path });
   renderLinkFiles("#link-remote-files", entries, openRemoteLink, (entry) => {
@@ -742,6 +743,16 @@ document.querySelector("#link-download-remote").onclick = async () => {
   try {
     const destination = await invoke("download_remote_link_file", { id: linkRemoteId, password: linkRemotePassword, path: linkSelectedRemote });
     status.textContent = `Concluído: ${destination}`;
+  } catch (error) { if (`${error}` !== "cancelled") status.textContent = `Falha: ${error}`; }
+};
+document.querySelector("#link-upload-local").onclick = async () => {
+  if (!linkRemoteId) return;
+  const status = document.querySelector("#link-status");
+  status.textContent = "Enviando…";
+  try {
+    const remotePath = await invoke("upload_remote_link_file", { id: linkRemoteId, password: linkRemotePassword, remoteDirectory: linkRemotePath });
+    status.textContent = `Concluído: ${remotePath}`;
+    await openRemoteLink(linkRemotePath);
   } catch (error) { if (`${error}` !== "cancelled") status.textContent = `Falha: ${error}`; }
 };
 function updateLogEditorControls() {
