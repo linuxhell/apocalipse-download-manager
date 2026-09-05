@@ -605,7 +605,7 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         let initial = &buffer[body_start..];
         if file.write_all(initial).is_err() { return; }
         let remaining = length.saturating_sub(initial.len());
-        if std::io::copy(&mut stream.by_ref().take(remaining as u64), &mut file).is_err() { return; }
+        if std::io::copy(&mut std::io::Read::by_ref(&mut stream).take(remaining as u64), &mut file).is_err() { return; }
         bridge_response(&mut stream, "200 OK", None, "{\"ok\":true}");
         return;
     }
