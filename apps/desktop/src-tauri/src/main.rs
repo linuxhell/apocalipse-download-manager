@@ -1,7 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use apocalipse_core::{
-    classify_url, partial_path, plan_download, Capabilities, DownloadEngine, DownloadEvent,
+    classify_url, cleanup_chunk_artifacts, partial_path, plan_download, Capabilities,
+    DownloadEngine, DownloadEvent,
     DownloadId, DownloadKind, DownloadRequest, DownloadState, DownloadTask,
 };
 use serde::{Deserialize, Serialize};
@@ -3834,6 +3835,9 @@ async fn remove_downloads(
         .collect::<Vec<_>>();
     if delete_files {
         for task in &removed {
+            cleanup_chunk_artifacts(&task.destination)
+                .await
+                .map_err(|error| error.to_string())?;
             for path in download_paths(task) {
                 let torrent_root = matches!(classify_url(&task.source), Some(DownloadKind::Torrent | DownloadKind::Magnet))
                     && path == task.destination;

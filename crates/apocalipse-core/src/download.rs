@@ -9,6 +9,7 @@ use reqwest::{
     dns::{Addrs, Name, Resolve, Resolving},
     header, Client, RequestBuilder, StatusCode,
 };
+use sha2::{Digest, Sha256};
 use std::{
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
@@ -240,10 +241,19 @@ impl DownloadEngine {
         let worker_count = connections.min(chunk_count);
         let next_chunk = Arc::new(AtomicUsize::new(0));
 
+        fs::create_dir_all(chunk_directory(&request.destination)).await?;
+
         for index in 0..chunk_count {
             let start = index as u64 * SEGMENT_CHUNK_SIZE;
             let expected = (total - start).min(SEGMENT_CHUNK_SIZE);
             let chunk = chunk_path(&request.destination, index);
+            let legacy = legacy_chunk_path(&request.destination, index);
+            if fs::metadata(&chunk).await.is_err() && fs::metadata(&legacy).await.is_ok() {
+                if fs::rename(&legacy, &chunk).await.is_err() {
+                    fs::copy(&legacy, &chunk).await?;
+                    fs::remove_file(&legacy).await?;
+                }
+            }
             let existing = fs::metadata(&chunk)
                 .await
                 .map(|metadata| metadata.len())
@@ -341,10 +351,8 @@ impl DownloadEngine {
             }
             fs::remove_file(segment).await?;
         }
-        for index in 0..32 {
-            let _ = fs::remove_file(segment_path(&request.destination, index)).await;
-        }
         output.flush().await?;
+        let _ = cleanup_chunk_artifacts(&request.destination).await;
         finish_download(&request, &partial, total, Some(total), &events).await
     }
 }
@@ -416,8 +424,75 @@ pub fn segment_path(destination: &Path, index: usize) -> PathBuf {
     PathBuf::from(format!("{}.part.{index:02}", destination.display()))
 }
 
+pub fn chunk_directory(destination: &Path) -> PathBuf {
+    let mut hasher = Sha256::new();
+    hasher.update(destination.to_string_lossy().as_bytes());
+    let identifier = hasher
+        .finalize()
+        .iter()
+        .take(16)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    destination
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(".apocalipse-parts")
+        .join(identifier)
+}
+
 fn chunk_path(destination: &Path, index: usize) -> PathBuf {
+    chunk_directory(destination).join(format!("{index:06}.part"))
+}
+
+fn legacy_chunk_path(destination: &Path, index: usize) -> PathBuf {
     PathBuf::from(format!("{}.part.chunk.{index:06}", destination.display()))
+}
+
+pub async fn cleanup_chunk_artifacts(destination: &Path) -> Result<()> {
+    let directory = chunk_directory(destination);
+    match fs::remove_dir_all(&directory).await {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    if let Some(root) = directory.parent() {
+        let _ = fs::remove_dir(root).await;
+    }
+
+    let Some(parent) = destination.parent() else {
+        return Ok(());
+    };
+    let Some(file_name) = destination.file_name().and_then(|value| value.to_str()) else {
+        return Ok(());
+    };
+    let prefix = format!("{file_name}.part.chunk.");
+    let mut entries = match fs::read_dir(parent).await {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    while let Some(entry) = entries.next_entry().await? {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let Some(suffix) = name.strip_prefix(&prefix) else {
+            continue;
+        };
+        if suffix.len() == 6 && suffix.bytes().all(|byte| byte.is_ascii_digit()) {
+            match fs::remove_file(entry.path()).await {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+    for index in 0..32 {
+        match fs::remove_file(segment_path(destination, index)).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -447,11 +522,39 @@ mod tests {
     fn adaptive_chunk_names_do_not_collide_with_legacy_segments() {
         assert_eq!(
             chunk_path(Path::new("image.iso"), 42),
-            PathBuf::from("image.iso.part.chunk.000042")
+            chunk_directory(Path::new("image.iso")).join("000042.part")
         );
         assert_ne!(
             chunk_path(Path::new("image.iso"), 0),
             segment_path(Path::new("image.iso"), 0)
         );
+    }
+
+    #[test]
+    fn different_destinations_have_different_chunk_directories() {
+        assert_ne!(
+            chunk_directory(Path::new("first.iso")),
+            chunk_directory(Path::new("second.iso"))
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_only_removes_chunks_for_the_exact_destination() {
+        let root = std::env::temp_dir().join(format!(
+            "apocalipse-chunk-cleanup-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let destination = root.join("image.iso");
+        let chunk = legacy_chunk_path(&destination, 1);
+        let unrelated = root.join("image.iso.part.chunk.backup");
+        std::fs::write(&chunk, b"chunk").unwrap();
+        std::fs::write(&unrelated, b"keep").unwrap();
+
+        cleanup_chunk_artifacts(&destination).await.unwrap();
+
+        assert!(!chunk.exists());
+        assert!(unrelated.exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
