@@ -677,8 +677,13 @@ let linkLocalPath = "";
 let linkRemotePath = "";
 let linkRemoteId = "";
 let linkRemotePassword = "";
+let linkSelectedLocal = "";
 let linkSelectedRemote = "";
 const linkParent = (path) => /^[A-Za-z]:[\\/]?$/.test(path) ? "" : path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
+function updateLinkTransferButtons() {
+  document.querySelector("#link-upload-local").disabled = !linkSelectedLocal || !linkRemoteId || !linkRemotePath;
+  document.querySelector("#link-download-remote").disabled = !linkSelectedRemote;
+}
 function renderLinkFiles(target, entries, open, select) {
   const root = document.querySelector(target);
   root.replaceChildren();
@@ -702,17 +707,23 @@ function renderLinkFiles(target, entries, open, select) {
 }
 async function openLocalLink(path = "") {
   linkLocalPath = path;
+  linkSelectedLocal = "";
+  updateLinkTransferButtons();
   document.querySelector("#link-local-path").textContent = path || "Unidades";
-  renderLinkFiles("#link-local-files", await invoke("list_local_link_files", { path }), openLocalLink);
+  renderLinkFiles("#link-local-files", await invoke("list_local_link_files", { path }), openLocalLink, (entry) => {
+    linkSelectedLocal = entry.directory ? "" : entry.path;
+    updateLinkTransferButtons();
+  });
 }
 async function openRemoteLink(path = "") {
   linkRemotePath = path;
-  document.querySelector("#link-upload-local").disabled = !path;
+  linkSelectedRemote = "";
+  updateLinkTransferButtons();
   document.querySelector("#link-remote-path").textContent = path || "Unidades";
   const entries = await invoke("list_remote_link_files", { id: linkRemoteId, password: linkRemotePassword, path });
   renderLinkFiles("#link-remote-files", entries, openRemoteLink, (entry) => {
     linkSelectedRemote = entry.directory ? "" : entry.path;
-    document.querySelector("#link-download-remote").disabled = !linkSelectedRemote;
+    updateLinkTransferButtons();
   });
 }
 async function loadLinkIdentity() {
@@ -750,14 +761,20 @@ document.querySelector("#link-download-remote").onclick = async () => {
   } catch (error) { if (`${error}` !== "cancelled") status.textContent = `Falha: ${error}`; }
 };
 document.querySelector("#link-upload-local").onclick = async () => {
-  if (!linkRemoteId) return;
+  if (!linkSelectedLocal || !linkRemoteId || !linkRemotePath) return;
   const status = document.querySelector("#link-status");
+  const button = document.querySelector("#link-upload-local");
   status.textContent = "Enviando…";
+  button.disabled = true;
   try {
-    const remotePath = await invoke("upload_remote_link_file", { id: linkRemoteId, password: linkRemotePassword, remoteDirectory: linkRemotePath });
+    const remotePath = await invoke("upload_remote_link_file", { id: linkRemoteId, password: linkRemotePassword, remoteDirectory: linkRemotePath, localPath: linkSelectedLocal });
     status.textContent = `Concluído: ${remotePath}`;
     await openRemoteLink(linkRemotePath);
-  } catch (error) { if (`${error}` !== "cancelled") status.textContent = `Falha: ${error}`; }
+  } catch (error) {
+    status.textContent = `Falha no envio: ${error}`;
+  } finally {
+    updateLinkTransferButtons();
+  }
 };
 async function refreshMatrix() {
   const status = await invoke("matrix_analyze");
@@ -781,8 +798,32 @@ async function refreshMatrix() {
   }
 }
 document.querySelector('[data-page="matrix"]').addEventListener("click", () => refreshMatrix().catch(console.error));
-document.querySelector("#matrix-scan").onclick = () => refreshMatrix().catch(console.error);
-document.querySelector("#matrix-rollback").onclick = async () => { try { await invoke("matrix_rollback"); await refreshMatrix(); } catch (error) { console.error(error); } };
+document.querySelector("#matrix-scan").onclick = async () => {
+  const button = document.querySelector("#matrix-scan");
+  const summary = document.querySelector("#matrix-summary");
+  button.disabled = true;
+  button.textContent = "Analisando…";
+  summary.textContent = "Verificando falhas de download…";
+  try {
+    await refreshMatrix();
+    summary.textContent += " · análise concluída agora";
+  } catch (error) {
+    summary.textContent = `Falha na análise: ${error}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "Analisar falhas";
+  }
+};
+document.querySelector("#matrix-rollback").onclick = async () => {
+  const summary = document.querySelector("#matrix-summary");
+  try {
+    await invoke("matrix_rollback");
+    await refreshMatrix();
+    summary.textContent += " · rollback concluído";
+  } catch (error) {
+    summary.textContent = `Rollback indisponível: ${error}`;
+  }
+};
 function updateLogEditorControls() {
   const configured = Boolean(document.querySelector("#log-editor").value.trim());
   document.querySelector("#remove-log-editor").disabled = !configured;

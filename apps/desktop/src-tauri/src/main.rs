@@ -356,8 +356,10 @@ async fn download_remote_link_file(id: String, password: String, path: String) -
 }
 
 #[tauri::command]
-async fn upload_remote_link_file(id: String, password: String, remote_directory: String) -> Result<String, String> {
-    let Some(source) = rfd::FileDialog::new().pick_file() else { return Err("cancelled".to_owned()); };
+async fn upload_remote_link_file(id: String, password: String, remote_directory: String, local_path: String) -> Result<String, String> {
+    let source = PathBuf::from(local_path);
+    if !source.is_file() { return Err("selected_local_file_not_found".to_owned()); }
+    if remote_directory.trim().is_empty() { return Err("select_remote_directory".to_owned()); }
     tokio::task::spawn_blocking(move || {
         let name = source.file_name().and_then(|value| value.to_str()).ok_or_else(|| "invalid_file_name".to_owned())?;
         let remote_path = format!("{}/{}", remote_directory.trim_end_matches(['/', '\\']), name);

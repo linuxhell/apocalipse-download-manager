@@ -110,8 +110,9 @@ nav button.active {
   display: block;
   margin: 2px 14px 8px 46px;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
 }
 .engine {
   margin-top: auto;
@@ -660,6 +661,7 @@ footer .bridge-connected i {
 .matrix-panel { display:grid; gap:14px; padding:20px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
 .matrix-panel[hidden] { display:none; }
 .matrix-panel > header { display:flex; justify-content:space-between; align-items:center; gap:14px; }
+.matrix-panel > header > span { display:flex; align-items:center; gap:12px; }
 .matrix-panel > header div { display:grid; gap:5px; }
 .matrix-panel > header small,.matrix-panel > p { color:var(--muted); }
 #matrix-proposals { display:grid; gap:8px; }
