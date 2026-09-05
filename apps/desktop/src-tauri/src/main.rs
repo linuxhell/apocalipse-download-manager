@@ -2717,7 +2717,9 @@ fn activate_main_window(app: tauri::AppHandle) {
 fn open_paypal_donation() -> Result<(), String> {
     const URL: &str = "https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL";
     #[cfg(target_os = "windows")]
-    let result = Command::new("explorer.exe").arg(URL).spawn();
+    let result = Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", URL])
+        .spawn();
     #[cfg(target_os = "macos")]
     let result = Command::new("open").arg(URL).spawn();
     #[cfg(target_os = "linux")]
