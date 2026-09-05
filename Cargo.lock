@@ -81,7 +81,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "apocalipse-core",
  "futures-util",
- "reqwest",
+ "reqwest 0.12.28",
  "rfd",
  "serde",
  "serde_json",
