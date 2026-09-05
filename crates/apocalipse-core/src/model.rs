@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use uuid::Uuid;
 
 pub type DownloadId = Uuid;
@@ -44,6 +47,18 @@ pub struct DownloadTask {
     pub referer: Option<String>,
     #[serde(default)]
     pub known_duration: Option<f64>,
+    #[serde(default)]
+    pub mirrors: Vec<String>,
+    #[serde(default)]
+    pub priority: i8,
+    #[serde(default)]
+    pub sha256: Option<String>,
+    #[serde(default)]
+    pub integrity_verified: bool,
+    #[serde(default)]
+    pub created_at: u64,
+    #[serde(default)]
+    pub completed_at: Option<u64>,
 }
 
 impl DownloadTask {
@@ -65,6 +80,14 @@ impl DownloadTask {
             format_selection: None,
             referer: None,
             known_duration: None,
+            mirrors: Vec::new(),
+            priority: 0,
+            sha256: None,
+            integrity_verified: false,
+            created_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |value| value.as_secs()),
+            completed_at: None,
         }
     }
 }

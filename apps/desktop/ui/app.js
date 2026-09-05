@@ -170,6 +170,8 @@ const catalogs = {
     saveRules: "Validate and save",
     resetRules: "Restore defaults",
     exportRecording: "Export completed recording", outputFormat: "Output format", videoCodec: "Video codec", audioCodec: "Audio codec", export: "Export",
+    searchHistory: "Search downloads…", importList: "Import list", advancedOptions: "Advanced options", mirrorUrls: "Mirror URLs (one per line)", priority: "Priority", priorityHigh: "High", priorityNormal: "Normal", priorityLow: "Low", verifyIntegrity: "Verify SHA-256", integrityPrompt: "Optional expected SHA-256 (leave blank to calculate only):", integrityOk: "SHA-256 verified",
+    smartAutomation: "Smart automation", adaptiveEfficiency: "Adaptive efficiency", adaptiveEfficiencyHint: "Optimizes queue order and connection use for the current workload.", scheduler: "Download schedule", schedulerHint: "Automatically pauses outside the permitted local time window.", scheduleStart: "Start", scheduleEnd: "End",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -343,6 +345,8 @@ const catalogs = {
     saveRules: "Validar e salvar",
     resetRules: "Restaurar padrões",
     exportRecording: "Exportar gravação concluída", outputFormat: "Formato de saída", videoCodec: "Codec de vídeo", audioCodec: "Codec de áudio", export: "Exportar",
+    searchHistory: "Pesquisar downloads…", importList: "Importar lista", advancedOptions: "Opções avançadas", mirrorUrls: "URLs espelho (uma por linha)", priority: "Prioridade", priorityHigh: "Alta", priorityNormal: "Normal", priorityLow: "Baixa", verifyIntegrity: "Verificar SHA-256", integrityPrompt: "SHA-256 esperado opcional (deixe vazio apenas para calcular):", integrityOk: "SHA-256 verificado",
+    smartAutomation: "Automação inteligente", adaptiveEfficiency: "Eficiência adaptativa", adaptiveEfficiencyHint: "Otimiza a ordem da fila e o uso de conexões para a carga atual.", scheduler: "Agendamento de downloads", schedulerHint: "Pausa automaticamente fora do horário local permitido.", scheduleStart: "Início", scheduleEnd: "Fim",
   },
   "zh-CN": {
     downloads: "下载",
@@ -515,6 +519,8 @@ const catalogs = {
     saveRules: "验证并保存",
     resetRules: "恢复默认值",
     exportRecording: "导出已完成的录制", outputFormat: "输出格式", videoCodec: "视频编码", audioCodec: "音频编码", export: "导出",
+    searchHistory: "搜索下载…", importList: "导入列表", advancedOptions: "高级选项", mirrorUrls: "镜像网址（每行一个）", priority: "优先级", priorityHigh: "高", priorityNormal: "普通", priorityLow: "低", verifyIntegrity: "验证 SHA-256", integrityPrompt: "可选的预期 SHA-256（留空则仅计算）：", integrityOk: "SHA-256 已验证",
+    smartAutomation: "智能自动化", adaptiveEfficiency: "自适应效率", adaptiveEfficiencyHint: "根据当前负载优化队列顺序和连接使用。", scheduler: "下载计划", schedulerHint: "在允许的本地时间之外自动暂停。", scheduleStart: "开始", scheduleEnd: "结束",
   },
 };
 
@@ -541,7 +547,9 @@ let clipboardMonitorPrimed = false;
 const busyIds = new Set();
 const selectedIds = new Set();
 const speedSamples = new Map();
+const schedulerPaused = new Set();
 let selectionPointerActive = false;
+let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
 const invoke = (command, args = {}) => {
@@ -611,6 +619,7 @@ function visibleDownloads() {
   if (activePage === "media") visible = visible.filter((task) => !/\.recording\.webm$/i.test(`${task.source} ${task.destination}`) && /(?:\.m3u8(?:$|[?#])|youtube\.com|youtu\.be|facebook\.com|fb\.watch|tiktok\.com|instagram\.com)/i.test(`${task.source} ${task.destination}`));
   if (activePage === "recordings") visible = visible.filter((task) => /\.recording\.webm$/i.test(`${task.source} ${task.destination}`));
   if (activePage === "link") visible = visible.filter((task) => /^(?:ftp|sftp):/i.test(task.source));
+  if (historyQuery) visible = visible.filter((task) => `${task.source} ${task.destination} ${task.sha256 || ""}`.toLocaleLowerCase().includes(historyQuery));
   if (activeFilter === "completed") return visible.filter((task) => task.state === "completed");
   if (activeFilter === "active") return visible.filter((task) => task.state !== "completed");
   return visible;
@@ -740,6 +749,24 @@ function renderDownloads() {
       };
       actions.append(exportButton);
     }
+    if (key === "completed") {
+      const verify = document.createElement("button");
+      verify.className = "task-action";
+      verify.textContent = task.integrity_verified ? "SHA-256 ✓" : t("verifyIntegrity");
+      verify.title = task.sha256 || "";
+      verify.onclick = async () => {
+        const expectedSha256 = window.prompt(t("integrityPrompt"), task.sha256 || "");
+        if (expectedSha256 === null) return;
+        verify.disabled = true;
+        try {
+          const digest = await invoke("verify_download_integrity", { id: task.id, expectedSha256: expectedSha256 || null });
+          window.alert(`${t("integrityOk")}: ${digest}`);
+          await refreshDownloads();
+        } catch (error) { window.alert(String(error)); }
+        finally { verify.disabled = false; }
+      };
+      actions.append(verify);
+    }
     if (/^(?:magnet:)|\.torrent(?:$|[?#])/i.test(task.source) && ["downloading", "paused", "completed"].includes(key))
       addAction(t("preview"), "preview_torrent");
     addAction(t("openFolder"), "reveal_download");
@@ -813,6 +840,25 @@ const logDialog = document.querySelector("#log-dialog");
 const siteRulesDialog = document.querySelector("#site-rules-dialog");
 const exportDialog = document.querySelector("#export-dialog");
 let exportTaskId = null;
+document.querySelector("#history-search").oninput = (event) => {
+  historyQuery = event.target.value.trim().toLocaleLowerCase();
+  renderDownloads();
+};
+document.querySelector("#import-list").onclick = async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const [urls, destinationDirectory] = await Promise.all([invoke("pick_url_list"), invoke("default_download_directory")]);
+    for (const url of urls) {
+      try {
+        const fileName = await invoke("suggest_download_name", { url });
+        downloads.push(await invoke("enqueue_download", { url, destinationDirectory, fileName, formatSelection: null, torrentSelection: null, mirrors: null, priority: 0, context: {} }));
+      } catch (error) { console.warn("import", url, error); }
+    }
+    renderDownloads();
+  } catch (error) { console.error(error); }
+  finally { button.disabled = false; }
+};
 document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data-page="tools"])').forEach((button) => {
   button.onclick = () => {
     activePage = button.dataset.page;
@@ -1241,6 +1287,10 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
     document.querySelector("#theme").value = document.documentElement.dataset.theme;
+    document.querySelector("#adaptive-efficiency").checked = limits.adaptiveEfficiency;
+    document.querySelector("#schedule-enabled").checked = localStorage.getItem("apocalipse.schedule.enabled") === "true";
+    document.querySelector("#schedule-start").value = localStorage.getItem("apocalipse.schedule.start") || "00:00";
+    document.querySelector("#schedule-end").value = localStorage.getItem("apocalipse.schedule.end") || "23:59";
     for (const association of associations) {
       const input = document.querySelector(`[data-association="${association.id}"]`);
       input.checked = association.enabled;
@@ -1292,6 +1342,9 @@ document.querySelector("#save-settings").onclick = async () => {
   try {
     const theme = document.querySelector("#theme").value;
     localStorage.setItem("apocalipse.theme", theme);
+    localStorage.setItem("apocalipse.schedule.enabled", String(document.querySelector("#schedule-enabled").checked));
+    localStorage.setItem("apocalipse.schedule.start", document.querySelector("#schedule-start").value);
+    localStorage.setItem("apocalipse.schedule.end", document.querySelector("#schedule-end").value);
     applyTheme(theme);
     await invoke("set_default_download_directory", { path: directory.value });
     await invoke("set_autostart", {
@@ -1303,6 +1356,7 @@ document.querySelector("#save-settings").onclick = async () => {
     await invoke("set_transfer_limits", {
       maxActiveDownloads: Number(document.querySelector("#max-tasks").value),
       connectionsPerDownload: Number(document.querySelector("#connections").value),
+      adaptiveEfficiency: document.querySelector("#adaptive-efficiency").checked,
     });
     await invoke("set_user_agent", {
       userAgent: document.querySelector("#user-agent").value,
@@ -1609,6 +1663,8 @@ document.querySelector("#enqueue").onclick = async () => {
         fileName: document.querySelector("#file-name").value,
         formatSelection: document.querySelector("#media-inspection").hidden ? null : document.querySelector("#media-format").value,
         torrentSelection,
+        mirrors: document.querySelector("#mirrors").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
+        priority: Number(document.querySelector("#priority").value),
         context: {
           referer: pendingReferer,
           knownDuration: pendingDuration,
@@ -1623,6 +1679,8 @@ document.querySelector("#enqueue").onclick = async () => {
     renderDownloads();
     dialog.close();
     url.value = "";
+    document.querySelector("#mirrors").value = "";
+    document.querySelector("#priority").value = "0";
     resetMediaInspection();
   } catch (error) {
     const box = document.querySelector("#analysis");
@@ -1636,6 +1694,24 @@ document.querySelector("#enqueue").onclick = async () => {
 translate();
 refreshDownloads();
 setInterval(refreshDownloads, 250);
+setInterval(async () => {
+  if (localStorage.getItem("apocalipse.schedule.enabled") !== "true") return;
+  const now = new Date();
+  const current = now.getHours() * 60 + now.getMinutes();
+  const minutes = (value) => { const [h, m] = value.split(":").map(Number); return h * 60 + m; };
+  const start = minutes(localStorage.getItem("apocalipse.schedule.start") || "00:00");
+  const end = minutes(localStorage.getItem("apocalipse.schedule.end") || "23:59");
+  const allowed = start <= end ? current >= start && current <= end : current >= start || current <= end;
+  for (const task of downloads) {
+    const key = stateKey(task.state);
+    if (!allowed && key === "downloading" && !schedulerPaused.has(task.id)) {
+      schedulerPaused.add(task.id);
+      invoke("pause_download", { id: task.id }).catch(console.error);
+    } else if (allowed && key === "paused" && schedulerPaused.delete(task.id)) {
+      invoke("resume_download", { id: task.id }).catch(console.error);
+    }
+  }
+}, 5000);
 setInterval(async () => {
   try {
     const link = await invoke("read_clipboard_link");

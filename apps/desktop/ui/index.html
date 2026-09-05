@@ -110,6 +110,8 @@
             </button>
           </div>
           <div class="list-actions">
+            <input id="history-search" class="history-search" type="search" data-i18n-placeholder="searchHistory" placeholder="Search downloads…" />
+            <button id="import-list" class="ghost" type="button" data-i18n="importList">Import list</button>
             <label
               ><input id="select-all" type="checkbox" /><span
                 data-i18n="selectAll"
@@ -152,7 +154,7 @@
         <span class="bridge-waiting"
           ><i></i
           ><b data-i18n="bridgeStatus">Extension bridge not configured</b></span
-        ><span>v0.3.21</span>
+        ><span>v0.4.0</span>
       </footer>
     </main>
     <dialog id="add-dialog">
@@ -205,6 +207,13 @@
           </div>
           <div id="destination-list"></div>
         </section>
+        <details class="advanced-download">
+          <summary data-i18n="advancedOptions">Advanced options</summary>
+          <label for="mirrors" data-i18n="mirrorUrls">Mirror URLs (one per line)</label>
+          <textarea id="mirrors" rows="3" placeholder="https://mirror.example/file"></textarea>
+          <label for="priority" data-i18n="priority">Priority</label>
+          <select id="priority"><option value="10" data-i18n="priorityHigh">High</option><option value="0" selected data-i18n="priorityNormal">Normal</option><option value="-10" data-i18n="priorityLow">Low</option></select>
+        </details>
         <div class="dialog-actions">
           <button type="button" data-dialog-close data-i18n="cancel">
             Cancel</button
@@ -298,6 +307,12 @@
             ></span
           >
         </label>
+        <section class="pairing-settings">
+          <b data-i18n="smartAutomation">Smart automation</b>
+          <label class="setting-toggle compact-toggle"><input id="adaptive-efficiency" type="checkbox" /><span><b data-i18n="adaptiveEfficiency">Adaptive efficiency</b><small data-i18n="adaptiveEfficiencyHint">Optimizes queue order and connection use for the current workload.</small></span></label>
+          <label class="setting-toggle compact-toggle"><input id="schedule-enabled" type="checkbox" /><span><b data-i18n="scheduler">Download schedule</b><small data-i18n="schedulerHint">Automatically pauses outside the permitted local time window.</small></span></label>
+          <div class="credential-grid"><label><span data-i18n="scheduleStart">Start</span><input id="schedule-start" type="time" value="00:00" /></label><label><span data-i18n="scheduleEnd">End</span><input id="schedule-end" type="time" value="23:59" /></label></div>
+        </section>
         <label class="setting-toggle">
           <input id="capture-clipboard" type="checkbox" />
           <span

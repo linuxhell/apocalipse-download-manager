@@ -788,6 +788,10 @@ footer .bridge-connected i {
   color: #e5fbff;
   background: #1d3c48;
 }
+.history-search { min-width: 180px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--input); color: var(--text); }
+.advanced-download { margin: 12px 0; padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.advanced-download summary { cursor: pointer; color: var(--accent); font-weight: 700; margin-bottom: 10px; }
+.advanced-download textarea { width: 100%; resize: vertical; background: var(--input); border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 9px; }
 .dialog-copy {
   color: var(--muted);
   margin: 0 0 14px;

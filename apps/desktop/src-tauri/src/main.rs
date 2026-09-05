@@ -6,6 +6,7 @@ use apocalipse_core::{
     DownloadId, DownloadKind, DownloadRequest, DownloadState, DownloadTask,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use futures_util::StreamExt;
 use std::{
     collections::{HashMap, HashSet},
@@ -177,6 +178,8 @@ struct UserSettings {
     max_active_downloads: usize,
     #[serde(default = "default_connections")]
     connections_per_download: usize,
+    #[serde(default = "default_true")]
+    adaptive_efficiency: bool,
     #[serde(default = "default_bridge_token")]
     bridge_token: String,
     #[serde(default)]
@@ -219,6 +222,7 @@ const fn default_max_active() -> usize {
 const fn default_connections() -> usize {
     8
 }
+const fn default_true() -> bool { true }
 fn default_bridge_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
@@ -233,6 +237,7 @@ impl Default for UserSettings {
             capture_clipboard: false,
             max_active_downloads: default_max_active(),
             connections_per_download: default_connections(),
+            adaptive_efficiency: true,
             bridge_token: default_bridge_token(),
             recent_download_directories: Vec::new(),
             ffmpeg_path: None,
@@ -309,6 +314,9 @@ struct LinkFileEntry { name: String, path: String, size: u64, directory: bool }
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LinkListRequest { password: String, path: String }
+
+#[derive(Deserialize)]
+struct MobileAddRequest { url: String }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -519,6 +527,7 @@ struct AssociationStatus {
 struct TransferLimits {
     max_active_downloads: usize,
     connections_per_download: usize,
+    adaptive_efficiency: bool,
 }
 
 #[derive(Serialize)]
@@ -629,6 +638,22 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         if let Some(position) = buffer.windows(4).position(|window| window == b"\r\n\r\n") { break position; }
     };
     let headers = String::from_utf8_lossy(&buffer[..header_end + 4]).into_owned();
+    if headers.starts_with("GET /mobile ") {
+        let page = include_str!("../mobile.html");
+        let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Security-Policy: default-src 'self' 'unsafe-inline'\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}", page.len());
+        let _ = stream.write_all(response.as_bytes());
+        return;
+    }
+    if headers.starts_with("GET /v1/mobile/tasks ") {
+        let state = app.state::<AppState>();
+        let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
+        if !bridge_authorized(&headers, &settings.link_password) { bridge_response(&mut stream, "401 Unauthorized", None, "{\"error\":\"unauthorized\"}"); return; }
+        drop(settings);
+        let queue = match state.queue.lock() { Ok(value) => value, Err(_) => return };
+        let body = serde_json::to_string(&*queue).unwrap_or_else(|_| "[]".to_owned());
+        bridge_response(&mut stream, "200 OK", None, &body);
+        return;
+    }
     if headers.starts_with("PUT /v1/link/file?") {
         let state = app.state::<AppState>();
         let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
@@ -656,6 +681,21 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     }
     let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") else { return; };
     let headers = String::from_utf8_lossy(&buffer[..header_end + 4]);
+    if headers.starts_with("POST /v1/mobile/add ") {
+        let state = app.state::<AppState>();
+        let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
+        if !bridge_authorized(&headers, &settings.link_password) { bridge_response(&mut stream, "401 Unauthorized", None, "{\"error\":\"unauthorized\"}"); return; }
+        drop(settings);
+        let request = serde_json::from_slice::<MobileAddRequest>(&buffer[header_end + 4..]);
+        match request {
+            Ok(request) if classify_url(&request.url).is_some() => {
+                let result = queue_from_bridge(app, BridgeDownload { url: request.url, file_name: None, page_url: None, duration: None, cookie_header: None, user_agent: None, request_method: None, request_body: None, request_content_type: None });
+                if result.is_ok() { bridge_response(&mut stream, "200 OK", None, "{\"ok\":true}"); } else { bridge_response(&mut stream, "400 Bad Request", None, "{\"error\":\"invalid_url\"}"); }
+            }
+            _ => bridge_response(&mut stream, "400 Bad Request", None, "{\"error\":\"invalid_url\"}"),
+        }
+        return;
+    }
     if headers.starts_with("GET /v1/link/file?") {
         let state = app.state::<AppState>();
         let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
@@ -1053,6 +1093,7 @@ async fn run_download(
     app: tauri::AppHandle,
     id: DownloadId,
     request: DownloadRequest,
+    mirrors: Vec<String>,
     mut cancellation: oneshot::Receiver<()>,
 ) {
     diagnostic_log(
@@ -1114,7 +1155,7 @@ async fn run_download(
         }
     };
     let (events, mut receiver) = mpsc::channel(64);
-    let mut download = Box::pin(engine.download(request, events));
+    let mut download = Box::pin(download_with_mirrors(engine, request, mirrors, events));
     let mut was_cancelled = false;
     loop {
         tokio::select! {
@@ -1127,7 +1168,10 @@ async fn run_download(
                 match result {
                     Ok(()) => {
                         diagnostic_log(&app.state::<AppState>(), "INFO", "http.completed", &format!("task={id}"));
-                        update_task(&app, id, true, |task| task.state = DownloadState::Completed);
+                        update_task(&app, id, true, |task| {
+                            task.state = DownloadState::Completed;
+                            task.completed_at = Some(epoch_seconds());
+                        });
                     },
                     Err(error) => {
                         diagnostic_log(&app.state::<AppState>(), "ERROR", "http.failed", &format!("task={id} error={error}"));
@@ -1153,6 +1197,7 @@ async fn run_download(
                     task.received = bytes;
                     task.total = Some(bytes);
                     task.state = DownloadState::Completed;
+                    task.completed_at = Some(epoch_seconds());
                 }),
                 None => break,
             }
@@ -1164,6 +1209,30 @@ async fn run_download(
         }
         start_next_queued(&app);
     }
+}
+
+async fn download_with_mirrors(
+    engine: DownloadEngine,
+    request: DownloadRequest,
+    mirrors: Vec<String>,
+    events: mpsc::Sender<DownloadEvent>,
+) -> anyhow::Result<()> {
+    let mut sources = vec![request.url.clone()];
+    sources.extend(mirrors);
+    let mut last_error = None;
+    for source in sources {
+        let mut attempt = request.clone();
+        attempt.url = source;
+        match engine.download(attempt, events.clone()).await {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no_download_source")))
+}
+
+fn epoch_seconds() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |value| value.as_secs())
 }
 
 async fn run_external_download(
@@ -1531,6 +1600,7 @@ async fn run_external_download(
             update_task(&app, id, true, |item| {
                 item.progress_percent = Some(100.0);
                 item.state = DownloadState::Completed;
+                item.completed_at = Some(epoch_seconds());
             });
         }
         Err(message) => {
@@ -2253,6 +2323,23 @@ fn pick_executable(initial_path: Option<String>) -> Option<String> {
 }
 
 #[tauri::command]
+fn pick_url_list() -> Result<Vec<String>, String> {
+    let Some(path) = rfd::FileDialog::new().add_filter("URL lists", &["txt", "csv"]).pick_file() else {
+        return Ok(Vec::new());
+    };
+    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let mut urls = Vec::new();
+    for token in content.split(|character: char| character.is_whitespace() || character == ',' || character == ';') {
+        let value = token.trim_matches(['\"', '\'', '[', ']']);
+        if classify_url(value).is_some() && !urls.iter().any(|url| url == value) {
+            urls.push(value.to_owned());
+        }
+        if urls.len() >= 500 { break; }
+    }
+    Ok(urls)
+}
+
+#[tauri::command]
 fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, String> {
     let settings = state.settings.lock().map_err(|error| error.to_string())?;
     let definitions = [
@@ -2540,8 +2627,14 @@ fn enqueue_download(
     file_name: Option<String>,
     format_selection: Option<String>,
     torrent_selection: Option<Vec<usize>>,
+    mirrors: Option<Vec<String>>,
+    priority: Option<i8>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
+    if let Some(existing) = state.queue.lock().map_err(|error| error.to_string())?.iter()
+        .find(|task| task.source == url && !matches!(task.state, DownloadState::Completed | DownloadState::Failed { .. })) {
+        return Err(format!("duplicate_active_download:{}", existing.id));
+    }
     let site_rule = {
         let rules = state.site_rules.lock().map_err(|error| error.to_string())?;
         matching_site_rule(&url, &rules)
@@ -2569,6 +2662,11 @@ fn enqueue_download(
     let mut task = DownloadTask::new(&url, unique_destination(&download_dir, &file_name));
     task.format_selection = format_selection.filter(|value| !value.trim().is_empty());
     task.torrent_selection = torrent_selection.unwrap_or_default().into_iter().filter(|index| *index > 0).collect();
+    task.mirrors = mirrors.unwrap_or_default().into_iter()
+        .filter(|mirror| mirror.starts_with("https://") || mirror.starts_with("http://"))
+        .take(10)
+        .collect();
+    task.priority = priority.unwrap_or_default().clamp(-10, 10);
     if let Some(context) = context {
         task.referer = context
             .referer
@@ -2691,6 +2789,14 @@ fn start_download(
             .lock()
             .ok()
             .and_then(|rules| matching_site_rule(&task.source, &rules));
+        let configured_connections = if limits.adaptive_efficiency
+            && limits.max_active_downloads <= 3
+            && task.priority >= 0
+        {
+            limits.connections_per_download.max(16)
+        } else {
+            limits.connections_per_download
+        };
         let connections = rule
             .as_ref()
             .filter(|rule| {
@@ -2700,7 +2806,7 @@ fn start_download(
                 )
             })
             .map_or_else(
-                || limits.connections_per_download.clamp(1, 32),
+                || configured_connections.clamp(1, 32),
                 |rule| rule.connections,
             );
         let mut headers = Vec::new();
@@ -2722,6 +2828,7 @@ fn start_download(
         {
             headers.push(("Content-Type".to_owned(), content_type.clone()));
         }
+        let mirrors = task.mirrors.clone();
         let request = DownloadRequest {
             url: task.source,
             destination: task.destination,
@@ -2734,7 +2841,13 @@ fn start_download(
             body: identity.and_then(|item| item.request_body.map(String::into_bytes)),
             headers,
         };
-        tauri::async_runtime::spawn(run_download(app.clone(), task.id, request, cancelled));
+        tauri::async_runtime::spawn(run_download(
+            app.clone(),
+            task.id,
+            request,
+            mirrors,
+            cancelled,
+        ));
     } else {
         tauri::async_runtime::spawn(run_external_download(
             app.clone(),
@@ -2766,12 +2879,14 @@ fn start_next_queued(app: &tauri::AppHandle) {
         .queue
         .lock()
         .map(|queue| {
-            queue
+            let mut queued = queue
                 .iter()
                 .filter(|task| task.state == DownloadState::Queued)
-                .take(available)
                 .cloned()
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            queued.sort_by_key(|task| (std::cmp::Reverse(task.priority), task.total.unwrap_or(u64::MAX), task.created_at));
+            queued.truncate(available);
+            queued
         })
         .unwrap_or_default();
     for task in queued {
@@ -2935,6 +3050,7 @@ fn get_transfer_limits(state: State<'_, AppState>) -> Result<TransferLimits, Str
     Ok(TransferLimits {
         max_active_downloads: settings.max_active_downloads,
         connections_per_download: settings.connections_per_download,
+        adaptive_efficiency: settings.adaptive_efficiency,
     })
 }
 
@@ -2943,14 +3059,17 @@ fn set_transfer_limits(
     state: State<'_, AppState>,
     max_active_downloads: usize,
     connections_per_download: usize,
+    adaptive_efficiency: bool,
 ) -> Result<TransferLimits, String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.max_active_downloads = max_active_downloads.clamp(1, 20);
     settings.connections_per_download = connections_per_download.clamp(1, 32);
+    settings.adaptive_efficiency = adaptive_efficiency;
     save_settings(&state, &settings)?;
     Ok(TransferLimits {
         max_active_downloads: settings.max_active_downloads,
         connections_per_download: settings.connections_per_download,
+        adaptive_efficiency: settings.adaptive_efficiency,
     })
 }
 
@@ -3497,6 +3616,7 @@ fn finish_blob_upload(app: &tauri::AppHandle, request: BlobFinish) -> Result<(),
         task.total = Some(upload.received);
         task.progress_percent = Some(100.0);
         task.state = DownloadState::Completed;
+        task.completed_at = Some(epoch_seconds());
     });
     diagnostic_log(
         &state,
@@ -3715,6 +3835,43 @@ fn reveal_download(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
 }
 
 #[tauri::command]
+async fn verify_download_integrity(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: DownloadId,
+    expected_sha256: Option<String>,
+) -> Result<String, String> {
+    let path = {
+        let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+        let task = queue.iter_mut().find(|task| task.id == id)
+            .ok_or_else(|| "download_not_found".to_owned())?;
+        if !task.destination.is_file() { return Err("download_file_not_found".to_owned()); }
+        task.state = DownloadState::Verifying;
+        task.destination.clone()
+    };
+    let digest = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; 1024 * 1024];
+        loop {
+            let count = file.read(&mut buffer).map_err(|error| error.to_string())?;
+            if count == 0 { break; }
+            hasher.update(&buffer[..count]);
+        }
+        Ok(format!("{:x}", hasher.finalize()))
+    }).await.map_err(|error| error.to_string())??;
+    let expected = expected_sha256.map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty());
+    let verified = expected.as_ref().is_none_or(|value| value == &digest);
+    update_task(&app, id, true, |task| {
+        task.state = DownloadState::Completed;
+        task.sha256 = Some(digest.clone());
+        task.integrity_verified = verified;
+    });
+    if verified { Ok(digest) } else { Err(format!("checksum_mismatch:{digest}")) }
+}
+
+#[tauri::command]
 async fn export_recording(
     state: State<'_, AppState>,
     id: DownloadId,
@@ -3768,6 +3925,7 @@ async fn export_recording(
     let size = fs::metadata(&output).map(|metadata| metadata.len()).unwrap_or(0);
     let mut exported = DownloadTask::new(source.to_string_lossy(), output.clone());
     exported.state = DownloadState::Completed;
+    exported.completed_at = Some(epoch_seconds());
     exported.received = size;
     exported.total = Some(size);
     exported.progress_percent = Some(100.0);
@@ -4220,6 +4378,7 @@ fn main() {
             set_default_download_directory,
             pick_directory,
             pick_executable,
+            pick_url_list,
             activate_main_window,
             open_paypal_donation,
             get_tool_statuses,
@@ -4246,6 +4405,7 @@ fn main() {
             resume_download,
             redownload_downloads,
             reveal_download,
+            verify_download_integrity,
             export_recording,
             get_autostart,
             set_autostart,
