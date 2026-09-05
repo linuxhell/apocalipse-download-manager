@@ -39,6 +39,7 @@ struct AppState {
     bridge_last_seen: Mutex<Option<Instant>>,
     bridge_pending: Mutex<Vec<BridgeDownload>>,
     blob_uploads: Mutex<HashMap<uuid::Uuid, BlobUpload>>,
+    recording_stops: Mutex<HashSet<DownloadId>>,
     request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
@@ -553,7 +554,7 @@ struct BlobUpload {
     partial: PathBuf,
     destination: PathBuf,
     received: u64,
-    total: u64,
+    total: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -562,6 +563,8 @@ struct BlobBegin {
     file_name: String,
     total: u64,
     source: String,
+    #[serde(default)]
+    streaming: bool,
 }
 
 #[derive(Deserialize)]
@@ -1834,7 +1837,7 @@ fn matrix_analyze(state: State<'_, AppState>) -> Result<MatrixStatus, String> {
     proposals.sort_by(|left, right| right.failures.cmp(&left.failures).then_with(|| left.host.cmp(&right.host)));
     let applied_rules = rules
         .iter()
-        .filter(|rule| rule.enabled && rule.action == SiteRuleAction::SingleConnection)
+        .filter(|rule| rule.enabled && rule.action != SiteRuleAction::Standard)
         .map(|rule| MatrixAppliedRule {
             id: rule.id.clone(),
             name: rule.name.clone(),
@@ -1878,7 +1881,7 @@ fn matrix_rollback_rule(state: State<'_, AppState>, id: String) -> Result<String
     let mut rules = state.site_rules.lock().map_err(|error| error.to_string())?.clone();
     let rule = rules
         .iter_mut()
-        .find(|rule| rule.id == id && rule.action == SiteRuleAction::SingleConnection)
+        .find(|rule| rule.id == id && rule.action != SiteRuleAction::Standard)
         .ok_or_else(|| "matrix_rule_not_found".to_owned())?;
     rule.enabled = false;
     save_site_rules(&state, &rules)?;
@@ -3403,7 +3406,7 @@ fn decode_hex(value: &str) -> Result<Vec<u8>, String> {
 }
 
 fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid::Uuid, String> {
-    if request.total == 0 {
+    if request.total == 0 && !request.streaming {
         return Err("empty_blob".to_owned());
     }
     let state = app.state::<AppState>();
@@ -3414,7 +3417,7 @@ fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid:
     fs::File::create(&partial).map_err(|error| error.to_string())?;
     let mut task = DownloadTask::new(request.source, destination.clone());
     task.state = DownloadState::Downloading;
-    task.total = Some(request.total);
+    task.total = (!request.streaming).then_some(request.total);
     let task_id = task.id;
     {
         let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
@@ -3433,14 +3436,17 @@ fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid:
                 partial,
                 destination,
                 received: 0,
-                total: request.total,
+                total: (!request.streaming).then_some(request.total),
             },
         );
     diagnostic_log(
         &state,
         "INFO",
         "blob.start",
-        &format!("task={task_id} bytes={}", request.total),
+        &format!(
+            "task={task_id} bytes={} streaming={}",
+            request.total, request.streaming
+        ),
     );
     Ok(upload_id)
 }
@@ -3453,7 +3459,10 @@ fn append_blob_chunk(app: &tauri::AppHandle, request: BlobChunk) -> Result<(), S
         let upload = uploads
             .get_mut(&request.upload_id)
             .ok_or_else(|| "blob_upload_not_found".to_owned())?;
-        if upload.received + data.len() as u64 > upload.total {
+        if upload
+            .total
+            .is_some_and(|total| upload.received + data.len() as u64 > total)
+        {
             return Err("blob_too_large".to_owned());
         }
         OpenOptions::new()
@@ -3466,7 +3475,7 @@ fn append_blob_chunk(app: &tauri::AppHandle, request: BlobChunk) -> Result<(), S
     };
     update_task(app, task_id, false, |task| {
         task.received = received;
-        task.progress_percent = Some(received as f64 * 100.0 / total as f64);
+        task.progress_percent = total.map(|total| received as f64 * 100.0 / total as f64);
     });
     Ok(())
 }
@@ -3479,12 +3488,13 @@ fn finish_blob_upload(app: &tauri::AppHandle, request: BlobFinish) -> Result<(),
         .map_err(|error| error.to_string())?
         .remove(&request.upload_id)
         .ok_or_else(|| "blob_upload_not_found".to_owned())?;
-    if upload.received != upload.total {
+    if upload.total.is_some_and(|total| upload.received != total) || upload.received == 0 {
         return Err("incomplete_blob".to_owned());
     }
     fs::rename(&upload.partial, &upload.destination).map_err(|error| error.to_string())?;
     update_task(app, upload.task_id, true, |task| {
         task.received = upload.received;
+        task.total = Some(upload.received);
         task.progress_percent = Some(100.0);
         task.state = DownloadState::Completed;
     });
@@ -3494,7 +3504,49 @@ fn finish_blob_upload(app: &tauri::AppHandle, request: BlobFinish) -> Result<(),
         "blob.completed",
         &format!("task={} bytes={}", upload.task_id, upload.received),
     );
+    state
+        .recording_stops
+        .lock()
+        .map_err(|error| error.to_string())?
+        .remove(&upload.task_id);
+    show_main_window(app);
+    let _ = app.emit("recording-completed", upload.task_id);
     Ok(())
+}
+
+#[tauri::command]
+fn stop_recording(state: State<'_, AppState>, id: DownloadId) -> Result<(), String> {
+    let active = state
+        .blob_uploads
+        .lock()
+        .map_err(|error| error.to_string())?
+        .values()
+        .any(|upload| upload.task_id == id);
+    if !active {
+        return Err("recording_not_active".to_owned());
+    }
+    state
+        .recording_stops
+        .lock()
+        .map_err(|error| error.to_string())?
+        .insert(id);
+    Ok(())
+}
+
+fn recording_stop_requested(app: &tauri::AppHandle, request: &BlobFinish) -> Result<bool, String> {
+    let state = app.state::<AppState>();
+    let task_id = state
+        .blob_uploads
+        .lock()
+        .map_err(|error| error.to_string())?
+        .get(&request.upload_id)
+        .map(|upload| upload.task_id)
+        .ok_or_else(|| "blob_upload_not_found".to_owned())?;
+    Ok(state
+        .recording_stops
+        .lock()
+        .map_err(|error| error.to_string())?
+        .contains(&task_id))
 }
 
 fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
@@ -3569,6 +3621,19 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             .and_then(|request| append_blob_chunk(app, request))
         {
             Ok(()) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
+            Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
+        }
+    } else if first.starts_with("POST /v1/blob/status ") {
+        match serde_json::from_str::<BlobFinish>(body)
+            .map_err(|error| error.to_string())
+            .and_then(|request| recording_stop_requested(app, &request))
+        {
+            Ok(stop) => bridge_response(
+                &mut stream,
+                "200 OK",
+                origin,
+                &format!("{{\"stop\":{stop}}}"),
+            ),
             Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
         }
     } else if first.starts_with("POST /v1/blob/end ") {
@@ -3655,6 +3720,7 @@ async fn export_recording(
     format: String,
     video_codec: String,
     audio_codec: String,
+    output_directory: String,
 ) -> Result<String, String> {
     const FORMATS: [&str; 8] = ["mp4", "mkv", "webm", "mp3", "m4a", "opus", "flac", "wav"];
     if !FORMATS.contains(&format.as_str()) { return Err("unsupported_export_format".to_owned()); }
@@ -3672,7 +3738,11 @@ async fn export_recording(
     };
     let stem = source.file_name().and_then(|value| value.to_str()).unwrap_or("recording.recording.webm")
         .trim_end_matches(".recording.webm");
-    let output = unique_destination(source.parent().unwrap_or(Path::new(".")), &format!("{stem}.{format}"));
+    let output_directory = PathBuf::from(output_directory);
+    if !output_directory.is_dir() {
+        return Err("export_directory_not_found".to_owned());
+    }
+    let output = unique_destination(&output_directory, &format!("{stem}.{format}"));
     let audio_only = matches!(format.as_str(), "mp3" | "m4a" | "opus" | "flac" | "wav");
     let mut command = tokio::process::Command::new(ffmpeg);
     command.args(["-y", "-i"]).arg(&source);
@@ -4064,6 +4134,7 @@ fn main() {
                 bridge_last_seen: Mutex::new(None),
                 bridge_pending: Mutex::new(Vec::new()),
                 blob_uploads: Mutex::new(HashMap::new()),
+                recording_stops: Mutex::new(HashSet::new()),
                 request_identities: Mutex::new(HashMap::new()),
                 log_path,
                 log_write_lock: Mutex::new(()),
@@ -4169,6 +4240,7 @@ fn main() {
             matrix_analyze,
             matrix_apply_rule,
             matrix_rollback_rule,
+            stop_recording,
             pause_download,
             resume_download,
             redownload_downloads,

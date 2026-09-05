@@ -19,6 +19,9 @@
         <button data-page="media">
           <span>▶</span><b data-i18n="media">Media</b>
         </button>
+        <button data-page="recordings">
+          <span>●</span><b data-i18n="recordings">Recordings</b>
+        </button>
         <button data-page="torrents">
           <span>◉</span><b data-i18n="torrents">Torrents</b>
         </button>
@@ -48,6 +51,7 @@
         <div>
           <p data-i18n="overview">OVERVIEW</p>
           <h1 data-i18n="downloads">Downloads</h1>
+          <p id="page-description" class="page-description" data-i18n="downloadsDescription">Manage direct downloads, progress, speed and completed files.</p>
         </div>
         <div class="actions">
           <select id="language" aria-label="Language">
@@ -148,7 +152,7 @@
         <span class="bridge-waiting"
           ><i></i
           ><b data-i18n="bridgeStatus">Extension bridge not configured</b></span
-        ><span>v0.3.20</span>
+        ><span>v0.3.21</span>
       </footer>
     </main>
     <dialog id="add-dialog">
@@ -384,18 +388,6 @@
           <small data-i18n="siteRulesHint">Versioned fixes that can change site behavior without rebuilding the application</small>
           <button id="manage-site-rules" type="button" data-i18n="manageRules">Manage rules</button>
         </section>
-        <section class="tool-settings">
-          <b data-i18n="externalTools">Required media and transfer tools</b>
-          <small data-i18n="toolsHint">Configure each executable. Apocalipse uses these exact paths for downloads.</small>
-          <div id="tool-list">
-            <label data-tool="ffmpeg"><span>FFmpeg <small></small></span><div><input id="tool-ffmpeg" type="text" /><button type="button" data-tool-pick="ffmpeg" data-i18n="browse">Browse…</button><button type="button" data-tool-update="ffmpeg">Update</button></div></label>
-            <label data-tool="yt-dlp"><span>yt-dlp <small></small></span><div><input id="tool-yt-dlp" type="text" /><button type="button" data-tool-pick="yt-dlp" data-i18n="browse">Browse…</button><button type="button" data-tool-update="yt-dlp">Update</button></div></label>
-            <label data-tool="n-m3u8dl-re"><span>N_m3u8DL-RE <small></small></span><div><input id="tool-n-m3u8dl-re" type="text" /><button type="button" data-tool-pick="n-m3u8dl-re" data-i18n="browse">Browse…</button><button type="button" data-tool-update="n-m3u8dl-re">Update</button></div></label>
-            <label data-tool="aria2"><span>aria2c <small></small></span><div><input id="tool-aria2" type="text" /><button type="button" data-tool-pick="aria2" data-i18n="browse">Browse…</button><button type="button" data-tool-update="aria2">Update</button></div></label>
-          </div>
-          <label for="media-player">VLC / mpv / player</label>
-          <div class="path-picker"><input id="media-player" type="text" /><button id="pick-media-player" type="button" data-i18n="browse">Browse…</button></div>
-        </section>
         <section class="pairing-settings">
           <b data-i18n="diagnostics">Diagnostics</b>
           <small data-i18n="diagnosticsHint">Safe activity log with credentials and URL parameters hidden</small>
@@ -424,6 +416,25 @@
             Save
           </button>
         </div>
+      </form>
+    </dialog>
+    <dialog id="tools-dialog">
+      <form method="dialog">
+        <div class="dialog-head"><div><small data-i18n="toolbox">TOOLBOX</small><h2 data-i18n="tools">Tools</h2></div><button type="button" class="close" data-tools-close>×</button></div>
+        <p class="dialog-copy readable-description" data-i18n="toolsPageDescription">Manage the engines used for media, transfers, conversion and preview.</p>
+        <section class="tool-settings">
+          <b data-i18n="externalTools">Required media and transfer tools</b>
+          <small data-i18n="toolsHint">Configure each executable. Apocalipse uses these exact paths for downloads.</small>
+          <div id="tool-list">
+            <label data-tool="ffmpeg"><span>FFmpeg <small></small></span><div><input id="tool-ffmpeg" type="text" /><button type="button" data-tool-pick="ffmpeg" data-i18n="browse">Browse…</button><button type="button" data-tool-update="ffmpeg" data-i18n="update">Update</button></div></label>
+            <label data-tool="yt-dlp"><span>yt-dlp <small></small></span><div><input id="tool-yt-dlp" type="text" /><button type="button" data-tool-pick="yt-dlp" data-i18n="browse">Browse…</button><button type="button" data-tool-update="yt-dlp" data-i18n="update">Update</button></div></label>
+            <label data-tool="n-m3u8dl-re"><span>N_m3u8DL-RE <small></small></span><div><input id="tool-n-m3u8dl-re" type="text" /><button type="button" data-tool-pick="n-m3u8dl-re" data-i18n="browse">Browse…</button><button type="button" data-tool-update="n-m3u8dl-re" data-i18n="update">Update</button></div></label>
+            <label data-tool="aria2"><span>aria2c <small></small></span><div><input id="tool-aria2" type="text" /><button type="button" data-tool-pick="aria2" data-i18n="browse">Browse…</button><button type="button" data-tool-update="aria2" data-i18n="update">Update</button></div></label>
+          </div>
+          <label for="media-player" data-i18n="mediaPlayer">VLC / mpv / player</label>
+          <div class="path-picker"><input id="media-player" type="text" /><button id="pick-media-player" type="button" data-i18n="browse">Browse…</button></div>
+        </section>
+        <div class="dialog-actions"><button type="button" data-tools-close data-i18n="cancel">Cancel</button><button id="save-tools" type="button" class="primary" data-i18n="save">Save</button></div>
       </form>
     </dialog>
     <dialog id="log-dialog">
@@ -465,6 +476,8 @@
       <form method="dialog">
         <div class="dialog-head"><div><small>MEDIA LAB</small><h2 data-i18n="exportRecording">Export completed recording</h2></div><button type="button" class="close" data-export-close>×</button></div>
         <p class="dialog-copy" id="export-source"></p>
+        <label for="export-destination" data-i18n="saveTo">Save to</label>
+        <div class="path-picker"><input id="export-destination" type="text" required /><button type="button" data-pick-for="export-destination" data-i18n="browse">Browse…</button></div>
         <label for="export-format" data-i18n="outputFormat">Output format</label>
         <select id="export-format"><option>mp4</option><option>mkv</option><option>webm</option><option>mp3</option><option>m4a</option><option>opus</option><option>flac</option><option>wav</option></select>
         <label for="export-video-codec" data-i18n="videoCodec">Video codec</label>

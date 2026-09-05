@@ -2,9 +2,19 @@ const catalogs = {
   en: {
     downloads: "Downloads",
     media: "Media",
+    recordings: "Recordings",
     torrents: "Torrents",
     tools: "Tools",
     settings: "Settings",
+    downloadsDescription: "Manage direct downloads, progress, speed and completed files.",
+    mediaDescription: "Videos, audio, recordings and exports detected by Apocalipse.",
+    recordingsDescription: "Follow active recordings, stop and save, export or open completed captures.",
+    torrentsDescription: "Manage torrents, file selection, peers and previews.",
+    linkDescription: "Transfer files securely between this computer and a remote Apocalipse.",
+    matrixPageDescription: "Continuous diagnostics and isolated site corrections with individual rollback.",
+    toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
+    settingsDescription: "Configure appearance, integrations, network and application behavior.",
+    toolbox: "TOOLBOX", update: "Update", mediaPlayer: "VLC / mpv / media player",
     donatePaypal: "Donate via PayPal",
     overview: "OVERVIEW",
     engineReady: "Engine ready",
@@ -45,6 +55,8 @@ const catalogs = {
     retry: "Retry",
     openFolder: "Open folder",
     preview: "Preview",
+    stopRecording: "Stop and save",
+    recordingActive: "Recording",
     matrixPowered: "Powered by Matrix Ultimate v2 AI",
     matrixRollback: "Rollback",
     matrixAnalyze: "Analyze failures",
@@ -162,9 +174,19 @@ const catalogs = {
   "pt-BR": {
     downloads: "Downloads",
     media: "Mídia",
+    recordings: "Gravações",
     torrents: "Torrents",
     tools: "Ferramentas",
     settings: "Configurações",
+    downloadsDescription: "Gerencie downloads diretos, progresso, velocidade e arquivos concluídos.",
+    mediaDescription: "Vídeos, áudios, gravações e exportações detectados pelo Apocalipse.",
+    recordingsDescription: "Acompanhe gravações ativas, pare e salve, exporte ou abra capturas concluídas.",
+    torrentsDescription: "Gerencie torrents, escolha de arquivos, pares e pré-visualizações.",
+    linkDescription: "Transfira arquivos com segurança entre este computador e um Apocalipse remoto.",
+    matrixPageDescription: "Diagnóstico contínuo e correções isoladas por site, com reversão individual.",
+    toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
+    settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
+    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", mediaPlayer: "VLC / mpv / reprodutor de mídia",
     donatePaypal: "Faça uma doação pelo PayPal",
     overview: "VISÃO GERAL",
     engineReady: "Motor pronto",
@@ -206,6 +228,8 @@ const catalogs = {
     retry: "Tentar novamente",
     openFolder: "Abrir pasta",
     preview: "Pré-visualizar",
+    stopRecording: "Parar e salvar",
+    recordingActive: "Gravando",
     matrixPowered: "Alimentada por Matrix Ultimate v2 AI",
     matrixRollback: "Reverter",
     matrixAnalyze: "Analisar falhas",
@@ -323,9 +347,19 @@ const catalogs = {
   "zh-CN": {
     downloads: "下载",
     media: "媒体",
+    recordings: "录制",
     torrents: "种子",
     tools: "工具",
     settings: "设置",
+    downloadsDescription: "管理直接下载、进度、速度和已完成文件。",
+    mediaDescription: "管理 Apocalipse 检测到的视频、音频、录制和导出。",
+    recordingsDescription: "查看正在录制的内容、停止并保存、导出或打开已完成的录制。",
+    torrentsDescription: "管理种子、文件选择、节点和预览。",
+    linkDescription: "在本机与远程 Apocalipse 之间安全传输文件。",
+    matrixPageDescription: "持续诊断及可单独回滚的网站修正规则。",
+    toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
+    settingsDescription: "配置外观、集成、网络和应用行为。",
+    toolbox: "工具箱", update: "更新", mediaPlayer: "VLC / mpv / 媒体播放器",
     donatePaypal: "通过 PayPal 捐赠",
     overview: "概览",
     engineReady: "引擎已就绪",
@@ -366,6 +400,8 @@ const catalogs = {
     retry: "重试",
     openFolder: "打开文件夹",
     preview: "预览",
+    stopRecording: "停止并保存",
+    recordingActive: "正在录制",
     matrixPowered: "由 Matrix Ultimate v2 AI 驱动",
     matrixRollback: "回滚",
     matrixAnalyze: "分析故障",
@@ -572,7 +608,8 @@ function updateSpeeds(tasks) {
 function visibleDownloads() {
   let visible = downloads;
   if (activePage === "torrents") visible = visible.filter((task) => /^(?:magnet:)|\.torrent(?:$|[?#])/i.test(task.source));
-  if (activePage === "media") visible = visible.filter((task) => /(?:\.m3u8(?:$|[?#])|\.recording\.webm$|youtube\.com|youtu\.be|facebook\.com|fb\.watch|tiktok\.com|instagram\.com)/i.test(`${task.source} ${task.destination}`));
+  if (activePage === "media") visible = visible.filter((task) => !/\.recording\.webm$/i.test(`${task.source} ${task.destination}`) && /(?:\.m3u8(?:$|[?#])|youtube\.com|youtu\.be|facebook\.com|fb\.watch|tiktok\.com|instagram\.com)/i.test(`${task.source} ${task.destination}`));
+  if (activePage === "recordings") visible = visible.filter((task) => /\.recording\.webm$/i.test(`${task.source} ${task.destination}`));
   if (activePage === "link") visible = visible.filter((task) => /^(?:ftp|sftp):/i.test(task.source));
   if (activeFilter === "completed") return visible.filter((task) => task.state === "completed");
   if (activeFilter === "active") return visible.filter((task) => task.state !== "completed");
@@ -583,9 +620,9 @@ function renderDownloads() {
   const list = document.querySelector("#download-list");
   const empty = document.querySelector("#empty");
   list.replaceChildren();
-  list.hidden = downloads.length === 0;
-  empty.hidden = downloads.length !== 0;
   const visible = visibleDownloads();
+  list.hidden = visible.length === 0;
+  empty.hidden = visible.length !== 0;
   for (const task of visible) {
     const row = document.createElement("article");
     row.className = "download-row";
@@ -647,7 +684,7 @@ function renderDownloads() {
     info.append(progress, details);
     const state = Object.assign(document.createElement("span"), {
       className: "download-state",
-      textContent: stateName(task.state),
+      textContent: /\.recording\.webm$/i.test(task.destination) && stateKey(task.state) === "downloading" ? t("recordingActive") : stateName(task.state),
     });
     if (typeof task.state === "object")
       state.title = task.state.failed?.message || "";
@@ -682,7 +719,9 @@ function renderDownloads() {
       actions.append(button);
     };
     const key = stateKey(task.state);
-    if (key === "downloading" || key === "inspecting")
+    const recording = /\.recording\.webm$/i.test(task.destination);
+    if (recording && key === "downloading") addAction(t("stopRecording"), "stop_recording");
+    else if (key === "downloading" || key === "inspecting")
       addAction(t("pause"), "pause_download");
     if (key === "paused") addAction(t("resume"), "resume_download");
     if (key === "failed") addAction(t("retry"), "resume_download");
@@ -693,6 +732,7 @@ function renderDownloads() {
       exportButton.onclick = () => {
         exportTaskId = task.id;
         document.querySelector("#export-source").textContent = task.destination;
+        document.querySelector("#export-destination").value = task.destination.replace(/[\\/][^\\/]+$/, "");
         document.querySelector("#export-format").value = "mkv";
         document.querySelector("#export-video-codec").value = "copy";
         document.querySelector("#export-audio-codec").value = "copy";
@@ -741,6 +781,8 @@ function translate() {
     .querySelectorAll("[data-i18n-placeholder]")
     .forEach((element) => (element.placeholder = t(element.dataset.i18nPlaceholder)));
   document.querySelector("#language").value = locale;
+  const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", matrix: "matrixPageDescription" };
+  document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
   renderDownloads();
   if (activePage === "matrix") refreshMatrix().catch(console.error);
   if (activePage === "link") {
@@ -766,6 +808,7 @@ async function refreshDownloads() {
 const dialog = document.querySelector("#add-dialog");
 const clearDialog = document.querySelector("#clear-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
+const toolsDialog = document.querySelector("#tools-dialog");
 const logDialog = document.querySelector("#log-dialog");
 const siteRulesDialog = document.querySelector("#site-rules-dialog");
 const exportDialog = document.querySelector("#export-dialog");
@@ -776,6 +819,8 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelectorAll("nav [data-page]").forEach((item) => item.classList.toggle("active", item === button));
     const heading = button.querySelector("b")?.textContent || t("downloads");
     document.querySelector("header h1").textContent = heading;
+    const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", matrix: "matrixPageDescription" };
+    document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
     document.querySelector("#apocalipse-link-panel").hidden = activePage !== "link";
     document.querySelector("#matrix-panel").hidden = activePage !== "matrix";
     document.querySelector(".metrics").hidden = ["link", "matrix"].includes(activePage);
@@ -1182,7 +1227,7 @@ document.querySelector("#dns-preset").onchange = (event) => {
 };
 document.querySelector('[data-page="settings"]').onclick = async () => {
   try {
-    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations, mediaPlayer] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
@@ -1193,7 +1238,6 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
       invoke("get_proxy_setting"),
       invoke("get_dns_setting"),
       invoke("get_associations"),
-      invoke("get_media_player"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
     document.querySelector("#theme").value = document.documentElement.dataset.theme;
@@ -1211,7 +1255,6 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
     document.querySelector("#pairing-token").value = pairing.token;
     document.querySelector("#user-agent").value = userAgent.userAgent;
     document.querySelector("#log-editor").value = logEditor;
-    document.querySelector("#media-player").value = mediaPlayer;
     document.querySelector("#proxy-enabled").checked = proxy.enabled;
     document.querySelector("#proxy-url").value = proxy.url;
     document.querySelector("#proxy-username").value = proxy.username;
@@ -1229,7 +1272,6 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
       : "custom";
     updateDnsControls();
     updateLogEditorControls();
-    await refreshToolStatuses();
     settingsDialog.showModal();
   } catch (error) {
     console.error(error);
@@ -1285,6 +1327,25 @@ document.querySelector("#save-settings").onclick = async () => {
         enabled: input.checked,
       });
     }
+    settingsDialog.close();
+  } catch (error) {
+    console.error(error);
+  } finally {
+    button.disabled = false;
+  }
+};
+document.querySelector('[data-page="tools"]').onclick = async () => {
+  try {
+    document.querySelector("#media-player").value = await invoke("get_media_player");
+    await refreshToolStatuses();
+    toolsDialog.showModal();
+  } catch (error) { console.error(error); }
+};
+document.querySelectorAll("[data-tools-close]").forEach((button) => button.onclick = () => toolsDialog.close());
+document.querySelector("#save-tools").onclick = async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
     await invoke("set_tool_paths", {
       ffmpeg: document.querySelector("#tool-ffmpeg").value,
       ytDlp: document.querySelector("#tool-yt-dlp").value,
@@ -1292,12 +1353,9 @@ document.querySelector("#save-settings").onclick = async () => {
       aria2: document.querySelector("#tool-aria2").value,
     });
     await invoke("set_media_player", { path: document.querySelector("#media-player").value });
-    settingsDialog.close();
-  } catch (error) {
-    console.error(error);
-  } finally {
-    button.disabled = false;
-  }
+    toolsDialog.close();
+  } catch (error) { console.error(error); }
+  finally { button.disabled = false; }
 };
 document.querySelectorAll("[data-tool-update]").forEach((button) => {
   button.onclick = async () => {
@@ -1326,6 +1384,7 @@ document.querySelector("#export-recording").onclick = async (event) => {
       format: document.querySelector("#export-format").value,
       videoCodec: document.querySelector("#export-video-codec").value,
       audioCodec: document.querySelector("#export-audio-codec").value,
+      outputDirectory: document.querySelector("#export-destination").value,
     });
     exportDialog.close();
     await refreshDownloads();
@@ -1643,6 +1702,20 @@ async function consumeBridgeDownload() {
 }
 setInterval(consumeBridgeDownload, 400);
 window.__TAURI__?.event?.listen?.("bridge-download-ready", consumeBridgeDownload).catch(console.error);
+window.__TAURI__?.event?.listen?.("recording-completed", async (event) => {
+  try {
+    await invoke("activate_main_window");
+    await refreshDownloads();
+    exportTaskId = event.payload;
+    const task = downloads.find((item) => item.id === exportTaskId);
+    document.querySelector("#export-source").textContent = task?.destination || "";
+    document.querySelector("#export-destination").value = task?.destination?.replace(/[\\/][^\\/]+$/, "") || await invoke("default_download_directory");
+    document.querySelector("#export-format").value = "mkv";
+    document.querySelector("#export-video-codec").value = "copy";
+    document.querySelector("#export-audio-codec").value = "copy";
+    if (!exportDialog.open) exportDialog.showModal();
+  } catch (error) { console.error(error); }
+}).catch(console.error);
 async function refreshBridgeStatus() {
   try {
     const status = await invoke("get_bridge_pairing");

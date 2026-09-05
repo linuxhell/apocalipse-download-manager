@@ -84,6 +84,19 @@
     });
     if (result?.error) throw new Error(result.error);
   };
+  const appendBlob = async (uploadId, blob) => {
+    const chunkSize = 64 * 1024;
+    for (let offset = 0; offset < blob.size; offset += chunkSize) {
+      const bytes = new Uint8Array(await blob.slice(offset, offset + chunkSize).arrayBuffer());
+      let data = "";
+      for (const byte of bytes) data += byte.toString(16).padStart(2, "0");
+      const result = await chrome.runtime.sendMessage({
+        type: "APOCALIPSE_BLOB_CHUNK",
+        request: { uploadId, data },
+      });
+      if (result?.error) throw new Error(result.error);
+    }
+  };
   const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
   const thumbnailFor = (element, kind) => {
     if (kind === "audio") return "";
@@ -264,6 +277,16 @@
     const value = (navigator.language || "en").toLowerCase();
     return value.startsWith("zh") ? "下载" : value.startsWith("pt") ? "Baixar" : "Download";
   };
+  const recordingLabels = () => {
+    const value = (navigator.language || "en").toLowerCase();
+    if (value.startsWith("zh")) return { record: "● 录制", stop: "■ 停止并保存", uploading: "正在发送…", done: "已保存", unavailable: "此视频无法由浏览器录制" };
+    if (value.startsWith("pt")) return { record: "● Gravar", stop: "■ Parar e salvar", uploading: "Enviando…", done: "Gravação salva", unavailable: "Este vídeo não permite gravação pelo navegador" };
+    return { record: "● Record", stop: "■ Stop and save", uploading: "Uploading…", done: "Recording saved", unavailable: "This video cannot be recorded by the browser" };
+  };
+  const clockLabel = (seconds) => {
+    const value = Math.max(0, Math.floor(seconds));
+    return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+  };
   const downloadableLink = (anchor) => {
     const url = absolute(anchor?.href);
     if (!url || !/^https?:/i.test(url)) return null;
@@ -370,13 +393,17 @@
       const tikTokUrl = element.tagName === "VIDEO" ? tikTokUrlFor(element) : null;
       const isTikTokVideo = Boolean(tikTokUrl);
       const url = isFacebookVideo ? facebookUrlFor(element) || location.href : tikTokUrl || downloadUrlFor(element);
-      if (!url || !/^https?:/.test(url)) return;
+      const canDownload = Boolean(url && /^https?:/.test(url));
+      const canRecord = element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
+        && Boolean(element.captureStream || element.webkitCaptureStream);
+      if (!canDownload && !canRecord) return;
       element.dataset.apocalipseButton = "1";
       const button = document.createElement("button");
       button.type = "button";
       button.className = "apocalipse-media-download";
       button.textContent = `⇩ ${downloadLabel()}`;
       button.title = "Apocalipse Download Manager";
+      button.hidden = !canDownload;
       let recordButton = null;
       button.addEventListener("click", async (event) => {
         event.preventDefault();
@@ -411,18 +438,21 @@
         recordButton = record;
         record.type = "button";
         record.className = "apocalipse-media-download apocalipse-media-record";
-        record.textContent = "● REC";
-        record.title = "Gravar o vídeo inteiro e exportar depois";
+        const labels = recordingLabels();
+        record.textContent = labels.record;
+        record.title = labels.record;
         let recorder = null;
-        let cancelled = false;
         let previousLoop = false;
+        let startedAt = 0;
+        let clockTimer = null;
+        let stopPoll = null;
         record.addEventListener("click", async (event) => {
           event.preventDefault();
           event.stopPropagation();
           if (recorder?.state === "recording") {
-            cancelled = true;
             recorder.stop();
-            record.textContent = "● REC";
+            record.disabled = true;
+            record.textContent = labels.uploading;
             return;
           }
           try {
@@ -434,33 +464,61 @@
             const stream = capture();
             const mimeType = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
               .find((type) => MediaRecorder.isTypeSupported(type)) || "";
-            const chunks = [];
-            cancelled = false;
+            const safeTitle = (document.title || "recording").replace(/[<>:\"/\\|?*]+/g, "_").slice(0, 120);
+            const begin = await chrome.runtime.sendMessage({
+              type: "APOCALIPSE_BLOB_BEGIN",
+              request: { fileName: `${safeTitle}.recording.webm`, total: 0, source: location.href, streaming: true },
+            });
+            if (!begin?.uploadId) throw new Error(begin?.error || "recording_begin_failed");
+            let uploadQueue = Promise.resolve();
+            let uploadError = null;
             recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-            recorder.ondataavailable = ({ data }) => { if (data.size) chunks.push(data); };
+            recorder.ondataavailable = ({ data }) => {
+              if (!data.size || uploadError) return;
+              uploadQueue = uploadQueue.then(() => appendBlob(begin.uploadId, data)).catch((error) => { uploadError = error; });
+            };
             recorder.onstop = async () => {
+              if (clockTimer) clearInterval(clockTimer);
+              if (stopPoll) clearInterval(stopPoll);
               stream.getTracks().forEach((track) => track.stop());
               element.loop = previousLoop;
-              if (cancelled || !element.ended) return;
-              record.textContent = "⇧";
-              const safeTitle = (document.title || "recording").replace(/[<>:\"/\\|?*]+/g, "_").slice(0, 120);
-              await uploadBlob(new Blob(chunks, { type: recorder.mimeType || "video/webm" }), `${safeTitle}.recording.webm`);
-              record.textContent = "✓";
-              setTimeout(() => { record.textContent = "● REC"; }, 1800);
+              record.textContent = labels.uploading;
+              try {
+                await uploadQueue;
+                if (uploadError) throw uploadError;
+                const result = await chrome.runtime.sendMessage({ type: "APOCALIPSE_BLOB_END", request: { uploadId: begin.uploadId } });
+                if (result?.error) throw new Error(result.error);
+                record.textContent = `✓ ${labels.done}`;
+              } catch (error) {
+                console.error("Apocalipse recorder upload", error);
+                record.textContent = "⚠";
+              } finally {
+                recorder = null;
+                setTimeout(() => { record.disabled = false; record.textContent = labels.record; }, 2200);
+              }
             };
             element.addEventListener("ended", () => {
               if (recorder?.state === "recording") recorder.stop();
             }, { once: true });
             recorder.start(1000);
             await element.play();
-            record.textContent = "■ CANCELAR";
+            startedAt = Date.now();
+            record.textContent = `${labels.stop} · 00:00`;
+            clockTimer = setInterval(() => {
+              if (recorder?.state === "recording") record.textContent = `${labels.stop} · ${clockLabel((Date.now() - startedAt) / 1000)}`;
+            }, 1000);
+            stopPoll = setInterval(async () => {
+              if (recorder?.state !== "recording") return;
+              const status = await chrome.runtime.sendMessage({ type: "APOCALIPSE_BLOB_STATUS", request: { uploadId: begin.uploadId } }).catch(() => null);
+              if (status?.stop && recorder?.state === "recording") recorder.stop();
+            }, 1000);
           } catch (error) {
             console.error("Apocalipse recorder", error);
             record.textContent = "⚠";
-            setTimeout(() => { record.textContent = "● REC"; }, 2000);
+            record.title = labels.unavailable;
+            setTimeout(() => { record.textContent = labels.record; }, 2000);
           }
         });
-        button.after(record);
       }
       let positionTimer = null;
       const position = () => {
@@ -479,14 +537,15 @@
           ? rect.top + scrollY - button.offsetHeight - 8
           : rect.top + scrollY + 8;
         button.style.top = `${Math.max(6, top)}px`;
-        button.hidden = rect.width < 100 || rect.height < 55;
+        button.hidden = !canDownload || rect.width < 100 || rect.height < 55;
         if (recordButton) {
-          recordButton.style.left = `${Math.max(6, rect.left + scrollX + 90)}px`;
+          recordButton.style.left = `${Math.max(6, rect.left + scrollX + (canDownload ? 104 : 8))}px`;
           recordButton.style.top = `${Math.max(6, top)}px`;
-          recordButton.hidden = button.hidden;
+          recordButton.hidden = rect.width < 100 || rect.height < 55;
         }
       };
       document.documentElement.append(button);
+      if (recordButton) document.documentElement.append(recordButton);
       position();
       addEventListener("scroll", position, { passive: true });
       addEventListener("resize", position, { passive: true });
@@ -498,7 +557,7 @@
     overlayTimer = setTimeout(installOverlays, 250);
   };
   const style = document.createElement("style");
-  style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:1px solid #4c6470!important;border-radius:7px!important;padding:6px 9px!important;background:#111a20e8!important;color:#f3fbff!important;font:600 12px system-ui!important;box-shadow:0 3px 12px #0008!important;backdrop-filter:blur(5px)!important;cursor:pointer!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download:hover{border-color:#31d9ee!important;background:#15262eef!important;box-shadow:0 3px 14px #00cce755!important}.apocalipse-media-record{margin-left:82px!important;border-color:#73404a!important;color:#ffb7c3!important}";
+  style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:1px solid #4c6470!important;border-radius:8px!important;padding:8px 11px!important;background:#111a20e8!important;color:#f3fbff!important;font:700 13px system-ui!important;box-shadow:0 3px 12px #0008!important;backdrop-filter:blur(5px)!important;cursor:pointer!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download:hover{border-color:#31d9ee!important;background:#15262eef!important;box-shadow:0 3px 14px #00cce755!important}.apocalipse-media-download:disabled{cursor:wait!important;opacity:.85!important}.apocalipse-media-record{border-color:#c94a5e!important;color:#ffd8de!important;background:#35151ce8!important}.apocalipse-media-record:hover{border-color:#ff6078!important;background:#4a1922ef!important;box-shadow:0 3px 14px #ff405555!important}";
   document.documentElement.append(style);
   new MutationObserver(scheduleOverlays).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "poster"] });
   scheduleOverlays();

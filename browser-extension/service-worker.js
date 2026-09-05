@@ -284,6 +284,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       .catch((error) => reply({ error: String(error) }));
     return true;
   }
+  if (message?.type === "APOCALIPSE_BLOB_STATUS") {
+    bridgeRequest("/v1/blob/status", { method: "POST", body: JSON.stringify(message.request) }).then(reply)
+      .catch((error) => reply({ error: String(error) }));
+    return true;
+  }
   if (message?.type === "APOCALIPSE_BLOB_END") {
     bridgeRequest("/v1/blob/end", { method: "POST", body: JSON.stringify(message.request) }).then(reply)
       .catch((error) => reply({ error: String(error) }));

@@ -176,6 +176,17 @@ header p {
   letter-spacing: 2px;
   margin: 0 0 6px;
 }
+.page-description {
+  max-width: 680px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.45;
+  text-transform: none;
+}
+.readable-description { color: var(--muted); font-size: 15px; line-height: 1.5; }
 h1 {
   margin: 0;
   font-size: 29px;
@@ -537,7 +548,7 @@ dialog input:focus {
   cursor: pointer;
 }
 .tool-settings { display: grid; gap: 9px; margin-top: 14px; padding: 15px; border: 1px solid var(--line); border-radius: 11px; background: #0b1319; }
-.tool-settings > small { color: var(--muted); }
+.tool-settings > small { color: var(--muted); font-size: 14px; line-height: 1.45; }
 #tool-list { display: grid; gap: 9px; }
 #tool-list label { margin: 0; display: grid; gap: 4px; }
 #tool-list label > span { display: flex; justify-content: space-between; font-weight: 700; }
