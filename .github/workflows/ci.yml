@@ -30,5 +30,14 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
+      - name: Upload formatted Rust sources
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustfmt-${{ matrix.os }}
+          path: |
+            apps/desktop/src-tauri/src/**/*.rs
+            crates/**/*.rs
+          retention-days: 1
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
