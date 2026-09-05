@@ -594,11 +594,27 @@ dialog input:focus {
 #tool-list button, #check-tools { border: 1px solid #29424f; border-radius: 8px; background: #111d25; color: #bcd1d9; padding: 7px 13px; cursor: pointer; }
 #check-tools { justify-self: end; }
 #settings-dialog, #tools-dialog { width: min(1080px, calc(100vw - 40px)); overflow: hidden; }
-#settings-dialog form, #tools-dialog form { display: grid; max-height: calc(100vh - 30px); }
+#settings-dialog form, #tools-dialog form {
+  display: grid;
+  box-sizing: border-box;
+  height: min(850px, calc(100vh - 60px));
+  max-height: none;
+  overflow: hidden;
+}
+#settings-dialog form { grid-template-rows: auto minmax(0, 1fr) auto; }
+#tools-dialog form { grid-template-rows: auto auto minmax(0, 1fr) auto; }
 .settings-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; min-height: 0; }
-.settings-columns > div { min-width: 0; max-height: calc(100vh - 165px); overflow-y: auto; padding-right: 7px; }
+.settings-columns > div { min-width: 0; height: 100%; max-height: none; overflow-y: auto; padding-right: 7px; }
 .settings-columns > div + div { padding-left: 18px; border-left: 1px solid var(--line); }
-#settings-dialog .dialog-actions, #tools-dialog .dialog-actions { margin-top: 12px; }
+#settings-dialog .dialog-actions, #tools-dialog .dialog-actions {
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
 #tools-dialog #tool-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 #tools-dialog .tool-settings { min-height: 0; }
 #settings-dialog label { font-size: 14px; }
@@ -938,7 +954,7 @@ nav button:hover, nav button.active, .download-icon { color: var(--accent); }
   .add-dialog-grid { display: block; }
   .add-dialog-destination { margin-top: 14px; padding-left: 0; border-left: 0; }
   #settings-dialog, #tools-dialog { overflow-y: auto; }
-  #settings-dialog form, #tools-dialog form { display: block; max-height: none; }
+  #settings-dialog form, #tools-dialog form { display: block; height: auto; max-height: none; overflow: visible; }
   .settings-columns { display: block; }
   .settings-columns > div { max-height: none; overflow: visible; padding-right: 0; }
   .settings-columns > div + div { padding-left: 0; border-left: 0; }

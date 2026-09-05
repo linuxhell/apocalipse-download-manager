@@ -535,14 +535,16 @@
           ? document.querySelector("#movie_player") || element.closest("ytd-player") || element
           : element;
         const rect = anchor.getBoundingClientRect();
-        button.style.left = `${Math.max(6, rect.left + scrollX + 8)}px`;
-        const top = isYouTubeVideo
-          ? rect.top + scrollY - button.offsetHeight - 8
-          : rect.top + scrollY + 8;
+        const left = Math.max(6, rect.left + scrollX + 10);
+        const top = rect.top + scrollY + 10;
+        button.style.left = `${left}px`;
         button.style.top = `${Math.max(6, top)}px`;
         button.hidden = !canDownload || rect.width < 100 || rect.height < 55;
         if (recordButton) {
-          recordButton.style.left = `${Math.max(6, rect.left + scrollX + (canDownload ? 104 : 8))}px`;
+          const recordLeft = canDownload && !button.hidden
+            ? left + button.offsetWidth + 8
+            : left;
+          recordButton.style.left = `${recordLeft}px`;
           recordButton.style.top = `${Math.max(6, top)}px`;
           recordButton.hidden = rect.width < 100 || rect.height < 55;
         }
