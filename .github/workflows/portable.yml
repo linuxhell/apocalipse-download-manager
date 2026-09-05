@@ -133,4 +133,11 @@ jobs:
           fi
           gh release view "$tag" >/dev/null 2>&1 ||
             gh release create "$tag" --target "${{ github.sha }}" --generate-notes "${prerelease[@]}"
+          gh release view "$tag" --json assets --jq '.assets[].name' | while IFS= read -r asset; do
+            case "$asset" in
+              apocalipse-chrome-*|apocalipse-edge-*|apocalipse-firefox-*)
+                gh release delete-asset "$tag" "$asset" --yes
+                ;;
+            esac
+          done
           gh release upload "$tag" dist/* --clobber
