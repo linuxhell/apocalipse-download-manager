@@ -166,6 +166,8 @@
           </div>
           <button type="button" class="close" data-dialog-close>×</button>
         </div>
+        <div class="add-dialog-grid">
+        <section class="add-dialog-analysis">
         <label data-i18n="sourceUrl">Source URL</label
         ><input
           id="url"
@@ -188,6 +190,8 @@
           <div><b id="torrent-title"></b><small id="torrent-total"></small></div>
           <div id="torrent-files"></div>
         </section>
+        </section>
+        <section class="add-dialog-destination">
         <label for="file-name" data-i18n="fileName">File name</label>
         <input id="file-name" type="text" required />
         <label for="destination" data-i18n="saveTo">Save to</label>
@@ -216,6 +220,8 @@
           <label for="download-bandwidth-limit" data-i18n="downloadBandwidthLimit">This download limit</label>
           <div class="bandwidth-input"><input id="download-bandwidth-limit" type="number" min="0" max="10240" step="0.1" value="0" /><span data-i18n="megabytesPerSecond">MB/s</span><small data-i18n="unlimited">Unlimited</small></div>
         </details>
+        </section>
+        </div>
         <div class="dialog-actions">
           <button type="button" data-dialog-close data-i18n="cancel">
             Cancel</button
