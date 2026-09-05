@@ -86,6 +86,17 @@ fn default_site_rules() -> Vec<SiteRule> {
             enabled: true,
             connections: 1,
         },
+        SiteRule {
+            id: "pixeldrain".to_owned(),
+            name: "Pixeldrain".to_owned(),
+            hosts: vec![
+                "pixeldrain.com".to_owned(),
+                "*.pixeldrain.com".to_owned(),
+            ],
+            action: SiteRuleAction::SingleConnection,
+            enabled: true,
+            connections: 1,
+        },
     ]
 }
 
@@ -4244,6 +4255,12 @@ mod tests {
                 .unwrap()
                 .id,
             "rapidgator"
+        );
+        assert_eq!(
+            matching_site_rule("https://pixeldrain.com/api/file/FhcC8Fyd?download", &rules)
+                .unwrap()
+                .id,
+            "pixeldrain"
         );
     }
 
