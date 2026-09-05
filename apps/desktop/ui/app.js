@@ -59,6 +59,24 @@ const catalogs = {
     matrixAnalysisFailed: "Analysis failed",
     matrixRollbackDone: "rollback completed",
     matrixRollbackUnavailable: "Rollback unavailable",
+    linkThisComputer: "This computer",
+    linkRemoteControl: "Control remote computer",
+    linkRemoteId: "Remote ID",
+    linkNewPassword: "New password",
+    linkAccessNotice: "Authorized access shows all drives and folders on this computer.",
+    linkConnect: "Connect",
+    linkSelfTest: "Test on this PC",
+    linkSend: "Send →",
+    linkRemoteComputer: "Remote computer",
+    linkDownload: "← Download",
+    linkDrives: "Drives",
+    linkConnected: "Connected",
+    linkConnectionFailed: "Connection failed",
+    linkTransferring: "Transferring…",
+    linkSending: "Sending…",
+    linkCompleted: "Completed",
+    linkTransferFailed: "Transfer failed",
+    linkUploadFailed: "Upload failed",
     linkSendTitle: "Send a file directly",
     linkSendHint: "Create a private, one-use link valid for 10 minutes on your local network.",
     linkChooseFile: "Choose file and create link",
@@ -198,6 +216,24 @@ const catalogs = {
     matrixAnalysisFailed: "Falha na análise",
     matrixRollbackDone: "reversão concluída",
     matrixRollbackUnavailable: "Reversão indisponível",
+    linkThisComputer: "Este computador",
+    linkRemoteControl: "Controlar computador remoto",
+    linkRemoteId: "ID remoto",
+    linkNewPassword: "Nova senha",
+    linkAccessNotice: "O acesso autorizado mostra todas as unidades e pastas deste computador.",
+    linkConnect: "Conectar",
+    linkSelfTest: "Testar neste PC",
+    linkSend: "Enviar →",
+    linkRemoteComputer: "Computador remoto",
+    linkDownload: "← Baixar",
+    linkDrives: "Unidades",
+    linkConnected: "Conectado",
+    linkConnectionFailed: "Falha na conexão",
+    linkTransferring: "Transferindo…",
+    linkSending: "Enviando…",
+    linkCompleted: "Concluído",
+    linkTransferFailed: "Falha na transferência",
+    linkUploadFailed: "Falha no envio",
     linkSendTitle: "Enviar um arquivo diretamente",
     linkSendHint: "Crie um link privado de uso único, válido por 10 minutos na sua rede local.",
     linkChooseFile: "Escolher arquivo e criar link",
@@ -336,6 +372,24 @@ const catalogs = {
     matrixAnalysisFailed: "分析失败",
     matrixRollbackDone: "回滚完成",
     matrixRollbackUnavailable: "回滚不可用",
+    linkThisComputer: "此电脑",
+    linkRemoteControl: "控制远程电脑",
+    linkRemoteId: "远程 ID",
+    linkNewPassword: "新密码",
+    linkAccessNotice: "授权访问会显示此电脑上的所有驱动器和文件夹。",
+    linkConnect: "连接",
+    linkSelfTest: "在此电脑上测试",
+    linkSend: "发送 →",
+    linkRemoteComputer: "远程电脑",
+    linkDownload: "← 下载",
+    linkDrives: "驱动器",
+    linkConnected: "已连接",
+    linkConnectionFailed: "连接失败",
+    linkTransferring: "正在传输…",
+    linkSending: "正在发送…",
+    linkCompleted: "已完成",
+    linkTransferFailed: "传输失败",
+    linkUploadFailed: "发送失败",
     linkSendTitle: "直接发送文件",
     linkSendHint: "创建一个在本地网络中有效十分钟的私密一次性链接。",
     linkChooseFile: "选择文件并创建链接",
@@ -677,6 +731,10 @@ function translate() {
   document.querySelector("#language").value = locale;
   renderDownloads();
   if (activePage === "matrix") refreshMatrix().catch(console.error);
+  if (activePage === "link") {
+    document.querySelector("#link-local-path").textContent = linkLocalPath || t("linkDrives");
+    document.querySelector("#link-remote-path").textContent = linkRemotePath || t("linkDrives");
+  }
 }
 
 async function refreshDownloads() {
@@ -750,7 +808,7 @@ async function openLocalLink(path = "") {
   linkLocalPath = path;
   linkSelectedLocal = "";
   updateLinkTransferButtons();
-  document.querySelector("#link-local-path").textContent = path || "Unidades";
+  document.querySelector("#link-local-path").textContent = path || t("linkDrives");
   renderLinkFiles("#link-local-files", await invoke("list_local_link_files", { path }), openLocalLink, (entry) => {
     linkSelectedLocal = entry.directory ? "" : entry.path;
     updateLinkTransferButtons();
@@ -760,7 +818,7 @@ async function openRemoteLink(path = "") {
   linkRemotePath = path;
   linkSelectedRemote = "";
   updateLinkTransferButtons();
-  document.querySelector("#link-remote-path").textContent = path || "Unidades";
+  document.querySelector("#link-remote-path").textContent = path || t("linkDrives");
   const entries = await invoke("list_remote_link_files", { id: linkRemoteId, password: linkRemotePassword, path });
   renderLinkFiles("#link-remote-files", entries, openRemoteLink, (entry) => {
     linkSelectedRemote = entry.directory ? "" : entry.path;
@@ -781,8 +839,8 @@ document.querySelector("#link-new-password").onclick = async () => {
 document.querySelector("#link-connect").onclick = async () => {
   linkRemoteId = document.querySelector("#link-remote-id").value.trim();
   linkRemotePassword = document.querySelector("#link-remote-password").value.trim();
-  try { await openRemoteLink(); document.querySelector("#link-status").textContent = "Conectado"; }
-  catch (error) { document.querySelector("#link-status").textContent = `Falha: ${error}`; }
+  try { await openRemoteLink(); document.querySelector("#link-status").textContent = t("linkConnected"); }
+  catch (error) { document.querySelector("#link-status").textContent = `${t("linkConnectionFailed")}: ${error}`; }
 };
 document.querySelector("#link-self-test").onclick = async () => {
   const identity = await loadLinkIdentity();
@@ -795,24 +853,24 @@ document.querySelector("#link-remote-up").onclick = () => openRemoteLink(linkPar
 document.querySelector("#link-download-remote").onclick = async () => {
   if (!linkSelectedRemote) return;
   const status = document.querySelector("#link-status");
-  status.textContent = "Transferindo…";
+  status.textContent = t("linkTransferring");
   try {
     const destination = await invoke("download_remote_link_file", { id: linkRemoteId, password: linkRemotePassword, path: linkSelectedRemote });
-    status.textContent = `Concluído: ${destination}`;
-  } catch (error) { if (`${error}` !== "cancelled") status.textContent = `Falha: ${error}`; }
+    status.textContent = `${t("linkCompleted")}: ${destination}`;
+  } catch (error) { if (`${error}` !== "cancelled") status.textContent = `${t("linkTransferFailed")}: ${error}`; }
 };
 document.querySelector("#link-upload-local").onclick = async () => {
   if (!linkSelectedLocal || !linkRemoteId || !linkRemotePath) return;
   const status = document.querySelector("#link-status");
   const button = document.querySelector("#link-upload-local");
-  status.textContent = "Enviando…";
+  status.textContent = t("linkSending");
   button.disabled = true;
   try {
     const remotePath = await invoke("upload_remote_link_file", { id: linkRemoteId, password: linkRemotePassword, remoteDirectory: linkRemotePath, localPath: linkSelectedLocal });
-    status.textContent = `Concluído: ${remotePath}`;
+    status.textContent = `${t("linkCompleted")}: ${remotePath}`;
     await openRemoteLink(linkRemotePath);
   } catch (error) {
-    status.textContent = `Falha no envio: ${error}`;
+    status.textContent = `${t("linkUploadFailed")}: ${error}`;
   } finally {
     updateLinkTransferButtons();
   }
