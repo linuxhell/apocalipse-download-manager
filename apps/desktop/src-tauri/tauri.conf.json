@@ -11,8 +11,8 @@
     "windows": [{
       "label": "main",
       "title": "Apocalipse Download Manager",
-      "width": 1300,
-      "height": 900,
+      "width": 1180,
+      "height": 780,
       "minWidth": 900,
       "minHeight": 600,
       "center": true,
