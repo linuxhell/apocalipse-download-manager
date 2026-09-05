@@ -666,8 +666,9 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     const heading = button.querySelector("b")?.textContent || t("downloads");
     document.querySelector("header h1").textContent = heading;
     document.querySelector("#apocalipse-link-panel").hidden = activePage !== "link";
-    document.querySelector(".metrics").hidden = activePage === "link";
-    document.querySelector(".panel").hidden = activePage === "link";
+    document.querySelector("#matrix-panel").hidden = activePage !== "matrix";
+    document.querySelector(".metrics").hidden = ["link", "matrix"].includes(activePage);
+    document.querySelector(".panel").hidden = ["link", "matrix"].includes(activePage);
     renderDownloads();
   };
 });
@@ -758,6 +759,30 @@ document.querySelector("#link-upload-local").onclick = async () => {
     await openRemoteLink(linkRemotePath);
   } catch (error) { if (`${error}` !== "cancelled") status.textContent = `Falha: ${error}`; }
 };
+async function refreshMatrix() {
+  const status = await invoke("matrix_analyze");
+  document.querySelector("#matrix-summary").textContent = `${status.activeRules} regras ativas · ${status.proposals.length} propostas`;
+  const root = document.querySelector("#matrix-proposals");
+  root.replaceChildren();
+  if (!status.proposals.length) {
+    root.append(Object.assign(document.createElement("p"), { textContent: "Nenhuma nova regra necessária." }));
+    return;
+  }
+  for (const proposal of status.proposals) {
+    const row = document.createElement("div");
+    row.className = "matrix-proposal";
+    const info = document.createElement("span");
+    info.append(Object.assign(document.createElement("b"), { textContent: proposal.host }), Object.assign(document.createElement("small"), { textContent: proposal.reason }));
+    const confidence = Object.assign(document.createElement("b"), { textContent: `${proposal.confidence}%` });
+    const apply = Object.assign(document.createElement("button"), { type: "button", textContent: "Aplicar regra" });
+    apply.onclick = async () => { apply.disabled = true; try { await invoke("matrix_apply_rule", { host: proposal.host }); await refreshMatrix(); } catch (error) { console.error(error); } finally { apply.disabled = false; } };
+    row.append(info, confidence, apply);
+    root.append(row);
+  }
+}
+document.querySelector('[data-page="matrix"]').addEventListener("click", () => refreshMatrix().catch(console.error));
+document.querySelector("#matrix-scan").onclick = () => refreshMatrix().catch(console.error);
+document.querySelector("#matrix-rollback").onclick = async () => { try { await invoke("matrix_rollback"); await refreshMatrix(); } catch (error) { console.error(error); } };
 function updateLogEditorControls() {
   const configured = Boolean(document.querySelector("#log-editor").value.trim());
   document.querySelector("#remove-log-editor").disabled = !configured;

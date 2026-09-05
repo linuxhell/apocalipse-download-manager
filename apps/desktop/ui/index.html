@@ -23,6 +23,7 @@
           <span>◉</span><b data-i18n="torrents">Torrents</b>
         </button>
         <button data-page="link"><span>↔</span><b>Apocalipse Link</b></button>
+        <button data-page="matrix"><span>◆</span><b>Matrix Ultimate v1 AI</b></button>
         <button data-page="tools">
           <span>⌁</span><b data-i18n="tools">Tools</b>
         </button>
@@ -89,6 +90,11 @@
         <div class="link-connect"><b>Controlar computador remoto</b><label>ID remoto<input id="link-remote-id" placeholder="192.168.1.10:17655" /></label><label>Senha<input id="link-remote-password" /></label><div class="path-picker"><button id="link-connect" class="primary" type="button">Conectar</button><button id="link-self-test" type="button">Testar neste PC</button></div><small id="link-status"></small></div>
         <div class="link-files"><header><b>Este computador</b><span><button id="link-upload-local" type="button">Enviar →</button> <button id="link-local-up" type="button">↑</button></span></header><small id="link-local-path">/</small><div id="link-local-files"></div></div>
         <div class="link-files"><header><b>Computador remoto</b><span><button id="link-download-remote" type="button" disabled>← Baixar</button> <button id="link-remote-up" type="button">↑</button></span></header><small id="link-remote-path">/</small><div id="link-remote-files"></div></div>
+      </section>
+      <section id="matrix-panel" class="matrix-panel" hidden>
+        <header><div><b>Matrix Ultimate v1 AI</b><small id="matrix-summary"></small></div><span><button id="matrix-rollback" type="button">Rollback</button><button id="matrix-scan" class="primary" type="button">Analisar falhas</button></span></header>
+        <p>A Matrix analisa falhas locais e propõe regras seguras. Nenhuma regra executa código de sites.</p>
+        <div id="matrix-proposals"></div>
       </section>
       <section class="panel">
         <div class="toolbar">

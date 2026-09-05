@@ -657,6 +657,15 @@ footer .bridge-connected i {
 .link-file:hover { background:var(--surface-2); }
 .link-file.selected { background:color-mix(in srgb, var(--accent) 22%, var(--surface-2)); outline:1px solid var(--accent); }
 .link-file small { color:var(--muted); }
+.matrix-panel { display:grid; gap:14px; padding:20px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+.matrix-panel[hidden] { display:none; }
+.matrix-panel > header { display:flex; justify-content:space-between; align-items:center; gap:14px; }
+.matrix-panel > header div { display:grid; gap:5px; }
+.matrix-panel > header small,.matrix-panel > p { color:var(--muted); }
+#matrix-proposals { display:grid; gap:8px; }
+.matrix-proposal { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:12px; padding:12px; border:1px solid var(--line); border-radius:9px; }
+.matrix-proposal span { display:grid; gap:4px; }
+.matrix-proposal small { color:var(--muted); }
 .download-row {
   display: grid;
   grid-template-columns: 22px 42px minmax(0, 1fr) auto;

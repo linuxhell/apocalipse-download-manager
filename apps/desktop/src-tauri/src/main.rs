@@ -1701,6 +1701,72 @@ fn reset_site_rules(state: State<'_, AppState>) -> Result<String, String> {
     get_site_rules(state)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MatrixRuleProposal {
+    host: String,
+    failures: usize,
+    confidence: u8,
+    reason: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MatrixStatus {
+    version: String,
+    active_rules: usize,
+    proposals: Vec<MatrixRuleProposal>,
+}
+
+#[tauri::command]
+fn matrix_analyze(state: State<'_, AppState>) -> Result<MatrixStatus, String> {
+    let queue = state.queue.lock().map_err(|error| error.to_string())?;
+    let rules = state.site_rules.lock().map_err(|error| error.to_string())?;
+    let mut failures = HashMap::<String, usize>::new();
+    for task in queue.iter().filter(|task| matches!(&task.state, DownloadState::Failed { .. })) {
+        if let Ok(url) = url::Url::parse(&task.source) {
+            if let Some(host) = url.host_str() {
+                *failures.entry(host.to_ascii_lowercase()).or_default() += 1;
+            }
+        }
+    }
+    let mut proposals = failures.into_iter().filter(|(host, _)| !rules.iter().any(|rule| rule.hosts.iter().any(|candidate| candidate.trim_start_matches("*.").eq_ignore_ascii_case(host)))).map(|(host, count)| MatrixRuleProposal {
+        confidence: (55 + count.saturating_sub(1).min(4) * 10) as u8,
+        reason: format!("{count} failed download(s); retry with one conservative connection"),
+        host,
+        failures: count,
+    }).collect::<Vec<_>>();
+    proposals.sort_by(|left, right| right.failures.cmp(&left.failures).then_with(|| left.host.cmp(&right.host)));
+    Ok(MatrixStatus { version: "Matrix Ultimate v1 AI".to_owned(), active_rules: rules.iter().filter(|rule| rule.enabled).count(), proposals })
+}
+
+#[tauri::command]
+fn matrix_apply_rule(state: State<'_, AppState>, host: String) -> Result<String, String> {
+    let host = host.trim().to_ascii_lowercase();
+    if host.is_empty() || host.len() > 253 || !host.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '-')) { return Err("invalid_matrix_host".to_owned()); }
+    let mut rules = state.site_rules.lock().map_err(|error| error.to_string())?.clone();
+    if rules.iter().any(|rule| rule.hosts.iter().any(|candidate| candidate.trim_start_matches("*.").eq_ignore_ascii_case(&host))) { return Err("site_rule_already_exists".to_owned()); }
+    let id_host = host.replace('.', "-");
+    rules.push(SiteRule { id: format!("matrix-{id_host}"), name: format!("Matrix: {host}"), hosts: vec![host.clone(), format!("*.{host}")], action: SiteRuleAction::SingleConnection, enabled: true, connections: 1 });
+    if rules.len() > 100 || !rules.iter().all(valid_site_rule) { return Err("invalid_site_rules".to_owned()); }
+    save_site_rules(&state, &rules)?;
+    *state.site_rules.lock().map_err(|error| error.to_string())? = rules;
+    diagnostic_log(&state, "INFO", "matrix.rule_applied", &format!("host={host} action=single_connection"));
+    Ok(host)
+}
+
+#[tauri::command]
+fn matrix_rollback(state: State<'_, AppState>) -> Result<String, String> {
+    let backup = state.site_rules_path.with_extension("backup.json");
+    let data = fs::read(&backup).map_err(|error| error.to_string())?;
+    let rules = serde_json::from_slice::<Vec<SiteRule>>(&data).map_err(|error| error.to_string())?;
+    if rules.is_empty() || !rules.iter().all(valid_site_rule) { return Err("invalid_site_rules_backup".to_owned()); }
+    save_site_rules(&state, &rules)?;
+    *state.site_rules.lock().map_err(|error| error.to_string())? = rules;
+    diagnostic_log(&state, "INFO", "matrix.rollback", "site_rules_backup_restored");
+    get_site_rules(state)
+}
+
 async fn read_process_tail(
     mut stream: impl tokio::io::AsyncRead + Unpin,
     progress: Option<(tauri::AppHandle, DownloadId, DownloadKind)>,
@@ -3962,6 +4028,9 @@ fn main() {
             get_site_rules,
             set_site_rules,
             reset_site_rules,
+            matrix_analyze,
+            matrix_apply_rule,
+            matrix_rollback,
             pause_download,
             resume_download,
             redownload_downloads,
