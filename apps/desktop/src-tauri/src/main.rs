@@ -8,7 +8,7 @@ use apocalipse_core::{
 use serde::{Deserialize, Serialize};
 use futures_util::StreamExt;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     fs::OpenOptions,
     io::{Read, Write},
@@ -155,16 +155,16 @@ fn matching_site_rule(url: &str, rules: &[SiteRule]) -> Option<SiteRule> {
         .iter()
         .find(|rule| {
             rule.enabled
-                && rule.hosts.iter().any(|pattern| {
-                    let pattern = pattern.trim().to_ascii_lowercase();
-                    pattern
-                        .strip_prefix("*.")
-                        .map_or(host == pattern, |suffix| {
-                            host == suffix || host.ends_with(&format!(".{suffix}"))
-                        })
-                })
+                && rule.hosts.iter().any(|pattern| host_matches_pattern(&host, pattern))
         })
         .cloned()
+}
+
+fn host_matches_pattern(host: &str, pattern: &str) -> bool {
+    let pattern = pattern.trim().to_ascii_lowercase();
+    pattern.strip_prefix("*.").map_or(host == pattern, |suffix| {
+        host == suffix || host.ends_with(&format!(".{suffix}"))
+    })
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -1750,32 +1750,103 @@ struct MatrixRuleProposal {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct MatrixAppliedRule {
+    id: String,
+    name: String,
+    host: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct MatrixStatus {
     version: String,
     active_rules: usize,
     proposals: Vec<MatrixRuleProposal>,
+    applied_rules: Vec<MatrixAppliedRule>,
 }
 
 #[tauri::command]
 fn matrix_analyze(state: State<'_, AppState>) -> Result<MatrixStatus, String> {
     let queue = state.queue.lock().map_err(|error| error.to_string())?;
     let rules = state.site_rules.lock().map_err(|error| error.to_string())?;
-    let mut failures = HashMap::<String, usize>::new();
+    let mut failures = HashMap::<String, HashSet<String>>::new();
     for task in queue.iter().filter(|task| matches!(&task.state, DownloadState::Failed { .. })) {
         if let Ok(url) = url::Url::parse(&task.source) {
             if let Some(host) = url.host_str() {
-                *failures.entry(host.to_ascii_lowercase()).or_default() += 1;
+                failures
+                    .entry(host.to_ascii_lowercase())
+                    .or_default()
+                    .insert(task.id.to_string());
             }
         }
     }
-    let mut proposals = failures.into_iter().filter(|(host, _)| !rules.iter().any(|rule| rule.hosts.iter().any(|candidate| candidate.trim_start_matches("*.").eq_ignore_ascii_case(host)))).map(|(host, count)| MatrixRuleProposal {
-        confidence: (55 + count.saturating_sub(1).min(4) * 10) as u8,
-        reason: format!("{count} failed download(s); retry with one conservative connection"),
-        host,
-        failures: count,
-    }).collect::<Vec<_>>();
+
+    let mut log = fs::read_to_string(state.log_path.with_extension("log.1")).unwrap_or_default();
+    log.push_str(&fs::read_to_string(&state.log_path).unwrap_or_default());
+    let mut task_hosts = HashMap::<String, String>::new();
+    for line in log.lines() {
+        if !line.contains("task.enqueued") {
+            continue;
+        }
+        let task = line
+            .split_whitespace()
+            .find_map(|field| field.strip_prefix("task="));
+        let source = line
+            .split_whitespace()
+            .find_map(|field| field.strip_prefix("url="));
+        if let (Some(task), Some(source)) = (task, source)
+            && let Some(host) = host_from_url(source)
+        {
+            task_hosts.insert(task.to_owned(), host);
+        }
+    }
+    for line in log.lines().filter(|line| line.contains("http.failed")) {
+        let task = line
+            .split_whitespace()
+            .find_map(|field| field.strip_prefix("task="));
+        if let Some(task) = task
+            && let Some(host) = task_hosts.get(task)
+        {
+            failures
+                .entry(host.clone())
+                .or_default()
+                .insert(task.to_owned());
+        }
+    }
+
+    let mut proposals = failures
+        .into_iter()
+        .filter(|(host, _)| {
+            matching_site_rule(&format!("https://{host}/"), &rules).is_none()
+        })
+        .map(|(host, task_ids)| {
+            let count = task_ids.len();
+            MatrixRuleProposal {
+                confidence: (55 + count.saturating_sub(1).min(4) * 10) as u8,
+                reason: format!(
+                    "{count} failed download(s); retry with one conservative connection"
+                ),
+                host,
+                failures: count,
+            }
+        })
+        .collect::<Vec<_>>();
     proposals.sort_by(|left, right| right.failures.cmp(&left.failures).then_with(|| left.host.cmp(&right.host)));
-    Ok(MatrixStatus { version: "Matrix Ultimate v1 AI".to_owned(), active_rules: rules.iter().filter(|rule| rule.enabled).count(), proposals })
+    let applied_rules = rules
+        .iter()
+        .filter(|rule| rule.enabled && rule.action == SiteRuleAction::SingleConnection)
+        .map(|rule| MatrixAppliedRule {
+            id: rule.id.clone(),
+            name: rule.name.clone(),
+            host: rule.hosts.first().cloned().unwrap_or_default(),
+        })
+        .collect();
+    Ok(MatrixStatus {
+        version: "Matrix Ultimate v2 AI".to_owned(),
+        active_rules: rules.iter().filter(|rule| rule.enabled).count(),
+        proposals,
+        applied_rules,
+    })
 }
 
 #[tauri::command]
@@ -1783,9 +1854,18 @@ fn matrix_apply_rule(state: State<'_, AppState>, host: String) -> Result<String,
     let host = host.trim().to_ascii_lowercase();
     if host.is_empty() || host.len() > 253 || !host.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '-')) { return Err("invalid_matrix_host".to_owned()); }
     let mut rules = state.site_rules.lock().map_err(|error| error.to_string())?.clone();
-    if rules.iter().any(|rule| rule.hosts.iter().any(|candidate| candidate.trim_start_matches("*.").eq_ignore_ascii_case(&host))) { return Err("site_rule_already_exists".to_owned()); }
-    let id_host = host.replace('.', "-");
-    rules.push(SiteRule { id: format!("matrix-{id_host}"), name: format!("Matrix: {host}"), hosts: vec![host.clone(), format!("*.{host}")], action: SiteRuleAction::SingleConnection, enabled: true, connections: 1 });
+    if let Some(rule) = rules.iter_mut().find(|rule| {
+        rule.hosts
+            .iter()
+            .any(|candidate| host_matches_pattern(&host, candidate))
+    }) {
+        rule.enabled = true;
+        rule.action = SiteRuleAction::SingleConnection;
+        rule.connections = 1;
+    } else {
+        let id_host = host.replace('.', "-");
+        rules.push(SiteRule { id: format!("matrix-{id_host}"), name: format!("Matrix: {host}"), hosts: vec![host.clone(), format!("*.{host}")], action: SiteRuleAction::SingleConnection, enabled: true, connections: 1 });
+    }
     if rules.len() > 100 || !rules.iter().all(valid_site_rule) { return Err("invalid_site_rules".to_owned()); }
     save_site_rules(&state, &rules)?;
     *state.site_rules.lock().map_err(|error| error.to_string())? = rules;
@@ -1794,15 +1874,17 @@ fn matrix_apply_rule(state: State<'_, AppState>, host: String) -> Result<String,
 }
 
 #[tauri::command]
-fn matrix_rollback(state: State<'_, AppState>) -> Result<String, String> {
-    let backup = state.site_rules_path.with_extension("backup.json");
-    let data = fs::read(&backup).map_err(|error| error.to_string())?;
-    let rules = serde_json::from_slice::<Vec<SiteRule>>(&data).map_err(|error| error.to_string())?;
-    if rules.is_empty() || !rules.iter().all(valid_site_rule) { return Err("invalid_site_rules_backup".to_owned()); }
+fn matrix_rollback_rule(state: State<'_, AppState>, id: String) -> Result<String, String> {
+    let mut rules = state.site_rules.lock().map_err(|error| error.to_string())?.clone();
+    let rule = rules
+        .iter_mut()
+        .find(|rule| rule.id == id && rule.action == SiteRuleAction::SingleConnection)
+        .ok_or_else(|| "matrix_rule_not_found".to_owned())?;
+    rule.enabled = false;
     save_site_rules(&state, &rules)?;
     *state.site_rules.lock().map_err(|error| error.to_string())? = rules;
-    diagnostic_log(&state, "INFO", "matrix.rollback", "site_rules_backup_restored");
-    get_site_rules(state)
+    diagnostic_log(&state, "INFO", "matrix.rule_rolled_back", &format!("id={id}"));
+    Ok(id)
 }
 
 async fn read_process_tail(
@@ -4086,7 +4168,7 @@ fn main() {
             reset_site_rules,
             matrix_analyze,
             matrix_apply_rule,
-            matrix_rollback,
+            matrix_rollback_rule,
             pause_download,
             resume_download,
             redownload_downloads,

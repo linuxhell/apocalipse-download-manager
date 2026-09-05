@@ -101,6 +101,20 @@ nav button span {
 nav button b {
   font-weight: 550;
 }
+.matrix-alert {
+  min-width: 21px;
+  height: 21px;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ff9d2e;
+  color: #111;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 21px;
+  text-align: center;
+}
 nav button:hover,
 nav button.active {
   background: linear-gradient(90deg, #123843, #101a22);
@@ -665,7 +679,9 @@ footer .bridge-connected i {
 .matrix-panel > header div { display:grid; gap:5px; }
 .matrix-panel > header small,.matrix-panel > p { color:var(--muted); }
 #matrix-proposals { display:grid; gap:8px; }
+.matrix-section-title { margin-top:8px; }
 .matrix-proposal { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:12px; padding:12px; border:1px solid var(--line); border-radius:9px; }
+.matrix-proposal.matrix-applied { grid-template-columns:minmax(0,1fr) auto; }
 .matrix-proposal span { display:grid; gap:4px; }
 .matrix-proposal small { color:var(--muted); }
 .download-row {

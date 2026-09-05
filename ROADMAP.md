@@ -11,7 +11,7 @@
 - Native tray, themes, clipboard detection and protocol/file associations
 - Per-tool updates for yt-dlp, FFmpeg, ffprobe, aria2, N_m3u8DL-RE and QuickJS
 - Apocalipse Link authenticated local/remote file browsing and transfers
-- Matrix Ultimate v1 AI local diagnostics and reversible site rules
+- Matrix Ultimate v2 AI continuous diagnostics, correction proposals and per-site rollback
 - CI on Windows, Linux and macOS
 
 ## Next — reliability and security

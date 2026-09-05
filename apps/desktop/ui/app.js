@@ -45,14 +45,18 @@ const catalogs = {
     retry: "Retry",
     openFolder: "Open folder",
     preview: "Preview",
-    matrixPowered: "Powered by Matrix Ultimate v1 AI",
+    matrixPowered: "Powered by Matrix Ultimate v2 AI",
     matrixRollback: "Rollback",
     matrixAnalyze: "Analyze failures",
-    matrixDescription: "Matrix analyzes local failures and proposes safe rules. No rule executes website code.",
+    matrixDescription: "Matrix continuously monitors local failures and proposes safe rules. No rule executes website code.",
     matrixSummary: "{active} active rules · {proposals} proposals",
     matrixNoProposal: "No new rule is required.",
     matrixReason: "{count} failed download(s); retry with one conservative connection",
     matrixApply: "Apply rule",
+    matrixConfirm: "Apply the isolated correction for {host}? You can roll it back afterward.",
+    matrixAvailable: "{count} correction(s) available",
+    matrixApplied: "Applied corrections",
+    matrixRollbackConfirm: "Roll back the correction for {host}? Other corrections will remain active.",
     matrixAnalyzing: "Analyzing…",
     matrixChecking: "Checking download failures…",
     matrixDone: "analysis completed now",
@@ -202,14 +206,18 @@ const catalogs = {
     retry: "Tentar novamente",
     openFolder: "Abrir pasta",
     preview: "Pré-visualizar",
-    matrixPowered: "Alimentada por Matrix Ultimate v1 AI",
+    matrixPowered: "Alimentada por Matrix Ultimate v2 AI",
     matrixRollback: "Reverter",
     matrixAnalyze: "Analisar falhas",
-    matrixDescription: "A Matrix analisa falhas locais e propõe regras seguras. Nenhuma regra executa código de sites.",
+    matrixDescription: "A Matrix monitora continuamente as falhas locais e propõe regras seguras. Nenhuma regra executa código de sites.",
     matrixSummary: "{active} regras ativas · {proposals} propostas",
     matrixNoProposal: "Nenhuma nova regra necessária.",
     matrixReason: "{count} download(s) com falha; tentar novamente com uma conexão conservadora",
     matrixApply: "Aplicar regra",
+    matrixConfirm: "Aplicar a correção isolada para {host}? Depois você poderá revertê-la.",
+    matrixAvailable: "{count} correção(ões) disponível(is)",
+    matrixApplied: "Correções aplicadas",
+    matrixRollbackConfirm: "Reverter a correção de {host}? As outras correções continuarão ativas.",
     matrixAnalyzing: "Analisando…",
     matrixChecking: "Verificando falhas de download…",
     matrixDone: "análise concluída agora",
@@ -358,14 +366,18 @@ const catalogs = {
     retry: "重试",
     openFolder: "打开文件夹",
     preview: "预览",
-    matrixPowered: "由 Matrix Ultimate v1 AI 驱动",
+    matrixPowered: "由 Matrix Ultimate v2 AI 驱动",
     matrixRollback: "回滚",
     matrixAnalyze: "分析故障",
-    matrixDescription: "Matrix 会分析本地故障并建议安全规则。任何规则都不会执行网站代码。",
+    matrixDescription: "Matrix 会持续监控本地故障并建议安全规则。任何规则都不会执行网站代码。",
     matrixSummary: "{active} 条启用规则 · {proposals} 条建议",
     matrixNoProposal: "无需添加新规则。",
     matrixReason: "{count} 个下载失败；使用一个保守连接重试",
     matrixApply: "应用规则",
+    matrixConfirm: "是否为 {host} 应用隔离修复？之后可以回滚。",
+    matrixAvailable: "有 {count} 个可用修复",
+    matrixApplied: "已应用的修复",
+    matrixRollbackConfirm: "是否回滚 {host} 的修复？其他修复将保持启用。",
     matrixAnalyzing: "正在分析…",
     matrixChecking: "正在检查下载故障…",
     matrixDone: "分析刚刚完成",
@@ -878,25 +890,60 @@ document.querySelector("#link-upload-local").onclick = async () => {
 async function refreshMatrix() {
   const status = await invoke("matrix_analyze");
   document.querySelector("#matrix-summary").textContent = tf("matrixSummary", { active: status.activeRules, proposals: status.proposals.length });
+  const alert = document.querySelector("#matrix-alert");
+  alert.hidden = !status.proposals.length;
+  alert.textContent = status.proposals.length;
+  alert.title = tf("matrixAvailable", { count: status.proposals.length });
   const root = document.querySelector("#matrix-proposals");
   root.replaceChildren();
   if (!status.proposals.length) {
     root.append(Object.assign(document.createElement("p"), { textContent: t("matrixNoProposal") }));
-    return;
+  } else {
+    for (const proposal of status.proposals) {
+      const row = document.createElement("div");
+      row.className = "matrix-proposal";
+      const info = document.createElement("span");
+      info.append(Object.assign(document.createElement("b"), { textContent: proposal.host }), Object.assign(document.createElement("small"), { textContent: tf("matrixReason", { count: proposal.failures }) }));
+      const confidence = Object.assign(document.createElement("b"), { textContent: `${proposal.confidence}%` });
+      const apply = Object.assign(document.createElement("button"), { type: "button", textContent: t("matrixApply") });
+      apply.onclick = async () => {
+        if (!window.confirm(tf("matrixConfirm", { host: proposal.host }))) return;
+        apply.disabled = true;
+        try { await invoke("matrix_apply_rule", { host: proposal.host }); await refreshMatrix(); }
+        catch (error) { console.error(error); }
+        finally { apply.disabled = false; }
+      };
+      row.append(info, confidence, apply);
+      root.append(row);
+    }
   }
-  for (const proposal of status.proposals) {
-    const row = document.createElement("div");
-    row.className = "matrix-proposal";
-    const info = document.createElement("span");
-    info.append(Object.assign(document.createElement("b"), { textContent: proposal.host }), Object.assign(document.createElement("small"), { textContent: tf("matrixReason", { count: proposal.failures }) }));
-    const confidence = Object.assign(document.createElement("b"), { textContent: `${proposal.confidence}%` });
-    const apply = Object.assign(document.createElement("button"), { type: "button", textContent: t("matrixApply") });
-    apply.onclick = async () => { apply.disabled = true; try { await invoke("matrix_apply_rule", { host: proposal.host }); await refreshMatrix(); } catch (error) { console.error(error); } finally { apply.disabled = false; } };
-    row.append(info, confidence, apply);
-    root.append(row);
+  if (status.appliedRules.length) {
+    const title = Object.assign(document.createElement("b"), { className: "matrix-section-title", textContent: t("matrixApplied") });
+    root.append(title);
+    for (const rule of status.appliedRules) {
+      const row = document.createElement("div");
+      row.className = "matrix-proposal matrix-applied";
+      const info = document.createElement("span");
+      info.append(
+        Object.assign(document.createElement("b"), { textContent: rule.name }),
+        Object.assign(document.createElement("small"), { textContent: rule.host }),
+      );
+      const rollback = Object.assign(document.createElement("button"), { type: "button", textContent: t("matrixRollback") });
+      rollback.onclick = async () => {
+        if (!window.confirm(tf("matrixRollbackConfirm", { host: rule.host }))) return;
+        rollback.disabled = true;
+        try { await invoke("matrix_rollback_rule", { id: rule.id }); await refreshMatrix(); }
+        catch (error) { console.error(error); }
+        finally { rollback.disabled = false; }
+      };
+      row.append(info, rollback);
+      root.append(row);
+    }
   }
 }
 document.querySelector('[data-page="matrix"]').addEventListener("click", () => refreshMatrix().catch(console.error));
+refreshMatrix().catch(console.error);
+setInterval(() => refreshMatrix().catch(console.error), 5000);
 document.querySelector("#matrix-scan").onclick = async () => {
   const button = document.querySelector("#matrix-scan");
   const summary = document.querySelector("#matrix-summary");
@@ -911,16 +958,6 @@ document.querySelector("#matrix-scan").onclick = async () => {
   } finally {
     button.disabled = false;
     button.textContent = t("matrixAnalyze");
-  }
-};
-document.querySelector("#matrix-rollback").onclick = async () => {
-  const summary = document.querySelector("#matrix-summary");
-  try {
-    await invoke("matrix_rollback");
-    await refreshMatrix();
-    summary.textContent += ` · ${t("matrixRollbackDone")}`;
-  } catch (error) {
-    summary.textContent = `${t("matrixRollbackUnavailable")}: ${error}`;
   }
 };
 function updateLogEditorControls() {
