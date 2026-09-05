@@ -170,6 +170,8 @@ struct UserSettings {
     dns_enabled: bool,
     #[serde(default)]
     dns_servers: Vec<std::net::IpAddr>,
+    #[serde(default)]
+    associations: HashMap<String, bool>,
 }
 
 const fn default_max_active() -> usize {
@@ -203,6 +205,7 @@ impl Default for UserSettings {
             proxy_password: None,
             dns_enabled: false,
             dns_servers: Vec::new(),
+            associations: HashMap::new(),
         }
     }
 }
@@ -303,6 +306,14 @@ struct AutostartStatus {
 #[derive(Serialize)]
 struct ClipboardStatus {
     enabled: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AssociationStatus {
+    id: String,
+    enabled: bool,
+    supported: bool,
 }
 
 #[derive(Serialize)]
@@ -617,7 +628,8 @@ fn redact_url(url: &str) -> String {
     };
     let base = if let Some(scheme_end) = base.find("://") {
         let authority_start = scheme_end + 3;
-        match base[authority_start..].find('@') {
+        let authority_end = base[authority_start..].find('/').map_or(base.len(), |index| authority_start + index);
+        match base[authority_start..authority_end].find('@') {
             Some(at) => format!(
                 "{}{}",
                 &base[..authority_start],
@@ -1122,7 +1134,7 @@ async fn run_external_download(
                 command
             }
         }
-        DownloadKind::Torrent | DownloadKind::Magnet => {
+        DownloadKind::Torrent | DownloadKind::Magnet | DownloadKind::Ftp => {
             let mut command = tokio::process::Command::new(&tools.3);
             if !tools.8.is_empty() {
                 command.arg(format!(
@@ -2628,6 +2640,37 @@ fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<
     Ok(())
 }
 
+fn association_id(source: &str) -> Option<&'static str> {
+    let lower = source.to_ascii_lowercase();
+    if lower.starts_with("magnet:") { Some("magnet") }
+    else if lower.starts_with("sftp:") { Some("sftp") }
+    else if lower.starts_with("ftp:") { Some("ftp") }
+    else {
+        let path = lower.split(['?', '#']).next().unwrap_or(&lower);
+        if path.ends_with(".torrent") { Some("torrent") }
+        else if path.ends_with(".m3u8") { Some("m3u8") }
+        else { None }
+    }
+}
+
+fn queue_associated_source(app: &tauri::AppHandle, source: String) -> Result<(), String> {
+    let id = association_id(&source).ok_or_else(|| "unsupported_association".to_owned())?;
+    let enabled = app.state::<AppState>().settings.lock().map_err(|error| error.to_string())?
+        .associations.get(id).copied().unwrap_or(false);
+    if !enabled { return Ok(()); }
+    queue_from_bridge(app, BridgeDownload {
+        url: source,
+        file_name: None,
+        page_url: None,
+        duration: None,
+        cookie_header: None,
+        user_agent: None,
+        request_method: None,
+        request_body: None,
+        request_content_type: None,
+    })
+}
+
 #[tauri::command]
 fn take_bridge_download(
     state: State<'_, AppState>,
@@ -3015,6 +3058,111 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<AutostartStatus
     get_autostart(app)
 }
 
+const ASSOCIATION_IDS: [&str; 5] = ["m3u8", "torrent", "magnet", "ftp", "sftp"];
+
+#[cfg(target_os = "windows")]
+fn configure_association(id: &str, enabled: bool, _: &HashMap<String, bool>) -> Result<(), String> {
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let root = if matches!(id, "m3u8" | "torrent") {
+        format!(r"HKCU\Software\Classes\.{id}")
+    } else {
+        format!(r"HKCU\Software\Classes\{id}")
+    };
+    if !enabled {
+        let _ = Command::new("reg.exe").args(["DELETE", &root, "/f"]).status();
+        if matches!(id, "m3u8" | "torrent") {
+            let prog_id = format!(r"HKCU\Software\Classes\Apocalipse.{id}");
+            let _ = Command::new("reg.exe").args(["DELETE", &prog_id, "/f"]).status();
+        }
+        return Ok(());
+    }
+    let prog_id = format!("Apocalipse.{id}");
+    let class_root = if matches!(id, "m3u8" | "torrent") {
+        let status = Command::new("reg.exe")
+            .args(["ADD", &root, "/ve", "/t", "REG_SZ", "/d", &prog_id, "/f"])
+            .status()
+            .map_err(|error| error.to_string())?;
+        if !status.success() { return Err("association_update_failed".to_owned()); }
+        format!(r"HKCU\Software\Classes\{prog_id}")
+    } else {
+        let status = Command::new("reg.exe")
+            .args(["ADD", &root, "/v", "URL Protocol", "/t", "REG_SZ", "/d", "", "/f"])
+            .status()
+            .map_err(|error| error.to_string())?;
+        if !status.success() { return Err("association_update_failed".to_owned()); }
+        root
+    };
+    let command_key = format!(r"{class_root}\shell\open\command");
+    let open_command = format!("\"{}\" --open \"%1\"", executable.display());
+    let status = Command::new("reg.exe")
+        .args(["ADD", &command_key, "/ve", "/t", "REG_SZ", "/d", &open_command, "/f"])
+        .status()
+        .map_err(|error| error.to_string())?;
+    if status.success() { Ok(()) } else { Err("association_update_failed".to_owned()) }
+}
+
+#[cfg(target_os = "linux")]
+fn configure_association(_: &str, _: bool, associations: &HashMap<String, bool>) -> Result<(), String> {
+    let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| "home_directory_unavailable".to_owned())?;
+    let applications = home.join(".local/share/applications");
+    fs::create_dir_all(&applications).map_err(|error| error.to_string())?;
+    let entry = applications.join("apocalipse-download-manager.desktop");
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let definitions = [
+        ("m3u8", "application/vnd.apple.mpegurl"),
+        ("torrent", "application/x-bittorrent"),
+        ("magnet", "x-scheme-handler/magnet"),
+        ("ftp", "x-scheme-handler/ftp"),
+        ("sftp", "x-scheme-handler/sftp"),
+    ];
+    let enabled = definitions.iter().filter(|(id, _)| associations.get(*id).copied().unwrap_or(false)).collect::<Vec<_>>();
+    if enabled.is_empty() {
+        if entry.exists() { fs::remove_file(&entry).map_err(|error| error.to_string())?; }
+    } else {
+        let mime_types = enabled.iter().map(|(_, mime)| *mime).collect::<Vec<_>>().join(";");
+        let escaped = executable.to_string_lossy().replace('"', "\\\"");
+        fs::write(&entry, format!("[Desktop Entry]\nType=Application\nName=Apocalipse Download Manager\nExec=\"{escaped}\" --open %U\nTerminal=false\nNoDisplay=true\nMimeType={mime_types};\n"))
+            .map_err(|error| error.to_string())?;
+        for (_, mime) in enabled {
+            let _ = Command::new("xdg-mime").args(["default", "apocalipse-download-manager.desktop", mime]).status();
+        }
+    }
+    let _ = Command::new("update-desktop-database").arg(&applications).status();
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn configure_association(_: &str, _: bool, _: &HashMap<String, bool>) -> Result<(), String> {
+    // LaunchServices reads the handlers from the application bundle. Individual switches
+    // control whether incoming items are accepted by Apocalipse.
+    Ok(())
+}
+
+#[tauri::command]
+fn get_associations(state: State<'_, AppState>) -> Result<Vec<AssociationStatus>, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    Ok(ASSOCIATION_IDS.iter().map(|id| AssociationStatus {
+        id: (*id).to_owned(),
+        enabled: settings.associations.get(*id).copied().unwrap_or(false),
+        supported: true,
+    }).collect())
+}
+
+#[tauri::command]
+fn set_association(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    if !ASSOCIATION_IDS.contains(&id.as_str()) { return Err("unsupported_association".to_owned()); }
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    let mut associations = settings.associations.clone();
+    associations.insert(id.clone(), enabled);
+    configure_association(&id, enabled, &associations)?;
+    settings.associations = associations;
+    save_settings(&state, &settings)
+}
+
 #[tauri::command]
 async fn remove_downloads(
     state: State<'_, AppState>,
@@ -3133,6 +3281,12 @@ fn main() {
             std::thread::Builder::new()
                 .name("apocalipse-extension-bridge".into())
                 .spawn(move || run_extension_bridge(bridge_app))?;
+            let arguments = std::env::args().collect::<Vec<_>>();
+            if let Some(index) = arguments.iter().position(|argument| argument == "--open") {
+                if let Some(source) = arguments.get(index + 1).filter(|value| classify_url(value).is_some()) {
+                    queue_associated_source(app.handle(), source.clone()).map_err(std::io::Error::other)?;
+                }
+            }
             let show = MenuItem::with_id(app, "show", "Show Apocalipse", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
@@ -3201,6 +3355,8 @@ fn main() {
             reveal_download,
             get_autostart,
             set_autostart,
+            get_associations,
+            set_association,
             get_clipboard_monitor,
             set_clipboard_monitor,
             read_clipboard_link,
@@ -3220,8 +3376,18 @@ fn main() {
             clear_download_directories,
             take_bridge_download
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run Apocalipse Download Manager");
+        .build(tauri::generate_context!())
+        .expect("failed to build Apocalipse Download Manager")
+        .run(|_app, _event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
+                for url in urls {
+                    let source = url.to_file_path().map(|path| path.to_string_lossy().into_owned())
+                        .unwrap_or_else(|_| url.to_string());
+                    let _ = queue_associated_source(_app, source);
+                }
+            }
+        });
 }
 
 #[cfg(test)]
@@ -3298,6 +3464,10 @@ mod tests {
         assert_eq!(
             redact_url("http://user:secret@proxy.example:8080/file"),
             "http://proxy.example:8080/file"
+        );
+        assert_eq!(
+            redact_url("https://www.tiktok.com/@creator/video/123?q=test"),
+            "https://www.tiktok.com/@creator/video/123?q=<redacted>"
         );
     }
 

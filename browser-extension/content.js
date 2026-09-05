@@ -77,6 +77,12 @@
         || parsed.searchParams.has("story_fbid");
     } catch { return false; }
   };
+  const isTikTokVideoUrl = (url) => {
+    try {
+      const parsed = new URL(url, location.href);
+      return /(^|\.)tiktok\.com$/i.test(parsed.hostname) && /\/@[^/]+\/video\/\d+/i.test(parsed.pathname);
+    } catch { return false; }
+  };
   const facebookUrlFor = (element) => {
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
     if (isFacebookMediaUrl(location.href)) return location.href;
@@ -196,6 +202,7 @@
       element.querySelectorAll("source").forEach((source) => add(source.src, "video", element));
       const facebookUrl = facebookUrlFor(element);
       if (facebookUrl) add(facebookUrl, "video", element);
+      if (isTikTokVideoUrl(location.href)) add(location.href, "video", element);
     });
     const facebookPageUrl = facebookUrlFor(document.querySelector("video"));
     if (facebookPageUrl) add(facebookPageUrl, "video", document.querySelector("video"));
@@ -287,6 +294,7 @@
   };
   const downloadUrlFor = (element) => {
     if (element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch") return location.href;
+    if (element.tagName === "VIDEO" && isTikTokVideoUrl(location.href)) return location.href;
     if (element.tagName === "VIDEO") {
       const facebookUrl = facebookUrlFor(element);
       if (facebookUrl) return facebookUrl;
@@ -316,7 +324,8 @@
       if (element.dataset.apocalipseButton) return;
       const isYouTubeVideo = element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch";
       const isFacebookVideo = element.tagName === "VIDEO" && /(^|\.)facebook\.com$/i.test(location.hostname);
-      const url = isFacebookVideo ? facebookUrlFor(element) || location.href : downloadUrlFor(element);
+      const isTikTokVideo = element.tagName === "VIDEO" && isTikTokVideoUrl(location.href);
+      const url = isFacebookVideo ? facebookUrlFor(element) || location.href : isTikTokVideo ? location.href : downloadUrlFor(element);
       if (!url || !/^https?:/.test(url)) return;
       element.dataset.apocalipseButton = "1";
       const button = document.createElement("button");

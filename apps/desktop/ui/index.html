@@ -255,6 +255,13 @@
             <option value="royal">Royal Nebula</option>
             <option value="crimson">Blood Moon</option>
             <option value="arctic">Arctic Signal</option>
+            <option value="obsidian">Obsidian Black</option>
+            <option value="monochrome">Monochrome</option>
+            <option value="midnight">Midnight Blue</option>
+            <option value="forest">Dark Forest</option>
+            <option value="graphite">Graphite Steel</option>
+            <option value="deepsea">Deep Sea</option>
+            <option value="eclipse">Purple Eclipse</option>
           </select>
           <small data-i18n="themeHint">Colors and text contrast are adjusted together for readability.</small>
         </section>
@@ -276,6 +283,15 @@
             ></span
           >
         </label>
+        <section class="pairing-settings association-settings">
+          <b data-i18n="associations">File and link associations</b>
+          <small data-i18n="associationsHint">Choose individually what the system should open with Apocalipse.</small>
+          <label class="setting-toggle compact-toggle"><input type="checkbox" data-association="m3u8" /><span><b>.m3u8</b><small>HLS playlists</small></span></label>
+          <label class="setting-toggle compact-toggle"><input type="checkbox" data-association="torrent" /><span><b>.torrent</b><small>BitTorrent files</small></span></label>
+          <label class="setting-toggle compact-toggle"><input type="checkbox" data-association="magnet" /><span><b>magnet:</b><small>Magnet links</small></span></label>
+          <label class="setting-toggle compact-toggle"><input type="checkbox" data-association="ftp" /><span><b>ftp:</b><small>FTP links</small></span></label>
+          <label class="setting-toggle compact-toggle"><input type="checkbox" data-association="sftp" /><span><b>sftp:</b><small>SFTP links</small></span></label>
+        </section>
         <label for="default-directory" data-i18n="defaultDirectory"
           >Default download directory</label
         >

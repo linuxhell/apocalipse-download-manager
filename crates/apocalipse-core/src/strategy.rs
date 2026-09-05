@@ -47,6 +47,11 @@ pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<Strategy
             fallbacks: vec![Engine::NativeHls],
             reason: "hls_manifest",
         },
+        DownloadKind::Ftp => StrategyPlan {
+            primary: Engine::Aria2Rpc,
+            fallbacks: Vec::new(),
+            reason: "ftp_transfer",
+        },
         DownloadKind::Torrent | DownloadKind::Magnet => StrategyPlan {
             primary: if capabilities.torrent { Engine::NativeTorrent } else { Engine::Aria2Rpc },
             fallbacks: capabilities.aria2.then_some(Engine::Aria2Rpc).into_iter().collect(),

@@ -46,6 +46,8 @@ const catalogs = {
     preferences: "PREFERENCES",
     appearanceTheme: "Interface theme",
     themeHint: "Colors and text contrast are adjusted together for readability.",
+    associations: "File and link associations",
+    associationsHint: "Choose individually what the system should open with Apocalipse.",
     startWithSystem: "Start with the system",
     startHidden: "Open hidden in the system tray",
     defaultDirectory: "Default download directory",
@@ -159,6 +161,8 @@ const catalogs = {
     preferences: "PREFERÊNCIAS",
     appearanceTheme: "Tema da interface",
     themeHint: "As cores e o contraste do texto são ajustados juntos para manter a leitura.",
+    associations: "Associações de arquivos e links",
+    associationsHint: "Escolha individualmente o que o sistema deve abrir com o Apocalipse.",
     startWithSystem: "Iniciar com o sistema",
     startHidden: "Abrir oculto na bandeja do sistema",
     defaultDirectory: "Diretório padrão de downloads",
@@ -271,6 +275,8 @@ const catalogs = {
     preferences: "偏好设置",
     appearanceTheme: "界面主题",
     themeHint: "颜色与文字对比度会同步调整，以保持清晰易读。",
+    associations: "文件和链接关联",
+    associationsHint: "单独选择由系统使用 Apocalipse 打开的类型。",
     startWithSystem: "随系统启动",
     startHidden: "启动后隐藏到系统托盘",
     defaultDirectory: "默认下载目录",
@@ -340,7 +346,7 @@ const catalogs = {
 
 let locale = localStorage.getItem("apocalipse.language") || "en";
 const applyTheme = (theme) => {
-  const valid = ["void", "inferno", "toxic", "synthwave", "royal", "crimson", "arctic"];
+  const valid = ["void", "inferno", "toxic", "synthwave", "royal", "crimson", "arctic", "obsidian", "monochrome", "midnight", "forest", "graphite", "deepsea", "eclipse"];
   document.documentElement.dataset.theme = valid.includes(theme) ? theme : "void";
 };
 applyTheme(localStorage.getItem("apocalipse.theme") || "void");
@@ -355,6 +361,7 @@ let downloads = [];
 let activeFilter = "all";
 let overallSpeed = 0;
 let lastClipboardLink = "";
+let clipboardMonitorPrimed = false;
 const busyIds = new Set();
 const selectedIds = new Set();
 const speedSamples = new Map();
@@ -787,7 +794,7 @@ document.querySelector("#dns-preset").onchange = (event) => {
 };
 document.querySelector('[data-page="settings"]').onclick = async () => {
   try {
-    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
@@ -797,9 +804,16 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
       invoke("get_log_editor"),
       invoke("get_proxy_setting"),
       invoke("get_dns_setting"),
+      invoke("get_associations"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
     document.querySelector("#theme").value = document.documentElement.dataset.theme;
+    for (const association of associations) {
+      const input = document.querySelector(`[data-association="${association.id}"]`);
+      input.checked = association.enabled;
+      input.dataset.initial = String(association.enabled);
+      input.disabled = !association.supported;
+    }
     document.querySelector("#default-directory").value = directory;
     document.querySelector("#capture-clipboard").checked = clipboard.enabled;
     document.querySelector("#max-tasks").value = limits.maxActiveDownloads;
@@ -875,6 +889,12 @@ document.querySelector("#save-settings").onclick = async () => {
         .map((server) => server.trim())
         .filter(Boolean),
     });
+    for (const input of document.querySelectorAll("[data-association]")) {
+      if (!input.disabled && input.dataset.initial !== String(input.checked)) await invoke("set_association", {
+        id: input.dataset.association,
+        enabled: input.checked,
+      });
+    }
     await invoke("set_tool_paths", {
       ffmpeg: document.querySelector("#tool-ffmpeg").value,
       ytDlp: document.querySelector("#tool-yt-dlp").value,
@@ -1123,6 +1143,11 @@ setInterval(refreshDownloads, 250);
 setInterval(async () => {
   try {
     const link = await invoke("read_clipboard_link");
+    if (!clipboardMonitorPrimed) {
+      lastClipboardLink = link || "";
+      clipboardMonitorPrimed = true;
+      return;
+    }
     if (!link || link === lastClipboardLink) return;
     lastClipboardLink = link;
     pendingReferer = null;
