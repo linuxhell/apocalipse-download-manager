@@ -384,8 +384,12 @@
     } catch { return { url: immediate, duration: null }; }
   };
   let overlayTimer;
+  const activeOverlays = new Map();
   const installOverlays = () => {
     if (/(^|\.)chatgpt\.com$/.test(location.hostname)) return;
+    for (const overlay of activeOverlays.values()) {
+      if (!overlay.element.isConnected || overlay.pageUrl !== location.href) overlay.cleanup();
+    }
     document.querySelectorAll("video,audio").forEach((element) => {
       if (element.dataset.apocalipseButton) return;
       const isYouTubeVideo = element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch";
@@ -521,11 +525,10 @@
         });
       }
       let positionTimer = null;
+      let cleanupOverlay = () => {};
       const position = () => {
         if (!element.isConnected) {
-          button.remove();
-          recordButton?.remove();
-          if (positionTimer) clearInterval(positionTimer);
+          cleanupOverlay();
           return;
         }
         const anchor = isYouTubeVideo
@@ -546,6 +549,16 @@
       };
       document.documentElement.append(button);
       if (recordButton) document.documentElement.append(recordButton);
+      cleanupOverlay = () => {
+        button.remove();
+        recordButton?.remove();
+        if (positionTimer) clearInterval(positionTimer);
+        removeEventListener("scroll", position);
+        removeEventListener("resize", position);
+        delete element.dataset.apocalipseButton;
+        activeOverlays.delete(element);
+      };
+      activeOverlays.set(element, { element, pageUrl: location.href, cleanup: cleanupOverlay });
       position();
       addEventListener("scroll", position, { passive: true });
       addEventListener("resize", position, { passive: true });
