@@ -1258,15 +1258,38 @@ fn bundled_ed2k_helper() -> Option<PathBuf> {
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf))?;
     let file_name = if cfg!(windows) { "ed2k.exe" } else { "ed2k" };
-    ["Data", "data"]
+    let mut roots = ["Data", "data"]
         .into_iter()
-        .map(|directory| {
-            executable_directory
+        .map(|directory| executable_directory.join(directory).join("ed2k"))
+        .collect::<Vec<_>>();
+    if let Some(contents_directory) = executable_directory.parent() {
+        roots.extend(["Data", "data"].into_iter().map(|directory| {
+            contents_directory
+                .join("Resources")
                 .join(directory)
                 .join("ed2k")
-                .join(file_name)
-        })
-        .find(|path| path.is_file())
+        }));
+    }
+    roots
+        .iter()
+        .find_map(|root| find_bundled_component(root, file_name, 6))
+}
+
+fn find_bundled_component(root: &Path, file_name: &str, depth: usize) -> Option<PathBuf> {
+    if depth == 0 || !root.is_dir() {
+        return None;
+    }
+    let direct = root.join(file_name);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    fs::read_dir(root).ok()?.flatten().find_map(|entry| {
+        entry
+            .file_type()
+            .ok()
+            .filter(|kind| kind.is_dir())
+            .and_then(|_| find_bundled_component(&entry.path(), file_name, depth - 1))
+    })
 }
 
 fn configured_ed2k_tool(settings: &UserSettings) -> PathBuf {
