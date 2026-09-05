@@ -26,7 +26,7 @@ Apocalipse combines fast resumable downloads, media discovery, streaming capture
 - TS to MP4 conversion with lossless fast remux and an H.264/AAC compatibility mode
 - Selective torrent file window and peer/session information
 - Progressive torrent video preview in VLC, mpv or a user-configured player
-- Apocalipse Link for end-to-end encrypted file transfers between two computers, with direct connections and resumable relay fallback
+- Apocalipse Link for authenticated direct file transfers between two computers, including a same-PC test mode
 - Browser media discovery grouped into Video, Audio and Images
 - Correct thumbnails, estimated sizes and format/quality selection
 - In-page download button for supported media, with an explicit user action
@@ -38,6 +38,9 @@ Apocalipse combines fast resumable downloads, media discovery, streaming capture
 - Windows 10+, modern Linux distributions and macOS 13+
 
 Sites protected by DRM or access controls are intentionally not bypassed. Users are responsible for downloading only content they are authorized to save.
+
+> [!WARNING]
+> The current Apocalipse Link transport is not end-to-end encrypted. Use it only on a trusted local network or through a trusted VPN. Internet relay, transport encryption and resumable transfers remain planned hardening work.
 
 ## Architecture
 

@@ -6,4 +6,7 @@
 *.part
 *.aria2
 .DS_Store
-
+/upload/
+/apocalipse-*.zip
+/apocalipse-firefox-*-unsigned*.xpi
+*.log

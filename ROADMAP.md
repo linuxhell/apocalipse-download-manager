@@ -1,46 +1,32 @@
 # Roadmap
 
-## M0 — foundation (current)
+## Current usable baseline — v0.3.20
 
 - Rust workspace and stable task domain model
-- URL/media classifier
-- Streaming HTTP download with safe partial-file resume
-- Cross-browser media detector prototype
+- HTTP/HTTPS downloads with queue, pause, resume and retry
+- Media inspection through yt-dlp with format and audio selection
+- Chrome, Edge and signed Firefox browser extensions
+- Facebook, Instagram and TikTok media workflows
+- Torrent/magnet downloads with file selection, peer data and player preview
+- Native tray, themes, clipboard detection and protocol/file associations
+- Per-tool updates for yt-dlp, FFmpeg, ffprobe, aria2, N_m3u8DL-RE and QuickJS
+- Apocalipse Link authenticated local/remote file browsing and transfers
+- Matrix Ultimate v1 AI local diagnostics and reversible site rules
 - CI on Windows, Linux and macOS
 
-## M1 — desktop alpha
+## Next — reliability and security
 
-- Tauri 2 desktop shell and native tray
-- SQLite queue, scheduler, retry policy and bandwidth controls
-- Segmented HTTP engine with server capability detection
-- Native Messaging bridge authenticated per browser profile
-- Site credential manager using Windows Credential Manager, macOS Keychain and Linux Secret Service
-- Windows/macOS/Linux packages in GitHub Releases
-
-## M2 — media intelligence
-
-- yt-dlp inspection and format picker
-- FFmpeg and N_m3u8DL-RE adapters
-- TS to MP4 conversion (fast remux and compatibility transcode)
-- Video/Audio/Image extension tabs with thumbnails and reliable size labels
-- HLS capture/recording and merge progress
-
-## M3 — torrents
-
-- libtorrent-backed magnet and torrent sessions
-- File selection, priorities, peers, trackers and sequential mode
-- Watch video torrents while downloading through VLC, mpv or a configured executable
-- Magnet and `.torrent` associations
-
-## M4 — hardening
-
-- Signed update manifests, tool checksum verification and rollback
+- Encrypt Apocalipse Link transport end-to-end and add explicit remote consent
+- Store every persisted secret in the operating-system credential vault
+- Signed engine-update manifests with mandatory checksum verification
 - Crash recovery, fuzzing and large-file soak tests
-- Accessibility, translations and stable releases
+- Resumable Apocalipse Link transfers with progress and integrity checks
+- Accessibility and complete localization of every recently added screen
 
-## M5 — optional power modules
+## Later — expanded distribution
 
-- aria2 JSON-RPC fallback engine secured to loopback with a per-install secret
+- ARM64 builds for Windows and Linux and native Apple Silicon validation
+- AppImage and optional native installers
+- Direct internet connectivity through an encrypted resumable relay
 - ED2K/Kademlia integration through an optional aMule adapter
-- Apocalipse Link: consent-based, end-to-end encrypted computer-to-computer transfers
-- Optional local/cloud AI assistant for diagnostics and site-rule suggestions, disabled by default
+- Further Matrix versions with signed, reviewable rule updates

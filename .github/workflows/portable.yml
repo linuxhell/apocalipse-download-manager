@@ -97,25 +97,40 @@ jobs:
 
   release:
     name: Publish tagged Release
-    if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - name: Package browser extensions
+        shell: bash
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('browser-extension/manifest.json'))['version'])")
+          (cd browser-extension && zip -qr "../dist/apocalipse-chrome-${version}.zip" .)
+          cp "dist/apocalipse-chrome-${version}.zip" "dist/apocalipse-edge-${version}.zip"
+          signed="packaging/firefox/apocalipse-firefox-${version}.xpi"
+          if [ -f "$signed" ]; then
+            cp "$signed" "dist/apocalipse-firefox-${version}-signed.xpi"
+          fi
       - name: Create Release and upload portable packages
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          tag="${{ github.ref_name }}"
+          if [[ "${{ github.ref }}" != refs/tags/v* ]]; then
+            version=$(python3 -c "import json; print(json.load(open('browser-extension/manifest.json'))['version'])")
+            tag="v${version}"
+          fi
           prerelease=()
-          if [[ "${{ github.ref_name }}" =~ (alpha|beta|rc) ]]; then
+          if [[ "$tag" =~ (alpha|beta|rc) ]]; then
             prerelease=(--prerelease)
           fi
-          gh release view "${{ github.ref_name }}" >/dev/null 2>&1 ||
-            gh release create "${{ github.ref_name }}" --generate-notes "${prerelease[@]}"
-          gh release upload "${{ github.ref_name }}" dist/* --clobber
+          gh release view "$tag" >/dev/null 2>&1 ||
+            gh release create "$tag" --target "${{ github.sha }}" --generate-notes "${prerelease[@]}"
+          gh release upload "$tag" dist/* --clobber
