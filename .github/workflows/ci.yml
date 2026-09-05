@@ -17,6 +17,18 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all -- --check
+      - name: Check Rust formatting
+        shell: bash
+        run: |
+          if ! cargo fmt --all -- --check; then
+            cargo fmt --all
+            {
+              echo '### Required rustfmt changes'
+              echo '```diff'
+              git diff -- '*.rs'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
