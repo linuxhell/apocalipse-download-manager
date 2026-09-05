@@ -106,6 +106,22 @@
       return /(^|\.)tiktok\.com$/i.test(parsed.hostname) && /\/@[^/]+\/video\/\d+/i.test(parsed.pathname);
     } catch { return false; }
   };
+  const tikTokUrlFor = (element) => {
+    if (!/(^|\.)tiktok\.com$/i.test(location.hostname)) return null;
+    if (isTikTokVideoUrl(location.href)) return location.href;
+    let container = element;
+    for (let depth = 0; container && depth < 12; depth += 1, container = container.parentElement) {
+      const anchors = container.querySelectorAll?.('a[href*="/video/"]') || [];
+      for (const anchor of anchors) {
+        const url = absolute(anchor.href);
+        if (isTikTokVideoUrl(url)) return url;
+      }
+      const markup = (container.innerHTML || "").replaceAll("\\/", "/");
+      const path = markup.match(/\/@[^/"'<>\\s]+\/video\/\d+/i)?.[0];
+      if (path && isTikTokVideoUrl(path)) return absolute(path);
+    }
+    return null;
+  };
   const facebookUrlFor = (element) => {
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
     if (isFacebookMediaUrl(location.href)) return location.href;
@@ -225,7 +241,8 @@
       element.querySelectorAll("source").forEach((source) => add(source.src, "video", element));
       const facebookUrl = facebookUrlFor(element);
       if (facebookUrl) add(facebookUrl, "video", element);
-      if (isTikTokVideoUrl(location.href)) add(location.href, "video", element);
+      const tikTokUrl = tikTokUrlFor(element);
+      if (tikTokUrl) add(tikTokUrl, "video", element);
     });
     const facebookPageUrl = facebookUrlFor(document.querySelector("video"));
     if (facebookPageUrl) add(facebookPageUrl, "video", document.querySelector("video"));
@@ -317,7 +334,10 @@
   };
   const downloadUrlFor = (element) => {
     if (element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch") return location.href;
-    if (element.tagName === "VIDEO" && isTikTokVideoUrl(location.href)) return location.href;
+    if (element.tagName === "VIDEO") {
+      const tikTokUrl = tikTokUrlFor(element);
+      if (tikTokUrl) return tikTokUrl;
+    }
     if (element.tagName === "VIDEO") {
       const facebookUrl = facebookUrlFor(element);
       if (facebookUrl) return facebookUrl;
@@ -347,8 +367,9 @@
       if (element.dataset.apocalipseButton) return;
       const isYouTubeVideo = element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch";
       const isFacebookVideo = element.tagName === "VIDEO" && /(^|\.)facebook\.com$/i.test(location.hostname);
-      const isTikTokVideo = element.tagName === "VIDEO" && isTikTokVideoUrl(location.href);
-      const url = isFacebookVideo ? facebookUrlFor(element) || location.href : isTikTokVideo ? location.href : downloadUrlFor(element);
+      const tikTokUrl = element.tagName === "VIDEO" ? tikTokUrlFor(element) : null;
+      const isTikTokVideo = Boolean(tikTokUrl);
+      const url = isFacebookVideo ? facebookUrlFor(element) || location.href : tikTokUrl || downloadUrlFor(element);
       if (!url || !/^https?:/.test(url)) return;
       element.dataset.apocalipseButton = "1";
       const button = document.createElement("button");
@@ -363,7 +384,7 @@
         const originalText = button.textContent;
         button.textContent = "…";
         const visibleFacebookUrl = isFacebookVideo && isFacebookMediaUrl(location.href) ? location.href : null;
-        const resolved = visibleFacebookUrl || (isFacebookVideo ? await revealFacebookUrl(element) : await resolveDownloadUrl(element));
+        const resolved = visibleFacebookUrl || (isFacebookVideo ? await revealFacebookUrl(element) : tikTokUrlFor(element) || await resolveDownloadUrl(element));
         if (resolved === "clipboard-copied") {
           button.textContent = "✓";
           button.title = "Link copiado; o Apocalipse abrirá a janela de download";

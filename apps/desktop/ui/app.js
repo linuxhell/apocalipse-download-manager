@@ -1199,6 +1199,10 @@ setInterval(async () => {
     }
     if (!link || link === lastClipboardLink) return;
     lastClipboardLink = link;
+    // Never replace a link already being reviewed in the save dialog. This is
+    // especially important on SPA feeds such as TikTok, where the clipboard may
+    // still contain a previously copied reel while the extension sends a new one.
+    if (dialog.open) return;
     pendingReferer = null;
     pendingDuration = null;
     pendingCookieHeader = null;
@@ -1212,6 +1216,7 @@ setInterval(async () => {
     document.querySelector("#enqueue").hidden = true;
     document.querySelector("#analyze").hidden = false;
     resetMediaInspection();
+    await invoke("activate_main_window");
     if (!dialog.open) dialog.showModal();
     url.focus();
   } catch (error) {
@@ -1242,6 +1247,7 @@ async function consumeBridgeDownload() {
     resetMediaInspection();
     document.querySelector("#destination").value = await invoke("default_download_directory");
     await refreshDestinationHistory();
+    await invoke("activate_main_window");
     if (!dialog.open) dialog.showModal();
     document.querySelector("#url").focus();
   } catch (error) { console.error(error); }

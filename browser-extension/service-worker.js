@@ -349,7 +349,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         const tabUrl = new URL(pageUrl);
         if (/(^|\.)facebook\.com$/i.test(tabUrl.hostname)
           && /(?:^|\/)(?:reel|reels|watch|videos|posts|share)(?:\/|$)/i.test(tabUrl.pathname)) url = tabUrl.href;
-        if (/(^|\.)tiktok\.com$/i.test(tabUrl.hostname) && /\/@[^/]+\/video\/\d+/i.test(tabUrl.pathname)) url = tabUrl.href;
+        // TikTok is an SPA and sender.tab.url may lag behind the visible reel.
+        // The content script resolves the permalink beside the actual <video>,
+        // so preserve message.item.url instead of replacing it here.
       } catch {}
       return bridgeRequest("/v1/download", {
         method: "POST",

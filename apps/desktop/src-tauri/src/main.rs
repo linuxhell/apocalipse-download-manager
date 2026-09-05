@@ -2615,6 +2615,11 @@ fn show_main_window(app: &tauri::AppHandle) {
     });
 }
 
+#[tauri::command]
+fn activate_main_window(app: tauri::AppHandle) {
+    show_main_window(&app);
+}
+
 fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<(), String> {
     let state = app.state::<AppState>();
     classify_url(&request.url).ok_or_else(|| "unsupported_url".to_owned())?;
@@ -3401,6 +3406,7 @@ fn main() {
             set_default_download_directory,
             pick_directory,
             pick_executable,
+            activate_main_window,
             get_tool_statuses,
             set_tool_paths,
             suggest_download_name,
