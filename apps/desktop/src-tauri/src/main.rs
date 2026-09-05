@@ -3542,11 +3542,12 @@ fn recording_stop_requested(app: &tauri::AppHandle, request: &BlobFinish) -> Res
         .get(&request.upload_id)
         .map(|upload| upload.task_id)
         .ok_or_else(|| "blob_upload_not_found".to_owned())?;
-    Ok(state
+    let stop = state
         .recording_stops
         .lock()
         .map_err(|error| error.to_string())?
-        .contains(&task_id))
+        .contains(&task_id);
+    Ok(stop)
 }
 
 fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
