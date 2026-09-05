@@ -967,7 +967,7 @@ fn amule_process_running() -> bool {
         .output();
     #[cfg(not(target_os = "windows"))]
     let output = Command::new("pgrep").args(["-x", "amule|amuled"]).output();
-    output.map_or(false, |result| {
+    output.is_ok_and(|result| {
         let text = String::from_utf8_lossy(&result.stdout).to_ascii_lowercase();
         result.status.success() && (text.contains("amule") || cfg!(not(target_os = "windows")))
     })
@@ -1062,10 +1062,8 @@ fn configure_amule_ec(settings: &UserSettings) -> Result<PathBuf, String> {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let backup = path.with_extension("conf.apocalipse-backup");
-    if path.is_file() {
-        if !backup.exists() {
-            fs::copy(&path, &backup).map_err(|error| error.to_string())?;
-        }
+    if path.is_file() && !backup.exists() {
+        fs::copy(&path, &backup).map_err(|error| error.to_string())?;
     }
     let temporary = path.with_extension("conf.apocalipse-new");
     fs::write(&temporary, updated).map_err(|error| error.to_string())?;
