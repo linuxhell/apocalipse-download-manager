@@ -3452,7 +3452,7 @@ fn main() {
                 Err(_) => {
                     if associated_source.as_deref().is_some_and(|source|
                         forward_to_running_instance(source, &initial_settings.bridge_token)) {
-                        app.exit(0);
+                        app.handle().exit(0);
                         return Ok(());
                     }
                     None
