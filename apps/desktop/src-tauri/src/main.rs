@@ -56,6 +56,7 @@ struct AppState {
 enum SiteRuleAction {
     Standard,
     SingleConnection,
+    BrowserAssisted,
     UupdumpPost,
 }
 
@@ -84,7 +85,7 @@ fn default_site_rules() -> Vec<SiteRule> {
             id: "rapidgator".to_owned(),
             name: "Rapidgator".to_owned(),
             hosts: vec!["rapidgator.net".to_owned(), "*.rapidgator.net".to_owned()],
-            action: SiteRuleAction::SingleConnection,
+            action: SiteRuleAction::BrowserAssisted,
             enabled: true,
             connections: 1,
         },
@@ -135,6 +136,11 @@ fn load_site_rules(path: &Path) -> Vec<SiteRule> {
     let Some(mut rules) = loaded else {
         return default_site_rules();
     };
+    if let Some(rapidgator) = rules.iter_mut().find(|rule| rule.id == "rapidgator") {
+        if rapidgator.action == SiteRuleAction::SingleConnection {
+            rapidgator.action = SiteRuleAction::BrowserAssisted;
+        }
+    }
     for rule in default_site_rules() {
         if rules.len() < 100 && !rules.iter().any(|existing| existing.id == rule.id) {
             rules.push(rule);
@@ -803,6 +809,14 @@ struct BridgeDownload {
     request_method: Option<String>,
     request_body: Option<String>,
     request_content_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserDownloadComplete {
+    url: String,
+    file_name: String,
+    total: Option<u64>,
 }
 
 struct BlobUpload {
@@ -2494,10 +2508,10 @@ fn matrix_analyze(state: State<'_, AppState>) -> Result<MatrixStatus, String> {
             name: rule.name.clone(),
             host: rule.hosts.first().cloned().unwrap_or_default(),
         })
-        .collect();
+        .collect::<Vec<_>>();
     Ok(MatrixStatus {
         version: "Matrix Ultimate v2 AI".to_owned(),
-        active_rules: rules.iter().filter(|rule| rule.enabled).count(),
+        active_rules: applied_rules.len(),
         proposals,
         applied_rules,
     })
@@ -4460,6 +4474,61 @@ fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<
     Ok(())
 }
 
+fn register_browser_download(
+    app: &tauri::AppHandle,
+    request: BrowserDownloadComplete,
+) -> Result<(), String> {
+    if !matches!(host_from_url(&request.url), Some(_)) {
+        return Err("invalid_browser_download_url".to_owned());
+    }
+    let destination = PathBuf::from(request.file_name);
+    if !destination.is_absolute() || !destination.is_file() {
+        return Err("browser_download_not_found".to_owned());
+    }
+    let destination = destination
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let size = fs::metadata(&destination)
+        .map_err(|error| error.to_string())?
+        .len();
+    let state = app.state::<AppState>();
+    let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+    if queue.iter().any(|task| {
+        task.destination == destination
+            && task.source == request.url
+            && task.state == DownloadState::Completed
+    }) {
+        return Ok(());
+    }
+    let mut task = DownloadTask::new(&request.url, destination);
+    task.state = DownloadState::Completed;
+    task.received = size;
+    task.total = Some(request.total.unwrap_or(size).max(size));
+    task.progress_percent = Some(100.0);
+    task.completed_at = Some(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |value| value.as_secs()),
+    );
+    queue.push(task.clone());
+    save_queue(&state, &queue)?;
+    drop(queue);
+    diagnostic_log(
+        &state,
+        "INFO",
+        "browser_assisted.completed",
+        &format!(
+            "task={} bytes={} url={} file={}",
+            task.id,
+            size,
+            redact_url(&task.source),
+            task.destination.display()
+        ),
+    );
+    show_main_window(app);
+    Ok(())
+}
+
 fn association_id(source: &str) -> Option<&'static str> {
     let lower = source.to_ascii_lowercase();
     if lower.starts_with("magnet:") {
@@ -4757,6 +4826,14 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         match serde_json::from_str::<BridgeDownload>(body)
             .map_err(|error| error.to_string())
             .and_then(|request| queue_from_bridge(app, request))
+        {
+            Ok(()) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
+            Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
+        }
+    } else if first.starts_with("POST /v1/browser-download-complete ") {
+        match serde_json::from_str::<BrowserDownloadComplete>(body)
+            .map_err(|error| error.to_string())
+            .and_then(|request| register_browser_download(app, request))
         {
             Ok(()) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
             Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
@@ -5846,12 +5923,10 @@ mod tests {
             "uupdump"
         );
         assert!(matching_site_rule("https://example.com/uupdump.net/file", &rules).is_none());
-        assert_eq!(
-            matching_site_rule("https://s14.rapidgator.net/download/token", &rules)
-                .unwrap()
-                .id,
-            "rapidgator"
-        );
+        let rapidgator =
+            matching_site_rule("https://s14.rapidgator.net/download/token", &rules).unwrap();
+        assert_eq!(rapidgator.id, "rapidgator");
+        assert_eq!(rapidgator.action, SiteRuleAction::BrowserAssisted);
         assert_eq!(
             matching_site_rule("https://pixeldrain.com/api/file/FhcC8Fyd?download", &rules)
                 .unwrap()
