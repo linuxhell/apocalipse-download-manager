@@ -4945,7 +4945,8 @@ fn reveal_download(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
     #[cfg(target_os = "windows")]
     let result = if let Some(target) = &target {
         Command::new("explorer.exe")
-            .arg(format!("/select,{}", target.display()))
+            .arg("/select,")
+            .arg(target)
             .spawn()
     } else {
         Command::new("explorer.exe").arg(directory).spawn()
