@@ -3193,18 +3193,6 @@ fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, String>
     })
 }
 
-fn open_external_url(url: &str) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    let result = Command::new("rundll32.exe")
-        .args(["url.dll,FileProtocolHandler", url])
-        .spawn();
-    #[cfg(target_os = "macos")]
-    let result = Command::new("open").arg(url).spawn();
-    #[cfg(target_os = "linux")]
-    let result = Command::new("xdg-open").arg(url).spawn();
-    result.map(|_| ()).map_err(|error| error.to_string())
-}
-
 #[tauri::command]
 async fn inspect_torrent_metadata(
     state: State<'_, AppState>,
