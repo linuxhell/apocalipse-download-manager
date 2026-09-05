@@ -129,7 +129,8 @@ impl DownloadEngine {
             fs::create_dir_all(parent).await?;
         }
         let can_segment = request.method.eq_ignore_ascii_case("GET") && request.body.is_none();
-        let head = if can_segment {
+        let requested = request.connections.clamp(1, 32);
+        let head = if can_segment && requested > 1 {
             apply_headers(self.client.head(&request.url), &request.headers)
                 .send()
                 .await
@@ -138,7 +139,6 @@ impl DownloadEngine {
             None
         };
         let total = head.as_ref().and_then(|response| response.content_length());
-        let requested = request.connections.clamp(1, 32);
         if can_segment && requested > 1 {
             let probe = apply_headers(self.client.get(&request.url), &request.headers)
                 .header(header::RANGE, "bytes=0-0")

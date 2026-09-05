@@ -66,14 +66,27 @@ struct SiteRule {
 }
 
 fn default_site_rules() -> Vec<SiteRule> {
-    vec![SiteRule {
-        id: "uupdump".to_owned(),
-        name: "UUP dump".to_owned(),
-        hosts: vec!["uupdump.net".to_owned(), "*.uupdump.net".to_owned()],
-        action: SiteRuleAction::UupdumpPost,
-        enabled: true,
-        connections: 1,
-    }]
+    vec![
+        SiteRule {
+            id: "uupdump".to_owned(),
+            name: "UUP dump".to_owned(),
+            hosts: vec!["uupdump.net".to_owned(), "*.uupdump.net".to_owned()],
+            action: SiteRuleAction::UupdumpPost,
+            enabled: true,
+            connections: 1,
+        },
+        SiteRule {
+            id: "rapidgator".to_owned(),
+            name: "Rapidgator".to_owned(),
+            hosts: vec![
+                "rapidgator.net".to_owned(),
+                "*.rapidgator.net".to_owned(),
+            ],
+            action: SiteRuleAction::SingleConnection,
+            enabled: true,
+            connections: 1,
+        },
+    ]
 }
 
 fn valid_site_rule(rule: &SiteRule) -> bool {
@@ -95,13 +108,21 @@ fn valid_site_rule(rule: &SiteRule) -> bool {
 }
 
 fn load_site_rules(path: &Path) -> Vec<SiteRule> {
-    fs::read(path)
+    let loaded = fs::read(path)
         .ok()
         .and_then(|data| serde_json::from_slice::<Vec<SiteRule>>(&data).ok())
         .filter(|rules| {
             !rules.is_empty() && rules.len() <= 100 && rules.iter().all(valid_site_rule)
-        })
-        .unwrap_or_else(default_site_rules)
+        });
+    let Some(mut rules) = loaded else {
+        return default_site_rules();
+    };
+    for rule in default_site_rules() {
+        if rules.len() < 100 && !rules.iter().any(|existing| existing.id == rule.id) {
+            rules.push(rule);
+        }
+    }
+    rules
 }
 
 fn host_from_url(url: &str) -> Option<String> {
@@ -4218,6 +4239,12 @@ mod tests {
             "uupdump"
         );
         assert!(matching_site_rule("https://example.com/uupdump.net/file", &rules).is_none());
+        assert_eq!(
+            matching_site_rule("https://s14.rapidgator.net/download/token", &rules)
+                .unwrap()
+                .id,
+            "rapidgator"
+        );
     }
 
     #[test]
