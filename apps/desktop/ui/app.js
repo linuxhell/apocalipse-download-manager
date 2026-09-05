@@ -12,13 +12,13 @@ const catalogs = {
     recordingsDescription: "Follow active recordings, stop and save, export or open completed captures.",
     torrentsDescription: "Manage torrents, file selection, peers and previews.",
     ed2kDescription: "Search ED2K/Kad and manage decentralized transfers through the aMule 3 engine.",
-    ed2kEngine: "aMule 3.0.1 engine", ed2kChecking: "Checking components…", ed2kStart: "Start engine", ed2kConnect: "Connect networks", openAmule: "Open aMule",
+    ed2kEngine: "aMule 3.0.1 engine", ed2kChecking: "Checking components…", ed2kSync: "Synchronize aMule", ed2kStart: "Start engine", ed2kConnect: "Connect networks", openAmule: "Open aMule",
     ed2kSources: "SOURCES", connected: "Connected", disconnected: "Disconnected", ed2kHighId: "High ID", ed2kLowId: "Low ID / firewalled",
     ed2kConnection: "Engine connection", ed2kHost: "Host", ed2kPort: "EC port", ed2kPasswordHint: "Enter the External Connections password",
     ed2kSearchTitle: "Search ED2K/Kad", ed2kSearchHint: "Search the decentralized networks and choose a result.", ed2kSearchPlaceholder: "File name…", ed2kGlobal: "Global", search: "Search",
     ed2kVideo: "Video", ed2kAudio: "Audio", ed2kImage: "Image", ed2kDocument: "Document", ed2kProgram: "Program", ed2kArchive: "Archive",
     ed2kSearching: "Searching…", ed2kWaitingResults: "Waiting for network results…", ed2kNoResults: "No results yet.", ed2kDownload: "Download", ed2kTransfers: "Transfers", ed2kTransfersHint: "Real progress reported by the aMule engine.", ed2kNoTransfers: "No ED2K transfers.", ed2kCancel: "Cancel", ed2kPriority: "Priority",
-    ed2kReady: "Engine ready", ed2kIncomplete: "Select the official aMule 3.0.1 package in Tools.", ed2kPasswordRequired: "Configure the External Connections password.", ed2kConnectionSaved: "Connection saved.",
+    ed2kReady: "Engine ready", ed2kIncomplete: "Select the official aMule 3.0.1 package in Tools.", ed2kPasswordRequired: "Configure the External Connections password.", ed2kConnectionSaved: "Connection saved.", ed2kSyncing: "Synchronizing with aMule…", ed2kSynced: "aMule synchronized. Transfers will now appear here.", ed2kRestartConfirm: "aMule must restart once to enable secure local synchronization. Active transfers will resume automatically. Restart now?", ed2kSyncStarting: "Synchronization configured. aMule is starting; wait a few seconds.",
     ed2kLinks: "ED2K file, server and server-list links",
     linkDescription: "Transfer files securely between this computer and a remote Apocalipse.",
     matrixPageDescription: "Continuous diagnostics and isolated site corrections with individual rollback.",
@@ -196,13 +196,13 @@ const catalogs = {
     recordingsDescription: "Acompanhe gravações ativas, pare e salve, exporte ou abra capturas concluídas.",
     torrentsDescription: "Gerencie torrents, escolha de arquivos, pares e pré-visualizações.",
     ed2kDescription: "Pesquise nas redes ED2K/Kad e gerencie transferências descentralizadas pelo motor aMule 3.",
-    ed2kEngine: "Motor aMule 3.0.1", ed2kChecking: "Verificando componentes…", ed2kStart: "Iniciar motor", ed2kConnect: "Conectar redes", openAmule: "Abrir aMule",
+    ed2kEngine: "Motor aMule 3.0.1", ed2kChecking: "Verificando componentes…", ed2kSync: "Sincronizar aMule", ed2kStart: "Iniciar motor", ed2kConnect: "Conectar redes", openAmule: "Abrir aMule",
     ed2kSources: "FONTES", connected: "Conectado", disconnected: "Desconectado", ed2kHighId: "ID alto", ed2kLowId: "ID baixo / com firewall",
     ed2kConnection: "Conexão com o motor", ed2kHost: "Servidor", ed2kPort: "Porta EC", ed2kPasswordHint: "Digite a senha de Conexões Externas",
     ed2kSearchTitle: "Pesquisar em ED2K/Kad", ed2kSearchHint: "Pesquise nas redes descentralizadas e escolha um resultado.", ed2kSearchPlaceholder: "Nome do arquivo…", ed2kGlobal: "Global", search: "Pesquisar",
     ed2kVideo: "Vídeo", ed2kAudio: "Áudio", ed2kImage: "Imagem", ed2kDocument: "Documento", ed2kProgram: "Programa", ed2kArchive: "Arquivo compactado",
     ed2kSearching: "Pesquisando…", ed2kWaitingResults: "Aguardando resultados da rede…", ed2kNoResults: "Ainda não há resultados.", ed2kDownload: "Baixar", ed2kTransfers: "Transferências", ed2kTransfersHint: "Progresso real informado pelo motor aMule.", ed2kNoTransfers: "Nenhuma transferência ED2K.", ed2kCancel: "Cancelar", ed2kPriority: "Prioridade",
-    ed2kReady: "Motor pronto", ed2kIncomplete: "Selecione o pacote oficial aMule 3.0.1 em Ferramentas.", ed2kPasswordRequired: "Configure a senha de Conexões Externas.", ed2kConnectionSaved: "Conexão salva.",
+    ed2kReady: "Motor pronto", ed2kIncomplete: "Selecione o pacote oficial aMule 3.0.1 em Ferramentas.", ed2kPasswordRequired: "Configure a senha de Conexões Externas.", ed2kConnectionSaved: "Conexão salva.", ed2kSyncing: "Sincronizando com o aMule…", ed2kSynced: "aMule sincronizado. As transferências agora aparecerão aqui.", ed2kRestartConfirm: "O aMule precisa reiniciar uma vez para ativar a sincronização local segura. As transferências ativas continuarão automaticamente. Reiniciar agora?", ed2kSyncStarting: "Sincronização configurada. O aMule está iniciando; aguarde alguns segundos.",
     ed2kLinks: "Links de arquivo, servidor e lista de servidores ED2K",
     linkDescription: "Transfira arquivos com segurança entre este computador e um Apocalipse remoto.",
     matrixPageDescription: "Diagnóstico contínuo e correções isoladas por site, com reversão individual.",
@@ -381,13 +381,13 @@ const catalogs = {
     recordingsDescription: "查看正在录制的内容、停止并保存、导出或打开已完成的录制。",
     torrentsDescription: "管理种子、文件选择、节点和预览。",
     ed2kDescription: "通过 aMule 3 引擎搜索 ED2K/Kad 网络并管理去中心化传输。",
-    ed2kEngine: "aMule 3.0.1 引擎", ed2kChecking: "正在检查组件…", ed2kStart: "启动引擎", ed2kConnect: "连接网络", openAmule: "打开 aMule",
+    ed2kEngine: "aMule 3.0.1 引擎", ed2kChecking: "正在检查组件…", ed2kSync: "同步 aMule", ed2kStart: "启动引擎", ed2kConnect: "连接网络", openAmule: "打开 aMule",
     ed2kSources: "来源", connected: "已连接", disconnected: "未连接", ed2kHighId: "高 ID", ed2kLowId: "低 ID / 防火墙限制",
     ed2kConnection: "引擎连接", ed2kHost: "主机", ed2kPort: "EC 端口", ed2kPasswordHint: "输入外部连接密码",
     ed2kSearchTitle: "搜索 ED2K/Kad", ed2kSearchHint: "搜索去中心化网络并选择结果。", ed2kSearchPlaceholder: "文件名…", ed2kGlobal: "全局", search: "搜索",
     ed2kVideo: "视频", ed2kAudio: "音频", ed2kImage: "图像", ed2kDocument: "文档", ed2kProgram: "程序", ed2kArchive: "压缩包",
     ed2kSearching: "正在搜索…", ed2kWaitingResults: "正在等待网络结果…", ed2kNoResults: "暂无结果。", ed2kDownload: "下载", ed2kTransfers: "传输", ed2kTransfersHint: "由 aMule 引擎报告的真实进度。", ed2kNoTransfers: "没有 ED2K 传输。", ed2kCancel: "取消", ed2kPriority: "优先级",
-    ed2kReady: "引擎就绪", ed2kIncomplete: "请在工具中选择官方 aMule 3.0.1 软件包。", ed2kPasswordRequired: "请配置外部连接密码。", ed2kConnectionSaved: "连接已保存。",
+    ed2kReady: "引擎就绪", ed2kIncomplete: "请在工具中选择官方 aMule 3.0.1 软件包。", ed2kPasswordRequired: "请配置外部连接密码。", ed2kConnectionSaved: "连接已保存。", ed2kSyncing: "正在与 aMule 同步…", ed2kSynced: "aMule 已同步，传输任务现在会显示在这里。", ed2kRestartConfirm: "aMule 需要重启一次以启用安全的本地同步。活动传输将自动继续。现在重启吗？", ed2kSyncStarting: "同步已配置。aMule 正在启动，请稍候。",
     ed2kLinks: "ED2K 文件、服务器和服务器列表链接",
     linkDescription: "在本机与远程 Apocalipse 之间安全传输文件。",
     matrixPageDescription: "持续诊断及可单独回滚的网站修正规则。",
@@ -1071,6 +1071,7 @@ let ed2kRefreshTimer = null;
 function ed2kError(error) {
   const value = String(error);
   if (value.includes("ed2k_password_required")) return t("ed2kPasswordRequired");
+  if (value.includes("ed2k_sync_starting")) return t("ed2kSyncStarting");
   return value;
 }
 function renderEd2kResults(results) {
@@ -1145,6 +1146,22 @@ async function loadEd2kPage() {
   ed2kRefreshTimer = setInterval(() => { if (activePage === "ed2k") { refreshEd2kStatus().catch(() => {}); refreshEd2kTransfers().catch(() => {}); } }, 2500);
 }
 document.querySelector('[data-page="ed2k"]').addEventListener("click", () => loadEd2kPage().catch(console.error));
+document.querySelector("#ed2k-sync").onclick = async () => {
+  const button = document.querySelector("#ed2k-sync");
+  const status = document.querySelector("#ed2k-engine-status");
+  button.disabled = true; status.textContent = t("ed2kSyncing");
+  try {
+    let result;
+    try { result = await invoke("synchronize_ed2k_engine", { restartRunning: false }); }
+    catch (error) {
+      if (!String(error).includes("ed2k_restart_confirmation_required") || !confirm(t("ed2kRestartConfirm"))) throw error;
+      result = await invoke("synchronize_ed2k_engine", { restartRunning: true });
+    }
+    status.textContent = result.connected ? t("ed2kSynced") : t("ed2kSyncStarting");
+    await loadEd2kPage();
+  } catch (error) { status.textContent = ed2kError(error); }
+  finally { button.disabled = false; }
+};
 document.querySelector("#ed2k-save-connection").onclick = async () => {
   try { await invoke("set_ed2k_connection", { host: document.querySelector("#ed2k-host").value, port: Number(document.querySelector("#ed2k-port").value), password: document.querySelector("#ed2k-password").value }); document.querySelector("#ed2k-password").value = ""; document.querySelector("#ed2k-search-status").textContent = t("ed2kConnectionSaved"); }
   catch (error) { document.querySelector("#ed2k-search-status").textContent = ed2kError(error); }

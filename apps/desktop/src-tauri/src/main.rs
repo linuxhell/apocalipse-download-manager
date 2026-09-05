@@ -734,6 +734,14 @@ struct Ed2kConnectionSetting {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct Ed2kSyncResult {
+    connected: bool,
+    restarted: bool,
+    config_path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Ed2kNetworkStatus {
     ed2k_connected: bool,
     kad_connected: bool,
@@ -926,6 +934,204 @@ fn set_ed2k_connection(
     save_settings(&state, &settings)
 }
 
+fn amule_config_path(settings: &UserSettings) -> Result<PathBuf, String> {
+    let helper = configured_ed2k_tool(settings);
+    let mut candidates = Vec::new();
+    if let Some(directory) = helper.parent() {
+        candidates.push(directory.join("config/amule.conf"));
+    }
+    #[cfg(target_os = "windows")]
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        candidates.push(PathBuf::from(appdata).join("aMule/amule.conf"));
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(home) = std::env::var_os("HOME") {
+        candidates.push(PathBuf::from(home).join("Library/Application Support/aMule/amule.conf"));
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    if let Some(home) = std::env::var_os("HOME") {
+        candidates.push(PathBuf::from(home).join(".aMule/amule.conf"));
+    }
+    candidates
+        .iter()
+        .find(|path| path.is_file())
+        .cloned()
+        .or_else(|| candidates.into_iter().next())
+        .ok_or_else(|| "amule_config_not_found".to_owned())
+}
+
+fn amule_process_running() -> bool {
+    #[cfg(target_os = "windows")]
+    let output = Command::new("tasklist")
+        .args(["/NH", "/FO", "CSV"])
+        .output();
+    #[cfg(not(target_os = "windows"))]
+    let output = Command::new("pgrep").args(["-x", "amule|amuled"]).output();
+    output.is_ok_and(|result| {
+        let text = String::from_utf8_lossy(&result.stdout).to_ascii_lowercase();
+        result.status.success() && (text.contains("amule") || cfg!(not(target_os = "windows")))
+    })
+}
+
+fn stop_amule_for_sync() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let status = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$p=Get-Process amule,amuled -ErrorAction SilentlyContinue; if($p){$p | ForEach-Object {$null=$_.CloseMainWindow()}; $p | Wait-Process -Timeout 8 -ErrorAction SilentlyContinue}",
+        ])
+        .status();
+    #[cfg(not(target_os = "windows"))]
+    let status = Command::new("pkill")
+        .args(["-TERM", "-x", "amule|amuled"])
+        .status();
+    status.map_err(|error| format!("amule_restart_failed: {error}"))?;
+    for _ in 0..40 {
+        if !amule_process_running() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    Err("amule_did_not_close".to_owned())
+}
+
+fn update_ini_section(source: &str, section: &str, values: &[(&str, String)]) -> String {
+    let newline = if source.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut lines = source.lines().map(str::to_owned).collect::<Vec<_>>();
+    let header = format!("[{section}]");
+    let start = lines
+        .iter()
+        .position(|line| line.trim().eq_ignore_ascii_case(&header));
+    let (start, end) = match start {
+        Some(index) => {
+            let end = lines[index + 1..]
+                .iter()
+                .position(|line| line.trim_start().starts_with('['))
+                .map_or(lines.len(), |offset| index + 1 + offset);
+            (index + 1, end)
+        }
+        None => {
+            if !lines.is_empty() && !lines.last().is_some_and(String::is_empty) {
+                lines.push(String::new());
+            }
+            lines.push(header);
+            let index = lines.len();
+            (index, index)
+        }
+    };
+    let mut insert_at = end;
+    for (key, value) in values {
+        if let Some(index) = (start..end).find(|index| {
+            lines[*index]
+                .split_once('=')
+                .is_some_and(|(existing, _)| existing.trim().eq_ignore_ascii_case(key))
+        }) {
+            lines[index] = format!("{key}={value}");
+        } else {
+            lines.insert(insert_at, format!("{key}={value}"));
+            insert_at += 1;
+        }
+    }
+    let mut result = lines.join(newline);
+    result.push_str(newline);
+    result
+}
+
+fn configure_amule_ec(settings: &UserSettings) -> Result<PathBuf, String> {
+    let path = amule_config_path(settings)?;
+    let source = fs::read_to_string(&path).unwrap_or_default();
+    let password_hash = format!("{:X}", md5::compute(settings.ed2k_password.as_bytes()));
+    let updated = update_ini_section(
+        &source,
+        "ExternalConnect",
+        &[
+            ("AcceptExternalConnections", "1".to_owned()),
+            ("ECAddress", "127.0.0.1".to_owned()),
+            ("ECPort", settings.ed2k_port.to_string()),
+            ("ECPassword", password_hash),
+            ("UPnPECEnabled", "0".to_owned()),
+        ],
+    );
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let backup = path.with_extension("conf.apocalipse-backup");
+    if path.is_file() && !backup.exists() {
+        fs::copy(&path, &backup).map_err(|error| error.to_string())?;
+    }
+    let temporary = path.with_extension("conf.apocalipse-new");
+    fs::write(&temporary, updated).map_err(|error| error.to_string())?;
+    if path.exists() {
+        fs::remove_file(&path).map_err(|error| error.to_string())?;
+    }
+    if let Err(error) = fs::rename(&temporary, &path) {
+        if backup.is_file() {
+            let _ = fs::copy(&backup, &path);
+        }
+        return Err(error.to_string());
+    }
+    Ok(path)
+}
+
+#[tauri::command]
+fn synchronize_ed2k_engine(
+    state: State<'_, AppState>,
+    restart_running: bool,
+) -> Result<Ed2kSyncResult, String> {
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    settings.ed2k_host = "127.0.0.1".to_owned();
+    settings.ed2k_port = default_ed2k_port();
+    if settings.ed2k_password.is_empty() {
+        settings.ed2k_password = uuid::Uuid::new_v4().simple().to_string();
+    }
+    if amule_command(&settings, "status").is_ok() {
+        let path = amule_config_path(&settings)?;
+        let mut locked = state.settings.lock().map_err(|error| error.to_string())?;
+        *locked = settings;
+        save_settings(&state, &locked)?;
+        return Ok(Ed2kSyncResult {
+            connected: true,
+            restarted: false,
+            config_path: path.to_string_lossy().into_owned(),
+        });
+    }
+    let running = amule_process_running();
+    if running && !restart_running {
+        return Err("ed2k_restart_confirmation_required".to_owned());
+    }
+    if running {
+        stop_amule_for_sync()?;
+    }
+    let path = configure_amule_ec(&settings)?;
+    {
+        let mut locked = state.settings.lock().map_err(|error| error.to_string())?;
+        *locked = settings.clone();
+        save_settings(&state, &locked)?;
+    }
+    start_ed2k_engine(state)?;
+    for _ in 0..30 {
+        std::thread::sleep(Duration::from_millis(250));
+        if amule_command(&settings, "status").is_ok() {
+            return Ok(Ed2kSyncResult {
+                connected: true,
+                restarted: running,
+                config_path: path.to_string_lossy().into_owned(),
+            });
+        }
+    }
+    Err("ed2k_sync_starting".to_owned())
+}
+
 #[tauri::command]
 fn start_ed2k_engine(state: State<'_, AppState>) -> Result<(), String> {
     let settings = state
@@ -933,6 +1139,9 @@ fn start_ed2k_engine(state: State<'_, AppState>) -> Result<(), String> {
         .lock()
         .map_err(|error| error.to_string())?
         .clone();
+    if amule_command(&settings, "status").is_ok() || amule_process_running() {
+        return Ok(());
+    }
     let helper = configured_ed2k_tool(&settings);
     let daemon = amule_component(
         &helper,
@@ -5895,6 +6104,7 @@ fn main() {
             get_ed2k_engine_status,
             get_ed2k_connection,
             set_ed2k_connection,
+            synchronize_ed2k_engine,
             start_ed2k_engine,
             connect_ed2k_networks,
             ed2k_network_status,
@@ -6154,5 +6364,37 @@ mod tests {
         let parsed = parse_dns_servers(&servers).expect("valid DNS servers");
         assert_eq!(parsed.len(), 2);
         assert!(parse_dns_servers(&["not-an-address".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn updates_existing_amule_external_connection_section() {
+        let source = "[eMule]\nNick=Apocalipse\n\n[ExternalConnect]\nAcceptExternalConnections=0\nECPort=4662\nECPassword=old\n\n[WebServer]\nEnabled=0\n";
+        let updated = update_ini_section(
+            source,
+            "ExternalConnect",
+            &[
+                ("AcceptExternalConnections", "1".to_owned()),
+                ("ECAddress", "127.0.0.1".to_owned()),
+                ("ECPort", "4712".to_owned()),
+                ("ECPassword", "newhash".to_owned()),
+            ],
+        );
+        assert!(updated.contains("AcceptExternalConnections=1"));
+        assert!(updated.contains("ECAddress=127.0.0.1"));
+        assert!(updated.contains("ECPort=4712"));
+        assert!(updated.contains("ECPassword=newhash"));
+        assert!(updated.contains("[WebServer]\nEnabled=0"));
+        assert!(!updated.contains("ECPassword=old"));
+    }
+
+    #[test]
+    fn creates_amule_external_connection_section_without_losing_crlf() {
+        let updated = update_ini_section(
+            "[eMule]\r\nNick=Apocalipse\r\n",
+            "ExternalConnect",
+            &[("AcceptExternalConnections", "1".to_owned())],
+        );
+        assert!(updated.contains("\r\n[ExternalConnect]\r\n"));
+        assert!(updated.ends_with("AcceptExternalConnections=1\r\n"));
     }
 }
