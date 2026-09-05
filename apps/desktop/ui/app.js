@@ -45,6 +45,13 @@ const catalogs = {
     retry: "Retry",
     openFolder: "Open folder",
     preview: "Preview",
+    linkSendTitle: "Send a file directly",
+    linkSendHint: "Create a private, one-use link valid for 10 minutes on your local network.",
+    linkChooseFile: "Choose file and create link",
+    linkCopy: "Copy link",
+    linkReceiveTitle: "Receive a file",
+    linkReceiveHint: "Paste an Apocalipse Link received from another computer.",
+    linkReceive: "Receive",
     preferences: "PREFERENCES",
     appearanceTheme: "Interface theme",
     themeHint: "Colors and text contrast are adjusted together for readability.",
@@ -163,6 +170,13 @@ const catalogs = {
     retry: "Tentar novamente",
     openFolder: "Abrir pasta",
     preview: "Pré-visualizar",
+    linkSendTitle: "Enviar um arquivo diretamente",
+    linkSendHint: "Crie um link privado de uso único, válido por 10 minutos na sua rede local.",
+    linkChooseFile: "Escolher arquivo e criar link",
+    linkCopy: "Copiar link",
+    linkReceiveTitle: "Receber um arquivo",
+    linkReceiveHint: "Cole um Apocalipse Link recebido de outro computador.",
+    linkReceive: "Receber",
     preferences: "PREFERÊNCIAS",
     appearanceTheme: "Tema da interface",
     themeHint: "As cores e o contraste do texto são ajustados juntos para manter a leitura.",
@@ -280,6 +294,13 @@ const catalogs = {
     retry: "重试",
     openFolder: "打开文件夹",
     preview: "预览",
+    linkSendTitle: "直接发送文件",
+    linkSendHint: "创建一个在本地网络中有效十分钟的私密一次性链接。",
+    linkChooseFile: "选择文件并创建链接",
+    linkCopy: "复制链接",
+    linkReceiveTitle: "接收文件",
+    linkReceiveHint: "粘贴从另一台计算机收到的 Apocalipse Link。",
+    linkReceive: "接收",
     preferences: "偏好设置",
     appearanceTheme: "界面主题",
     themeHint: "颜色与文字对比度会同步调整，以保持清晰易读。",
@@ -641,9 +662,88 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelectorAll("nav [data-page]").forEach((item) => item.classList.toggle("active", item === button));
     const heading = button.querySelector("b")?.textContent || t("downloads");
     document.querySelector("header h1").textContent = heading;
+    document.querySelector("#apocalipse-link-panel").hidden = activePage !== "link";
+    document.querySelector(".metrics").hidden = activePage === "link";
+    document.querySelector(".panel").hidden = activePage === "link";
     renderDownloads();
   };
 });
+
+let linkLocalPath = "";
+let linkRemotePath = "";
+let linkRemoteId = "";
+let linkRemotePassword = "";
+let linkSelectedRemote = "";
+const linkParent = (path) => /^[A-Za-z]:[\\/]?$/.test(path) ? "" : path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
+function renderLinkFiles(target, entries, open, select) {
+  const root = document.querySelector(target);
+  root.replaceChildren();
+  for (const entry of entries) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "link-file";
+    row.append(
+      Object.assign(document.createElement("span"), { textContent: entry.directory ? "📁" : "📄" }),
+      Object.assign(document.createElement("span"), { textContent: entry.name }),
+      Object.assign(document.createElement("small"), { textContent: entry.directory ? "" : formatBytes(entry.size) }),
+    );
+    row.ondblclick = () => entry.directory && open(entry.path);
+    row.onclick = () => {
+      root.querySelectorAll(".selected").forEach((item) => item.classList.remove("selected"));
+      row.classList.add("selected");
+      select?.(entry);
+    };
+    root.append(row);
+  }
+}
+async function openLocalLink(path = "") {
+  linkLocalPath = path;
+  document.querySelector("#link-local-path").textContent = path || "Unidades";
+  renderLinkFiles("#link-local-files", await invoke("list_local_link_files", { path }), openLocalLink);
+}
+async function openRemoteLink(path = "") {
+  linkRemotePath = path;
+  document.querySelector("#link-remote-path").textContent = path || "Unidades";
+  const entries = await invoke("list_remote_link_files", { id: linkRemoteId, password: linkRemotePassword, path });
+  renderLinkFiles("#link-remote-files", entries, openRemoteLink, (entry) => {
+    linkSelectedRemote = entry.directory ? "" : entry.path;
+    document.querySelector("#link-download-remote").disabled = !linkSelectedRemote;
+  });
+}
+async function loadLinkIdentity() {
+  const identity = await invoke("get_link_identity");
+  document.querySelector("#link-own-id").value = identity.id;
+  document.querySelector("#link-own-password").value = identity.password;
+  await openLocalLink();
+  return identity;
+}
+document.querySelector('[data-page="link"]').addEventListener("click", () => loadLinkIdentity().catch(console.error));
+document.querySelector("#link-new-password").onclick = async () => {
+  document.querySelector("#link-own-password").value = await invoke("regenerate_link_password");
+};
+document.querySelector("#link-connect").onclick = async () => {
+  linkRemoteId = document.querySelector("#link-remote-id").value.trim();
+  linkRemotePassword = document.querySelector("#link-remote-password").value.trim();
+  try { await openRemoteLink(); document.querySelector("#link-status").textContent = "Conectado"; }
+  catch (error) { document.querySelector("#link-status").textContent = `Falha: ${error}`; }
+};
+document.querySelector("#link-self-test").onclick = async () => {
+  const identity = await loadLinkIdentity();
+  document.querySelector("#link-remote-id").value = `127.0.0.1:${identity.port}`;
+  document.querySelector("#link-remote-password").value = identity.password;
+  document.querySelector("#link-connect").click();
+};
+document.querySelector("#link-local-up").onclick = () => openLocalLink(linkParent(linkLocalPath)).catch(console.error);
+document.querySelector("#link-remote-up").onclick = () => openRemoteLink(linkParent(linkRemotePath)).catch(console.error);
+document.querySelector("#link-download-remote").onclick = async () => {
+  if (!linkSelectedRemote) return;
+  const status = document.querySelector("#link-status");
+  status.textContent = "Transferindo…";
+  try {
+    const destination = await invoke("download_remote_link_file", { id: linkRemoteId, password: linkRemotePassword, path: linkSelectedRemote });
+    status.textContent = `Concluído: ${destination}`;
+  } catch (error) { if (`${error}` !== "cancelled") status.textContent = `Falha: ${error}`; }
+};
 function updateLogEditorControls() {
   const configured = Boolean(document.querySelector("#log-editor").value.trim());
   document.querySelector("#remove-log-editor").disabled = !configured;

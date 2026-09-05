@@ -5,12 +5,13 @@ use apocalipse_core::{
     DownloadId, DownloadKind, DownloadRequest, DownloadState, DownloadTask,
 };
 use serde::{Deserialize, Serialize};
+use futures_util::StreamExt;
 use std::{
     collections::HashMap,
     fs,
     fs::OpenOptions,
     io::{Read, Write},
-    net::{TcpListener, TcpStream},
+    net::{TcpListener, TcpStream, UdpSocket},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Mutex,
@@ -24,7 +25,7 @@ use tauri::{
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::{
-    io::AsyncReadExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     sync::{mpsc, oneshot},
 };
 
@@ -174,6 +175,8 @@ struct UserSettings {
     dns_servers: Vec<std::net::IpAddr>,
     #[serde(default)]
     associations: HashMap<String, bool>,
+    #[serde(default = "default_link_password")]
+    link_password: String,
 }
 
 const fn default_max_active() -> usize {
@@ -184,6 +187,9 @@ const fn default_connections() -> usize {
 }
 fn default_bridge_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
+}
+fn default_link_password() -> String {
+    uuid::Uuid::new_v4().simple().to_string()[..8].to_ascii_uppercase()
 }
 
 impl Default for UserSettings {
@@ -209,6 +215,7 @@ impl Default for UserSettings {
             dns_enabled: false,
             dns_servers: Vec::new(),
             associations: HashMap::new(),
+            link_password: default_link_password(),
         }
     }
 }
@@ -260,6 +267,93 @@ struct TorrentFileInfo { index: usize, path: String, size: u64 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TorrentInspection { name: String, files: Vec<TorrentFileInfo>, total_size: u64 }
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkFileEntry { name: String, path: String, size: u64, directory: bool }
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkListRequest { password: String, path: String }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkIdentity { id: String, password: String, port: u16 }
+
+fn safe_link_path(path: &str) -> Result<PathBuf, String> {
+    let path = Path::new(path);
+    if !path.is_absolute() { return Err("remote_path_must_be_absolute".to_owned()); }
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(value) => result.push(value.as_os_str()),
+            std::path::Component::RootDir => result.push(std::path::MAIN_SEPARATOR.to_string()),
+            std::path::Component::Normal(value) => result.push(value),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => return Err("invalid_remote_path".to_owned()),
+        }
+    }
+    Ok(result)
+}
+
+fn link_roots() -> Vec<LinkFileEntry> {
+    #[cfg(windows)]
+    { (b'A'..=b'Z').filter_map(|letter| { let path = format!("{}:\\", letter as char); Path::new(&path).exists().then(|| LinkFileEntry { name: path.clone(), path, size: 0, directory: true }) }).collect() }
+    #[cfg(not(windows))]
+    { vec![LinkFileEntry { name: "/".to_owned(), path: "/".to_owned(), size: 0, directory: true }] }
+}
+
+fn list_link_directory(path: &str) -> Result<Vec<LinkFileEntry>, String> {
+    if path.trim().is_empty() { return Ok(link_roots()); }
+    let directory = safe_link_path(path)?;
+    let mut entries = fs::read_dir(directory).map_err(|error| error.to_string())?.flatten().filter_map(|entry| {
+        let metadata = entry.metadata().ok()?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = directory.join(&name).to_string_lossy().into_owned();
+        Some(LinkFileEntry { name, path, size: if metadata.is_file() { metadata.len() } else { 0 }, directory: metadata.is_dir() })
+    }).collect::<Vec<_>>();
+    entries.sort_by_key(|entry| (!entry.directory, entry.name.to_ascii_lowercase()));
+    Ok(entries)
+}
+
+#[tauri::command]
+fn get_link_identity(state: State<'_, AppState>) -> Result<LinkIdentity, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    let ip = local_link_ip();
+    Ok(LinkIdentity { id: format!("{ip}:{LINK_PORT}"), password: settings.link_password.clone(), port: LINK_PORT })
+}
+
+#[tauri::command]
+fn regenerate_link_password(state: State<'_, AppState>) -> Result<String, String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.link_password = default_link_password();
+    save_settings(&state, &settings)?;
+    Ok(settings.link_password.clone())
+}
+
+#[tauri::command]
+fn list_local_link_files(path: String) -> Result<Vec<LinkFileEntry>, String> {
+    list_link_directory(&path)
+}
+
+#[tauri::command]
+async fn list_remote_link_files(id: String, password: String, path: String) -> Result<Vec<LinkFileEntry>, String> {
+    let address = if id.starts_with("http://") { id } else { format!("http://{id}") };
+    reqwest::Client::new().post(format!("{address}/v1/link/list")).json(&LinkListRequest { password, path }).send().await.map_err(|error| error.to_string())?.error_for_status().map_err(|error| error.to_string())?.json().await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn download_remote_link_file(id: String, password: String, path: String) -> Result<String, String> {
+    let file_name = Path::new(&path).file_name().and_then(|value| value.to_str()).unwrap_or("download");
+    let Some(destination) = rfd::FileDialog::new().set_file_name(file_name).save_file() else { return Err("cancelled".to_owned()); };
+    let address = if id.starts_with("http://") { id } else { format!("http://{id}") };
+    let encoded = url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>();
+    let response = reqwest::Client::new().get(format!("{address}/v1/link/file?path={encoded}")).bearer_auth(password).send().await.map_err(|error| error.to_string())?.error_for_status().map_err(|error| error.to_string())?;
+    let mut file = tokio::fs::File::create(&destination).await.map_err(|error| error.to_string())?;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await { file.write_all(&chunk.map_err(|error| error.to_string())?).await.map_err(|error| error.to_string())?; }
+    Ok(destination.to_string_lossy().into_owned())
+}
 
 enum BValue { Int(i64), Bytes(Vec<u8>), List(Vec<BValue>), Dict(HashMap<Vec<u8>, BValue>) }
 
@@ -455,6 +549,56 @@ struct DestinationChoice {
 }
 
 const BRIDGE_PORT: u16 = 17654;
+const LINK_PORT: u16 = 17655;
+
+fn local_link_ip() -> std::net::IpAddr {
+    UdpSocket::bind(("0.0.0.0", 0)).ok().and_then(|socket| {
+        socket.connect(("8.8.8.8", 80)).ok()?;
+        socket.local_addr().ok().map(|address| address.ip())
+    }).filter(|ip| !ip.is_loopback()).unwrap_or_else(|| "127.0.0.1".parse().expect("valid loopback"))
+}
+
+fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
+    let Some(buffer) = read_bridge_request(&mut stream) else { return; };
+    let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") else { return; };
+    let headers = String::from_utf8_lossy(&buffer[..header_end + 4]);
+    if headers.starts_with("GET /v1/link/file?") {
+        let state = app.state::<AppState>();
+        let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
+        if !bridge_authorized(&headers, &settings.link_password) { bridge_response(&mut stream, "401 Unauthorized", None, ""); return; }
+        let request_target = headers.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("");
+        let path = url::Url::parse(&format!("http://localhost{request_target}")).ok().and_then(|url| url.query_pairs().find(|(key, _)| key == "path").map(|(_, value)| value.into_owned()));
+        let Some(path) = path.and_then(|value| safe_link_path(&value).ok()) else { bridge_response(&mut stream, "400 Bad Request", None, ""); return; };
+        let Ok(mut file) = fs::File::open(&path) else { bridge_response(&mut stream, "404 Not Found", None, ""); return; };
+        let Ok(metadata) = file.metadata() else { return; };
+        let header = format!("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", metadata.len());
+        if stream.write_all(header.as_bytes()).is_ok() { let _ = std::io::copy(&mut file, &mut stream); }
+        return;
+    }
+    if !headers.starts_with("POST /v1/link/list ") {
+        bridge_response(&mut stream, "404 Not Found", None, "{\"error\":\"not_found\"}");
+        return;
+    }
+    let request = serde_json::from_slice::<LinkListRequest>(&buffer[header_end + 4..]);
+    let Ok(request) = request else { bridge_response(&mut stream, "400 Bad Request", None, "{\"error\":\"invalid_request\"}"); return; };
+    let state = app.state::<AppState>();
+    let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
+    if request.password != settings.link_password {
+        bridge_response(&mut stream, "401 Unauthorized", None, "{\"error\":\"unauthorized\"}");
+        return;
+    }
+    match list_link_directory(&request.path).and_then(|entries| serde_json::to_string(&entries).map_err(|error| error.to_string())) {
+        Ok(body) => bridge_response(&mut stream, "200 OK", None, &body),
+        Err(_) => bridge_response(&mut stream, "400 Bad Request", None, "{\"error\":\"invalid_path\"}"),
+    }
+}
+
+fn run_link_server(app: tauri::AppHandle, listener: TcpListener) {
+    for stream in listener.incoming().flatten() {
+        let app = app.clone();
+        let _ = std::thread::Builder::new().name("apocalipse-link-client".into()).spawn(move || handle_link_connection(&app, stream));
+    }
+}
 
 #[tauri::command]
 fn inspect_url(url: String) -> Result<PlanResponse, String> {
@@ -1213,6 +1357,7 @@ async fn run_external_download(
                     "--enable-peer-exchange=true",
                     "--bt-enable-lpd=true",
                     "--bt-max-peers=100",
+                    "--bt-prioritize-piece=head=32M,tail=32M",
                     "--file-allocation=trunc",
                     "--seed-time=0",
                 ]);
@@ -2025,6 +2170,32 @@ fn find_video_file(root: &Path, depth: usize) -> Option<PathBuf> {
     best.map(|(_, path)| path)
 }
 
+fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
+    let mut best: Option<(u64, PathBuf)> = None;
+    for entry in fs::read_dir(directory).ok()?.flatten() {
+        let path = entry.path();
+        let candidate = if path.is_dir() {
+            find_video_file(&path, 0)
+        } else if path.extension().and_then(|value| value.to_str()).is_some_and(|extension| {
+            matches!(extension.to_ascii_lowercase().as_str(), "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts")
+        }) {
+            Some(path)
+        } else {
+            None
+        };
+        let Some(candidate) = candidate else { continue; };
+        let Ok(metadata) = candidate.metadata() else { continue; };
+        let size = metadata.len();
+        let control = PathBuf::from(format!("{}.aria2", candidate.display()));
+        let priority = if control.exists() { u64::MAX / 2 } else { 0 };
+        let score = priority.saturating_add(size);
+        if best.as_ref().is_none_or(|(current, _)| score > *current) {
+            best = Some((score, candidate));
+        }
+    }
+    best.map(|(_, path)| path)
+}
+
 #[tauri::command]
 fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), String> {
     let (root, player) = {
@@ -2034,7 +2205,15 @@ fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
         (task.destination.clone(), settings.media_player_path.clone())
     };
-    let video = if root.is_file() { root } else { find_video_file(&root, 0).ok_or_else(|| "torrent_video_not_available".to_owned())? };
+    let video = if root.is_file() {
+        root
+    } else if root.is_dir() {
+        find_video_file(&root, 0)
+            .ok_or_else(|| "torrent_video_not_available".to_owned())?
+    } else {
+        active_torrent_video(root.parent().unwrap_or(Path::new(".")))
+            .ok_or_else(|| "torrent_video_not_available".to_owned())?
+    };
     let mut command = Command::new(player.unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "vlc.exe" } else { "vlc" })));
     command.arg(video);
     #[cfg(target_os = "windows")] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
@@ -3643,6 +3822,12 @@ fn main() {
                     .name("apocalipse-extension-bridge".into())
                     .spawn(move || run_extension_bridge(bridge_app, listener))?;
             }
+            if let Ok(listener) = TcpListener::bind(("0.0.0.0", LINK_PORT)) {
+                let link_app = app.handle().clone();
+                std::thread::Builder::new()
+                    .name("apocalipse-link-server".into())
+                    .spawn(move || run_link_server(link_app, listener))?;
+            }
             if let Some(source) = associated_source {
                 queue_associated_source(app.handle(), source).map_err(std::io::Error::other)?;
             }
@@ -3691,6 +3876,11 @@ fn main() {
             inspect_url,
             inspect_media_formats,
             inspect_torrent_metadata,
+            get_link_identity,
+            regenerate_link_password,
+            list_local_link_files,
+            list_remote_link_files,
+            download_remote_link_file,
             list_downloads,
             enqueue_download,
             default_download_directory,

@@ -16,5 +16,7 @@ rfd = "0.15"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-clipboard-manager = "2"
 tokio.workspace = true
+reqwest.workspace = true
+futures-util.workspace = true
 uuid.workspace = true
 url.workspace = true

@@ -636,6 +636,20 @@ footer .bridge-connected i {
 .download-list {
   padding: 8px 14px;
 }
+.link-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; }
+.link-panel[hidden] { display: none; }
+.link-panel > div { display: grid; align-content: start; gap: 10px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.link-panel p { color: var(--muted); margin: 0 0 6px; line-height: 1.5; }
+.link-panel input { min-width: 0; padding: 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface); }
+.link-identity label,.link-connect label { display:grid; gap:6px; color:var(--muted); font-size:12px; }
+.link-files { min-height:300px; }
+.link-files header { display:flex; justify-content:space-between; align-items:center; }
+.link-files > small { color:var(--muted); overflow-wrap:anywhere; }
+.link-files > div { display:grid; gap:4px; max-height:360px; overflow:auto; }
+.link-file { display:grid; grid-template-columns:24px minmax(0,1fr) auto; gap:8px; align-items:center; padding:9px; border:0; border-radius:7px; text-align:left; color:var(--text); background:transparent; }
+.link-file:hover { background:var(--surface-2); }
+.link-file.selected { background:color-mix(in srgb, var(--accent) 22%, var(--surface-2)); outline:1px solid var(--accent); }
+.link-file small { color:var(--muted); }
 .download-row {
   display: grid;
   grid-template-columns: 22px 42px minmax(0, 1fr) auto;
@@ -688,12 +702,13 @@ footer .bridge-connected i {
   transition: width 0.25s ease;
 }
 .download-info strong {
-  font-size: 13px;
+  font-size: 15px;
 }
 .download-info small {
-  margin-top: 4px;
+  margin-top: 6px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
+  line-height: 1.35;
 }
 .download-state {
   color: #6eeeff;
@@ -716,10 +731,12 @@ footer .bridge-connected i {
 .task-action {
   border: 0;
   border-radius: 6px;
-  padding: 4px 7px;
+  min-height: 30px;
+  padding: 6px 11px;
   background: #162832;
   color: #9ac8d2;
-  font-size: 9px;
+  font-size: 11px;
+  font-weight: 650;
   cursor: pointer;
 }
 .task-action:hover {
