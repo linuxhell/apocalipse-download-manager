@@ -1083,21 +1083,23 @@ async function refreshMatrix() {
 }
 document.querySelector('[data-page="matrix"]').addEventListener("click", () => refreshMatrix().catch(console.error));
 document.querySelector("#matrix-import").onclick = async (event) => {
-  event.currentTarget.disabled = true;
+  const button = event.currentTarget;
+  button.disabled = true;
   try {
     const count = await invoke("import_matrix_rules");
     if (count) window.alert(`${t("matrixImportDone")}: ${count}`);
     await refreshMatrix();
   } catch (error) { window.alert(String(error)); }
-  finally { event.currentTarget.disabled = false; }
+  finally { button.disabled = false; }
 };
 document.querySelector("#matrix-export").onclick = async (event) => {
-  event.currentTarget.disabled = true;
+  const button = event.currentTarget;
+  button.disabled = true;
   try {
     const count = await invoke("export_matrix_rules");
     if (count) window.alert(`${t("matrixExportDone")}: ${count}`);
   } catch (error) { window.alert(String(error)); }
-  finally { event.currentTarget.disabled = false; }
+  finally { button.disabled = false; }
 };
 
 refreshMatrix().catch(console.error);

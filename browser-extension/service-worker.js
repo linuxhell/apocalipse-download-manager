@@ -8,6 +8,7 @@ let forceHeld = false;
 let lastFormSubmission = null;
 let siteRules = [{ id: "uupdump", hosts: ["uupdump.net", "*.uupdump.net"], action: "uupdump_post", enabled: true }];
 const recentFileResponses = [];
+const ASSISTED_PREFIX = "assisted-download:";
 
 function responseHeader(headers, name) {
   return (headers || []).find((header) => header.name?.toLowerCase() === name)?.value || "";
@@ -62,6 +63,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     bridgeRequest("/v1/health")
       .then(() => bridgeRequest("/v1/site-rules"))
       .then((rules) => { if (Array.isArray(rules)) siteRules = rules; })
+      .then(() => flushAssistedDownloads())
       .catch(() => {});
   }
 });
@@ -148,6 +150,51 @@ function uupDumpPost(url) {
   }
 }
 
+function matchingRule(url, action) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return siteRules.find((rule) => rule.enabled && rule.action === action
+      && rule.hosts?.some((pattern) => pattern.startsWith("*.")
+        ? host === pattern.slice(2) || host.endsWith(`.${pattern.slice(2)}`)
+        : host === pattern));
+  } catch {
+    return null;
+  }
+}
+
+const assistedKey = (id) => `${ASSISTED_PREFIX}${id}`;
+
+async function markAssistedDownload(item, url) {
+  await chrome.storage.session.set({
+    [assistedKey(item.id)]: { url, fileName: item.filename || null },
+  });
+}
+
+async function completeAssistedDownload(id) {
+  const key = assistedKey(id);
+  const stored = await chrome.storage.session.get(key);
+  const pending = stored[key];
+  if (!pending) return;
+  const [item] = await chrome.downloads.search({ id });
+  if (!item || item.state !== "complete" || !item.filename) return;
+  await bridgeRequest("/v1/browser-download-complete", {
+    method: "POST",
+    body: JSON.stringify({
+      url: item.finalUrl || pending.url || item.url,
+      fileName: item.filename,
+      total: Number(item.fileSize || item.totalBytes) || null,
+    }),
+  });
+  await chrome.storage.session.remove(key);
+}
+
+async function flushAssistedDownloads() {
+  const values = await chrome.storage.session.get(null);
+  await Promise.all(Object.keys(values)
+    .filter((key) => key.startsWith(ASSISTED_PREFIX))
+    .map((key) => completeAssistedDownload(Number(key.slice(ASSISTED_PREFIX.length))).catch(() => {})));
+}
+
 const cancelBrowserDownload = (id) => new Promise((resolve, reject) => {
   chrome.downloads.cancel(id, () => {
     const error = chrome.runtime.lastError;
@@ -224,6 +271,10 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     return false;
   }
   if (!bridgeConnected || bypassHeld || Date.now() < bypassUntil) return false;
+  if (matchingRule(url, "browser_assisted")) {
+    await markAssistedDownload(item, url);
+    return false;
+  }
   let cancelled = false;
   try {
     await cancelBrowserDownload(item.id);
@@ -272,6 +323,12 @@ if (chrome.downloads.onDeterminingFilename?.addListener) {
     void takeBrowserDownload(item, true);
   });
 }
+
+chrome.downloads.onChanged.addListener((delta) => {
+  if (delta.state?.current === "complete") {
+    void completeAssistedDownload(delta.id).catch(() => {});
+  }
+});
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "APOCALIPSE_BLOB_BEGIN") {
