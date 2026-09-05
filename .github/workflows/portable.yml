@@ -124,7 +124,7 @@ jobs:
         run: |
           tag="${{ github.ref_name }}"
           if [[ "${{ github.ref }}" != refs/tags/v* ]]; then
-            version=$(python3 -c "import json; print(json.load(open('browser-extension/manifest.json'))['version'])")
+            version=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")
             tag="v${version}"
           fi
           prerelease=()
