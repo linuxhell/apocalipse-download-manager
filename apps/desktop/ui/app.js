@@ -46,6 +46,19 @@ const catalogs = {
     openFolder: "Open folder",
     preview: "Preview",
     matrixPowered: "Powered by Matrix Ultimate v1 AI",
+    matrixRollback: "Rollback",
+    matrixAnalyze: "Analyze failures",
+    matrixDescription: "Matrix analyzes local failures and proposes safe rules. No rule executes website code.",
+    matrixSummary: "{active} active rules · {proposals} proposals",
+    matrixNoProposal: "No new rule is required.",
+    matrixReason: "{count} failed download(s); retry with one conservative connection",
+    matrixApply: "Apply rule",
+    matrixAnalyzing: "Analyzing…",
+    matrixChecking: "Checking download failures…",
+    matrixDone: "analysis completed now",
+    matrixAnalysisFailed: "Analysis failed",
+    matrixRollbackDone: "rollback completed",
+    matrixRollbackUnavailable: "Rollback unavailable",
     linkSendTitle: "Send a file directly",
     linkSendHint: "Create a private, one-use link valid for 10 minutes on your local network.",
     linkChooseFile: "Choose file and create link",
@@ -172,6 +185,19 @@ const catalogs = {
     openFolder: "Abrir pasta",
     preview: "Pré-visualizar",
     matrixPowered: "Alimentada por Matrix Ultimate v1 AI",
+    matrixRollback: "Reverter",
+    matrixAnalyze: "Analisar falhas",
+    matrixDescription: "A Matrix analisa falhas locais e propõe regras seguras. Nenhuma regra executa código de sites.",
+    matrixSummary: "{active} regras ativas · {proposals} propostas",
+    matrixNoProposal: "Nenhuma nova regra necessária.",
+    matrixReason: "{count} download(s) com falha; tentar novamente com uma conexão conservadora",
+    matrixApply: "Aplicar regra",
+    matrixAnalyzing: "Analisando…",
+    matrixChecking: "Verificando falhas de download…",
+    matrixDone: "análise concluída agora",
+    matrixAnalysisFailed: "Falha na análise",
+    matrixRollbackDone: "reversão concluída",
+    matrixRollbackUnavailable: "Reversão indisponível",
     linkSendTitle: "Enviar um arquivo diretamente",
     linkSendHint: "Crie um link privado de uso único, válido por 10 minutos na sua rede local.",
     linkChooseFile: "Escolher arquivo e criar link",
@@ -297,6 +323,19 @@ const catalogs = {
     openFolder: "打开文件夹",
     preview: "预览",
     matrixPowered: "由 Matrix Ultimate v1 AI 驱动",
+    matrixRollback: "回滚",
+    matrixAnalyze: "分析故障",
+    matrixDescription: "Matrix 会分析本地故障并建议安全规则。任何规则都不会执行网站代码。",
+    matrixSummary: "{active} 条启用规则 · {proposals} 条建议",
+    matrixNoProposal: "无需添加新规则。",
+    matrixReason: "{count} 个下载失败；使用一个保守连接重试",
+    matrixApply: "应用规则",
+    matrixAnalyzing: "正在分析…",
+    matrixChecking: "正在检查下载故障…",
+    matrixDone: "分析刚刚完成",
+    matrixAnalysisFailed: "分析失败",
+    matrixRollbackDone: "回滚完成",
+    matrixRollbackUnavailable: "回滚不可用",
     linkSendTitle: "直接发送文件",
     linkSendHint: "创建一个在本地网络中有效十分钟的私密一次性链接。",
     linkChooseFile: "选择文件并创建链接",
@@ -402,6 +441,7 @@ const selectedIds = new Set();
 const speedSamples = new Map();
 let selectionPointerActive = false;
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
+const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
 const invoke = (command, args = {}) => {
   const bridge = window.__TAURI__?.core?.invoke;
   if (!bridge) throw new Error("Desktop bridge unavailable in preview");
@@ -636,6 +676,7 @@ function translate() {
     .forEach((element) => (element.placeholder = t(element.dataset.i18nPlaceholder)));
   document.querySelector("#language").value = locale;
   renderDownloads();
+  if (activePage === "matrix") refreshMatrix().catch(console.error);
 }
 
 async function refreshDownloads() {
@@ -778,20 +819,20 @@ document.querySelector("#link-upload-local").onclick = async () => {
 };
 async function refreshMatrix() {
   const status = await invoke("matrix_analyze");
-  document.querySelector("#matrix-summary").textContent = `${status.activeRules} regras ativas · ${status.proposals.length} propostas`;
+  document.querySelector("#matrix-summary").textContent = tf("matrixSummary", { active: status.activeRules, proposals: status.proposals.length });
   const root = document.querySelector("#matrix-proposals");
   root.replaceChildren();
   if (!status.proposals.length) {
-    root.append(Object.assign(document.createElement("p"), { textContent: "Nenhuma nova regra necessária." }));
+    root.append(Object.assign(document.createElement("p"), { textContent: t("matrixNoProposal") }));
     return;
   }
   for (const proposal of status.proposals) {
     const row = document.createElement("div");
     row.className = "matrix-proposal";
     const info = document.createElement("span");
-    info.append(Object.assign(document.createElement("b"), { textContent: proposal.host }), Object.assign(document.createElement("small"), { textContent: proposal.reason }));
+    info.append(Object.assign(document.createElement("b"), { textContent: proposal.host }), Object.assign(document.createElement("small"), { textContent: tf("matrixReason", { count: proposal.failures }) }));
     const confidence = Object.assign(document.createElement("b"), { textContent: `${proposal.confidence}%` });
-    const apply = Object.assign(document.createElement("button"), { type: "button", textContent: "Aplicar regra" });
+    const apply = Object.assign(document.createElement("button"), { type: "button", textContent: t("matrixApply") });
     apply.onclick = async () => { apply.disabled = true; try { await invoke("matrix_apply_rule", { host: proposal.host }); await refreshMatrix(); } catch (error) { console.error(error); } finally { apply.disabled = false; } };
     row.append(info, confidence, apply);
     root.append(row);
@@ -802,16 +843,16 @@ document.querySelector("#matrix-scan").onclick = async () => {
   const button = document.querySelector("#matrix-scan");
   const summary = document.querySelector("#matrix-summary");
   button.disabled = true;
-  button.textContent = "Analisando…";
-  summary.textContent = "Verificando falhas de download…";
+  button.textContent = t("matrixAnalyzing");
+  summary.textContent = t("matrixChecking");
   try {
     await refreshMatrix();
-    summary.textContent += " · análise concluída agora";
+    summary.textContent += ` · ${t("matrixDone")}`;
   } catch (error) {
-    summary.textContent = `Falha na análise: ${error}`;
+    summary.textContent = `${t("matrixAnalysisFailed")}: ${error}`;
   } finally {
     button.disabled = false;
-    button.textContent = "Analisar falhas";
+    button.textContent = t("matrixAnalyze");
   }
 };
 document.querySelector("#matrix-rollback").onclick = async () => {
@@ -819,9 +860,9 @@ document.querySelector("#matrix-rollback").onclick = async () => {
   try {
     await invoke("matrix_rollback");
     await refreshMatrix();
-    summary.textContent += " · rollback concluído";
+    summary.textContent += ` · ${t("matrixRollbackDone")}`;
   } catch (error) {
-    summary.textContent = `Rollback indisponível: ${error}`;
+    summary.textContent = `${t("matrixRollbackUnavailable")}: ${error}`;
   }
 };
 function updateLogEditorControls() {
