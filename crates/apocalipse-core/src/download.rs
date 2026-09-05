@@ -248,11 +248,12 @@ impl DownloadEngine {
             let expected = (total - start).min(SEGMENT_CHUNK_SIZE);
             let chunk = chunk_path(&request.destination, index);
             let legacy = legacy_chunk_path(&request.destination, index);
-            if fs::metadata(&chunk).await.is_err() && fs::metadata(&legacy).await.is_ok() {
-                if fs::rename(&legacy, &chunk).await.is_err() {
-                    fs::copy(&legacy, &chunk).await?;
-                    fs::remove_file(&legacy).await?;
-                }
+            if fs::metadata(&chunk).await.is_err()
+                && fs::metadata(&legacy).await.is_ok()
+                && fs::rename(&legacy, &chunk).await.is_err()
+            {
+                fs::copy(&legacy, &chunk).await?;
+                fs::remove_file(&legacy).await?;
             }
             let existing = fs::metadata(&chunk)
                 .await
