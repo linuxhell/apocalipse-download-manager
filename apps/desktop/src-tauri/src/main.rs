@@ -1874,6 +1874,43 @@ fn set_tool_paths(
 }
 
 #[tauri::command]
+fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, String> {
+    if id != "yt-dlp" {
+        return Err("manual_update_required: this engine has no safe in-place updater".to_owned());
+    }
+    let executable = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        configured_tool(
+            &settings.yt_dlp_path,
+            if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" },
+        )
+    };
+    if executable.is_dir() {
+        return Err("tool_target_must_be_a_file".to_owned());
+    }
+    let before = version_line(&executable, &["--version"])
+        .ok_or_else(|| "yt_dlp_not_found".to_owned())?;
+    let mut command = Command::new(&executable);
+    command.args(["--update-to", "stable"]);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(if message.is_empty() { "yt_dlp_update_failed".to_owned() } else { message });
+    }
+    let after = version_line(&executable, &["--version"]).unwrap_or_else(|| before.clone());
+    Ok(if before == after {
+        format!("yt-dlp already current ({after})")
+    } else {
+        format!("yt-dlp updated: {before} → {after}")
+    })
+}
+
+#[tauri::command]
 fn enqueue_download(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -3409,6 +3446,7 @@ fn main() {
             activate_main_window,
             get_tool_statuses,
             set_tool_paths,
+            update_tool,
             suggest_download_name,
             remove_downloads,
             read_general_log,

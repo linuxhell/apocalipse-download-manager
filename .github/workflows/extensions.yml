@@ -1,0 +1,45 @@
+name: Browser extensions
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Chrome and Edge packages
+        run: |
+          mkdir -p dist
+          (cd browser-extension && zip -qr ../dist/apocalipse-chrome.zip .)
+          cp dist/apocalipse-chrome.zip dist/apocalipse-edge.zip
+      - name: Build Firefox XPI
+        run: |
+          cp -R browser-extension firefox-extension
+          python3 - <<'PY'
+          import json
+          path = 'firefox-extension/manifest.json'
+          with open(path, encoding='utf-8') as stream:
+              manifest = json.load(stream)
+          worker = manifest.pop('background', {}).get('service_worker')
+          manifest['background'] = {'scripts': [worker]}
+          manifest['browser_specific_settings'] = {
+              'gecko': {
+                  'id': 'apocalipse-download-manager@linuxhell',
+                  'strict_min_version': '121.0'
+              }
+          }
+          with open(path, 'w', encoding='utf-8') as stream:
+              json.dump(manifest, stream, ensure_ascii=False, indent=2)
+          PY
+          (cd firefox-extension && zip -qr ../dist/apocalipse-firefox-unsigned.xpi .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apocalipse-browser-extensions
+          path: dist/*
+          retention-days: 14

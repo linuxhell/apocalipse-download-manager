@@ -940,6 +940,20 @@ document.querySelector("#save-settings").onclick = async () => {
   }
 };
 document.querySelector("#check-tools").onclick = refreshToolStatuses;
+document.querySelectorAll("[data-tool-update]").forEach((button) => {
+  button.onclick = async () => {
+    button.disabled = true;
+    try {
+      const message = await invoke("update_tool", { id: button.dataset.toolUpdate });
+      await refreshToolStatuses();
+      alert(message);
+    } catch (error) {
+      alert(String(error).replace("manual_update_required:", "Atualização manual necessária:"));
+    } finally {
+      button.disabled = false;
+    }
+  };
+});
 document.querySelectorAll("[data-export-close]").forEach((button) => button.onclick = () => exportDialog.close());
 document.querySelector("#export-format").onchange = (event) => {
   document.querySelector("#export-video-codec").disabled = ["mp3", "m4a", "opus", "flac", "wav"].includes(event.target.value);
