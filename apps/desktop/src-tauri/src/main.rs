@@ -3501,21 +3501,36 @@ fn reveal_download(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
         .iter()
         .find(|task| task.id == id)
         .ok_or_else(|| "download_not_found".to_owned())?;
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    let partial = partial_path(&task.destination);
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     let target = if task.destination.exists() {
-        task.destination.clone()
+        Some(task.destination.clone())
+    } else if partial.exists() {
+        Some(partial)
     } else {
-        partial_path(&task.destination)
+        None
     };
+    let directory = task
+        .destination
+        .parent()
+        .ok_or_else(|| "download_directory_not_found".to_owned())?;
     #[cfg(target_os = "windows")]
-    let result = Command::new("explorer.exe")
-        .arg(format!("/select,{}", target.display()))
-        .spawn();
+    let result = if let Some(target) = &target {
+        Command::new("explorer.exe")
+            .arg(format!("/select,{}", target.display()))
+            .spawn()
+    } else {
+        Command::new("explorer.exe").arg(directory).spawn()
+    };
     #[cfg(target_os = "macos")]
-    let result = Command::new("open").arg("-R").arg(&target).spawn();
+    let result = if let Some(target) = &target {
+        Command::new("open").arg("-R").arg(target).spawn()
+    } else {
+        Command::new("open").arg(directory).spawn()
+    };
     #[cfg(target_os = "linux")]
-    let result = Command::new("xdg-open")
-        .arg(target.parent().unwrap_or(&target))
-        .spawn();
+    let result = Command::new("xdg-open").arg(directory).spawn();
     result.map(|_| ()).map_err(|error| error.to_string())
 }
 
