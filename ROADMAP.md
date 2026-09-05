@@ -1,6 +1,6 @@
 # Roadmap
 
-## Current usable baseline — v0.4.4
+## Current usable baseline — v0.4.5
 
 - Rust workspace and stable task domain model
 - HTTP/HTTPS downloads with queue, pause, resume and retry

@@ -110,6 +110,14 @@ fn default_site_rules() -> Vec<SiteRule> {
             enabled: true,
             connections: 1,
         },
+        SiteRule {
+            id: "fixti".to_owned(),
+            name: "RSLoad / Fixti".to_owned(),
+            hosts: vec!["fixti.net".to_owned(), "*.fixti.net".to_owned()],
+            action: SiteRuleAction::SingleConnection,
+            enabled: true,
+            connections: 1,
+        },
     ]
 }
 
@@ -2550,7 +2558,10 @@ async fn run_external_download(
         .settings
         .lock()
         .ok()
-        .and_then(|settings| website_credential_for_url(&settings, &task.source).cloned());
+        .and_then(|settings| {
+            website_credential_for_download(&settings, &task.source, task.referer.as_deref())
+                .cloned()
+        });
     let user_agent = configured_user_agent.as_deref()
         .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_deref()))
         .unwrap_or("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36");
@@ -4483,7 +4494,9 @@ fn start_download(
         {
             headers.push(("Content-Type".to_owned(), content_type.clone()));
         }
-        if let Some(credential) = website_credential_for_url(&limits, &task.source) {
+        if let Some(credential) =
+            website_credential_for_download(&limits, &task.source, task.referer.as_deref())
+        {
             let basic = BASE64.encode(format!("{}:{}", credential.username, credential.password));
             headers.push(("Authorization".to_owned(), format!("Basic {basic}")));
         }
@@ -4813,6 +4826,30 @@ fn website_credential_for_url<'a>(
         .to_ascii_lowercase();
     settings.website_credentials.iter().find(|credential| {
         host == credential.host || host.ends_with(&format!(".{}", credential.host))
+    })
+}
+
+fn website_credential_for_download<'a>(
+    settings: &'a UserSettings,
+    source: &str,
+    referer: Option<&str>,
+) -> Option<&'a WebsiteCredential> {
+    website_credential_for_url(settings, source).or_else(|| {
+        let source_host = url::Url::parse(source)
+            .ok()?
+            .host_str()?
+            .to_ascii_lowercase();
+        let referer = referer?;
+        let referer_host = url::Url::parse(referer)
+            .ok()?
+            .host_str()?
+            .to_ascii_lowercase();
+        let is_rsload_download = (source_host == "fixti.net"
+            || source_host.ends_with(".fixti.net"))
+            && (referer_host == "rsload.net" || referer_host.ends_with(".rsload.net"));
+        is_rsload_download
+            .then(|| website_credential_for_url(settings, referer))
+            .flatten()
     })
 }
 
@@ -6434,6 +6471,28 @@ mod tests {
     }
 
     #[test]
+    fn applies_rsload_credentials_only_to_its_known_download_host() {
+        let mut settings = UserSettings::default();
+        settings.website_credentials.push(WebsiteCredential {
+            host: "rsload.net".into(),
+            username: "rsload".into(),
+            password: "rsload".into(),
+        });
+        assert!(website_credential_for_download(
+            &settings,
+            "https://s4.fixti.net/files/freeware/file.zip",
+            Some("https://rsload.net/software/page.html")
+        )
+        .is_some());
+        assert!(website_credential_for_download(
+            &settings,
+            "https://unrelated.example/file.zip",
+            Some("https://rsload.net/software/page.html")
+        )
+        .is_none());
+    }
+
+    #[test]
     fn media_page_names_always_receive_mp4_extension() {
         assert_eq!(
             append_source_extension(
@@ -6584,6 +6643,12 @@ mod tests {
                 .unwrap()
                 .id,
             "pixeldrain"
+        );
+        assert_eq!(
+            matching_site_rule("https://s4.fixti.net/files/freeware/file.zip", &rules)
+                .unwrap()
+                .id,
+            "fixti"
         );
     }
 
