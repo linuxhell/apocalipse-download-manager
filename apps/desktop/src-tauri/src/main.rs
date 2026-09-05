@@ -306,7 +306,7 @@ fn link_roots() -> Vec<LinkFileEntry> {
 fn list_link_directory(path: &str) -> Result<Vec<LinkFileEntry>, String> {
     if path.trim().is_empty() { return Ok(link_roots()); }
     let directory = safe_link_path(path)?;
-    let mut entries = fs::read_dir(directory).map_err(|error| error.to_string())?.flatten().filter_map(|entry| {
+    let mut entries = fs::read_dir(&directory).map_err(|error| error.to_string())?.flatten().filter_map(|entry| {
         let metadata = entry.metadata().ok()?;
         let name = entry.file_name().to_string_lossy().into_owned();
         let path = directory.join(&name).to_string_lossy().into_owned();
