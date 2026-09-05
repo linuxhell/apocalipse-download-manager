@@ -132,6 +132,15 @@ const catalogs = {
     proxyPasswordHint: "Leave blank to keep the saved password",
     proxyClearPassword: "Remove the saved proxy password",
     proxyPortableWarning: "The proxy configuration is saved in the portable data/settings.json file.",
+    websiteCredentials: "Site credentials",
+    websiteCredentialsHint: "Automatically authenticate compatible HTTP, FTP and media downloads.",
+    websiteHost: "Site domain",
+    websiteHostHint: "example.com",
+    websiteCredentialAdd: "Add or update",
+    websiteCredentialRemove: "Remove",
+    websiteCredentialSaved: "Credential saved",
+    websiteCredentialsEmpty: "No site credentials saved.",
+    websiteCredentialsLocalWarning: "Passwords are stored locally in the portable data/settings.json file. Protect access to this folder.",
     customDns: "Custom DNS",
     customDnsHint: "Resolve native downloads without changing the operating system DNS",
     dnsProvider: "Provider",
@@ -317,6 +326,15 @@ const catalogs = {
     proxyPasswordHint: "Deixe vazio para manter a senha salva",
     proxyClearPassword: "Remover a senha de proxy salva",
     proxyPortableWarning: "A configuração do proxy é salva no arquivo portátil data/settings.json.",
+    websiteCredentials: "Credenciais de sites",
+    websiteCredentialsHint: "Autenticar automaticamente downloads HTTP, FTP e de mídia compatíveis.",
+    websiteHost: "Domínio do site",
+    websiteHostHint: "exemplo.com.br",
+    websiteCredentialAdd: "Adicionar ou atualizar",
+    websiteCredentialRemove: "Remover",
+    websiteCredentialSaved: "Credencial salva",
+    websiteCredentialsEmpty: "Nenhuma credencial de site salva.",
+    websiteCredentialsLocalWarning: "As senhas ficam armazenadas localmente no arquivo portátil data/settings.json. Proteja o acesso a essa pasta.",
     customDns: "DNS personalizado",
     customDnsHint: "Resolver downloads nativos sem alterar o DNS do sistema operacional",
     dnsProvider: "Provedor",
@@ -501,6 +519,15 @@ const catalogs = {
     proxyPasswordHint: "留空以保留已保存的密码",
     proxyClearPassword: "删除已保存的代理密码",
     proxyPortableWarning: "代理配置保存在便携式 data/settings.json 文件中。",
+    websiteCredentials: "网站凭据",
+    websiteCredentialsHint: "自动验证兼容的 HTTP、FTP 和媒体下载。",
+    websiteHost: "网站域名",
+    websiteHostHint: "example.com",
+    websiteCredentialAdd: "添加或更新",
+    websiteCredentialRemove: "删除",
+    websiteCredentialSaved: "凭据已保存",
+    websiteCredentialsEmpty: "尚未保存网站凭据。",
+    websiteCredentialsLocalWarning: "密码保存在便携式 data/settings.json 文件中。请保护此文件夹的访问权限。",
     customDns: "自定义 DNS",
     customDnsHint: "解析原生下载而不更改操作系统 DNS",
     dnsProvider: "提供商",
@@ -1417,9 +1444,65 @@ document.querySelector("#dns-preset").onchange = (event) => {
     document.querySelector("#dns-servers").value = event.target.value;
   }
 };
+function renderWebsiteCredentials(credentials) {
+  const list = document.querySelector("#website-credential-list");
+  list.replaceChildren();
+  if (!credentials.length) {
+    const empty = document.createElement("small");
+    empty.textContent = t("websiteCredentialsEmpty");
+    list.append(empty);
+    return;
+  }
+  for (const credential of credentials) {
+    const row = document.createElement("div");
+    const identity = document.createElement("span");
+    const host = document.createElement("b");
+    const username = document.createElement("small");
+    const remove = document.createElement("button");
+    host.textContent = credential.host;
+    username.textContent = credential.username;
+    identity.append(host, username);
+    remove.type = "button";
+    remove.textContent = t("websiteCredentialRemove");
+    remove.onclick = async () => {
+      remove.disabled = true;
+      try {
+        renderWebsiteCredentials(await invoke("remove_website_credential", { host: credential.host }));
+      } catch (error) {
+        console.error(error);
+        remove.disabled = false;
+      }
+    };
+    row.append(identity, remove);
+    list.append(row);
+  }
+}
+document.querySelector("#save-website-credential").onclick = async (event) => {
+  const button = event.currentTarget;
+  const host = document.querySelector("#website-credential-host");
+  const username = document.querySelector("#website-credential-username");
+  const password = document.querySelector("#website-credential-password");
+  if (![host, username, password].every((input) => input.reportValidity()) || !host.value.trim() || !username.value.trim() || !password.value) return;
+  button.disabled = true;
+  try {
+    renderWebsiteCredentials(await invoke("save_website_credential", {
+      host: host.value,
+      username: username.value,
+      password: password.value,
+    }));
+    host.value = "";
+    username.value = "";
+    password.value = "";
+  } catch (error) {
+    console.error(error);
+    window.alert(String(error));
+  } finally {
+    button.disabled = false;
+  }
+};
 document.querySelector('[data-page="settings"]').onclick = async () => {
   try {
-    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations, websiteCredentials] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
@@ -1430,6 +1513,7 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
       invoke("get_proxy_setting"),
       invoke("get_dns_setting"),
       invoke("get_associations"),
+      invoke("list_website_credentials"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
     document.querySelector("#theme").value = document.documentElement.dataset.theme;
@@ -1467,6 +1551,7 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
       ? dnsValue
       : "custom";
     updateDnsControls();
+    renderWebsiteCredentials(websiteCredentials);
     updateLogEditorControls();
     settingsDialog.showModal();
   } catch (error) {

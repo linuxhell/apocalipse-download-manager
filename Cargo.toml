@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/apocalipse-core", "crates/apocalipse-cli", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.4.3"
+version = "0.4.4"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/linuxhell/apocalipse-download-manager"
@@ -19,6 +19,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 md5 = "0.7"
+base64 = "0.22"
 thiserror = "2.0"
 tokio = { version = "1.44", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 url = "2.5"

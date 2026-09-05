@@ -49,7 +49,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "apocalipse-cli"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "anyhow",
  "apocalipse-core",
@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "apocalipse-core"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -77,10 +77,11 @@ dependencies = [
 
 [[package]]
 name = "apocalipse-desktop"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "anyhow",
  "apocalipse-core",
+ "base64 0.22.1",
  "futures-util",
  "md5",
  "reqwest 0.12.28",

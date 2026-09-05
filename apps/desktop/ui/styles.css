@@ -326,11 +326,23 @@ h1 {
   display: grid;
   gap: 6px;
 }
+.website-credential-form { display: grid; grid-template-columns: 1.1fr 1fr 1fr auto; gap: 10px; align-items: end; }
+.website-credential-form label { display: grid; gap: 6px; margin: 0; }
+.website-credential-form button { min-height: 42px; }
+.website-credential-list { display: grid; gap: 7px; }
+.website-credential-list > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.website-credential-list span { display: grid; gap: 2px; min-width: 0; }
+.website-credential-list b, .website-credential-list small { overflow-wrap: anywhere; }
+.website-credential-list button { padding: 8px 13px; }
 .compact-toggle {
   margin: 0;
 }
 @media (max-width: 620px) {
   .credential-grid { grid-template-columns: 1fr; }
+  .website-credential-form { grid-template-columns: 1fr; }
+}
+@media (min-width: 621px) and (max-width: 1050px) {
+  .website-credential-form { grid-template-columns: 1fr 1fr; }
 }
 #site-rules-json {
   width: 100%;
