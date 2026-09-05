@@ -707,6 +707,8 @@ footer .bridge-connected i {
 .matrix-panel[hidden] { display:none; }
 .matrix-panel > header { display:flex; justify-content:space-between; align-items:center; gap:14px; }
 .matrix-panel > header > span { display:flex; align-items:center; gap:12px; }
+.matrix-actions { margin-left:auto; white-space:nowrap; }
+.matrix-actions button { min-height:42px; }
 .matrix-panel > header div { display:grid; gap:5px; }
 .matrix-panel > header small,.matrix-panel > p { color:var(--muted); }
 #matrix-proposals { display:grid; gap:8px; }
@@ -715,6 +717,10 @@ footer .bridge-connected i {
 .matrix-proposal.matrix-applied { grid-template-columns:minmax(0,1fr) auto; }
 .matrix-proposal span { display:grid; gap:4px; }
 .matrix-proposal small { color:var(--muted); }
+.bandwidth-input { display:grid; grid-template-columns:minmax(90px,1fr) auto auto; align-items:center; gap:8px; }
+.bandwidth-input input { min-width:0; }
+.bandwidth-input small { color:var(--muted); }
+.compact-dialog { width:min(440px,calc(100vw - 32px)); }
 .download-row {
   display: grid;
   grid-template-columns: 22px 42px minmax(0, 1fr) auto;

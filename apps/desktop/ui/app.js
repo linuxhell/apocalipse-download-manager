@@ -180,7 +180,7 @@ const catalogs = {
     resetRules: "Restore defaults",
     exportRecording: "Export completed recording", outputFormat: "Output format", videoCodec: "Video codec", audioCodec: "Audio codec", export: "Export",
     searchHistory: "Search downloads…", importList: "Import list", advancedOptions: "Advanced options", mirrorUrls: "Mirror URLs (one per line)", priority: "Priority", priorityHigh: "High", priorityNormal: "Normal", priorityLow: "Low", verifyIntegrity: "Verify SHA-256", integrityPrompt: "Optional expected SHA-256 (leave blank to calculate only):", integrityOk: "SHA-256 verified",
-    smartAutomation: "Smart automation", adaptiveEfficiency: "Adaptive efficiency", adaptiveEfficiencyHint: "Optimizes queue order and connection use for the current workload.", scheduler: "Download schedule", schedulerHint: "Automatically pauses outside the permitted local time window.", scheduleStart: "Start", scheduleEnd: "End",
+    smartAutomation: "Smart automation", adaptiveEfficiency: "Adaptive efficiency", adaptiveEfficiencyHint: "Optimizes queue order and connection use for the current workload.", scheduler: "Download schedule", schedulerHint: "Automatically pauses outside the permitted local time window.", scheduleStart: "Start", scheduleEnd: "End", matrixImport: "Import", matrixExport: "Export", matrixImportDone: "Matrix rules imported", matrixExportDone: "Matrix rules exported", bandwidthPanel: "Bandwidth", bandwidthPanelHint: "Set limits without changing the window size.", globalBandwidthLimit: "Global download limit", downloadBandwidthLimit: "This download limit", bandwidthAction: "Bandwidth", bandwidthPrompt: "Download limit in MB/s (0 = unlimited):", currentBandwidth: "Current usage", unlimited: "Unlimited", megabytesPerSecond: "MB/s",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -364,7 +364,7 @@ const catalogs = {
     resetRules: "Restaurar padrões",
     exportRecording: "Exportar gravação concluída", outputFormat: "Formato de saída", videoCodec: "Codec de vídeo", audioCodec: "Codec de áudio", export: "Exportar",
     searchHistory: "Pesquisar downloads…", importList: "Importar lista", advancedOptions: "Opções avançadas", mirrorUrls: "URLs espelho (uma por linha)", priority: "Prioridade", priorityHigh: "Alta", priorityNormal: "Normal", priorityLow: "Baixa", verifyIntegrity: "Verificar SHA-256", integrityPrompt: "SHA-256 esperado opcional (deixe vazio apenas para calcular):", integrityOk: "SHA-256 verificado",
-    smartAutomation: "Automação inteligente", adaptiveEfficiency: "Eficiência adaptativa", adaptiveEfficiencyHint: "Otimiza a ordem da fila e o uso de conexões para a carga atual.", scheduler: "Agendamento de downloads", schedulerHint: "Pausa automaticamente fora do horário local permitido.", scheduleStart: "Início", scheduleEnd: "Fim",
+    smartAutomation: "Automação inteligente", adaptiveEfficiency: "Eficiência adaptativa", adaptiveEfficiencyHint: "Otimiza a ordem da fila e o uso de conexões para a carga atual.", scheduler: "Agendamento de downloads", schedulerHint: "Pausa automaticamente fora do horário local permitido.", scheduleStart: "Início", scheduleEnd: "Fim", matrixImport: "Importar", matrixExport: "Exportar", matrixImportDone: "Regras da Matrix importadas", matrixExportDone: "Regras da Matrix exportadas", bandwidthPanel: "Banda", bandwidthPanelHint: "Defina limites sem alterar o tamanho da janela.", globalBandwidthLimit: "Limite global de download", downloadBandwidthLimit: "Limite deste download", bandwidthAction: "Banda", bandwidthPrompt: "Limite do download em MB/s (0 = ilimitado):", currentBandwidth: "Uso atual", unlimited: "Ilimitado", megabytesPerSecond: "MB/s",
   },
   "zh-CN": {
     downloads: "下载",
@@ -547,7 +547,7 @@ const catalogs = {
     resetRules: "恢复默认值",
     exportRecording: "导出已完成的录制", outputFormat: "输出格式", videoCodec: "视频编码", audioCodec: "音频编码", export: "导出",
     searchHistory: "搜索下载…", importList: "导入列表", advancedOptions: "高级选项", mirrorUrls: "镜像网址（每行一个）", priority: "优先级", priorityHigh: "高", priorityNormal: "普通", priorityLow: "低", verifyIntegrity: "验证 SHA-256", integrityPrompt: "可选的预期 SHA-256（留空则仅计算）：", integrityOk: "SHA-256 已验证",
-    smartAutomation: "智能自动化", adaptiveEfficiency: "自适应效率", adaptiveEfficiencyHint: "根据当前负载优化队列顺序和连接使用。", scheduler: "下载计划", schedulerHint: "在允许的本地时间之外自动暂停。", scheduleStart: "开始", scheduleEnd: "结束",
+    smartAutomation: "智能自动化", adaptiveEfficiency: "自适应效率", adaptiveEfficiencyHint: "根据当前负载优化队列顺序和连接使用。", scheduler: "下载计划", schedulerHint: "在允许的本地时间之外自动暂停。", scheduleStart: "开始", scheduleEnd: "结束", matrixImport: "导入", matrixExport: "导出", matrixImportDone: "Matrix 规则已导入", matrixExportDone: "Matrix 规则已导出", bandwidthPanel: "带宽", bandwidthPanelHint: "无需改变窗口大小即可设置限制。", globalBandwidthLimit: "全局下载限制", downloadBandwidthLimit: "此下载的限制", bandwidthAction: "带宽", bandwidthPrompt: "下载限制（MB/秒，0 = 不限速）：", currentBandwidth: "当前使用量", unlimited: "不限速", megabytesPerSecond: "MB/秒",
   },
 };
 
@@ -796,6 +796,25 @@ function renderDownloads() {
     }
     if (/^(?:magnet:)|\.torrent(?:$|[?#])/i.test(task.source) && ["downloading", "paused", "completed"].includes(key))
       addAction(t("preview"), "preview_torrent");
+    if (["queued", "inspecting", "downloading", "paused"].includes(key)) {
+      const bandwidth = document.createElement("button");
+      bandwidth.className = "task-action";
+      bandwidth.textContent = t("bandwidthAction");
+      bandwidth.title = task.bandwidth_limit ? `${(task.bandwidth_limit / 1024 / 1024).toFixed(1)} ${t("megabytesPerSecond")}` : t("unlimited");
+      bandwidth.onclick = async () => {
+        const current = task.bandwidth_limit ? task.bandwidth_limit / 1024 / 1024 : 0;
+        const value = window.prompt(t("bandwidthPrompt"), String(current));
+        if (value === null) return;
+        const megabytes = Number(value.replace(",", "."));
+        if (!Number.isFinite(megabytes) || megabytes < 0 || megabytes > 10240) return;
+        await invoke("set_download_bandwidth_limit", {
+          id: task.id,
+          bandwidthLimit: Math.round(megabytes * 1024 * 1024),
+        });
+        await refreshDownloads();
+      };
+      actions.append(bandwidth);
+    }
     addAction(t("openFolder"), "reveal_download");
     const status = document.createElement("div");
     status.className = "task-status";
@@ -809,6 +828,8 @@ function renderDownloads() {
     downloads.filter((task) => task.state === "completed").length;
   document.querySelector(".metrics article:first-child strong").textContent =
     `${formatBytes(overallSpeed)}/s`;
+  const bandwidthCurrent = document.querySelector("#bandwidth-current");
+  if (bandwidthCurrent) bandwidthCurrent.textContent = `${formatBytes(overallSpeed)}/s`;
   document.querySelector(".metrics article:nth-child(2) strong").textContent =
     `${formatBytes(overallUploadSpeed)}/s`;
   updateSelectionControls();
@@ -866,6 +887,7 @@ const toolsDialog = document.querySelector("#tools-dialog");
 const logDialog = document.querySelector("#log-dialog");
 const siteRulesDialog = document.querySelector("#site-rules-dialog");
 const exportDialog = document.querySelector("#export-dialog");
+const bandwidthDialog = document.querySelector("#bandwidth-dialog");
 let exportTaskId = null;
 document.querySelector("#history-search").oninput = (event) => {
   historyQuery = event.target.value.trim().toLocaleLowerCase();
@@ -879,7 +901,7 @@ document.querySelector("#import-list").onclick = async (event) => {
     for (const url of urls) {
       try {
         const fileName = await invoke("suggest_download_name", { url });
-        downloads.push(await invoke("enqueue_download", { url, destinationDirectory, fileName, formatSelection: null, torrentSelection: null, mirrors: null, priority: 0, context: {} }));
+        downloads.push(await invoke("enqueue_download", { url, destinationDirectory, fileName, formatSelection: null, torrentSelection: null, mirrors: null, priority: 0, bandwidthLimit: null, context: {} }));
       } catch (error) { console.warn("import", url, error); }
     }
     renderDownloads();
@@ -1060,6 +1082,23 @@ async function refreshMatrix() {
   }
 }
 document.querySelector('[data-page="matrix"]').addEventListener("click", () => refreshMatrix().catch(console.error));
+document.querySelector("#matrix-import").onclick = async (event) => {
+  event.currentTarget.disabled = true;
+  try {
+    const count = await invoke("import_matrix_rules");
+    if (count) window.alert(`${t("matrixImportDone")}: ${count}`);
+    await refreshMatrix();
+  } catch (error) { window.alert(String(error)); }
+  finally { event.currentTarget.disabled = false; }
+};
+document.querySelector("#matrix-export").onclick = async (event) => {
+  event.currentTarget.disabled = true;
+  try {
+    const count = await invoke("export_matrix_rules");
+    if (count) window.alert(`${t("matrixExportDone")}: ${count}`);
+  } catch (error) { window.alert(String(error)); }
+  finally { event.currentTarget.disabled = false; }
+};
 
 refreshMatrix().catch(console.error);
 setInterval(() => refreshMatrix().catch(console.error), 5000);
@@ -1386,6 +1425,8 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
     document.querySelector("#capture-clipboard").checked = clipboard.enabled;
     document.querySelector("#max-tasks").value = limits.maxActiveDownloads;
     document.querySelector("#connections").value = limits.connectionsPerDownload;
+    document.querySelector("#global-bandwidth-limit").value = limits.globalBandwidthLimit
+      ? (limits.globalBandwidthLimit / 1024 / 1024).toFixed(1) : 0;
     updateLimitLabels();
     document.querySelector("#pairing-token").value = pairing.token;
     document.querySelector("#user-agent").value = userAgent.userAgent;
@@ -1443,6 +1484,7 @@ document.querySelector("#save-settings").onclick = async () => {
       maxActiveDownloads: Number(document.querySelector("#max-tasks").value),
       connectionsPerDownload: Number(document.querySelector("#connections").value),
       adaptiveEfficiency: document.querySelector("#adaptive-efficiency").checked,
+      globalBandwidthLimit: Math.round((Number(document.querySelector("#global-bandwidth-limit").value) || 0) * 1024 * 1024),
     });
     await invoke("set_user_agent", {
       userAgent: document.querySelector("#user-agent").value,
@@ -1473,6 +1515,25 @@ document.querySelector("#save-settings").onclick = async () => {
   } finally {
     button.disabled = false;
   }
+};
+document.querySelector("#open-bandwidth-panel").onclick = () => bandwidthDialog.showModal();
+document.querySelectorAll("[data-bandwidth-close]").forEach((button) => button.onclick = () => bandwidthDialog.close());
+document.querySelector("#save-bandwidth").onclick = async (event) => {
+  const button = event.currentTarget;
+  const value = document.querySelector("#global-bandwidth-limit");
+  if (!value.reportValidity()) return;
+  button.disabled = true;
+  try {
+    const limits = await invoke("get_transfer_limits");
+    await invoke("set_transfer_limits", {
+      maxActiveDownloads: limits.maxActiveDownloads,
+      connectionsPerDownload: limits.connectionsPerDownload,
+      adaptiveEfficiency: limits.adaptiveEfficiency,
+      globalBandwidthLimit: Math.round((Number(value.value) || 0) * 1024 * 1024),
+    });
+    bandwidthDialog.close();
+  } catch (error) { window.alert(String(error)); }
+  finally { button.disabled = false; }
 };
 document.querySelector('[data-page="tools"]').onclick = async () => {
   try {
@@ -1751,6 +1812,7 @@ document.querySelector("#enqueue").onclick = async () => {
         torrentSelection,
         mirrors: document.querySelector("#mirrors").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
         priority: Number(document.querySelector("#priority").value),
+        bandwidthLimit: Math.round((Number(document.querySelector("#download-bandwidth-limit").value) || 0) * 1024 * 1024) || null,
         context: {
           referer: pendingReferer,
           knownDuration: pendingDuration,
@@ -1767,6 +1829,7 @@ document.querySelector("#enqueue").onclick = async () => {
     url.value = "";
     document.querySelector("#mirrors").value = "";
     document.querySelector("#priority").value = "0";
+    document.querySelector("#download-bandwidth-limit").value = "0";
     resetMediaInspection();
   } catch (error) {
     const box = document.querySelector("#analysis");

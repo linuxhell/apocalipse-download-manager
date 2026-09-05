@@ -18,6 +18,7 @@ async fn main() -> Result<()> {
         method: "GET".to_owned(),
         body: None,
         headers: Vec::new(),
+        limiters: Vec::new(),
     };
     let worker = tokio::spawn(async move { DownloadEngine::new()?.download(request, tx).await });
     while let Some(event) = rx.recv().await {

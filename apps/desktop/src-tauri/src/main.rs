@@ -1,9 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use apocalipse_core::{
-    classify_url, cleanup_chunk_artifacts, partial_path, plan_download, Capabilities,
-    DownloadEngine, DownloadEvent, DownloadId, DownloadKind, DownloadRequest, DownloadState,
-    DownloadTask,
+    classify_url, cleanup_chunk_artifacts, partial_path, plan_download, BandwidthLimiter,
+    Capabilities, DownloadEngine, DownloadEvent, DownloadId, DownloadKind, DownloadRequest,
+    DownloadState, DownloadTask,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use futures_util::StreamExt;
@@ -17,7 +17,7 @@ use std::{
     net::{TcpListener, TcpStream, UdpSocket},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
@@ -47,6 +47,8 @@ struct AppState {
     log_write_lock: Mutex<()>,
     site_rules: Mutex<Vec<SiteRule>>,
     site_rules_path: PathBuf,
+    global_bandwidth_limiter: Arc<BandwidthLimiter>,
+    download_bandwidth_limiters: Mutex<HashMap<DownloadId, Arc<BandwidthLimiter>>>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -188,6 +190,8 @@ struct UserSettings {
     connections_per_download: usize,
     #[serde(default = "default_true")]
     adaptive_efficiency: bool,
+    #[serde(default)]
+    global_bandwidth_limit: u64,
     #[serde(default = "default_bridge_token")]
     bridge_token: String,
     #[serde(default)]
@@ -250,6 +254,7 @@ impl Default for UserSettings {
             max_active_downloads: default_max_active(),
             connections_per_download: default_connections(),
             adaptive_efficiency: true,
+            global_bandwidth_limit: 0,
             bridge_token: default_bridge_token(),
             recent_download_directories: Vec::new(),
             ffmpeg_path: None,
@@ -769,6 +774,7 @@ struct TransferLimits {
     max_active_downloads: usize,
     connections_per_download: usize,
     adaptive_efficiency: bool,
+    global_bandwidth_limit: u64,
 }
 
 #[derive(Serialize)]
@@ -1728,6 +1734,20 @@ async fn run_external_download(
         .lock()
         .ok()
         .and_then(|settings| settings.user_agent.clone());
+    let global_bandwidth_limit = app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .map(|settings| settings.global_bandwidth_limit)
+        .unwrap_or_default();
+    let bandwidth_limit = match (
+        global_bandwidth_limit,
+        task.bandwidth_limit.unwrap_or_default(),
+    ) {
+        (0, task_limit) => task_limit,
+        (global_limit, 0) => global_limit,
+        (global_limit, task_limit) => global_limit.min(task_limit),
+    };
     let website_credential = app
         .state::<AppState>()
         .settings
@@ -1755,6 +1775,9 @@ async fn run_external_download(
                 .as_deref()
                 .unwrap_or("bestvideo+bestaudio/best");
             command.args(["--no-playlist", "--newline", "--verbose"]);
+            if bandwidth_limit > 0 {
+                command.arg("--limit-rate").arg(bandwidth_limit.to_string());
+            }
             command
                 .arg("--concurrent-fragments")
                 .arg(tools.4.to_string());
@@ -1878,6 +1901,9 @@ async fn run_external_download(
                     .arg(tools.4.to_string())
                     .arg("--ffmpeg-binary-path")
                     .arg(&tools.0);
+                if bandwidth_limit > 0 {
+                    command.arg("--max-speed").arg(bandwidth_limit.to_string());
+                }
                 if let Some(referer) = task.referer.as_deref() {
                     command.arg("-H").arg(format!("Referer: {referer}"));
                     if let Some(origin) = http_origin(referer) {
@@ -1968,6 +1994,9 @@ async fn run_external_download(
                 "--file-allocation=trunc",
                 "--seed-time=0",
             ]);
+            if bandwidth_limit > 0 {
+                command.arg(format!("--max-download-limit={bandwidth_limit}"));
+            }
             if !task.torrent_selection.is_empty() {
                 command.arg(format!(
                     "--select-file={}",
@@ -2284,6 +2313,104 @@ struct MatrixStatus {
     active_rules: usize,
     proposals: Vec<MatrixRuleProposal>,
     applied_rules: Vec<MatrixAppliedRule>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MatrixRuleBundle {
+    format: String,
+    version: u8,
+    rules: Vec<SiteRule>,
+}
+
+#[tauri::command]
+fn export_matrix_rules(state: State<'_, AppState>) -> Result<usize, String> {
+    let rules = state
+        .site_rules
+        .lock()
+        .map_err(|error| error.to_string())?
+        .iter()
+        .filter(|rule| rule.action != SiteRuleAction::Standard)
+        .cloned()
+        .collect::<Vec<_>>();
+    let Some(path) = rfd::FileDialog::new()
+        .set_file_name("apocalipse-matrix-rules.json")
+        .add_filter("Apocalipse Matrix rules", &["json"])
+        .save_file()
+    else {
+        return Ok(0);
+    };
+    let bundle = MatrixRuleBundle {
+        format: "apocalipse-matrix-rules".to_owned(),
+        version: 1,
+        rules,
+    };
+    fs::write(
+        path,
+        serde_json::to_vec_pretty(&bundle).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "matrix.rules_exported",
+        &format!("count={}", bundle.rules.len()),
+    );
+    Ok(bundle.rules.len())
+}
+
+#[tauri::command]
+fn import_matrix_rules(state: State<'_, AppState>) -> Result<usize, String> {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("Apocalipse Matrix rules", &["json"])
+        .pick_file()
+    else {
+        return Ok(0);
+    };
+    let bundle: MatrixRuleBundle =
+        serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
+            .map_err(|error| format!("invalid_matrix_rules_file: {error}"))?;
+    if bundle.format != "apocalipse-matrix-rules"
+        || bundle.version != 1
+        || bundle.rules.is_empty()
+        || bundle.rules.len() > 100
+        || bundle
+            .rules
+            .iter()
+            .any(|rule| rule.action == SiteRuleAction::Standard || !valid_site_rule(rule))
+    {
+        return Err("invalid_matrix_rules_file".to_owned());
+    }
+    let mut rules = state
+        .site_rules
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let imported = bundle.rules.len();
+    for incoming in bundle.rules {
+        rules.retain(|existing| {
+            existing.id != incoming.id
+                && !existing.hosts.iter().any(|host| {
+                    incoming
+                        .hosts
+                        .iter()
+                        .any(|candidate| host.eq_ignore_ascii_case(candidate))
+                })
+        });
+        rules.push(incoming);
+    }
+    if rules.len() > 100 || !rules.iter().all(valid_site_rule) {
+        return Err("invalid_matrix_rules_file".to_owned());
+    }
+    save_site_rules(&state, &rules)?;
+    *state.site_rules.lock().map_err(|error| error.to_string())? = rules;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "matrix.rules_imported",
+        &format!("count={imported}"),
+    );
+    Ok(imported)
 }
 
 #[tauri::command]
@@ -3277,6 +3404,7 @@ fn enqueue_download(
     torrent_selection: Option<Vec<usize>>,
     mirrors: Option<Vec<String>>,
     priority: Option<i8>,
+    bandwidth_limit: Option<u64>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
     if let Some(existing) = state
@@ -3332,6 +3460,7 @@ fn enqueue_download(
         .take(10)
         .collect();
     task.priority = priority.unwrap_or_default().clamp(-10, 10);
+    task.bandwidth_limit = bandwidth_limit.filter(|limit| *limit > 0);
     if let Some(context) = context {
         task.referer = context
             .referer
@@ -3510,6 +3639,32 @@ fn start_download(
                 .unwrap_or_else(|| "GET".to_owned()),
             body: identity.and_then(|item| item.request_body.map(String::into_bytes)),
             headers,
+            limiters: {
+                let mut limiters = vec![state.global_bandwidth_limiter.clone()];
+                let task_limiter =
+                    state
+                        .download_bandwidth_limiters
+                        .lock()
+                        .ok()
+                        .and_then(|mut items| {
+                            let limit = task.bandwidth_limit.unwrap_or_default();
+                            if limit == 0 {
+                                items.remove(&task.id);
+                                None
+                            } else {
+                                let limiter = items
+                                    .entry(task.id)
+                                    .or_insert_with(|| Arc::new(BandwidthLimiter::new(limit)))
+                                    .clone();
+                                limiter.set_limit(limit);
+                                Some(limiter)
+                            }
+                        });
+                if let Some(limiter) = task_limiter {
+                    limiters.push(limiter);
+                }
+                limiters
+            },
         };
         tauri::async_runtime::spawn(run_download(
             app.clone(),
@@ -3727,6 +3882,7 @@ fn get_transfer_limits(state: State<'_, AppState>) -> Result<TransferLimits, Str
         max_active_downloads: settings.max_active_downloads,
         connections_per_download: settings.connections_per_download,
         adaptive_efficiency: settings.adaptive_efficiency,
+        global_bandwidth_limit: settings.global_bandwidth_limit,
     })
 }
 
@@ -3736,17 +3892,55 @@ fn set_transfer_limits(
     max_active_downloads: usize,
     connections_per_download: usize,
     adaptive_efficiency: bool,
+    global_bandwidth_limit: u64,
 ) -> Result<TransferLimits, String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.max_active_downloads = max_active_downloads.clamp(1, 20);
     settings.connections_per_download = connections_per_download.clamp(1, 32);
     settings.adaptive_efficiency = adaptive_efficiency;
+    settings.global_bandwidth_limit = global_bandwidth_limit.min(10 * 1024 * 1024 * 1024);
+    state
+        .global_bandwidth_limiter
+        .set_limit(settings.global_bandwidth_limit);
     save_settings(&state, &settings)?;
     Ok(TransferLimits {
         max_active_downloads: settings.max_active_downloads,
         connections_per_download: settings.connections_per_download,
         adaptive_efficiency: settings.adaptive_efficiency,
+        global_bandwidth_limit: settings.global_bandwidth_limit,
     })
+}
+
+#[tauri::command]
+fn set_download_bandwidth_limit(
+    state: State<'_, AppState>,
+    id: DownloadId,
+    bandwidth_limit: u64,
+) -> Result<u64, String> {
+    let limit = bandwidth_limit.min(10 * 1024 * 1024 * 1024);
+    let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+    let task = queue
+        .iter_mut()
+        .find(|task| task.id == id)
+        .ok_or_else(|| "download_not_found".to_owned())?;
+    task.bandwidth_limit = (limit > 0).then_some(limit);
+    save_queue(&state, &queue)?;
+    drop(queue);
+    let mut limiters = state
+        .download_bandwidth_limiters
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if limit == 0 {
+        if let Some(limiter) = limiters.remove(&id) {
+            limiter.set_limit(0);
+        }
+    } else {
+        limiters
+            .entry(id)
+            .or_insert_with(|| Arc::new(BandwidthLimiter::new(limit)))
+            .set_limit(limit);
+    }
+    Ok(limit)
 }
 
 #[tauri::command]
@@ -5292,6 +5486,9 @@ fn main() {
                     None
                 }
             };
+            let global_bandwidth_limiter = Arc::new(BandwidthLimiter::new(
+                initial_settings.global_bandwidth_limit,
+            ));
             app.manage(AppState {
                 queue: Mutex::new(load_queue(&queue_path)),
                 queue_path,
@@ -5307,6 +5504,8 @@ fn main() {
                 log_write_lock: Mutex::new(()),
                 site_rules: Mutex::new(initial_site_rules),
                 site_rules_path,
+                global_bandwidth_limiter,
+                download_bandwidth_limiters: Mutex::new(HashMap::new()),
             });
             diagnostic_log(
                 &app.state::<AppState>(),
@@ -5408,6 +5607,8 @@ fn main() {
             matrix_analyze,
             matrix_apply_rule,
             matrix_rollback_rule,
+            import_matrix_rules,
+            export_matrix_rules,
             stop_recording,
             pause_download,
             resume_download,
@@ -5424,6 +5625,7 @@ fn main() {
             read_clipboard_link,
             get_transfer_limits,
             set_transfer_limits,
+            set_download_bandwidth_limit,
             get_user_agent,
             set_user_agent,
             get_proxy_setting,

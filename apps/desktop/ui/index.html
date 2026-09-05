@@ -96,7 +96,7 @@
         <div class="link-files"><header><b data-i18n="linkRemoteComputer">Remote computer</b><span><button id="link-download-remote" type="button" data-i18n="linkDownload" disabled>← Download</button> <button id="link-remote-up" type="button">↑</button></span></header><small id="link-remote-path">/</small><div id="link-remote-files"></div></div>
       </section>
       <section id="matrix-panel" class="matrix-panel" hidden>
-        <header><div><b>Matrix Ultimate v2 AI</b><small id="matrix-summary"></small></div><span><button id="matrix-scan" class="primary" type="button" data-i18n="matrixAnalyze">Analyze failures</button></span></header>
+        <header><div><b>Matrix Ultimate v2 AI</b><small id="matrix-summary"></small></div><span class="matrix-actions"><button id="matrix-import" type="button" data-i18n="matrixImport">Import</button><button id="matrix-export" type="button" data-i18n="matrixExport">Export</button><button id="matrix-scan" class="primary" type="button" data-i18n="matrixAnalyze">Analyze failures</button></span></header>
         <p data-i18n="matrixDescription">Matrix analyzes local failures and proposes safe rules. No rule executes website code.</p>
         <div id="matrix-proposals"></div>
       </section>
@@ -213,6 +213,8 @@
           <textarea id="mirrors" rows="3" placeholder="https://mirror.example/file"></textarea>
           <label for="priority" data-i18n="priority">Priority</label>
           <select id="priority"><option value="10" data-i18n="priorityHigh">High</option><option value="0" selected data-i18n="priorityNormal">Normal</option><option value="-10" data-i18n="priorityLow">Low</option></select>
+          <label for="download-bandwidth-limit" data-i18n="downloadBandwidthLimit">This download limit</label>
+          <div class="bandwidth-input"><input id="download-bandwidth-limit" type="number" min="0" max="10240" step="0.1" value="0" /><span data-i18n="megabytesPerSecond">MB/s</span><small data-i18n="unlimited">Unlimited</small></div>
         </details>
         <div class="dialog-actions">
           <button type="button" data-dialog-close data-i18n="cancel">
@@ -317,6 +319,7 @@
         </label>
         <section class="pairing-settings">
           <b data-i18n="smartAutomation">Smart automation</b>
+          <button id="open-bandwidth-panel" type="button" data-i18n="bandwidthPanel">Bandwidth</button>
           <label class="setting-toggle compact-toggle"><input id="adaptive-efficiency" type="checkbox" /><span><b data-i18n="adaptiveEfficiency">Adaptive efficiency</b><small data-i18n="adaptiveEfficiencyHint">Optimizes queue order and connection use for the current workload.</small></span></label>
           <label class="setting-toggle compact-toggle"><input id="schedule-enabled" type="checkbox" /><span><b data-i18n="scheduler">Download schedule</b><small data-i18n="schedulerHint">Automatically pauses outside the permitted local time window.</small></span></label>
           <div class="credential-grid"><label><span data-i18n="scheduleStart">Start</span><input id="schedule-start" type="time" value="00:00" /></label><label><span data-i18n="scheduleEnd">End</span><input id="schedule-end" type="time" value="23:59" /></label></div>
@@ -451,6 +454,15 @@
             Save
           </button>
         </div>
+      </form>
+    </dialog>
+    <dialog id="bandwidth-dialog" class="compact-dialog">
+      <form method="dialog">
+        <header><div><small data-i18n="smartAutomation">Smart automation</small><h2 data-i18n="bandwidthPanel">Bandwidth</h2></div><button type="button" data-bandwidth-close>×</button></header>
+        <p data-i18n="bandwidthPanelHint">Set limits without changing the window size.</p>
+        <div class="bandwidth-current"><span data-i18n="currentBandwidth">Current usage</span><strong id="bandwidth-current">0 B/s</strong></div>
+        <label><span data-i18n="globalBandwidthLimit">Global download limit</span><div class="bandwidth-input"><input id="global-bandwidth-limit" type="number" min="0" max="10240" step="0.1" value="0" /><span data-i18n="megabytesPerSecond">MB/s</span><small data-i18n="unlimited">Unlimited</small></div></label>
+        <div class="dialog-actions"><button type="button" data-bandwidth-close data-i18n="cancel">Cancel</button><button id="save-bandwidth" type="button" class="primary" data-i18n="save">Save</button></div>
       </form>
     </dialog>
     <dialog id="tools-dialog">

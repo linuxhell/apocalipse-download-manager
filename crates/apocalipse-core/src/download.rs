@@ -17,7 +17,7 @@ use std::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     fs,
@@ -38,6 +38,47 @@ pub struct DownloadRequest {
     pub method: String,
     pub body: Option<Vec<u8>>,
     pub headers: Vec<(String, String)>,
+    pub limiters: Vec<Arc<BandwidthLimiter>>,
+}
+
+#[derive(Debug)]
+pub struct BandwidthLimiter {
+    bytes_per_second: AtomicU64,
+    next_slot: tokio::sync::Mutex<Instant>,
+}
+
+impl BandwidthLimiter {
+    pub fn new(bytes_per_second: u64) -> Self {
+        Self {
+            bytes_per_second: AtomicU64::new(bytes_per_second),
+            next_slot: tokio::sync::Mutex::new(Instant::now()),
+        }
+    }
+
+    pub fn set_limit(&self, bytes_per_second: u64) {
+        self.bytes_per_second
+            .store(bytes_per_second, Ordering::Relaxed);
+    }
+
+    async fn acquire(&self, bytes: usize) {
+        let rate = self.bytes_per_second.load(Ordering::Relaxed);
+        if rate == 0 || bytes == 0 {
+            return;
+        }
+        let spacing = Duration::from_secs_f64(bytes as f64 / rate as f64);
+        let mut next = self.next_slot.lock().await;
+        let now = Instant::now();
+        if *next > now {
+            tokio::time::sleep(*next - now).await;
+        }
+        *next = std::cmp::max(*next, now) + spacing;
+    }
+}
+
+async fn apply_bandwidth_limits(limiters: &[Arc<BandwidthLimiter>], bytes: usize) {
+    for limiter in limiters {
+        limiter.acquire(bytes).await;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -228,6 +269,7 @@ impl DownloadEngine {
         let mut inspected = resumed;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.context("network stream failed")?;
+            apply_bandwidth_limits(&request.limiters, chunk.len()).await;
             if !inspected {
                 validate_payload(expectation, content_type.as_deref(), &chunk)?;
                 inspected = true;
@@ -286,6 +328,7 @@ impl DownloadEngine {
             let sender = events.clone();
             let shared = progress.clone();
             let cursor = next_chunk.clone();
+            let limiters = request.limiters.clone();
             jobs.push(async move {
                 loop {
                     let index = cursor.fetch_add(1, Ordering::Relaxed);
@@ -320,6 +363,7 @@ impl DownloadEngine {
                     let mut stream = response.bytes_stream();
                     while let Some(chunk) = stream.next().await {
                         let chunk = chunk.context("segmented network stream failed")?;
+                        apply_bandwidth_limits(&limiters, chunk.len()).await;
                         file.write_all(&chunk).await?;
                         downloaded += chunk.len() as u64;
                         let received = shared.fetch_add(chunk.len() as u64, Ordering::Relaxed)

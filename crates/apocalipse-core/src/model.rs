@@ -52,6 +52,8 @@ pub struct DownloadTask {
     #[serde(default)]
     pub priority: i8,
     #[serde(default)]
+    pub bandwidth_limit: Option<u64>,
+    #[serde(default)]
     pub sha256: Option<String>,
     #[serde(default)]
     pub integrity_verified: bool,
@@ -82,6 +84,7 @@ impl DownloadTask {
             known_duration: None,
             mirrors: Vec::new(),
             priority: 0,
+            bandwidth_limit: None,
             sha256: None,
             integrity_verified: false,
             created_at: SystemTime::now()
