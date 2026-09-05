@@ -1163,6 +1163,7 @@ async fn run_external_download(
                     "--console-log-level=notice",
                     "--show-console-readout=true",
                     "--download-result=hide",
+                    "--seed-time=0",
                 ])
                 .arg(&task.source);
             command
@@ -1588,7 +1589,10 @@ fn external_error_detail(output: &str, exit_code: Option<i32>) -> String {
 }
 
 fn suggested_name(source: &str) -> String {
-    source
+    let magnet_name = (classify_url(source) == Some(DownloadKind::Magnet))
+        .then(|| url::Url::parse(source).ok()?.query_pairs().find(|(key, _)| key == "dn").map(|(_, value)| value.into_owned()))
+        .flatten();
+    magnet_name.as_deref().unwrap_or(source)
         .split(['/', '\\'])
         .next_back()
         .and_then(|part| part.split(['?', '#']).next())
@@ -3380,7 +3384,9 @@ async fn remove_downloads(
     if delete_files {
         for task in &removed {
             for path in download_paths(task) {
-                remove_file_with_retry(&path).await?;
+                let torrent_root = matches!(classify_url(&task.source), Some(DownloadKind::Torrent | DownloadKind::Magnet))
+                    && path == task.destination;
+                remove_path_with_retry(&path, torrent_root).await?;
             }
         }
     }
@@ -3413,9 +3419,16 @@ fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
     paths
 }
 
-async fn remove_file_with_retry(path: &Path) -> Result<(), String> {
+async fn remove_path_with_retry(path: &Path, allow_directory: bool) -> Result<(), String> {
     for attempt in 0..5 {
-        match tokio::fs::remove_file(path).await {
+        let result = match tokio::fs::metadata(path).await {
+            Ok(metadata) if metadata.is_dir() && allow_directory && path.parent().is_some() && path.file_name().is_some() => {
+                tokio::fs::remove_dir_all(path).await
+            }
+            Ok(metadata) if metadata.is_dir() => return Err("refusing_to_remove_directory".to_owned()),
+            _ => tokio::fs::remove_file(path).await,
+        };
+        match result {
             Ok(()) => return Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied && attempt < 4 => {
@@ -3620,7 +3633,7 @@ mod tests {
     async fn removing_a_missing_file_is_already_successful() {
         let path =
             std::env::temp_dir().join(format!("apocalipse-missing-{}.mp4", uuid::Uuid::new_v4()));
-        assert!(remove_file_with_retry(&path).await.is_ok());
+        assert!(remove_path_with_retry(&path, false).await.is_ok());
     }
 
     #[test]

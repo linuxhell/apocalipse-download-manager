@@ -409,6 +409,9 @@ function updateSpeeds(tasks) {
   for (const task of tasks) {
     const previous = speedSamples.get(task.id);
     const active = stateKey(task.state) === "downloading";
+    const changed = !previous || task.received !== previous.bytes;
+    const changedAt = changed ? now : previous.changedAt;
+    const externalSpeed = now - changedAt < 2000 ? Number(task.download_speed) || 0 : 0;
     let speed = active ? previous?.speed || 0 : 0;
     if (previous && active) {
       const elapsed = Math.max(0.001, (now - previous.at) / 1000);
@@ -416,18 +419,19 @@ function updateSpeeds(tasks) {
       if (delta > 0) {
         const instantaneous = delta / elapsed;
         speed = previous.speed ? instantaneous * 0.65 + previous.speed * 0.35 : instantaneous;
-      } else if (now - previous.at >= 500) {
+      } else if (now - changedAt >= 1500) {
         speed = 0;
       }
     }
     speedSamples.set(task.id, {
       at: now,
       bytes: task.received,
-      speed,
+      speed: externalSpeed || speed,
+      changedAt,
     });
     if (active) {
-      overallSpeed += Number(task.download_speed) || speed;
-      overallUploadSpeed += Number(task.upload_speed) || 0;
+      overallSpeed += externalSpeed || speed;
+      overallUploadSpeed += now - changedAt < 2000 ? Number(task.upload_speed) || 0 : 0;
     }
   }
 }
@@ -492,8 +496,9 @@ function renderDownloads() {
         : 0;
     bar.style.width = `${percent}%`;
     const details = document.createElement("small");
-    const speed = Number(task.download_speed) || speedSamples.get(task.id)?.speed || 0;
-    const uploadSpeed = Number(task.upload_speed) || 0;
+    const speed = speedSamples.get(task.id)?.speed || 0;
+    const uploadSpeed = performance.now() - (speedSamples.get(task.id)?.changedAt || 0) < 2000
+      ? Number(task.upload_speed) || 0 : 0;
     const progressText = hasReportedPercent && !task.total
       ? `${percent.toFixed(1)}%`
       : task.total
