@@ -2,20 +2,20 @@
 
 use apocalipse_core::{
     classify_url, cleanup_chunk_artifacts, partial_path, plan_download, Capabilities,
-    DownloadEngine, DownloadEvent,
-    DownloadId, DownloadKind, DownloadRequest, DownloadState, DownloadTask,
+    DownloadEngine, DownloadEvent, DownloadId, DownloadKind, DownloadRequest, DownloadState,
+    DownloadTask,
 };
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use futures_util::StreamExt;
 use std::{
     collections::{HashMap, HashSet},
     fs,
     fs::OpenOptions,
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream, UdpSocket},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::Mutex,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -46,6 +46,22 @@ struct AppState {
     log_write_lock: Mutex<()>,
     site_rules: Mutex<Vec<SiteRule>>,
     site_rules_path: PathBuf,
+    ed2k_search: Mutex<Option<Ed2kSearchSession>>,
+}
+
+struct Ed2kSearchSession {
+    child: Child,
+    input: ChildStdin,
+    output: BufReader<ChildStdout>,
+}
+
+impl Drop for Ed2kSearchSession {
+    fn drop(&mut self) {
+        let _ = self.input.write_all(b"quit\n");
+        let _ = self.input.flush();
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -80,10 +96,7 @@ fn default_site_rules() -> Vec<SiteRule> {
         SiteRule {
             id: "rapidgator".to_owned(),
             name: "Rapidgator".to_owned(),
-            hosts: vec![
-                "rapidgator.net".to_owned(),
-                "*.rapidgator.net".to_owned(),
-            ],
+            hosts: vec!["rapidgator.net".to_owned(), "*.rapidgator.net".to_owned()],
             action: SiteRuleAction::SingleConnection,
             enabled: true,
             connections: 1,
@@ -91,10 +104,7 @@ fn default_site_rules() -> Vec<SiteRule> {
         SiteRule {
             id: "pixeldrain".to_owned(),
             name: "Pixeldrain".to_owned(),
-            hosts: vec![
-                "pixeldrain.com".to_owned(),
-                "*.pixeldrain.com".to_owned(),
-            ],
+            hosts: vec!["pixeldrain.com".to_owned(), "*.pixeldrain.com".to_owned()],
             action: SiteRuleAction::SingleConnection,
             enabled: true,
             connections: 1,
@@ -157,16 +167,21 @@ fn matching_site_rule(url: &str, rules: &[SiteRule]) -> Option<SiteRule> {
         .iter()
         .find(|rule| {
             rule.enabled
-                && rule.hosts.iter().any(|pattern| host_matches_pattern(&host, pattern))
+                && rule
+                    .hosts
+                    .iter()
+                    .any(|pattern| host_matches_pattern(&host, pattern))
         })
         .cloned()
 }
 
 fn host_matches_pattern(host: &str, pattern: &str) -> bool {
     let pattern = pattern.trim().to_ascii_lowercase();
-    pattern.strip_prefix("*.").map_or(host == pattern, |suffix| {
-        host == suffix || host.ends_with(&format!(".{suffix}"))
-    })
+    pattern
+        .strip_prefix("*.")
+        .map_or(host == pattern, |suffix| {
+            host == suffix || host.ends_with(&format!(".{suffix}"))
+        })
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -192,6 +207,14 @@ struct UserSettings {
     n_m3u8dl_re_path: Option<PathBuf>,
     #[serde(default)]
     aria2_path: Option<PathBuf>,
+    #[serde(default)]
+    ed2k_path: Option<PathBuf>,
+    #[serde(default = "default_ed2k_host")]
+    ed2k_host: String,
+    #[serde(default = "default_ed2k_port")]
+    ed2k_port: u16,
+    #[serde(default)]
+    ed2k_password: String,
     #[serde(default)]
     media_player_path: Option<PathBuf>,
     #[serde(default)]
@@ -222,12 +245,20 @@ const fn default_max_active() -> usize {
 const fn default_connections() -> usize {
     8
 }
-const fn default_true() -> bool { true }
+const fn default_true() -> bool {
+    true
+}
 fn default_bridge_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 fn default_link_password() -> String {
     uuid::Uuid::new_v4().simple().to_string()[..8].to_ascii_uppercase()
+}
+fn default_ed2k_host() -> String {
+    "127.0.0.1".to_owned()
+}
+const fn default_ed2k_port() -> u16 {
+    4712
 }
 
 impl Default for UserSettings {
@@ -244,6 +275,10 @@ impl Default for UserSettings {
             yt_dlp_path: None,
             n_m3u8dl_re_path: None,
             aria2_path: None,
+            ed2k_path: None,
+            ed2k_host: default_ed2k_host(),
+            ed2k_port: default_ed2k_port(),
+            ed2k_password: String::new(),
             media_player_path: None,
             user_agent: None,
             log_editor_path: None,
@@ -301,30 +336,54 @@ struct MediaInspection {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TorrentFileInfo { index: usize, path: String, size: u64 }
+struct TorrentFileInfo {
+    index: usize,
+    path: String,
+    size: u64,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TorrentInspection { name: String, files: Vec<TorrentFileInfo>, total_size: u64 }
+struct TorrentInspection {
+    name: String,
+    files: Vec<TorrentFileInfo>,
+    total_size: u64,
+}
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LinkFileEntry { name: String, path: String, size: u64, directory: bool }
+struct LinkFileEntry {
+    name: String,
+    path: String,
+    size: u64,
+    directory: bool,
+}
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LinkListRequest { password: String, path: String }
+struct LinkListRequest {
+    password: String,
+    path: String,
+}
 
 #[derive(Deserialize)]
-struct MobileAddRequest { url: String }
+struct MobileAddRequest {
+    url: String,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LinkIdentity { id: String, password: String, port: u16 }
+struct LinkIdentity {
+    id: String,
+    password: String,
+    port: u16,
+}
 
 fn safe_link_path(path: &str) -> Result<PathBuf, String> {
     let path = Path::new(path);
-    if !path.is_absolute() { return Err("remote_path_must_be_absolute".to_owned()); }
+    if !path.is_absolute() {
+        return Err("remote_path_must_be_absolute".to_owned());
+    }
     let mut result = PathBuf::new();
     for component in path.components() {
         match component {
@@ -340,20 +399,54 @@ fn safe_link_path(path: &str) -> Result<PathBuf, String> {
 
 fn link_roots() -> Vec<LinkFileEntry> {
     #[cfg(windows)]
-    { (b'A'..=b'Z').filter_map(|letter| { let path = format!("{}:\\", letter as char); Path::new(&path).exists().then(|| LinkFileEntry { name: path.clone(), path, size: 0, directory: true }) }).collect() }
+    {
+        (b'A'..=b'Z')
+            .filter_map(|letter| {
+                let path = format!("{}:\\", letter as char);
+                Path::new(&path).exists().then(|| LinkFileEntry {
+                    name: path.clone(),
+                    path,
+                    size: 0,
+                    directory: true,
+                })
+            })
+            .collect()
+    }
     #[cfg(not(windows))]
-    { vec![LinkFileEntry { name: "/".to_owned(), path: "/".to_owned(), size: 0, directory: true }] }
+    {
+        vec![LinkFileEntry {
+            name: "/".to_owned(),
+            path: "/".to_owned(),
+            size: 0,
+            directory: true,
+        }]
+    }
 }
 
 fn list_link_directory(path: &str) -> Result<Vec<LinkFileEntry>, String> {
-    if path.trim().is_empty() { return Ok(link_roots()); }
+    if path.trim().is_empty() {
+        return Ok(link_roots());
+    }
     let directory = safe_link_path(path)?;
-    let mut entries = fs::read_dir(&directory).map_err(|error| error.to_string())?.flatten().filter_map(|entry| {
-        let metadata = entry.metadata().ok()?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let path = directory.join(&name).to_string_lossy().into_owned();
-        Some(LinkFileEntry { name, path, size: if metadata.is_file() { metadata.len() } else { 0 }, directory: metadata.is_dir() })
-    }).collect::<Vec<_>>();
+    let mut entries = fs::read_dir(&directory)
+        .map_err(|error| error.to_string())?
+        .flatten()
+        .filter_map(|entry| {
+            let metadata = entry.metadata().ok()?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let path = directory.join(&name).to_string_lossy().into_owned();
+            Some(LinkFileEntry {
+                name,
+                path,
+                size: if metadata.is_file() {
+                    metadata.len()
+                } else {
+                    0
+                },
+                directory: metadata.is_dir(),
+            })
+        })
+        .collect::<Vec<_>>();
     entries.sort_by_key(|entry| (!entry.directory, entry.name.to_ascii_lowercase()));
     Ok(entries)
 }
@@ -362,7 +455,11 @@ fn list_link_directory(path: &str) -> Result<Vec<LinkFileEntry>, String> {
 fn get_link_identity(state: State<'_, AppState>) -> Result<LinkIdentity, String> {
     let settings = state.settings.lock().map_err(|error| error.to_string())?;
     let ip = local_link_ip();
-    Ok(LinkIdentity { id: format!("{ip}:{LINK_PORT}"), password: settings.link_password.clone(), port: LINK_PORT })
+    Ok(LinkIdentity {
+        id: format!("{ip}:{LINK_PORT}"),
+        password: settings.link_password.clone(),
+        port: LINK_PORT,
+    })
 }
 
 #[tauri::command]
@@ -379,29 +476,82 @@ fn list_local_link_files(path: String) -> Result<Vec<LinkFileEntry>, String> {
 }
 
 #[tauri::command]
-async fn list_remote_link_files(id: String, password: String, path: String) -> Result<Vec<LinkFileEntry>, String> {
-    let address = if id.starts_with("http://") { id } else { format!("http://{id}") };
-    reqwest::Client::new().post(format!("{address}/v1/link/list")).json(&LinkListRequest { password, path }).send().await.map_err(|error| error.to_string())?.error_for_status().map_err(|error| error.to_string())?.json().await.map_err(|error| error.to_string())
+async fn list_remote_link_files(
+    id: String,
+    password: String,
+    path: String,
+) -> Result<Vec<LinkFileEntry>, String> {
+    let address = if id.starts_with("http://") {
+        id
+    } else {
+        format!("http://{id}")
+    };
+    reqwest::Client::new()
+        .post(format!("{address}/v1/link/list"))
+        .json(&LinkListRequest { password, path })
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?
+        .json()
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn download_remote_link_file(id: String, password: String, path: String) -> Result<String, String> {
-    let file_name = Path::new(&path).file_name().and_then(|value| value.to_str()).unwrap_or("download");
-    let Some(destination) = rfd::FileDialog::new().set_file_name(file_name).save_file() else { return Err("cancelled".to_owned()); };
-    let address = if id.starts_with("http://") { id } else { format!("http://{id}") };
+async fn download_remote_link_file(
+    id: String,
+    password: String,
+    path: String,
+) -> Result<String, String> {
+    let file_name = Path::new(&path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download");
+    let Some(destination) = rfd::FileDialog::new().set_file_name(file_name).save_file() else {
+        return Err("cancelled".to_owned());
+    };
+    let address = if id.starts_with("http://") {
+        id
+    } else {
+        format!("http://{id}")
+    };
     let encoded = url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>();
-    let response = reqwest::Client::new().get(format!("{address}/v1/link/file?path={encoded}")).bearer_auth(password).send().await.map_err(|error| error.to_string())?.error_for_status().map_err(|error| error.to_string())?;
-    let mut file = tokio::fs::File::create(&destination).await.map_err(|error| error.to_string())?;
+    let response = reqwest::Client::new()
+        .get(format!("{address}/v1/link/file?path={encoded}"))
+        .bearer_auth(password)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?;
+    let mut file = tokio::fs::File::create(&destination)
+        .await
+        .map_err(|error| error.to_string())?;
     let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await { file.write_all(&chunk.map_err(|error| error.to_string())?).await.map_err(|error| error.to_string())?; }
+    while let Some(chunk) = stream.next().await {
+        file.write_all(&chunk.map_err(|error| error.to_string())?)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
     Ok(destination.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
-async fn upload_remote_link_file(id: String, password: String, remote_directory: String, local_path: String) -> Result<String, String> {
+async fn upload_remote_link_file(
+    id: String,
+    password: String,
+    remote_directory: String,
+    local_path: String,
+) -> Result<String, String> {
     let source = PathBuf::from(local_path);
-    if !source.is_file() { return Err("selected_local_file_not_found".to_owned()); }
-    if remote_directory.trim().is_empty() { return Err("select_remote_directory".to_owned()); }
+    if !source.is_file() {
+        return Err("selected_local_file_not_found".to_owned());
+    }
+    if remote_directory.trim().is_empty() {
+        return Err("select_remote_directory".to_owned());
+    }
     tokio::task::spawn_blocking(move || {
         let name = source.file_name().and_then(|value| value.to_str()).ok_or_else(|| "invalid_file_name".to_owned())?;
         let remote_path = format!("{}/{}", remote_directory.trim_end_matches(['/', '\\']), name);
@@ -422,38 +572,137 @@ async fn upload_remote_link_file(id: String, password: String, remote_directory:
     }).await.map_err(|error| error.to_string())?
 }
 
-enum BValue { Int(i64), Bytes(Vec<u8>), List(Vec<BValue>), Dict(HashMap<Vec<u8>, BValue>) }
+enum BValue {
+    Int(i64),
+    Bytes(Vec<u8>),
+    List(Vec<BValue>),
+    Dict(HashMap<Vec<u8>, BValue>),
+}
 
 fn parse_bencode(data: &[u8], position: &mut usize) -> Result<BValue, String> {
-    let byte = *data.get(*position).ok_or_else(|| "invalid_torrent".to_owned())?;
+    let byte = *data
+        .get(*position)
+        .ok_or_else(|| "invalid_torrent".to_owned())?;
     match byte {
-        b'i' => { *position += 1; let end = data[*position..].iter().position(|value| *value == b'e').ok_or_else(|| "invalid_torrent".to_owned())? + *position; let value = std::str::from_utf8(&data[*position..end]).map_err(|_| "invalid_torrent")?.parse().map_err(|_| "invalid_torrent")?; *position = end + 1; Ok(BValue::Int(value)) }
-        b'l' => { *position += 1; let mut values = Vec::new(); while data.get(*position) != Some(&b'e') { values.push(parse_bencode(data, position)?); } *position += 1; Ok(BValue::List(values)) }
-        b'd' => { *position += 1; let mut values = HashMap::new(); while data.get(*position) != Some(&b'e') { let BValue::Bytes(key) = parse_bencode(data, position)? else { return Err("invalid_torrent".to_owned()); }; values.insert(key, parse_bencode(data, position)?); } *position += 1; Ok(BValue::Dict(values)) }
-        b'0'..=b'9' => { let colon = data[*position..].iter().position(|value| *value == b':').ok_or_else(|| "invalid_torrent".to_owned())? + *position; let length: usize = std::str::from_utf8(&data[*position..colon]).map_err(|_| "invalid_torrent")?.parse().map_err(|_| "invalid_torrent")?; let start = colon + 1; let end = start.checked_add(length).filter(|end| *end <= data.len()).ok_or_else(|| "invalid_torrent".to_owned())?; *position = end; Ok(BValue::Bytes(data[start..end].to_vec())) }
+        b'i' => {
+            *position += 1;
+            let end = data[*position..]
+                .iter()
+                .position(|value| *value == b'e')
+                .ok_or_else(|| "invalid_torrent".to_owned())?
+                + *position;
+            let value = std::str::from_utf8(&data[*position..end])
+                .map_err(|_| "invalid_torrent")?
+                .parse()
+                .map_err(|_| "invalid_torrent")?;
+            *position = end + 1;
+            Ok(BValue::Int(value))
+        }
+        b'l' => {
+            *position += 1;
+            let mut values = Vec::new();
+            while data.get(*position) != Some(&b'e') {
+                values.push(parse_bencode(data, position)?);
+            }
+            *position += 1;
+            Ok(BValue::List(values))
+        }
+        b'd' => {
+            *position += 1;
+            let mut values = HashMap::new();
+            while data.get(*position) != Some(&b'e') {
+                let BValue::Bytes(key) = parse_bencode(data, position)? else {
+                    return Err("invalid_torrent".to_owned());
+                };
+                values.insert(key, parse_bencode(data, position)?);
+            }
+            *position += 1;
+            Ok(BValue::Dict(values))
+        }
+        b'0'..=b'9' => {
+            let colon = data[*position..]
+                .iter()
+                .position(|value| *value == b':')
+                .ok_or_else(|| "invalid_torrent".to_owned())?
+                + *position;
+            let length: usize = std::str::from_utf8(&data[*position..colon])
+                .map_err(|_| "invalid_torrent")?
+                .parse()
+                .map_err(|_| "invalid_torrent")?;
+            let start = colon + 1;
+            let end = start
+                .checked_add(length)
+                .filter(|end| *end <= data.len())
+                .ok_or_else(|| "invalid_torrent".to_owned())?;
+            *position = end;
+            Ok(BValue::Bytes(data[start..end].to_vec()))
+        }
         _ => Err("invalid_torrent".to_owned()),
     }
 }
 
-fn btext(value: Option<&BValue>) -> String { match value { Some(BValue::Bytes(bytes)) => String::from_utf8_lossy(bytes).into_owned(), _ => String::new() } }
+fn btext(value: Option<&BValue>) -> String {
+    match value {
+        Some(BValue::Bytes(bytes)) => String::from_utf8_lossy(bytes).into_owned(),
+        _ => String::new(),
+    }
+}
 
 fn inspect_torrent_file(path: &Path) -> Result<TorrentInspection, String> {
     let data = fs::read(path).map_err(|error| error.to_string())?;
     let mut position = 0;
-    let BValue::Dict(root) = parse_bencode(&data, &mut position)? else { return Err("invalid_torrent".to_owned()); };
-    let Some(BValue::Dict(info)) = root.get(b"info".as_slice()) else { return Err("invalid_torrent".to_owned()); };
-    let name = btext(info.get(b"name.utf-8".as_slice()).or_else(|| info.get(b"name".as_slice())));
+    let BValue::Dict(root) = parse_bencode(&data, &mut position)? else {
+        return Err("invalid_torrent".to_owned());
+    };
+    let Some(BValue::Dict(info)) = root.get(b"info".as_slice()) else {
+        return Err("invalid_torrent".to_owned());
+    };
+    let name = btext(
+        info.get(b"name.utf-8".as_slice())
+            .or_else(|| info.get(b"name".as_slice())),
+    );
     let mut files = Vec::new();
     if let Some(BValue::List(entries)) = info.get(b"files".as_slice()) {
         for (offset, entry) in entries.iter().enumerate() {
-            let BValue::Dict(file) = entry else { continue; };
-            let size = match file.get(b"length".as_slice()) { Some(BValue::Int(value)) if *value >= 0 => *value as u64, _ => 0 };
-            let parts = match file.get(b"path.utf-8".as_slice()).or_else(|| file.get(b"path".as_slice())) { Some(BValue::List(parts)) => parts.iter().map(|part| btext(Some(part))).filter(|part| !part.is_empty()).collect::<Vec<_>>(), _ => Vec::new() };
-            files.push(TorrentFileInfo { index: offset + 1, path: parts.join("/"), size });
+            let BValue::Dict(file) = entry else {
+                continue;
+            };
+            let size = match file.get(b"length".as_slice()) {
+                Some(BValue::Int(value)) if *value >= 0 => *value as u64,
+                _ => 0,
+            };
+            let parts = match file
+                .get(b"path.utf-8".as_slice())
+                .or_else(|| file.get(b"path".as_slice()))
+            {
+                Some(BValue::List(parts)) => parts
+                    .iter()
+                    .map(|part| btext(Some(part)))
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            };
+            files.push(TorrentFileInfo {
+                index: offset + 1,
+                path: parts.join("/"),
+                size,
+            });
         }
-    } else if let Some(BValue::Int(length)) = info.get(b"length".as_slice()) { files.push(TorrentFileInfo { index: 1, path: name.clone(), size: (*length).max(0) as u64 }); }
-    if files.is_empty() { return Err("torrent_has_no_files".to_owned()); }
-    Ok(TorrentInspection { total_size: files.iter().map(|file| file.size).sum(), name, files })
+    } else if let Some(BValue::Int(length)) = info.get(b"length".as_slice()) {
+        files.push(TorrentFileInfo {
+            index: 1,
+            path: name.clone(),
+            size: (*length).max(0) as u64,
+        });
+    }
+    if files.is_empty() {
+        return Err("torrent_has_no_files".to_owned());
+    }
+    Ok(TorrentInspection {
+        total_size: files.iter().map(|file| file.size).sum(),
+        name,
+        files,
+    })
 }
 
 #[derive(Serialize)]
@@ -465,10 +714,568 @@ struct ToolStatus {
     version: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Ed2kEngineStatus {
+    helper_found: bool,
+    controller_found: bool,
+    daemon_found: bool,
+    version: Option<String>,
+    connected: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Ed2kConnectionSetting {
+    host: String,
+    port: u16,
+    password_configured: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Ed2kNetworkStatus {
+    ed2k_connected: bool,
+    kad_connected: bool,
+    high_id: bool,
+    firewalled: bool,
+    download_speed: String,
+    upload_speed: String,
+    sources: u64,
+    raw: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Ed2kSearchResult {
+    number: u64,
+    name: String,
+    size_mib: f64,
+    sources: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Ed2kSearchResponse {
+    search_id: Option<u64>,
+    results: Vec<Ed2kSearchResult>,
+    raw: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Ed2kTransfer {
+    hash: String,
+    name: String,
+    percent: f64,
+    active_sources: u64,
+    total_sources: u64,
+    status: String,
+    priority: String,
+    speed: String,
+}
+
+fn amule_component(helper: &Path, names: &[&str]) -> Option<PathBuf> {
+    let directory = helper
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    names
+        .iter()
+        .map(|name| directory.join(name))
+        .find(|path| path.is_file())
+}
+
+#[tauri::command]
+fn get_ed2k_engine_status(state: State<'_, AppState>) -> Result<Ed2kEngineStatus, String> {
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let helper = configured_ed2k_tool(&settings);
+    let version = version_line(&helper, &["--version"]);
+    let connected = amule_command(&settings, "status").is_ok();
+    Ok(Ed2kEngineStatus {
+        helper_found: version.is_some(),
+        controller_found: amule_component(
+            &helper,
+            &[if cfg!(windows) {
+                "amulecmd.exe"
+            } else {
+                "amulecmd"
+            }],
+        )
+        .is_some(),
+        daemon_found: amule_component(
+            &helper,
+            &[
+                if cfg!(windows) {
+                    "amuled.exe"
+                } else {
+                    "amuled"
+                },
+                if cfg!(windows) { "amule.exe" } else { "amule" },
+            ],
+        )
+        .is_some(),
+        version,
+        connected,
+    })
+}
+
+fn amule_controller(settings: &UserSettings) -> PathBuf {
+    let helper = configured_ed2k_tool(settings);
+    amule_component(
+        &helper,
+        &[if cfg!(windows) {
+            "amulecmd.exe"
+        } else {
+            "amulecmd"
+        }],
+    )
+    .unwrap_or_else(|| {
+        PathBuf::from(if cfg!(windows) {
+            "amulecmd.exe"
+        } else {
+            "amulecmd"
+        })
+    })
+}
+
+fn configure_amule_command(command: &mut Command, settings: &UserSettings) -> Result<(), String> {
+    if settings.ed2k_password.is_empty() {
+        return Err("ed2k_password_required".to_owned());
+    }
+    command.args([
+        "-h",
+        &settings.ed2k_host,
+        "-p",
+        &settings.ed2k_port.to_string(),
+        "-P",
+        &settings.ed2k_password,
+        "-l",
+        "en",
+    ]);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    Ok(())
+}
+
+fn amule_command(settings: &UserSettings, instruction: &str) -> Result<String, String> {
+    let mut command = Command::new(amule_controller(settings));
+    configure_amule_command(&mut command, settings)?;
+    let output = command
+        .args(["--command", instruction])
+        .output()
+        .map_err(|error| format!("amulecmd_not_found: {error}"))?;
+    let text = if output.stdout.is_empty() {
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    } else {
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    if output.status.success()
+        && !text.contains("Connection Failed")
+        && !text.contains("Request failed")
+    {
+        Ok(text)
+    } else {
+        Err(text.trim().to_owned())
+    }
+}
+
+fn parse_after_label<'a>(text: &'a str, label: &str) -> &'a str {
+    text.lines()
+        .find_map(|line| line.split_once(label).map(|(_, value)| value.trim()))
+        .unwrap_or("")
+}
+
+#[tauri::command]
+fn get_ed2k_connection(state: State<'_, AppState>) -> Result<Ed2kConnectionSetting, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    Ok(Ed2kConnectionSetting {
+        host: settings.ed2k_host.clone(),
+        port: settings.ed2k_port,
+        password_configured: !settings.ed2k_password.is_empty(),
+    })
+}
+
+#[tauri::command]
+fn set_ed2k_connection(
+    state: State<'_, AppState>,
+    host: String,
+    port: u16,
+    password: String,
+) -> Result<(), String> {
+    if host.trim().is_empty() || port == 0 {
+        return Err("invalid_ed2k_connection".to_owned());
+    }
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.ed2k_host = host.trim().to_owned();
+    settings.ed2k_port = port;
+    if !password.is_empty() {
+        settings.ed2k_password = password;
+    }
+    *state
+        .ed2k_search
+        .lock()
+        .map_err(|error| error.to_string())? = None;
+    save_settings(&state, &settings)
+}
+
+#[tauri::command]
+fn start_ed2k_engine(state: State<'_, AppState>) -> Result<(), String> {
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let helper = configured_ed2k_tool(&settings);
+    let daemon = amule_component(
+        &helper,
+        &[
+            if cfg!(windows) {
+                "amuled.exe"
+            } else {
+                "amuled"
+            },
+            if cfg!(windows) { "amule.exe" } else { "amule" },
+        ],
+    )
+    .ok_or_else(|| "amule_engine_not_found".to_owned())?;
+    let mut command = Command::new(daemon);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn connect_ed2k_networks(state: State<'_, AppState>) -> Result<(), String> {
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    amule_command(&settings, "connect")?;
+    Ok(())
+}
+
+#[tauri::command]
+fn ed2k_network_status(state: State<'_, AppState>) -> Result<Ed2kNetworkStatus, String> {
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let raw = amule_command(&settings, "status")?;
+    let ed2k_line = parse_after_label(&raw, "eD2k:");
+    let kad_line = parse_after_label(&raw, "Kad:");
+    Ok(Ed2kNetworkStatus {
+        ed2k_connected: ed2k_line.starts_with("Connected"),
+        kad_connected: kad_line.starts_with("Connected"),
+        high_id: ed2k_line.contains("HighID"),
+        firewalled: kad_line.contains("firewalled") || ed2k_line.contains("LowID"),
+        download_speed: parse_after_label(&raw, "Download:").to_owned(),
+        upload_speed: parse_after_label(&raw, "Upload:").to_owned(),
+        sources: parse_after_label(&raw, "Total sources:")
+            .parse()
+            .unwrap_or(0),
+        raw,
+    })
+}
+
+fn start_search_session(settings: &UserSettings) -> Result<Ed2kSearchSession, String> {
+    let mut command = Command::new(amule_controller(settings));
+    configure_amule_command(&mut command, settings)?;
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("amulecmd_not_found: {error}"))?;
+    let input = child
+        .stdin
+        .take()
+        .ok_or_else(|| "amulecmd_stdin".to_owned())?;
+    let output = BufReader::new(
+        child
+            .stdout
+            .take()
+            .ok_or_else(|| "amulecmd_stdout".to_owned())?,
+    );
+    let mut session = Ed2kSearchSession {
+        child,
+        input,
+        output,
+    };
+    read_amule_prompt(&mut session)?;
+    Ok(session)
+}
+
+fn read_amule_prompt(session: &mut Ed2kSearchSession) -> Result<String, String> {
+    let mut bytes = Vec::new();
+    loop {
+        let available = session
+            .output
+            .fill_buf()
+            .map_err(|error| error.to_string())?;
+        if available.is_empty() {
+            return Err("amulecmd_closed".to_owned());
+        }
+        let take = available.len();
+        bytes.extend_from_slice(&available[..take]);
+        session.output.consume(take);
+        if bytes.ends_with(b"aMulecmd$ ") {
+            break;
+        }
+        if bytes.len() > 4 * 1024 * 1024 {
+            return Err("amulecmd_output_too_large".to_owned());
+        }
+    }
+    Ok(String::from_utf8_lossy(&bytes)
+        .trim_end_matches("aMulecmd$ ")
+        .to_owned())
+}
+
+fn interactive_amule(session: &mut Ed2kSearchSession, instruction: &str) -> Result<String, String> {
+    if instruction
+        .chars()
+        .any(|value| matches!(value, '\r' | '\n'))
+    {
+        return Err("invalid_ed2k_command".to_owned());
+    }
+    writeln!(session.input, "{instruction}")
+        .and_then(|_| session.input.flush())
+        .map_err(|error| error.to_string())?;
+    read_amule_prompt(session)
+}
+
+fn parse_search_results(raw: &str) -> Vec<Ed2kSearchResult> {
+    raw.lines()
+        .filter_map(|line| {
+            let (number, rest) = line.trim_start().split_once('.')?;
+            let number = number.parse().ok()?;
+            let mut tail = rest.trim().rsplitn(3, char::is_whitespace);
+            let sources = tail.next()?.parse().ok()?;
+            let size_mib = tail.next()?.parse().ok()?;
+            let name = tail.next()?.trim().to_owned();
+            (!name.is_empty()).then_some(Ed2kSearchResult {
+                number,
+                name,
+                size_mib,
+                sources,
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn ed2k_search(
+    state: State<'_, AppState>,
+    query: String,
+    search_type: String,
+    file_type: String,
+) -> Result<Ed2kSearchResponse, String> {
+    let query = query.trim();
+    if query.len() < 2 || query.chars().any(|value| matches!(value, '\r' | '\n')) {
+        return Err("invalid_ed2k_search".to_owned());
+    }
+    let network = match search_type.as_str() {
+        "kad" => "kad",
+        "local" => "local",
+        _ => "global",
+    };
+    let filter = match file_type.as_str() {
+        "Audio" | "Video" | "Image" | "Doc" | "Pro" | "Arc" | "Iso" => {
+            format!(" --type {file_type}")
+        }
+        _ => String::new(),
+    };
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let mut guard = state
+        .ed2k_search
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if guard
+        .as_mut()
+        .is_some_and(|session| session.child.try_wait().ok().flatten().is_some())
+    {
+        *guard = None;
+    }
+    if guard.is_none() {
+        *guard = Some(start_search_session(&settings)?);
+    }
+    let raw = interactive_amule(
+        guard.as_mut().unwrap(),
+        &format!("search {network}{filter} {query}"),
+    )?;
+    let search_id = raw
+        .split("Search started (id ")
+        .nth(1)
+        .and_then(|value| value.split(')').next())
+        .and_then(|value| value.parse().ok());
+    Ok(Ed2kSearchResponse {
+        search_id,
+        results: Vec::new(),
+        raw,
+    })
+}
+
+#[tauri::command]
+fn ed2k_search_results(
+    state: State<'_, AppState>,
+    search_id: Option<u64>,
+) -> Result<Ed2kSearchResponse, String> {
+    let mut guard = state
+        .ed2k_search
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| "ed2k_search_not_started".to_owned())?;
+    let raw = interactive_amule(
+        session,
+        &search_id.map_or_else(|| "results".to_owned(), |id| format!("results {id}")),
+    )?;
+    Ok(Ed2kSearchResponse {
+        search_id,
+        results: parse_search_results(&raw),
+        raw,
+    })
+}
+
+#[tauri::command]
+fn ed2k_download_result(state: State<'_, AppState>, number: u64) -> Result<(), String> {
+    let mut guard = state
+        .ed2k_search
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| "ed2k_search_not_started".to_owned())?;
+    interactive_amule(session, &format!("download {number}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn list_ed2k_transfers(state: State<'_, AppState>) -> Result<Vec<Ed2kTransfer>, String> {
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let raw = amule_command(&settings, "show dl")?;
+    let mut transfers = Vec::new();
+    let mut lines = raw.lines().peekable();
+    while let Some(line) = lines.next() {
+        let clean = line.trim_start_matches(" > ");
+        let Some((hash, name)) = clean.split_once('\t') else {
+            continue;
+        };
+        if hash.len() != 32 {
+            continue;
+        }
+        let detail = lines.next().unwrap_or("").trim_start_matches(" > ").trim();
+        let fields = detail.split('\t').map(str::trim).collect::<Vec<_>>();
+        let percent = fields
+            .first()
+            .and_then(|value| {
+                value
+                    .trim_matches(|character| matches!(character, '[' | ']' | '%'))
+                    .parse()
+                    .ok()
+            })
+            .unwrap_or(0.0);
+        let (active_sources, total_sources) = fields
+            .get(1)
+            .and_then(|value| value.split_once('/'))
+            .map(|(a, b)| (a.trim().parse().unwrap_or(0), b.trim().parse().unwrap_or(0)))
+            .unwrap_or((0, 0));
+        transfers.push(Ed2kTransfer {
+            hash: hash.to_owned(),
+            name: name.to_owned(),
+            percent,
+            active_sources,
+            total_sources,
+            status: fields.get(4).unwrap_or(&"").to_string(),
+            priority: fields.get(6).unwrap_or(&"").to_string(),
+            speed: fields.last().unwrap_or(&"").to_string(),
+        });
+    }
+    Ok(transfers)
+}
+
+#[tauri::command]
+fn control_ed2k_transfer(
+    state: State<'_, AppState>,
+    action: String,
+    hash: String,
+) -> Result<(), String> {
+    if hash.len() != 32 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("invalid_ed2k_hash".to_owned());
+    }
+    let instruction = match action.as_str() {
+        "pause" => "pause",
+        "resume" => "resume",
+        "cancel" => "cancel",
+        "low" => "priority low",
+        "normal" => "priority normal",
+        "high" => "priority high",
+        "auto" => "priority auto",
+        _ => return Err("invalid_ed2k_action".to_owned()),
+    };
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    amule_command(&settings, &format!("{instruction} {hash}"))?;
+    Ok(())
+}
+
 fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
     path.clone()
         .filter(|value| !value.as_os_str().is_empty())
         .unwrap_or_else(|| PathBuf::from(fallback))
+}
+
+fn bundled_ed2k_helper() -> Option<PathBuf> {
+    let executable_directory = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf))?;
+    let file_name = if cfg!(windows) { "ed2k.exe" } else { "ed2k" };
+    ["Data", "data"]
+        .into_iter()
+        .map(|directory| {
+            executable_directory
+                .join(directory)
+                .join("ed2k")
+                .join(file_name)
+        })
+        .find(|path| path.is_file())
+}
+
+fn configured_ed2k_tool(settings: &UserSettings) -> PathBuf {
+    settings
+        .ed2k_path
+        .clone()
+        .filter(|value| !value.as_os_str().is_empty())
+        .or_else(bundled_ed2k_helper)
+        .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "ed2k.exe" } else { "ed2k" }))
 }
 
 fn http_origin(url: &str) -> Option<&str> {
@@ -622,20 +1429,30 @@ const BRIDGE_PORT: u16 = 17654;
 const LINK_PORT: u16 = 17655;
 
 fn local_link_ip() -> std::net::IpAddr {
-    UdpSocket::bind(("0.0.0.0", 0)).ok().and_then(|socket| {
-        socket.connect(("8.8.8.8", 80)).ok()?;
-        socket.local_addr().ok().map(|address| address.ip())
-    }).filter(|ip| !ip.is_loopback()).unwrap_or_else(|| "127.0.0.1".parse().expect("valid loopback"))
+    UdpSocket::bind(("0.0.0.0", 0))
+        .ok()
+        .and_then(|socket| {
+            socket.connect(("8.8.8.8", 80)).ok()?;
+            socket.local_addr().ok().map(|address| address.ip())
+        })
+        .filter(|ip| !ip.is_loopback())
+        .unwrap_or_else(|| "127.0.0.1".parse().expect("valid loopback"))
 }
 
 fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     let mut buffer = Vec::with_capacity(8192);
     let mut chunk = [0_u8; 4096];
     let header_end = loop {
-        let Ok(count) = stream.read(&mut chunk) else { return; };
-        if count == 0 || buffer.len() + count > 65_536 { return; }
+        let Ok(count) = stream.read(&mut chunk) else {
+            return;
+        };
+        if count == 0 || buffer.len() + count > 65_536 {
+            return;
+        }
         buffer.extend_from_slice(&chunk[..count]);
-        if let Some(position) = buffer.windows(4).position(|window| window == b"\r\n\r\n") { break position; }
+        if let Some(position) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+            break position;
+        }
     };
     let headers = String::from_utf8_lossy(&buffer[..header_end + 4]).into_owned();
     if headers.starts_with("GET /mobile ") {
@@ -646,91 +1463,236 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     }
     if headers.starts_with("GET /v1/mobile/tasks ") {
         let state = app.state::<AppState>();
-        let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
-        if !bridge_authorized(&headers, &settings.link_password) { bridge_response(&mut stream, "401 Unauthorized", None, "{\"error\":\"unauthorized\"}"); return; }
+        let settings = match state.settings.lock() {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        if !bridge_authorized(&headers, &settings.link_password) {
+            bridge_response(
+                &mut stream,
+                "401 Unauthorized",
+                None,
+                "{\"error\":\"unauthorized\"}",
+            );
+            return;
+        }
         drop(settings);
-        let queue = match state.queue.lock() { Ok(value) => value, Err(_) => return };
+        let queue = match state.queue.lock() {
+            Ok(value) => value,
+            Err(_) => return,
+        };
         let body = serde_json::to_string(&*queue).unwrap_or_else(|_| "[]".to_owned());
         bridge_response(&mut stream, "200 OK", None, &body);
         return;
     }
     if headers.starts_with("PUT /v1/link/file?") {
         let state = app.state::<AppState>();
-        let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
-        if !bridge_authorized(&headers, &settings.link_password) { bridge_response(&mut stream, "401 Unauthorized", None, ""); return; }
+        let settings = match state.settings.lock() {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        if !bridge_authorized(&headers, &settings.link_password) {
+            bridge_response(&mut stream, "401 Unauthorized", None, "");
+            return;
+        }
         drop(settings);
-        let request_target = headers.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("");
-        let path = url::Url::parse(&format!("http://localhost{request_target}")).ok().and_then(|url| url.query_pairs().find(|(key, _)| key == "path").map(|(_, value)| value.into_owned()));
-        let Some(path) = path.and_then(|value| safe_link_path(&value).ok()) else { bridge_response(&mut stream, "400 Bad Request", None, ""); return; };
+        let request_target = headers
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("");
+        let path = url::Url::parse(&format!("http://localhost{request_target}"))
+            .ok()
+            .and_then(|url| {
+                url.query_pairs()
+                    .find(|(key, _)| key == "path")
+                    .map(|(_, value)| value.into_owned())
+            });
+        let Some(path) = path.and_then(|value| safe_link_path(&value).ok()) else {
+            bridge_response(&mut stream, "400 Bad Request", None, "");
+            return;
+        };
         let length = bridge_content_length(&headers);
-        let Ok(mut file) = fs::File::create(path) else { bridge_response(&mut stream, "403 Forbidden", None, ""); return; };
+        let Ok(mut file) = fs::File::create(path) else {
+            bridge_response(&mut stream, "403 Forbidden", None, "");
+            return;
+        };
         let body_start = header_end + 4;
         let initial = &buffer[body_start..];
-        if file.write_all(initial).is_err() { return; }
+        if file.write_all(initial).is_err() {
+            return;
+        }
         let remaining = length.saturating_sub(initial.len());
-        if std::io::copy(&mut std::io::Read::by_ref(&mut stream).take(remaining as u64), &mut file).is_err() { return; }
+        if std::io::copy(
+            &mut std::io::Read::by_ref(&mut stream).take(remaining as u64),
+            &mut file,
+        )
+        .is_err()
+        {
+            return;
+        }
         bridge_response(&mut stream, "200 OK", None, "{\"ok\":true}");
         return;
     }
     let length = bridge_content_length(&headers);
     let body_start = header_end + 4;
     while buffer.len() < body_start + length {
-        let Ok(count) = stream.read(&mut chunk) else { return; };
-        if count == 0 { return; }
+        let Ok(count) = stream.read(&mut chunk) else {
+            return;
+        };
+        if count == 0 {
+            return;
+        }
         buffer.extend_from_slice(&chunk[..count]);
     }
-    let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") else { return; };
+    let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return;
+    };
     let headers = String::from_utf8_lossy(&buffer[..header_end + 4]);
     if headers.starts_with("POST /v1/mobile/add ") {
         let state = app.state::<AppState>();
-        let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
-        if !bridge_authorized(&headers, &settings.link_password) { bridge_response(&mut stream, "401 Unauthorized", None, "{\"error\":\"unauthorized\"}"); return; }
+        let settings = match state.settings.lock() {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        if !bridge_authorized(&headers, &settings.link_password) {
+            bridge_response(
+                &mut stream,
+                "401 Unauthorized",
+                None,
+                "{\"error\":\"unauthorized\"}",
+            );
+            return;
+        }
         drop(settings);
         let request = serde_json::from_slice::<MobileAddRequest>(&buffer[header_end + 4..]);
         match request {
             Ok(request) if classify_url(&request.url).is_some() => {
-                let result = queue_from_bridge(app, BridgeDownload { url: request.url, file_name: None, page_url: None, duration: None, cookie_header: None, user_agent: None, request_method: None, request_body: None, request_content_type: None });
-                if result.is_ok() { bridge_response(&mut stream, "200 OK", None, "{\"ok\":true}"); } else { bridge_response(&mut stream, "400 Bad Request", None, "{\"error\":\"invalid_url\"}"); }
+                let result = queue_from_bridge(
+                    app,
+                    BridgeDownload {
+                        url: request.url,
+                        file_name: None,
+                        page_url: None,
+                        duration: None,
+                        cookie_header: None,
+                        user_agent: None,
+                        request_method: None,
+                        request_body: None,
+                        request_content_type: None,
+                    },
+                );
+                if result.is_ok() {
+                    bridge_response(&mut stream, "200 OK", None, "{\"ok\":true}");
+                } else {
+                    bridge_response(
+                        &mut stream,
+                        "400 Bad Request",
+                        None,
+                        "{\"error\":\"invalid_url\"}",
+                    );
+                }
             }
-            _ => bridge_response(&mut stream, "400 Bad Request", None, "{\"error\":\"invalid_url\"}"),
+            _ => bridge_response(
+                &mut stream,
+                "400 Bad Request",
+                None,
+                "{\"error\":\"invalid_url\"}",
+            ),
         }
         return;
     }
     if headers.starts_with("GET /v1/link/file?") {
         let state = app.state::<AppState>();
-        let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
-        if !bridge_authorized(&headers, &settings.link_password) { bridge_response(&mut stream, "401 Unauthorized", None, ""); return; }
-        let request_target = headers.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("");
-        let path = url::Url::parse(&format!("http://localhost{request_target}")).ok().and_then(|url| url.query_pairs().find(|(key, _)| key == "path").map(|(_, value)| value.into_owned()));
-        let Some(path) = path.and_then(|value| safe_link_path(&value).ok()) else { bridge_response(&mut stream, "400 Bad Request", None, ""); return; };
-        let Ok(mut file) = fs::File::open(&path) else { bridge_response(&mut stream, "404 Not Found", None, ""); return; };
-        let Ok(metadata) = file.metadata() else { return; };
+        let settings = match state.settings.lock() {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        if !bridge_authorized(&headers, &settings.link_password) {
+            bridge_response(&mut stream, "401 Unauthorized", None, "");
+            return;
+        }
+        let request_target = headers
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("");
+        let path = url::Url::parse(&format!("http://localhost{request_target}"))
+            .ok()
+            .and_then(|url| {
+                url.query_pairs()
+                    .find(|(key, _)| key == "path")
+                    .map(|(_, value)| value.into_owned())
+            });
+        let Some(path) = path.and_then(|value| safe_link_path(&value).ok()) else {
+            bridge_response(&mut stream, "400 Bad Request", None, "");
+            return;
+        };
+        let Ok(mut file) = fs::File::open(&path) else {
+            bridge_response(&mut stream, "404 Not Found", None, "");
+            return;
+        };
+        let Ok(metadata) = file.metadata() else {
+            return;
+        };
         let header = format!("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", metadata.len());
-        if stream.write_all(header.as_bytes()).is_ok() { let _ = std::io::copy(&mut file, &mut stream); }
+        if stream.write_all(header.as_bytes()).is_ok() {
+            let _ = std::io::copy(&mut file, &mut stream);
+        }
         return;
     }
     if !headers.starts_with("POST /v1/link/list ") {
-        bridge_response(&mut stream, "404 Not Found", None, "{\"error\":\"not_found\"}");
+        bridge_response(
+            &mut stream,
+            "404 Not Found",
+            None,
+            "{\"error\":\"not_found\"}",
+        );
         return;
     }
     let request = serde_json::from_slice::<LinkListRequest>(&buffer[header_end + 4..]);
-    let Ok(request) = request else { bridge_response(&mut stream, "400 Bad Request", None, "{\"error\":\"invalid_request\"}"); return; };
+    let Ok(request) = request else {
+        bridge_response(
+            &mut stream,
+            "400 Bad Request",
+            None,
+            "{\"error\":\"invalid_request\"}",
+        );
+        return;
+    };
     let state = app.state::<AppState>();
-    let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
+    let settings = match state.settings.lock() {
+        Ok(value) => value,
+        Err(_) => return,
+    };
     if request.password != settings.link_password {
-        bridge_response(&mut stream, "401 Unauthorized", None, "{\"error\":\"unauthorized\"}");
+        bridge_response(
+            &mut stream,
+            "401 Unauthorized",
+            None,
+            "{\"error\":\"unauthorized\"}",
+        );
         return;
     }
-    match list_link_directory(&request.path).and_then(|entries| serde_json::to_string(&entries).map_err(|error| error.to_string())) {
+    match list_link_directory(&request.path)
+        .and_then(|entries| serde_json::to_string(&entries).map_err(|error| error.to_string()))
+    {
         Ok(body) => bridge_response(&mut stream, "200 OK", None, &body),
-        Err(_) => bridge_response(&mut stream, "400 Bad Request", None, "{\"error\":\"invalid_path\"}"),
+        Err(_) => bridge_response(
+            &mut stream,
+            "400 Bad Request",
+            None,
+            "{\"error\":\"invalid_path\"}",
+        ),
     }
 }
 
 fn run_link_server(app: tauri::AppHandle, listener: TcpListener) {
     for stream in listener.incoming().flatten() {
         let app = app.clone();
-        let _ = std::thread::Builder::new().name("apocalipse-link-client".into()).spawn(move || handle_link_connection(&app, stream));
+        let _ = std::thread::Builder::new()
+            .name("apocalipse-link-client".into())
+            .spawn(move || handle_link_connection(&app, stream));
     }
 }
 
@@ -951,7 +1913,9 @@ fn redact_url(url: &str) -> String {
     };
     let base = if let Some(scheme_end) = base.find("://") {
         let authority_start = scheme_end + 3;
-        let authority_end = base[authority_start..].find('/').map_or(base.len(), |index| authority_start + index);
+        let authority_end = base[authority_start..]
+            .find('/')
+            .map_or(base.len(), |index| authority_start + index);
         match base[authority_start..authority_end].find('@') {
             Some(at) => format!(
                 "{}{}",
@@ -1232,7 +2196,9 @@ async fn download_with_mirrors(
 }
 
 fn epoch_seconds() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |value| value.as_secs())
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |value| value.as_secs())
 }
 
 async fn run_external_download(
@@ -1282,6 +2248,7 @@ async fn run_external_download(
                         "aria2c"
                     },
                 ),
+                configured_ed2k_tool(&settings),
                 settings.connections_per_download.clamp(1, 32),
                 settings
                     .proxy_enabled
@@ -1302,6 +2269,7 @@ async fn run_external_download(
                 "yt-dlp".into(),
                 "N_m3u8DL-RE".into(),
                 "aria2c".into(),
+                "ed2k".into(),
                 8,
                 None,
                 None,
@@ -1325,9 +2293,9 @@ async fn run_external_download(
         .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_deref()))
         .unwrap_or("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36");
     let proxy_url = tools
-        .5
+        .6
         .as_deref()
-        .map(|url| external_proxy_url(url, tools.6.as_deref(), tools.7.as_deref()));
+        .map(|url| external_proxy_url(url, tools.7.as_deref(), tools.8.as_deref()));
     let mut command = match kind {
         DownloadKind::MediaPage => {
             let mut command = tokio::process::Command::new(&tools.1);
@@ -1341,7 +2309,7 @@ async fn run_external_download(
             command.args(["--no-playlist", "--newline", "--verbose"]);
             command
                 .arg("--concurrent-fragments")
-                .arg(tools.4.to_string());
+                .arg(tools.5.to_string());
             let quickjs_name = if cfg!(windows) { "qjs.exe" } else { "qjs" };
             let adjacent_quickjs = tools
                 .1
@@ -1446,7 +2414,7 @@ async fn run_external_download(
                         "30",
                     ])
                     .arg("--thread-count")
-                    .arg(tools.4.to_string())
+                    .arg(tools.5.to_string())
                     .arg("--ffmpeg-binary-path")
                     .arg(&tools.0);
                 if let Some(referer) = task.referer.as_deref() {
@@ -1491,46 +2459,81 @@ async fn run_external_download(
         }
         DownloadKind::Torrent | DownloadKind::Magnet | DownloadKind::Ftp => {
             let mut command = tokio::process::Command::new(&tools.3);
-            if !tools.8.is_empty() {
+            if !tools.9.is_empty() {
                 command.arg(format!(
                     "--async-dns-server={}",
                     tools
-                        .8
+                        .9
                         .iter()
                         .map(ToString::to_string)
                         .collect::<Vec<_>>()
                         .join(",")
                 ));
             }
-            if let Some(proxy_url) = tools.5.as_deref() {
+            if let Some(proxy_url) = tools.6.as_deref() {
                 command.arg(format!("--all-proxy={proxy_url}"));
-                if let Some(username) = tools.6.as_deref() {
+                if let Some(username) = tools.7.as_deref() {
                     command.arg(format!("--all-proxy-user={username}"));
                 }
-                if let Some(password) = tools.7.as_deref() {
+                if let Some(password) = tools.8.as_deref() {
                     command.arg(format!("--all-proxy-passwd={password}"));
                 }
             }
-            command
-                .arg(format!("--dir={}", directory.display()))
-                .args([
-                    "--summary-interval=1",
-                    "--console-log-level=notice",
-                    "--show-console-readout=true",
-                    "--download-result=hide",
-                    "--continue=true",
-                    "--enable-dht=true",
-                    "--enable-peer-exchange=true",
-                    "--bt-enable-lpd=true",
-                    "--bt-max-peers=100",
-                    "--bt-prioritize-piece=head=32M,tail=32M",
-                    "--file-allocation=trunc",
-                    "--seed-time=0",
-                ]);
+            command.arg(format!("--dir={}", directory.display())).args([
+                "--summary-interval=1",
+                "--console-log-level=notice",
+                "--show-console-readout=true",
+                "--download-result=hide",
+                "--continue=true",
+                "--enable-dht=true",
+                "--enable-peer-exchange=true",
+                "--bt-enable-lpd=true",
+                "--bt-max-peers=100",
+                "--bt-prioritize-piece=head=32M,tail=32M",
+                "--file-allocation=trunc",
+                "--seed-time=0",
+            ]);
             if !task.torrent_selection.is_empty() {
-                command.arg(format!("--select-file={}", task.torrent_selection.iter().map(ToString::to_string).collect::<Vec<_>>().join(",")));
+                command.arg(format!(
+                    "--select-file={}",
+                    task.torrent_selection
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ));
             }
             command.arg(&task.source);
+            command
+        }
+        DownloadKind::Ed2k => {
+            let settings = app
+                .state::<AppState>()
+                .settings
+                .lock()
+                .map(|value| value.clone())
+                .unwrap_or_default();
+            if settings.ed2k_password.is_empty() {
+                update_task(&app, id, true, |item| {
+                    item.state = DownloadState::Failed {
+                        message: "ed2k_password_required".to_owned(),
+                    }
+                });
+                return;
+            }
+            let mut command = tokio::process::Command::new(amule_controller(&settings));
+            command.args([
+                "-h",
+                &settings.ed2k_host,
+                "-p",
+                &settings.ed2k_port.to_string(),
+                "-P",
+                &settings.ed2k_password,
+                "-l",
+                "en",
+                "--command",
+                &format!("add {}", task.source),
+            ]);
             command
         }
         _ => return,
@@ -1843,7 +2846,10 @@ fn matrix_analyze(state: State<'_, AppState>) -> Result<MatrixStatus, String> {
     let queue = state.queue.lock().map_err(|error| error.to_string())?;
     let rules = state.site_rules.lock().map_err(|error| error.to_string())?;
     let mut failures = HashMap::<String, HashSet<String>>::new();
-    for task in queue.iter().filter(|task| matches!(&task.state, DownloadState::Failed { .. })) {
+    for task in queue
+        .iter()
+        .filter(|task| matches!(&task.state, DownloadState::Failed { .. }))
+    {
         if let Ok(url) = url::Url::parse(&task.source) {
             if let Some(host) = url.host_str() {
                 failures
@@ -1889,9 +2895,7 @@ fn matrix_analyze(state: State<'_, AppState>) -> Result<MatrixStatus, String> {
 
     let mut proposals = failures
         .into_iter()
-        .filter(|(host, _)| {
-            matching_site_rule(&format!("https://{host}/"), &rules).is_none()
-        })
+        .filter(|(host, _)| matching_site_rule(&format!("https://{host}/"), &rules).is_none())
         .map(|(host, task_ids)| {
             let count = task_ids.len();
             MatrixRuleProposal {
@@ -1904,7 +2908,12 @@ fn matrix_analyze(state: State<'_, AppState>) -> Result<MatrixStatus, String> {
             }
         })
         .collect::<Vec<_>>();
-    proposals.sort_by(|left, right| right.failures.cmp(&left.failures).then_with(|| left.host.cmp(&right.host)));
+    proposals.sort_by(|left, right| {
+        right
+            .failures
+            .cmp(&left.failures)
+            .then_with(|| left.host.cmp(&right.host))
+    });
     let applied_rules = rules
         .iter()
         .filter(|rule| rule.enabled && rule.action != SiteRuleAction::Standard)
@@ -1925,8 +2934,19 @@ fn matrix_analyze(state: State<'_, AppState>) -> Result<MatrixStatus, String> {
 #[tauri::command]
 fn matrix_apply_rule(state: State<'_, AppState>, host: String) -> Result<String, String> {
     let host = host.trim().to_ascii_lowercase();
-    if host.is_empty() || host.len() > 253 || !host.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '-')) { return Err("invalid_matrix_host".to_owned()); }
-    let mut rules = state.site_rules.lock().map_err(|error| error.to_string())?.clone();
+    if host.is_empty()
+        || host.len() > 253
+        || !host
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '-'))
+    {
+        return Err("invalid_matrix_host".to_owned());
+    }
+    let mut rules = state
+        .site_rules
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
     if let Some(rule) = rules.iter_mut().find(|rule| {
         rule.hosts
             .iter()
@@ -1937,18 +2957,36 @@ fn matrix_apply_rule(state: State<'_, AppState>, host: String) -> Result<String,
         rule.connections = 1;
     } else {
         let id_host = host.replace('.', "-");
-        rules.push(SiteRule { id: format!("matrix-{id_host}"), name: format!("Matrix: {host}"), hosts: vec![host.clone(), format!("*.{host}")], action: SiteRuleAction::SingleConnection, enabled: true, connections: 1 });
+        rules.push(SiteRule {
+            id: format!("matrix-{id_host}"),
+            name: format!("Matrix: {host}"),
+            hosts: vec![host.clone(), format!("*.{host}")],
+            action: SiteRuleAction::SingleConnection,
+            enabled: true,
+            connections: 1,
+        });
     }
-    if rules.len() > 100 || !rules.iter().all(valid_site_rule) { return Err("invalid_site_rules".to_owned()); }
+    if rules.len() > 100 || !rules.iter().all(valid_site_rule) {
+        return Err("invalid_site_rules".to_owned());
+    }
     save_site_rules(&state, &rules)?;
     *state.site_rules.lock().map_err(|error| error.to_string())? = rules;
-    diagnostic_log(&state, "INFO", "matrix.rule_applied", &format!("host={host} action=single_connection"));
+    diagnostic_log(
+        &state,
+        "INFO",
+        "matrix.rule_applied",
+        &format!("host={host} action=single_connection"),
+    );
     Ok(host)
 }
 
 #[tauri::command]
 fn matrix_rollback_rule(state: State<'_, AppState>, id: String) -> Result<String, String> {
-    let mut rules = state.site_rules.lock().map_err(|error| error.to_string())?.clone();
+    let mut rules = state
+        .site_rules
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
     let rule = rules
         .iter_mut()
         .find(|rule| rule.id == id && rule.action != SiteRuleAction::Standard)
@@ -1956,7 +2994,12 @@ fn matrix_rollback_rule(state: State<'_, AppState>, id: String) -> Result<String
     rule.enabled = false;
     save_site_rules(&state, &rules)?;
     *state.site_rules.lock().map_err(|error| error.to_string())? = rules;
-    diagnostic_log(&state, "INFO", "matrix.rule_rolled_back", &format!("id={id}"));
+    diagnostic_log(
+        &state,
+        "INFO",
+        "matrix.rule_rolled_back",
+        &format!("id={id}"),
+    );
     Ok(id)
 }
 
@@ -1972,8 +3015,21 @@ async fn read_process_tail(
             Ok(count) => {
                 let text = String::from_utf8_lossy(&chunk[..count]);
                 if let Some((app, id, kind)) = progress.as_ref() {
-                    if matches!(*kind, DownloadKind::Torrent | DownloadKind::Magnet | DownloadKind::Ftp) {
-                        if let Some((received, total, percent, download_speed, upload_speed, seeders, leechers, eta)) = parse_aria2_progress(&text) {
+                    if matches!(
+                        *kind,
+                        DownloadKind::Torrent | DownloadKind::Magnet | DownloadKind::Ftp
+                    ) {
+                        if let Some((
+                            received,
+                            total,
+                            percent,
+                            download_speed,
+                            upload_speed,
+                            seeders,
+                            leechers,
+                            eta,
+                        )) = parse_aria2_progress(&text)
+                        {
                             update_task(app, *id, false, |task| {
                                 task.received = received;
                                 task.total = Some(total);
@@ -1987,7 +3043,8 @@ async fn read_process_tail(
                         }
                     } else if let Some(percent) = parse_external_progress(&text) {
                         update_task(app, *id, false, |task| {
-                            task.progress_percent = Some(task.progress_percent.unwrap_or(0.0).max(percent));
+                            task.progress_percent =
+                                Some(task.progress_percent.unwrap_or(0.0).max(percent));
                         });
                     }
                 }
@@ -2002,8 +3059,11 @@ async fn read_process_tail(
 }
 
 fn parse_aria2_size(value: &str) -> Option<u64> {
-    let value = value.trim_start_matches(|character: char| !character.is_ascii_digit() && character != '.');
-    let split = value.find(|character: char| !character.is_ascii_digit() && character != '.').unwrap_or(value.len());
+    let value =
+        value.trim_start_matches(|character: char| !character.is_ascii_digit() && character != '.');
+    let split = value
+        .find(|character: char| !character.is_ascii_digit() && character != '.')
+        .unwrap_or(value.len());
     let number = value[..split].parse::<f64>().ok()?;
     let unit = value[split..].to_ascii_lowercase();
     let multiplier = match unit.as_str() {
@@ -2020,27 +3080,54 @@ fn parse_aria2_size(value: &str) -> Option<u64> {
 #[allow(clippy::type_complexity)]
 fn parse_aria2_progress(text: &str) -> Option<(u64, u64, f64, u64, u64, u64, u64, Option<String>)> {
     text.lines().rev().find_map(|line| {
-      let ratio = line.split_whitespace().find_map(|token| {
-        let slash = token.find('/')?;
-        let open = token[slash + 1..].find('(').map(|index| slash + 1 + index)?;
-        let close = token[open + 1..].find('%').map(|index| open + 1 + index)?;
-        let received = parse_aria2_size(&token[..slash])?;
-        let total = parse_aria2_size(&token[slash + 1..open])?;
-        let percent = token[open + 1..close].parse::<f64>().ok()?;
-        if total > 0 && received <= total && (0.0..=100.0).contains(&percent) {
-            Some((received, total, percent))
-        } else {
-            None
-        }
-      })?;
-      let field = |prefix: &str| line.split_whitespace().find_map(|token| {
-          token.strip_prefix(prefix).and_then(parse_aria2_size)
-      }).unwrap_or(0);
-      let count = |prefix: &str| line.split_whitespace().find_map(|token| token.strip_prefix(prefix)?.trim_end_matches(']').parse::<u64>().ok()).unwrap_or(0);
-      let connections = count("CN:");
-      let seeders = count("SD:");
-      let eta = line.split_whitespace().find_map(|token| token.strip_prefix("ETA:").map(|value| value.trim_end_matches(']').to_owned()));
-      Some((ratio.0, ratio.1, ratio.2, field("DL:"), field("UL:"), seeders, connections.saturating_sub(seeders), eta))
+        let ratio = line.split_whitespace().find_map(|token| {
+            let slash = token.find('/')?;
+            let open = token[slash + 1..]
+                .find('(')
+                .map(|index| slash + 1 + index)?;
+            let close = token[open + 1..].find('%').map(|index| open + 1 + index)?;
+            let received = parse_aria2_size(&token[..slash])?;
+            let total = parse_aria2_size(&token[slash + 1..open])?;
+            let percent = token[open + 1..close].parse::<f64>().ok()?;
+            if total > 0 && received <= total && (0.0..=100.0).contains(&percent) {
+                Some((received, total, percent))
+            } else {
+                None
+            }
+        })?;
+        let field = |prefix: &str| {
+            line.split_whitespace()
+                .find_map(|token| token.strip_prefix(prefix).and_then(parse_aria2_size))
+                .unwrap_or(0)
+        };
+        let count = |prefix: &str| {
+            line.split_whitespace()
+                .find_map(|token| {
+                    token
+                        .strip_prefix(prefix)?
+                        .trim_end_matches(']')
+                        .parse::<u64>()
+                        .ok()
+                })
+                .unwrap_or(0)
+        };
+        let connections = count("CN:");
+        let seeders = count("SD:");
+        let eta = line.split_whitespace().find_map(|token| {
+            token
+                .strip_prefix("ETA:")
+                .map(|value| value.trim_end_matches(']').to_owned())
+        });
+        Some((
+            ratio.0,
+            ratio.1,
+            ratio.2,
+            field("DL:"),
+            field("UL:"),
+            seeders,
+            connections.saturating_sub(seeders),
+            eta,
+        ))
     })
 }
 
@@ -2111,10 +3198,20 @@ fn external_error_detail(output: &str, exit_code: Option<i32>) -> String {
 }
 
 fn suggested_name(source: &str) -> String {
+    let ed2k_name = parse_ed2k_file_link(source).map(|(name, _)| name);
     let magnet_name = (classify_url(source) == Some(DownloadKind::Magnet))
-        .then(|| url::Url::parse(source).ok()?.query_pairs().find(|(key, _)| key == "dn").map(|(_, value)| value.into_owned()))
+        .then(|| {
+            url::Url::parse(source)
+                .ok()?
+                .query_pairs()
+                .find(|(key, _)| key == "dn")
+                .map(|(_, value)| value.into_owned())
+        })
         .flatten();
-    magnet_name.as_deref().unwrap_or(source)
+    ed2k_name
+        .as_deref()
+        .or(magnet_name.as_deref())
+        .unwrap_or(source)
         .split(['/', '\\'])
         .next_back()
         .and_then(|part| part.split(['?', '#']).next())
@@ -2129,6 +3226,30 @@ fn suggested_name(source: &str) -> String {
             }
         })
         .collect()
+}
+
+fn parse_ed2k_file_link(source: &str) -> Option<(String, u64)> {
+    let fields = source.split('|').collect::<Vec<_>>();
+    if fields.len() < 6 || fields[0] != "ed2k://" || !fields[1].eq_ignore_ascii_case("file") {
+        return None;
+    }
+    let mut decoded = Vec::with_capacity(fields[2].len());
+    let bytes = fields[2].as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let Ok(value) = u8::from_str_radix(&fields[2][index + 1..index + 3], 16) {
+                decoded.push(value);
+                index += 3;
+                continue;
+            }
+        }
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+    let name = String::from_utf8_lossy(&decoded).replace(['/', '\\'], "_");
+    let size = fields[3].parse::<u64>().ok()?;
+    (!name.trim().is_empty() && size > 0).then_some((name, size))
 }
 
 fn suggested_download_name(source: &str) -> String {
@@ -2324,17 +3445,24 @@ fn pick_executable(initial_path: Option<String>) -> Option<String> {
 
 #[tauri::command]
 fn pick_url_list() -> Result<Vec<String>, String> {
-    let Some(path) = rfd::FileDialog::new().add_filter("URL lists", &["txt", "csv"]).pick_file() else {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("URL lists", &["txt", "csv"])
+        .pick_file()
+    else {
         return Ok(Vec::new());
     };
     let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let mut urls = Vec::new();
-    for token in content.split(|character: char| character.is_whitespace() || character == ',' || character == ';') {
+    for token in content
+        .split(|character: char| character.is_whitespace() || character == ',' || character == ';')
+    {
         let value = token.trim_matches(['\"', '\'', '[', ']']);
         if classify_url(value).is_some() && !urls.iter().any(|url| url == value) {
             urls.push(value.to_owned());
         }
-        if urls.len() >= 500 { break; }
+        if urls.len() >= 500 {
+            break;
+        }
     }
     Ok(urls)
 }
@@ -2389,6 +3517,11 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
                     "aria2c"
                 },
             ),
+            ["--version"].as_slice(),
+        ),
+        (
+            "ed2k",
+            configured_ed2k_tool(&settings),
             ["--version"].as_slice(),
         ),
     ];
@@ -2459,18 +3592,27 @@ fn set_tool_paths(
     yt_dlp: String,
     n_m3u8dl_re: String,
     aria2: String,
+    ed2k: String,
 ) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.ffmpeg_path = optional_path(ffmpeg);
     settings.yt_dlp_path = optional_path(yt_dlp);
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
     settings.aria2_path = optional_path(aria2);
+    settings.ed2k_path = optional_path(ed2k);
     save_settings(&state, &settings)
 }
 
 #[tauri::command]
 fn get_media_player(state: State<'_, AppState>) -> Result<String, String> {
-    Ok(state.settings.lock().map_err(|error| error.to_string())?.media_player_path.as_ref().map(|path| path.to_string_lossy().into_owned()).unwrap_or_default())
+    Ok(state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .media_player_path
+        .as_ref()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default())
 }
 
 #[tauri::command]
@@ -2481,7 +3623,9 @@ fn set_media_player(state: State<'_, AppState>, path: String) -> Result<(), Stri
 }
 
 fn find_video_file(root: &Path, depth: usize) -> Option<PathBuf> {
-    if depth > 6 { return None; }
+    if depth > 6 {
+        return None;
+    }
     let mut best: Option<(u64, PathBuf)> = None;
     for entry in fs::read_dir(root).ok()?.flatten() {
         let path = entry.path();
@@ -2489,13 +3633,26 @@ fn find_video_file(root: &Path, depth: usize) -> Option<PathBuf> {
             if let Some(candidate) = find_video_file(&path, depth + 1) {
                 if let Ok(metadata) = candidate.metadata() {
                     let size = metadata.len();
-                    if best.as_ref().is_none_or(|(current, _)| size > *current) { best = Some((size, candidate)); }
+                    if best.as_ref().is_none_or(|(current, _)| size > *current) {
+                        best = Some((size, candidate));
+                    }
                 }
             }
-        } else if path.extension().and_then(|value| value.to_str()).is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts")) {
+        } else if path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|extension| {
+                matches!(
+                    extension.to_ascii_lowercase().as_str(),
+                    "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts"
+                )
+            })
+        {
             if let Ok(metadata) = path.metadata() {
                 let size = metadata.len();
-                if best.as_ref().is_none_or(|(current, _)| size > *current) { best = Some((size, path)); }
+                if best.as_ref().is_none_or(|(current, _)| size > *current) {
+                    best = Some((size, path));
+                }
             }
         }
     }
@@ -2508,15 +3665,26 @@ fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
         let path = entry.path();
         let candidate = if path.is_dir() {
             find_video_file(&path, 0)
-        } else if path.extension().and_then(|value| value.to_str()).is_some_and(|extension| {
-            matches!(extension.to_ascii_lowercase().as_str(), "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts")
-        }) {
+        } else if path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|extension| {
+                matches!(
+                    extension.to_ascii_lowercase().as_str(),
+                    "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts"
+                )
+            })
+        {
             Some(path)
         } else {
             None
         };
-        let Some(candidate) = candidate else { continue; };
-        let Ok(metadata) = candidate.metadata() else { continue; };
+        let Some(candidate) = candidate else {
+            continue;
+        };
+        let Ok(metadata) = candidate.metadata() else {
+            continue;
+        };
         let size = metadata.len();
         let control = PathBuf::from(format!("{}.aria2", candidate.display()));
         let priority = if control.exists() { u64::MAX / 2 } else { 0 };
@@ -2532,28 +3700,68 @@ fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
 fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), String> {
     let (root, player) = {
         let queue = state.queue.lock().map_err(|error| error.to_string())?;
-        let task = queue.iter().find(|task| task.id == id).ok_or_else(|| "download_not_found".to_owned())?;
-        if !matches!(classify_url(&task.source), Some(DownloadKind::Torrent | DownloadKind::Magnet)) { return Err("not_a_torrent".to_owned()); }
+        let task = queue
+            .iter()
+            .find(|task| task.id == id)
+            .ok_or_else(|| "download_not_found".to_owned())?;
+        if !matches!(
+            classify_url(&task.source),
+            Some(DownloadKind::Torrent | DownloadKind::Magnet)
+        ) {
+            return Err("not_a_torrent".to_owned());
+        }
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
         (task.destination.clone(), settings.media_player_path.clone())
     };
     let video = if root.is_file() {
         root
     } else if root.is_dir() {
-        find_video_file(&root, 0)
-            .ok_or_else(|| "torrent_video_not_available".to_owned())?
+        find_video_file(&root, 0).ok_or_else(|| "torrent_video_not_available".to_owned())?
     } else {
         active_torrent_video(root.parent().unwrap_or(Path::new(".")))
             .ok_or_else(|| "torrent_video_not_available".to_owned())?
     };
-    let mut command = Command::new(player.unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "vlc.exe" } else { "vlc" })));
+    let mut command = Command::new(
+        player.unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "vlc.exe" } else { "vlc" })),
+    );
     command.arg(video);
-    #[cfg(target_os = "windows")] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
-    command.spawn().map(|_| ()).map_err(|error| error.to_string())
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, String> {
+    if id == "ed2k" {
+        let settings = state
+            .settings
+            .lock()
+            .map_err(|error| error.to_string())?
+            .clone();
+        let executable = configured_ed2k_tool(&settings);
+        let directory = executable
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let updater = ["amule-updater.exe", "amule-updater", "updater.exe"]
+            .into_iter()
+            .map(|name| directory.join(name))
+            .find(|path| path.is_file());
+        if let Some(updater) = updater {
+            Command::new(updater)
+                .spawn()
+                .map_err(|error| error.to_string())?;
+            return Ok("aMule updater started; the configured ed2k helper will be refreshed with its matching package".to_owned());
+        }
+        open_external_url("https://github.com/amule-org/amule/releases/latest")?;
+        return Ok("Official aMule release opened. Replace the complete portable package so ed2k and its matching libraries stay compatible".to_owned());
+    }
     if id != "yt-dlp" {
         return Err("manual_update_required: this engine has no safe in-place updater".to_owned());
     }
@@ -2561,14 +3769,18 @@ fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, String>
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
         configured_tool(
             &settings.yt_dlp_path,
-            if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" },
+            if cfg!(windows) {
+                "yt-dlp.exe"
+            } else {
+                "yt-dlp"
+            },
         )
     };
     if executable.is_dir() {
         return Err("tool_target_must_be_a_file".to_owned());
     }
-    let before = version_line(&executable, &["--version"])
-        .ok_or_else(|| "yt_dlp_not_found".to_owned())?;
+    let before =
+        version_line(&executable, &["--version"]).ok_or_else(|| "yt_dlp_not_found".to_owned())?;
     let mut command = Command::new(&executable);
     command.args(["--update-to", "stable"]);
     #[cfg(target_os = "windows")]
@@ -2579,7 +3791,11 @@ fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, String>
     let output = command.output().map_err(|error| error.to_string())?;
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        return Err(if message.is_empty() { "yt_dlp_update_failed".to_owned() } else { message });
+        return Err(if message.is_empty() {
+            "yt_dlp_update_failed".to_owned()
+        } else {
+            message
+        });
     }
     let after = version_line(&executable, &["--version"]).unwrap_or_else(|| before.clone());
     Ok(if before == after {
@@ -2589,25 +3805,112 @@ fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, String>
     })
 }
 
+fn open_external_url(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let result = Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn();
+    #[cfg(target_os = "macos")]
+    let result = Command::new("open").arg(url).spawn();
+    #[cfg(target_os = "linux")]
+    let result = Command::new("xdg-open").arg(url).spawn();
+    result.map(|_| ()).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
-async fn inspect_torrent_metadata(state: State<'_, AppState>, source: String) -> Result<TorrentInspection, String> {
+fn open_amule(state: State<'_, AppState>) -> Result<(), String> {
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let helper = configured_ed2k_tool(&settings);
+    let directory = helper
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let candidates = if cfg!(windows) {
+        vec![directory.join("amule.exe"), directory.join("aMule.exe")]
+    } else {
+        vec![
+            directory.join("amule"),
+            directory.join("aMule"),
+            PathBuf::from("amule"),
+        ]
+    };
+    let executable = candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "amule.exe" } else { "amule" }));
+    Command::new(executable)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("amule_not_found: {error}"))
+}
+
+#[tauri::command]
+async fn inspect_torrent_metadata(
+    state: State<'_, AppState>,
+    source: String,
+) -> Result<TorrentInspection, String> {
     match classify_url(&source) {
         Some(DownloadKind::Torrent) => inspect_torrent_file(Path::new(&source)),
         Some(DownloadKind::Magnet) => {
             let (aria2, root) = {
                 let settings = state.settings.lock().map_err(|error| error.to_string())?;
-                let root = state.queue_path.parent().unwrap_or(Path::new(".")).join("torrent-metadata").join(uuid::Uuid::new_v4().to_string());
-                (configured_tool(&settings.aria2_path, if cfg!(windows) { "aria2c.exe" } else { "aria2c" }), root)
+                let root = state
+                    .queue_path
+                    .parent()
+                    .unwrap_or(Path::new("."))
+                    .join("torrent-metadata")
+                    .join(uuid::Uuid::new_v4().to_string());
+                (
+                    configured_tool(
+                        &settings.aria2_path,
+                        if cfg!(windows) {
+                            "aria2c.exe"
+                        } else {
+                            "aria2c"
+                        },
+                    ),
+                    root,
+                )
             };
             fs::create_dir_all(&root).map_err(|error| error.to_string())?;
             let mut command = tokio::process::Command::new(aria2);
-            command.args(["--bt-metadata-only=true", "--bt-save-metadata=true", "--seed-time=0", "--summary-interval=0"])
-                .arg(format!("--dir={}", root.display())).arg(&source);
-            #[cfg(target_os = "windows")] { use std::os::windows::process::CommandExt; command.as_std_mut().creation_flags(0x08000000); }
-            let output = tokio::time::timeout(Duration::from_secs(120), command.output()).await.map_err(|_| "torrent_metadata_timeout".to_owned())?.map_err(|error| error.to_string())?;
-            if !output.status.success() { let _ = fs::remove_dir_all(&root); return Err(external_error_detail(&String::from_utf8_lossy(&output.stderr), output.status.code())); }
-            let torrent = fs::read_dir(&root).map_err(|error| error.to_string())?.flatten().map(|entry| entry.path())
-                .find(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("torrent")))
+            command
+                .args([
+                    "--bt-metadata-only=true",
+                    "--bt-save-metadata=true",
+                    "--seed-time=0",
+                    "--summary-interval=0",
+                ])
+                .arg(format!("--dir={}", root.display()))
+                .arg(&source);
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                command.as_std_mut().creation_flags(0x08000000);
+            }
+            let output = tokio::time::timeout(Duration::from_secs(120), command.output())
+                .await
+                .map_err(|_| "torrent_metadata_timeout".to_owned())?
+                .map_err(|error| error.to_string())?;
+            if !output.status.success() {
+                let _ = fs::remove_dir_all(&root);
+                return Err(external_error_detail(
+                    &String::from_utf8_lossy(&output.stderr),
+                    output.status.code(),
+                ));
+            }
+            let torrent = fs::read_dir(&root)
+                .map_err(|error| error.to_string())?
+                .flatten()
+                .map(|entry| entry.path())
+                .find(|path| {
+                    path.extension()
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("torrent"))
+                })
                 .ok_or_else(|| "torrent_metadata_missing".to_owned())?;
             let result = inspect_torrent_file(&torrent);
             let _ = fs::remove_dir_all(&root);
@@ -2631,8 +3934,19 @@ fn enqueue_download(
     priority: Option<i8>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
-    if let Some(existing) = state.queue.lock().map_err(|error| error.to_string())?.iter()
-        .find(|task| task.source == url && !matches!(task.state, DownloadState::Completed | DownloadState::Failed { .. })) {
+    if let Some(existing) = state
+        .queue
+        .lock()
+        .map_err(|error| error.to_string())?
+        .iter()
+        .find(|task| {
+            task.source == url
+                && !matches!(
+                    task.state,
+                    DownloadState::Completed | DownloadState::Failed { .. }
+                )
+        })
+    {
         return Err(format!("duplicate_active_download:{}", existing.id));
     }
     let site_rule = {
@@ -2660,9 +3974,18 @@ fn enqueue_download(
     let file_name = validate_file_name(&append_source_extension(proposed, &url, kind))?;
     remember_download_directory(&state, &download_dir)?;
     let mut task = DownloadTask::new(&url, unique_destination(&download_dir, &file_name));
+    if let Some((_, size)) = parse_ed2k_file_link(&url) {
+        task.total = Some(size);
+    }
     task.format_selection = format_selection.filter(|value| !value.trim().is_empty());
-    task.torrent_selection = torrent_selection.unwrap_or_default().into_iter().filter(|index| *index > 0).collect();
-    task.mirrors = mirrors.unwrap_or_default().into_iter()
+    task.torrent_selection = torrent_selection
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|index| *index > 0)
+        .collect();
+    task.mirrors = mirrors
+        .unwrap_or_default()
+        .into_iter()
         .filter(|mirror| mirror.starts_with("https://") || mirror.starts_with("http://"))
         .take(10)
         .collect();
@@ -2789,14 +4112,13 @@ fn start_download(
             .lock()
             .ok()
             .and_then(|rules| matching_site_rule(&task.source, &rules));
-        let configured_connections = if limits.adaptive_efficiency
-            && limits.max_active_downloads <= 3
-            && task.priority >= 0
-        {
-            limits.connections_per_download.max(16)
-        } else {
-            limits.connections_per_download
-        };
+        let configured_connections =
+            if limits.adaptive_efficiency && limits.max_active_downloads <= 3 && task.priority >= 0
+            {
+                limits.connections_per_download.max(16)
+            } else {
+                limits.connections_per_download
+            };
         let connections = rule
             .as_ref()
             .filter(|rule| {
@@ -2884,7 +4206,13 @@ fn start_next_queued(app: &tauri::AppHandle) {
                 .filter(|task| task.state == DownloadState::Queued)
                 .cloned()
                 .collect::<Vec<_>>();
-            queued.sort_by_key(|task| (std::cmp::Reverse(task.priority), task.total.unwrap_or(u64::MAX), task.created_at));
+            queued.sort_by_key(|task| {
+                (
+                    std::cmp::Reverse(task.priority),
+                    task.total.unwrap_or(u64::MAX),
+                    task.created_at,
+                )
+            });
             queued.truncate(available);
             queued
         })
@@ -3446,33 +4774,54 @@ fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<
 
 fn association_id(source: &str) -> Option<&'static str> {
     let lower = source.to_ascii_lowercase();
-    if lower.starts_with("magnet:") { Some("magnet") }
-    else if lower.starts_with("sftp:") { Some("sftp") }
-    else if lower.starts_with("ftp:") { Some("ftp") }
-    else {
+    if lower.starts_with("magnet:") {
+        Some("magnet")
+    } else if lower.starts_with("ed2k:") {
+        Some("ed2k")
+    } else if lower.starts_with("sftp:") {
+        Some("sftp")
+    } else if lower.starts_with("ftp:") {
+        Some("ftp")
+    } else {
         let path = lower.split(['?', '#']).next().unwrap_or(&lower);
-        if path.ends_with(".torrent") { Some("torrent") }
-        else if path.ends_with(".m3u8") { Some("m3u8") }
-        else { None }
+        if path.ends_with(".torrent") {
+            Some("torrent")
+        } else if path.ends_with(".m3u8") {
+            Some("m3u8")
+        } else {
+            None
+        }
     }
 }
 
 fn queue_associated_source(app: &tauri::AppHandle, source: String) -> Result<(), String> {
     let id = association_id(&source).ok_or_else(|| "unsupported_association".to_owned())?;
-    let enabled = app.state::<AppState>().settings.lock().map_err(|error| error.to_string())?
-        .associations.get(id).copied().unwrap_or(false);
-    if !enabled { return Ok(()); }
-    queue_from_bridge(app, BridgeDownload {
-        url: source,
-        file_name: None,
-        page_url: None,
-        duration: None,
-        cookie_header: None,
-        user_agent: None,
-        request_method: None,
-        request_body: None,
-        request_content_type: None,
-    })
+    let enabled = app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .associations
+        .get(id)
+        .copied()
+        .unwrap_or(false);
+    if !enabled {
+        return Ok(());
+    }
+    queue_from_bridge(
+        app,
+        BridgeDownload {
+            url: source,
+            file_name: None,
+            page_url: None,
+            duration: None,
+            cookie_header: None,
+            user_agent: None,
+            request_method: None,
+            request_body: None,
+            request_content_type: None,
+        },
+    )
 }
 
 #[tauri::command]
@@ -3574,7 +4923,10 @@ fn append_blob_chunk(app: &tauri::AppHandle, request: BlobChunk) -> Result<(), S
     let data = decode_hex(&request.data)?;
     let state = app.state::<AppState>();
     let (task_id, received, total) = {
-        let mut uploads = state.blob_uploads.lock().map_err(|error| error.to_string())?;
+        let mut uploads = state
+            .blob_uploads
+            .lock()
+            .map_err(|error| error.to_string())?;
         let upload = uploads
             .get_mut(&request.upload_id)
             .ok_or_else(|| "blob_upload_not_found".to_owned())?;
@@ -3777,18 +5129,30 @@ fn run_extension_bridge(app: tauri::AppHandle, listener: TcpListener) {
 }
 
 fn forward_to_running_instance(source: &str, token: &str) -> bool {
-    let Ok(mut stream) = TcpStream::connect(("127.0.0.1", BRIDGE_PORT)) else { return false; };
-    let request = BridgeDownload {
-        url: source.to_owned(), file_name: None, page_url: None, duration: None,
-        cookie_header: None, user_agent: None, request_method: None,
-        request_body: None, request_content_type: None,
+    let Ok(mut stream) = TcpStream::connect(("127.0.0.1", BRIDGE_PORT)) else {
+        return false;
     };
-    let Ok(body) = serde_json::to_string(&request) else { return false; };
+    let request = BridgeDownload {
+        url: source.to_owned(),
+        file_name: None,
+        page_url: None,
+        duration: None,
+        cookie_header: None,
+        user_agent: None,
+        request_method: None,
+        request_body: None,
+        request_content_type: None,
+    };
+    let Ok(body) = serde_json::to_string(&request) else {
+        return false;
+    };
     let message = format!(
         "POST /v1/download HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
-    if stream.write_all(message.as_bytes()).is_err() { return false; }
+    if stream.write_all(message.as_bytes()).is_err() {
+        return false;
+    }
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     let mut response = String::new();
     stream.read_to_string(&mut response).is_ok() && response.starts_with("HTTP/1.1 202")
@@ -3843,9 +5207,13 @@ async fn verify_download_integrity(
 ) -> Result<String, String> {
     let path = {
         let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
-        let task = queue.iter_mut().find(|task| task.id == id)
+        let task = queue
+            .iter_mut()
+            .find(|task| task.id == id)
             .ok_or_else(|| "download_not_found".to_owned())?;
-        if !task.destination.is_file() { return Err("download_file_not_found".to_owned()); }
+        if !task.destination.is_file() {
+            return Err("download_file_not_found".to_owned());
+        }
         task.state = DownloadState::Verifying;
         task.destination.clone()
     };
@@ -3855,12 +5223,17 @@ async fn verify_download_integrity(
         let mut buffer = [0_u8; 1024 * 1024];
         loop {
             let count = file.read(&mut buffer).map_err(|error| error.to_string())?;
-            if count == 0 { break; }
+            if count == 0 {
+                break;
+            }
             hasher.update(&buffer[..count]);
         }
         Ok(format!("{:x}", hasher.finalize()))
-    }).await.map_err(|error| error.to_string())??;
-    let expected = expected_sha256.map(|value| value.trim().to_ascii_lowercase())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let expected = expected_sha256
+        .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| !value.is_empty());
     let verified = expected.as_ref().is_none_or(|value| value == &digest);
     update_task(&app, id, true, |task| {
@@ -3868,7 +5241,11 @@ async fn verify_download_integrity(
         task.sha256 = Some(digest.clone());
         task.integrity_verified = verified;
     });
-    if verified { Ok(digest) } else { Err(format!("checksum_mismatch:{digest}")) }
+    if verified {
+        Ok(digest)
+    } else {
+        Err(format!("checksum_mismatch:{digest}"))
+    }
 }
 
 #[tauri::command]
@@ -3881,20 +5258,40 @@ async fn export_recording(
     output_directory: String,
 ) -> Result<String, String> {
     const FORMATS: [&str; 8] = ["mp4", "mkv", "webm", "mp3", "m4a", "opus", "flac", "wav"];
-    if !FORMATS.contains(&format.as_str()) { return Err("unsupported_export_format".to_owned()); }
+    if !FORMATS.contains(&format.as_str()) {
+        return Err("unsupported_export_format".to_owned());
+    }
     let source = {
         let queue = state.queue.lock().map_err(|error| error.to_string())?;
-        let task = queue.iter().find(|task| task.id == id).ok_or_else(|| "download_not_found".to_owned())?;
-        if task.state != DownloadState::Completed || !task.destination.to_string_lossy().ends_with(".recording.webm") {
+        let task = queue
+            .iter()
+            .find(|task| task.id == id)
+            .ok_or_else(|| "download_not_found".to_owned())?;
+        if task.state != DownloadState::Completed
+            || !task
+                .destination
+                .to_string_lossy()
+                .ends_with(".recording.webm")
+        {
             return Err("recording_not_complete".to_owned());
         }
         task.destination.clone()
     };
     let ffmpeg = {
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
-        configured_tool(&settings.ffmpeg_path, if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" })
+        configured_tool(
+            &settings.ffmpeg_path,
+            if cfg!(windows) {
+                "ffmpeg.exe"
+            } else {
+                "ffmpeg"
+            },
+        )
     };
-    let stem = source.file_name().and_then(|value| value.to_str()).unwrap_or("recording.recording.webm")
+    let stem = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("recording.recording.webm")
         .trim_end_matches(".recording.webm");
     let output_directory = PathBuf::from(output_directory);
     if !output_directory.is_dir() {
@@ -3908,29 +5305,50 @@ async fn export_recording(
         command.arg("-vn");
     } else {
         let codec = match video_codec.as_str() {
-            "copy" => "copy", "h264" => "libx264", "hevc" => "libx265", "vp9" => "libvpx-vp9", "av1" => "libaom-av1",
+            "copy" => "copy",
+            "h264" => "libx264",
+            "hevc" => "libx265",
+            "vp9" => "libvpx-vp9",
+            "av1" => "libaom-av1",
             _ => return Err("unsupported_video_codec".to_owned()),
         };
         command.args(["-c:v", codec]);
     }
     let codec = match audio_codec.as_str() {
-        "copy" => "copy", "aac" => "aac", "opus" => "libopus", "mp3" => "libmp3lame", "flac" => "flac",
+        "copy" => "copy",
+        "aac" => "aac",
+        "opus" => "libopus",
+        "mp3" => "libmp3lame",
+        "flac" => "flac",
         _ => return Err("unsupported_audio_codec".to_owned()),
     };
     command.args(["-c:a", codec]).arg(&output);
     #[cfg(target_os = "windows")]
-    { use std::os::windows::process::CommandExt; command.as_std_mut().creation_flags(0x08000000); }
+    {
+        use std::os::windows::process::CommandExt;
+        command.as_std_mut().creation_flags(0x08000000);
+    }
     let result = command.output().await.map_err(|error| error.to_string())?;
-    if !result.status.success() { return Err(String::from_utf8_lossy(&result.stderr).trim().to_owned()); }
-    let size = fs::metadata(&output).map(|metadata| metadata.len()).unwrap_or(0);
-    let mut exported = DownloadTask::new(source.to_string_lossy(), output.clone());
-    exported.state = DownloadState::Completed;
-    exported.completed_at = Some(epoch_seconds());
-    exported.received = size;
-    exported.total = Some(size);
-    exported.progress_percent = Some(100.0);
+    if !result.status.success() {
+        return Err(String::from_utf8_lossy(&result.stderr).trim().to_owned());
+    }
+    let size = fs::metadata(&output)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    if output != source {
+        fs::remove_file(&source)
+            .map_err(|error| format!("recording_source_cleanup_failed: {error}"))?;
+    }
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
-    queue.push(exported);
+    let task = queue
+        .iter_mut()
+        .find(|task| task.id == id)
+        .ok_or_else(|| "download_not_found".to_owned())?;
+    task.destination = output.clone();
+    task.received = size;
+    task.total = Some(size);
+    task.progress_percent = Some(100.0);
+    task.completed_at = Some(epoch_seconds());
     save_queue(&state, &queue)?;
     Ok(output.to_string_lossy().into_owned())
 }
@@ -4057,7 +5475,7 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<AutostartStatus
     get_autostart(app)
 }
 
-const ASSOCIATION_IDS: [&str; 5] = ["m3u8", "torrent", "magnet", "ftp", "sftp"];
+const ASSOCIATION_IDS: [&str; 6] = ["m3u8", "torrent", "magnet", "ftp", "sftp", "ed2k"];
 
 #[cfg(target_os = "windows")]
 fn configure_association(id: &str, enabled: bool, _: &HashMap<String, bool>) -> Result<(), String> {
@@ -4068,10 +5486,14 @@ fn configure_association(id: &str, enabled: bool, _: &HashMap<String, bool>) -> 
         format!(r"HKCU\Software\Classes\{id}")
     };
     if !enabled {
-        let _ = Command::new("reg.exe").args(["DELETE", &root, "/f"]).status();
+        let _ = Command::new("reg.exe")
+            .args(["DELETE", &root, "/f"])
+            .status();
         if matches!(id, "m3u8" | "torrent") {
             let prog_id = format!(r"HKCU\Software\Classes\Apocalipse.{id}");
-            let _ = Command::new("reg.exe").args(["DELETE", &prog_id, "/f"]).status();
+            let _ = Command::new("reg.exe")
+                .args(["DELETE", &prog_id, "/f"])
+                .status();
         }
         return Ok(());
     }
@@ -4081,28 +5503,61 @@ fn configure_association(id: &str, enabled: bool, _: &HashMap<String, bool>) -> 
             .args(["ADD", &root, "/ve", "/t", "REG_SZ", "/d", &prog_id, "/f"])
             .status()
             .map_err(|error| error.to_string())?;
-        if !status.success() { return Err("association_update_failed".to_owned()); }
+        if !status.success() {
+            return Err("association_update_failed".to_owned());
+        }
         format!(r"HKCU\Software\Classes\{prog_id}")
     } else {
         let status = Command::new("reg.exe")
-            .args(["ADD", &root, "/v", "URL Protocol", "/t", "REG_SZ", "/d", "", "/f"])
+            .args([
+                "ADD",
+                &root,
+                "/v",
+                "URL Protocol",
+                "/t",
+                "REG_SZ",
+                "/d",
+                "",
+                "/f",
+            ])
             .status()
             .map_err(|error| error.to_string())?;
-        if !status.success() { return Err("association_update_failed".to_owned()); }
+        if !status.success() {
+            return Err("association_update_failed".to_owned());
+        }
         root
     };
     let command_key = format!(r"{class_root}\shell\open\command");
     let open_command = format!("\"{}\" --open \"%1\"", executable.display());
     let status = Command::new("reg.exe")
-        .args(["ADD", &command_key, "/ve", "/t", "REG_SZ", "/d", &open_command, "/f"])
+        .args([
+            "ADD",
+            &command_key,
+            "/ve",
+            "/t",
+            "REG_SZ",
+            "/d",
+            &open_command,
+            "/f",
+        ])
         .status()
         .map_err(|error| error.to_string())?;
-    if status.success() { Ok(()) } else { Err("association_update_failed".to_owned()) }
+    if status.success() {
+        Ok(())
+    } else {
+        Err("association_update_failed".to_owned())
+    }
 }
 
 #[cfg(target_os = "linux")]
-fn configure_association(_: &str, _: bool, associations: &HashMap<String, bool>) -> Result<(), String> {
-    let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| "home_directory_unavailable".to_owned())?;
+fn configure_association(
+    _: &str,
+    _: bool,
+    associations: &HashMap<String, bool>,
+) -> Result<(), String> {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| "home_directory_unavailable".to_owned())?;
     let applications = home.join(".local/share/applications");
     fs::create_dir_all(&applications).map_err(|error| error.to_string())?;
     let entry = applications.join("apocalipse-download-manager.desktop");
@@ -4113,20 +5568,34 @@ fn configure_association(_: &str, _: bool, associations: &HashMap<String, bool>)
         ("magnet", "x-scheme-handler/magnet"),
         ("ftp", "x-scheme-handler/ftp"),
         ("sftp", "x-scheme-handler/sftp"),
+        ("ed2k", "x-scheme-handler/ed2k"),
     ];
-    let enabled = definitions.iter().filter(|(id, _)| associations.get(*id).copied().unwrap_or(false)).collect::<Vec<_>>();
+    let enabled = definitions
+        .iter()
+        .filter(|(id, _)| associations.get(*id).copied().unwrap_or(false))
+        .collect::<Vec<_>>();
     if enabled.is_empty() {
-        if entry.exists() { fs::remove_file(&entry).map_err(|error| error.to_string())?; }
+        if entry.exists() {
+            fs::remove_file(&entry).map_err(|error| error.to_string())?;
+        }
     } else {
-        let mime_types = enabled.iter().map(|(_, mime)| *mime).collect::<Vec<_>>().join(";");
+        let mime_types = enabled
+            .iter()
+            .map(|(_, mime)| *mime)
+            .collect::<Vec<_>>()
+            .join(";");
         let escaped = executable.to_string_lossy().replace('"', "\\\"");
         fs::write(&entry, format!("[Desktop Entry]\nType=Application\nName=Apocalipse Download Manager\nExec=\"{escaped}\" --open %U\nTerminal=false\nNoDisplay=true\nMimeType={mime_types};\n"))
             .map_err(|error| error.to_string())?;
         for (_, mime) in enabled {
-            let _ = Command::new("xdg-mime").args(["default", "apocalipse-download-manager.desktop", mime]).status();
+            let _ = Command::new("xdg-mime")
+                .args(["default", "apocalipse-download-manager.desktop", mime])
+                .status();
         }
     }
-    let _ = Command::new("update-desktop-database").arg(&applications).status();
+    let _ = Command::new("update-desktop-database")
+        .arg(&applications)
+        .status();
     Ok(())
 }
 
@@ -4140,20 +5609,21 @@ fn configure_association(_: &str, _: bool, _: &HashMap<String, bool>) -> Result<
 #[tauri::command]
 fn get_associations(state: State<'_, AppState>) -> Result<Vec<AssociationStatus>, String> {
     let settings = state.settings.lock().map_err(|error| error.to_string())?;
-    Ok(ASSOCIATION_IDS.iter().map(|id| AssociationStatus {
-        id: (*id).to_owned(),
-        enabled: settings.associations.get(*id).copied().unwrap_or(false),
-        supported: true,
-    }).collect())
+    Ok(ASSOCIATION_IDS
+        .iter()
+        .map(|id| AssociationStatus {
+            id: (*id).to_owned(),
+            enabled: settings.associations.get(*id).copied().unwrap_or(false),
+            supported: true,
+        })
+        .collect())
 }
 
 #[tauri::command]
-fn set_association(
-    state: State<'_, AppState>,
-    id: String,
-    enabled: bool,
-) -> Result<(), String> {
-    if !ASSOCIATION_IDS.contains(&id.as_str()) { return Err("unsupported_association".to_owned()); }
+fn set_association(state: State<'_, AppState>, id: String, enabled: bool) -> Result<(), String> {
+    if !ASSOCIATION_IDS.contains(&id.as_str()) {
+        return Err("unsupported_association".to_owned());
+    }
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     let mut associations = settings.associations.clone();
     associations.insert(id.clone(), enabled);
@@ -4197,8 +5667,10 @@ async fn remove_downloads(
                 .await
                 .map_err(|error| error.to_string())?;
             for path in download_paths(task) {
-                let torrent_root = matches!(classify_url(&task.source), Some(DownloadKind::Torrent | DownloadKind::Magnet))
-                    && path == task.destination;
+                let torrent_root = matches!(
+                    classify_url(&task.source),
+                    Some(DownloadKind::Torrent | DownloadKind::Magnet)
+                ) && path == task.destination;
                 remove_path_with_retry(&path, torrent_root).await?;
             }
         }
@@ -4215,6 +5687,10 @@ async fn remove_downloads(
 fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
     let partial = partial_path(&task.destination);
     let mut paths = vec![task.destination.clone(), partial];
+    let recording_source = PathBuf::from(&task.source);
+    if task.source.ends_with(".recording.webm") && recording_source.is_absolute() {
+        paths.push(recording_source);
+    }
     let stem = task
         .destination
         .file_stem()
@@ -4235,10 +5711,17 @@ fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
 async fn remove_path_with_retry(path: &Path, allow_directory: bool) -> Result<(), String> {
     for attempt in 0..5 {
         let result = match tokio::fs::metadata(path).await {
-            Ok(metadata) if metadata.is_dir() && allow_directory && path.parent().is_some() && path.file_name().is_some() => {
+            Ok(metadata)
+                if metadata.is_dir()
+                    && allow_directory
+                    && path.parent().is_some()
+                    && path.file_name().is_some() =>
+            {
                 tokio::fs::remove_dir_all(path).await
             }
-            Ok(metadata) if metadata.is_dir() => return Err("refusing_to_remove_directory".to_owned()),
+            Ok(metadata) if metadata.is_dir() => {
+                return Err("refusing_to_remove_directory".to_owned())
+            }
             _ => tokio::fs::remove_file(path).await,
         };
         match result {
@@ -4269,15 +5752,18 @@ fn main() {
             }
             let initial_settings = load_settings(&settings_path);
             let arguments = std::env::args().collect::<Vec<_>>();
-            let associated_source = arguments.iter().position(|argument| argument == "--open")
+            let associated_source = arguments
+                .iter()
+                .position(|argument| argument == "--open")
                 .and_then(|index| arguments.get(index + 1))
                 .filter(|value| classify_url(value).is_some())
                 .cloned();
             let bridge_listener = match TcpListener::bind(("127.0.0.1", BRIDGE_PORT)) {
                 Ok(listener) => Some(listener),
                 Err(_) => {
-                    if associated_source.as_deref().is_some_and(|source|
-                        forward_to_running_instance(source, &initial_settings.bridge_token)) {
+                    if associated_source.as_deref().is_some_and(|source| {
+                        forward_to_running_instance(source, &initial_settings.bridge_token)
+                    }) {
                         app.handle().exit(0);
                         return Ok(());
                     }
@@ -4299,6 +5785,7 @@ fn main() {
                 log_write_lock: Mutex::new(()),
                 site_rules: Mutex::new(initial_site_rules),
                 site_rules_path,
+                ed2k_search: Mutex::new(None),
             });
             diagnostic_log(
                 &app.state::<AppState>(),
@@ -4382,9 +5869,21 @@ fn main() {
             activate_main_window,
             open_paypal_donation,
             get_tool_statuses,
+            get_ed2k_engine_status,
+            get_ed2k_connection,
+            set_ed2k_connection,
+            start_ed2k_engine,
+            connect_ed2k_networks,
+            ed2k_network_status,
+            ed2k_search,
+            ed2k_search_results,
+            ed2k_download_result,
+            list_ed2k_transfers,
+            control_ed2k_transfer,
             set_tool_paths,
             get_media_player,
             set_media_player,
+            open_amule,
             preview_torrent,
             update_tool,
             suggest_download_name,
@@ -4436,7 +5935,9 @@ fn main() {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = _event {
                 for url in urls {
-                    let source = url.to_file_path().map(|path| path.to_string_lossy().into_owned())
+                    let source = url
+                        .to_file_path()
+                        .map(|path| path.to_string_lossy().into_owned())
                         .unwrap_or_else(|_| url.to_string());
                     let _ = queue_associated_source(_app, source);
                 }
@@ -4450,8 +5951,22 @@ mod tests {
 
     #[test]
     fn media_page_names_always_receive_mp4_extension() {
-        assert_eq!(append_source_extension("TikTok video".into(), "https://www.tiktok.com/@creator/video/123", DownloadKind::MediaPage), "TikTok video.mp4");
-        assert_eq!(append_source_extension("video.mkv".into(), "https://example.test/video", DownloadKind::MediaPage), "video.mkv");
+        assert_eq!(
+            append_source_extension(
+                "TikTok video".into(),
+                "https://www.tiktok.com/@creator/video/123",
+                DownloadKind::MediaPage
+            ),
+            "TikTok video.mp4"
+        );
+        assert_eq!(
+            append_source_extension(
+                "video.mkv".into(),
+                "https://example.test/video",
+                DownloadKind::MediaPage
+            ),
+            "video.mkv"
+        );
     }
 
     #[test]
@@ -4488,7 +6003,16 @@ mod tests {
     fn parses_real_aria2_transfer_progress() {
         assert_eq!(
             parse_aria2_progress("[#abc 5.0MiB/20MiB(25%) CN:4 SD:2 DL:1MiB ETA:15s]"),
-            Some((5 * 1024 * 1024, 20 * 1024 * 1024, 25.0, 1024 * 1024, 0, 2, 2, Some("15s".to_owned())))
+            Some((
+                5 * 1024 * 1024,
+                20 * 1024 * 1024,
+                25.0,
+                1024 * 1024,
+                0,
+                2,
+                2,
+                Some("15s".to_owned())
+            ))
         );
         assert_eq!(parse_aria2_progress("[#abc 0B/0B CN:1 DL:0B]"), None);
     }

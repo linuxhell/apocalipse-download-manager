@@ -3,7 +3,11 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum ExternalTool { YtDlp, Ffmpeg, NM3u8dlRe }
+pub enum ExternalTool {
+    YtDlp,
+    Ffmpeg,
+    NM3u8dlRe,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolInstallation {
