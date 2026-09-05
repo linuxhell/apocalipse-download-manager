@@ -4478,7 +4478,7 @@ fn register_browser_download(
     app: &tauri::AppHandle,
     request: BrowserDownloadComplete,
 ) -> Result<(), String> {
-    if !matches!(host_from_url(&request.url), Some(_)) {
+    if host_from_url(&request.url).is_none() {
         return Err("invalid_browser_download_url".to_owned());
     }
     let destination = PathBuf::from(request.file_name);
