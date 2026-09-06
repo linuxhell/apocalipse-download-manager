@@ -9,6 +9,7 @@ let lastFormSubmission = null;
 let siteRules = [{ id: "uupdump", hosts: ["uupdump.net", "*.uupdump.net"], action: "uupdump_post", enabled: true }];
 const recentFileResponses = [];
 const ASSISTED_PREFIX = "assisted-download:";
+const DIRECT_PREFIX = "direct-download:";
 
 function responseHeader(headers, name) {
   return (headers || []).find((header) => header.name?.toLowerCase() === name)?.value || "";
@@ -64,6 +65,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       .then(() => bridgeRequest("/v1/site-rules"))
       .then((rules) => { if (Array.isArray(rules)) siteRules = rules; })
       .then(() => flushAssistedDownloads())
+      .then(() => flushDirectDownloads())
       .catch(() => {});
   }
 });
@@ -195,6 +197,29 @@ async function flushAssistedDownloads() {
     .map((key) => completeAssistedDownload(Number(key.slice(ASSISTED_PREFIX.length))).catch(() => {})));
 }
 
+async function checkDirectDownload(taskId) {
+  const key = `${DIRECT_PREFIX}${taskId}`;
+  const stored = await chrome.storage.session.get(key);
+  const pending = stored[key];
+  if (!pending) return;
+  const result = await bridgeRequest("/v1/download-status", {
+    method: "POST",
+    body: JSON.stringify({ taskId }),
+  });
+  if (result.status === "active") return;
+  await chrome.storage.session.remove(key);
+  if (result.status !== "failed") return;
+  bypassNextUntil = Date.now() + 30000;
+  chrome.downloads.download({ url: pending.url, saveAs: false }, () => void chrome.runtime.lastError);
+}
+
+async function flushDirectDownloads() {
+  const values = await chrome.storage.session.get(null);
+  await Promise.all(Object.keys(values)
+    .filter((key) => key.startsWith(DIRECT_PREFIX))
+    .map((key) => checkDirectDownload(key.slice(DIRECT_PREFIX.length)).catch(() => {})));
+}
+
 const cancelBrowserDownload = (id) => new Promise((resolve, reject) => {
   chrome.downloads.cancel(id, () => {
     const error = chrome.runtime.lastError;
@@ -271,22 +296,19 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     return false;
   }
   if (!bridgeConnected || bypassHeld || Date.now() < bypassUntil) return false;
-  if (matchingRule(url, "browser_assisted")) {
-    await markAssistedDownload(item, url);
-    return false;
-  }
+  const immediateTakeover = Boolean(matchingRule(url, "browser_assisted"));
   let cancelled = false;
   try {
     await cancelBrowserDownload(item.id);
     cancelled = true;
-    if (eraseFromHistory) await eraseBrowserDownload(item.id);
+    if (eraseFromHistory || immediateTakeover) await eraseBrowserDownload(item.id);
     formRequest ||= lastFormSubmission
       && Date.now() - lastFormSubmission.capturedAt < 30000
       && pageUrl === lastFormSubmission.pageUrl
       ? lastFormSubmission
       : null;
     if (formRequest) lastFormSubmission = null;
-    await bridgeRequest("/v1/download", {
+    const handoff = await bridgeRequest("/v1/download", {
       method: "POST",
       body: JSON.stringify({
         url,
@@ -298,8 +320,15 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
         requestMethod: formRequest?.method || "GET",
         requestBody: formRequest?.body || null,
         requestContentType: formRequest?.contentType || null,
+        startImmediately: immediateTakeover,
       }),
     });
+    if (immediateTakeover && handoff.taskId) {
+      await chrome.storage.session.set({
+        [`${DIRECT_PREFIX}${handoff.taskId}`]: { url },
+      });
+      setTimeout(() => void checkDirectDownload(handoff.taskId).catch(() => {}), 1500);
+    }
     return true;
   } catch {
     if (cancelled) {
