@@ -3463,11 +3463,11 @@ fn enqueue_download_impl(
             }
             path
         }
-        None => configured_download_directory(&app, &state)?,
+        None => configured_download_directory(&app, state)?,
     };
     let proposed = file_name.unwrap_or_else(|| suggested_name(&url));
     let file_name = validate_file_name(&append_source_extension(proposed, &url, kind))?;
-    remember_download_directory(&state, &download_dir)?;
+    remember_download_directory(state, &download_dir)?;
     let mut task = DownloadTask::new(&url, unique_destination(&download_dir, &file_name));
     task.format_selection = format_selection.filter(|value| !value.trim().is_empty());
     task.torrent_selection = torrent_selection
@@ -3549,10 +3549,10 @@ fn enqueue_download_impl(
     }
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     queue.push(task.clone());
-    save_queue(&state, &queue)?;
+    save_queue(state, &queue)?;
     drop(queue);
     diagnostic_log(
-        &state,
+        state,
         "INFO",
         "task.enqueued",
         &format!(
