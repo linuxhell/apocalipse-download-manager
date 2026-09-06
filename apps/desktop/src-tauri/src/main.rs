@@ -809,6 +809,8 @@ struct BridgeDownload {
     request_method: Option<String>,
     request_body: Option<String>,
     request_content_type: Option<String>,
+    #[serde(default)]
+    start_immediately: bool,
 }
 
 #[derive(Deserialize)]
@@ -817,6 +819,12 @@ struct BrowserDownloadComplete {
     url: String,
     file_name: String,
     total: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgeDownloadStatus {
+    task_id: DownloadId,
 }
 
 struct BlobUpload {
@@ -1034,6 +1042,7 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                         request_method: None,
                         request_body: None,
                         request_content_type: None,
+                        start_immediately: false,
                     },
                 );
                 if result.is_ok() {
@@ -3406,11 +3415,10 @@ async fn inspect_torrent_metadata(
     }
 }
 
-#[tauri::command]
 #[allow(clippy::too_many_arguments)]
-fn enqueue_download(
+fn enqueue_download_impl(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
+    state: &AppState,
     url: String,
     destination_directory: Option<String>,
     file_name: Option<String>,
@@ -3555,8 +3563,38 @@ fn enqueue_download(
             task.destination.display()
         ),
     );
-    start_download(&app, &state, task.clone(), kind)?;
+    start_download(&app, state, task.clone(), kind)?;
     Ok(task)
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn enqueue_download(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+    destination_directory: Option<String>,
+    file_name: Option<String>,
+    format_selection: Option<String>,
+    torrent_selection: Option<Vec<usize>>,
+    mirrors: Option<Vec<String>>,
+    priority: Option<i8>,
+    bandwidth_limit: Option<u64>,
+    context: Option<DownloadContext>,
+) -> Result<DownloadTask, String> {
+    enqueue_download_impl(
+        app,
+        &state,
+        url,
+        destination_directory,
+        file_name,
+        format_selection,
+        torrent_selection,
+        mirrors,
+        priority,
+        bandwidth_limit,
+        context,
+    )
 }
 
 fn start_download(
@@ -4443,7 +4481,10 @@ fn open_paypal_donation() -> Result<(), String> {
     result.map(|_| ()).map_err(|error| error.to_string())
 }
 
-fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<(), String> {
+fn queue_from_bridge(
+    app: &tauri::AppHandle,
+    request: BridgeDownload,
+) -> Result<Option<DownloadId>, String> {
     let state = app.state::<AppState>();
     classify_url(&request.url).ok_or_else(|| "unsupported_url".to_owned())?;
     diagnostic_log(
@@ -4456,6 +4497,32 @@ fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<
             request.request_method.as_deref().unwrap_or("GET")
         ),
     );
+    if request.start_immediately {
+        let context = DownloadContext {
+            referer: request.page_url,
+            known_duration: request.duration,
+            cookie_header: request.cookie_header,
+            user_agent: request.user_agent,
+            request_method: request.request_method,
+            request_body: request.request_body,
+            request_content_type: request.request_content_type,
+        };
+        let task = enqueue_download_impl(
+            app.clone(),
+            &state,
+            request.url,
+            None,
+            request.file_name,
+            None,
+            None,
+            None,
+            Some(10),
+            None,
+            Some(context),
+        )?;
+        show_main_window(app);
+        return Ok(Some(task.id));
+    }
     state
         .bridge_pending
         .lock()
@@ -4471,7 +4538,7 @@ fn queue_from_bridge(app: &tauri::AppHandle, request: BridgeDownload) -> Result<
         std::thread::sleep(Duration::from_millis(850));
         show_main_window(&restored_app);
     });
-    Ok(())
+    Ok(None)
 }
 
 fn register_browser_download(
@@ -4575,8 +4642,10 @@ fn queue_associated_source(app: &tauri::AppHandle, source: String) -> Result<(),
             request_method: None,
             request_body: None,
             request_content_type: None,
+            start_immediately: false,
         },
     )
+    .map(|_| ())
 }
 
 #[tauri::command]
@@ -4827,8 +4896,43 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             .map_err(|error| error.to_string())
             .and_then(|request| queue_from_bridge(app, request))
         {
-            Ok(()) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
+            Ok(Some(task_id)) => bridge_response(
+                &mut stream,
+                "202 Accepted",
+                origin,
+                &format!("{{\"ok\":true,\"taskId\":\"{task_id}\"}}"),
+            ),
+            Ok(None) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
             Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
+        }
+    } else if first.starts_with("POST /v1/download-status ") {
+        let status = serde_json::from_str::<BridgeDownloadStatus>(body)
+            .ok()
+            .and_then(|request| {
+                state.queue.lock().ok().and_then(|queue| {
+                    queue
+                        .iter()
+                        .find(|task| task.id == request.task_id)
+                        .map(|task| match &task.state {
+                            DownloadState::Completed => "completed",
+                            DownloadState::Failed { .. } => "failed",
+                            _ => "active",
+                        })
+                })
+            });
+        match status {
+            Some(status) => bridge_response(
+                &mut stream,
+                "200 OK",
+                origin,
+                &format!("{{\"status\":\"{status}\"}}"),
+            ),
+            None => bridge_response(
+                &mut stream,
+                "404 Not Found",
+                origin,
+                "{\"status\":\"missing\"}",
+            ),
         }
     } else if first.starts_with("POST /v1/browser-download-complete ") {
         match serde_json::from_str::<BrowserDownloadComplete>(body)
@@ -4905,6 +5009,7 @@ fn forward_to_running_instance(source: &str, token: &str) -> bool {
         request_method: None,
         request_body: None,
         request_content_type: None,
+        start_immediately: false,
     };
     let Ok(body) = serde_json::to_string(&request) else {
         return false;
