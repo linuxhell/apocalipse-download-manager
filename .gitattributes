@@ -1,0 +1,9 @@
+# Keep source files stable across Windows/macOS/Linux checkouts.
+# build.rs performs deterministic source instrumentation before the desktop build,
+# so Rust/JS/HTML workflow inputs must not be rewritten to CRLF on Windows.
+*.rs text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
