@@ -3,6 +3,7 @@ from pathlib import Path
 # Applied after 0.3.44 test patch.
 # Goals:
 # - Make the native Apocalipse destination dialog the foreground/owned dialog.
+# - Suppress Chrome's own Save As dialog for ChatGPT Library and Rapidgator final downloads.
 # - Make Facebook sponsored/reel controls prefer the authoritative Copy Link URL.
 # - Give Facebook downloads a stable reel/share id instead of generic download.mp4 when possible.
 
@@ -20,8 +21,8 @@ new = '''        let main_window = app.get_webview_window("main");
             let _ = window.unminimize();
             let _ = window.set_focus();
         }
-        // On Windows an unowned native FileDialog can end up behind Chrome when
-        // a browser-triggered blob starts. Make the Apocalipse window its owner.
+        // Browser-triggered blob transfers can race Chrome's own Save As window.
+        // Own the dialog with the Apocalipse main window so it stays in front.
         let mut dialog = rfd::FileDialog::new()
             .set_title("Apocalipse Download Manager - Save as")
             .set_directory(&directory)
@@ -37,11 +38,58 @@ elif 'dialog = dialog.set_parent(window);' not in s:
     raise SystemExit('native blob destination dialog anchor missing')
 p.write_text(s, encoding='utf-8')
 
+# --- Service worker: kill browser-native downloads before Chrome can show Save As.
+p = Path('browser-extension/service-worker.js')
+s = p.read_text(encoding='utf-8')
+anchor = '''function isChatGPTLibraryDownload(value) {
+  try {
+    const url = new URL(value);
+    return url.hostname.toLowerCase() === "chatgpt.com" && url.pathname === "/backend-api/estuary/content";
+  } catch {
+    return false;
+  }
+}
+'''
+helper = anchor + '''
+function isRapidgatorFinalDownload(value) {
+  try {
+    const url = new URL(value);
+    return /^s\\d+\\.rapidgator\\.net$/i.test(url.hostname)
+      && /^\\/download\\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\/?$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+'''
+if 'function isRapidgatorFinalDownload' not in s:
+    if anchor not in s: raise SystemExit('download predicate anchor missing')
+    s = s.replace(anchor, helper, 1)
+
+old = '''  // background.js owns ChatGPT Library downloads and streams them through the
+  // authenticated blob bridge. Never let the generic interception path suggest
+  // or recreate the original Chrome download, otherwise a second Save As flow
+  // can appear after Apocalipse has already accepted the transfer.
+  if (isChatGPTLibraryDownload(url)) return true;
+'''
+new = '''  // These are already owned by the dedicated authenticated streaming/CDP paths.
+  // Cancel right here, inside filename determination, before Chrome can show its
+  // own Save As window over the Apocalipse destination dialog.
+  if (isChatGPTLibraryDownload(url) || (bridgeConnected && isRapidgatorFinalDownload(url))) {
+    await cancelBrowserDownload(item.id).catch(() => {});
+    await eraseBrowserDownload(item.id);
+    return true;
+  }
+'''
+if old in s:
+    s = s.replace(old, new, 1)
+elif 'isRapidgatorFinalDownload(url)' not in s or 'await cancelBrowserDownload(item.id)' not in s:
+    raise SystemExit('special browser cancellation block missing')
+p.write_text(s, encoding='utf-8')
+
 # --- Facebook: prefer canonical/copied URL and stable filename hints.
 p = Path('browser-extension/content.js')
 s = p.read_text(encoding='utf-8')
 
-# Helper for a stable numeric/share identifier.
 anchor = '''  const waitForFacebookUrl = async (element, attempts = 20) => {
 '''
 helper = '''  const facebookMediaId = (url) => {
@@ -67,7 +115,6 @@ if 'const facebookMediaId =' not in s:
     if anchor not in s: raise SystemExit('facebook helper anchor missing')
     s = s.replace(anchor, helper + anchor, 1)
 
-# For sponsored cards, Copy Link must be authoritative before any DOM/helper URL.
 old = '''  const revealFacebookUrl = async (element) => {
     if (!/(^|\\.)facebook\\.com$/i.test(location.hostname)) return null;
     const postText = element.closest?.('[role="article"],article')?.textContent || "";
@@ -83,8 +130,6 @@ new = '''  const revealFacebookUrl = async (element) => {
     if (!/(^|\\.)facebook\\.com$/i.test(location.hostname)) return null;
     const postText = element.closest?.('[role="article"],article')?.textContent || "";
     const sponsored = /(?:patrocinado|sponsored)/i.test(postText);
-    // Sponsored cards often expose advertiser/landing URLs in their DOM. The
-    // Facebook menu's Copy Link points at the actual video and wins every time.
     if (sponsored) {
       const menuUrl = await facebookUrlFromMenu(element);
       if (menuUrl && menuUrl !== "clipboard-copied") return menuUrl;
@@ -97,8 +142,6 @@ if old in s:
 elif 'const sponsored =' not in s:
     raise SystemExit('facebook reveal canonical block missing')
 
-# On Facebook buttons, use the resolved URL id as the title/filename hint and include
-# the playing media URL as a fallback candidate for future backend recovery.
 old = '''        const copiedToClipboard = isFacebookVideo ? copyTextNow(currentUrl) : false;
         chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls: resolved?.requestUrls || [], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
 '''
