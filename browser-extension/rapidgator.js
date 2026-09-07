@@ -15,16 +15,6 @@
     }
   };
 
-  const replayOriginalClick = async (anchor) => {
-    replaying = true;
-    try {
-      await chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 15000 }).catch(() => {});
-      anchor.click();
-    } finally {
-      setTimeout(() => { replaying = false; }, 0);
-    }
-  };
-
   chrome.runtime.onMessage.addListener((message, _sender, reply) => {
     if (message?.type === "APOCALIPSE_RAPIDGATOR_START_BROWSER_TRANSPORT" && message.url && message.transportId) {
       try {
@@ -72,10 +62,14 @@
         title: anchor.getAttribute("download") || null,
       },
     }, (result) => {
-      const failedBeforeBrowserRequest = Boolean(chrome.runtime.lastError) || result?.target !== "apocalipse";
-      if (failedBeforeBrowserRequest) void replayOriginalClick(anchor);
-      // Once the browser-authenticated request starts, never replay this one-shot
-      // URL. If the stream later fails the token has already been consumed.
+      // Rapidgator free URLs are one-shot. If debugger/bridge setup fails before
+      // the browser request begins, keep the original page intact instead of
+      // replaying the click and wasting the token. The user can click again
+      // after the transport problem is corrected.
+      if (chrome.runtime.lastError || result?.target !== "apocalipse") {
+        console.warn("Apocalipse Rapidgator transport did not start", result?.error || chrome.runtime.lastError?.message || "unknown");
+      }
+      // Once the browser-authenticated request starts, never replay this URL.
     });
   }, true);
 })();
