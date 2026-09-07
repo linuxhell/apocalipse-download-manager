@@ -1,0 +1,45 @@
+name: Fix extension pairing
+on:
+  push:
+    branches: [fix/rapidgator-preclick-0.3.29]
+    paths: [.github/workflows/fix-extension-pairing.yml]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/rapidgator-preclick-0.3.29
+      - name: Restore popup bridge pairing handlers
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('browser-extension/service-worker.js')
+          s = p.read_text()
+          needle = '''chrome.runtime.onMessage.addListener((message, sender, reply) => {\n  if (message?.type === "APOCALIPSE_BLOB_BEGIN") {'''
+          replacement = '''chrome.runtime.onMessage.addListener((message, sender, reply) => {\n  if (message?.type === "APOCALIPSE_PAIR") {\n    const token = String(message.token || "").trim();\n    if (!token) {\n      bridgeConnected = false;\n      reply({ connected: false, error: "not_paired" });\n      return;\n    }\n    bridgeRequest("/v1/health", {}, token)\n      .then(async () => {\n        await chrome.storage.local.set({ pairingToken: token });\n        bridgeConnected = true;\n        ensureHeartbeat();\n        reply({ connected: true });\n      })\n      .catch((error) => {\n        bridgeConnected = false;\n        reply({ connected: false, error: String(error) });\n      });\n    return true;\n  }\n  if (message?.type === "APOCALIPSE_BRIDGE_STATUS") {\n    bridgeRequest("/v1/health")\n      .then(() => reply({ connected: true }))\n      .catch((error) => reply({ connected: false, error: String(error) }));\n    return true;\n  }\n  if (message?.type === "APOCALIPSE_BLOB_BEGIN") {'''
+          if needle not in s:
+              raise SystemExit('pairing insertion point not found')
+          s = s.replace(needle, replacement, 1)
+          p.write_text(s)
+          PY
+      - name: Bump extension test version
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('browser-extension/manifest.json')
+          data = json.loads(p.read_text())
+          data['version'] = '0.3.39'
+          p.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n')
+          PY
+      - name: Commit repair and remove one-shot workflow
+        run: |
+          rm .github/workflows/fix-extension-pairing.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add browser-extension/service-worker.js browser-extension/manifest.json .github/workflows/fix-extension-pairing.yml
+          git commit -m "fix(extension): restore bridge pairing and live status"
+          git push origin HEAD:fix/rapidgator-preclick-0.3.29
