@@ -4457,16 +4457,23 @@ fn bridge_response(stream: &mut TcpStream, status: &str, origin: Option<&str>, b
 }
 
 fn show_main_window(app: &tauri::AppHandle) {
-    let main_app = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        if let Some(window) = main_app.get_webview_window("main") {
-            let _ = window.show();
-            let _ = window.unminimize();
-            let _ = window.set_always_on_top(true);
-            let _ = window.set_focus();
-            let _ = window.set_always_on_top(false);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        // tray_restore_minimum_size
+        if let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor()) {
+            let logical = size.to_logical::<f64>(scale);
+            if logical.width < 1040.0 || logical.height < 640.0 {
+                let _ = window.set_size(tauri::LogicalSize::new(
+                    logical.width.max(1040.0),
+                    logical.height.max(640.0),
+                ));
+            }
         }
-    });
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_focus();
+        let _ = window.set_always_on_top(false);
+    }
 }
 
 #[tauri::command]

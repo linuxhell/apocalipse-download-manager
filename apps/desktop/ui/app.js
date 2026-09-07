@@ -161,6 +161,8 @@ const catalogs = {
     missing: "Not found",
     checkTools: "Check versions",
     removeFailed: "Could not remove the selected files",
+    torrentP2PBlocked: "The current connection may be blocking or limiting BitTorrent/P2P traffic (VPN, firewall, or network).",
+    torrentSelectOne: "Select at least one torrent file.",
     diagnostics: "Diagnostics",
     diagnosticsHint: "Safe activity log with credentials and URL parameters hidden",
     openLog: "Open diagnostic log",
@@ -345,6 +347,8 @@ const catalogs = {
     missing: "Não encontrado",
     checkTools: "Verificar versões",
     removeFailed: "Não foi possível apagar os arquivos selecionados",
+    torrentP2PBlocked: "A conexão atual pode estar bloqueando ou limitando tráfego BitTorrent/P2P (VPN, firewall ou rede).",
+    torrentSelectOne: "Selecione pelo menos um arquivo do torrent.",
     diagnostics: "Diagnóstico",
     diagnosticsHint: "Log seguro de atividades com credenciais e parâmetros das URLs ocultados",
     openLog: "Abrir log de diagnóstico",
@@ -528,6 +532,8 @@ const catalogs = {
     missing: "未找到",
     checkTools: "检查版本",
     removeFailed: "无法删除所选文件",
+    torrentP2PBlocked: "当前连接可能正在阻止或限制 BitTorrent/P2P 流量（VPN、防火墙或网络）。",
+    torrentSelectOne: "请至少选择一个种子文件。",
     diagnostics: "诊断",
     diagnosticsHint: "隐藏凭据和网址参数的安全活动日志",
     openLog: "打开诊断日志",
@@ -1761,8 +1767,11 @@ document.querySelector("#media-format").onchange = (event) => {
   input.value = `${base}.${audio[1]}`;
 };
 document.querySelector("#analyze").onclick = async () => {
+  const analyzeButton = document.querySelector("#analyze");
+  if (analyzeButton.disabled) return;
   const url = document.querySelector("#url");
   if (!url.reportValidity()) return;
+  analyzeButton.disabled = true;
   const box = document.querySelector("#analysis");
   box.hidden = false;
   box.textContent = "…";
@@ -1794,7 +1803,10 @@ document.querySelector("#analyze").onclick = async () => {
     document.querySelector("#analyze").hidden = true;
     document.querySelector("#enqueue").hidden = false;
   } catch (error) {
-    box.textContent = String(error);
+    const message = String(error);
+    box.textContent = message.includes("torrent_metadata_timeout") ? t("torrentP2PBlocked") : message;
+  } finally {
+    analyzeButton.disabled = false;
   }
 };
 document.querySelector("#enqueue").onclick = async () => {
@@ -1804,7 +1816,7 @@ document.querySelector("#enqueue").onclick = async () => {
   try {
     const torrentSelection = document.querySelector("#torrent-inspection").hidden
       ? null : [...document.querySelectorAll("[data-torrent-index]:checked")].map((input) => Number(input.dataset.torrentIndex));
-    if (torrentSelection && !torrentSelection.length) throw new Error("Selecione pelo menos um arquivo do torrent.");
+    if (torrentSelection && !torrentSelection.length) throw new Error(t("torrentSelectOne"));
     downloads.push(
       await invoke("enqueue_download", {
         url: url.value,
