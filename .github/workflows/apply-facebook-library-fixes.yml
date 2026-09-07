@@ -16,16 +16,13 @@ jobs:
         with:
           ref: fix/rapidgator-preclick-0.3.29
       - name: Patch extension
-        shell: python
         run: |
+          cat > /tmp/patch.py <<'PY'
           from pathlib import Path
-
           content = Path('browser-extension/content.js')
           s = content.read_text(encoding='utf-8')
-
-          anchor = '''  const copyTextNow = (value) => {'''
-          direct = '''  // Intercept ChatGPT Library links before Chrome creates a download. This keeps
-  // destination selection owned by Apocalipse instead of Chrome's Save As dialog.
+          anchor = '  const copyTextNow = (value) => {'
+          direct = '''  // Intercept ChatGPT Library links before Chrome creates a download.
   document.addEventListener("click", (event) => {
     if (event.defaultPrevented || event.button !== 0) return;
     const anchor = event.target.closest?.('a[href*="/backend-api/estuary/content"]');
@@ -38,19 +35,13 @@ jobs:
     if (!url) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    chrome.runtime.sendMessage({
-      type: "APOCALIPSE_CHATGPT_LIBRARY_DIRECT",
-      url,
-      pageUrl: location.href,
-      fileName: anchor.getAttribute("download") || "",
-    }).catch(() => {});
+    chrome.runtime.sendMessage({ type: "APOCALIPSE_CHATGPT_LIBRARY_DIRECT", url, pageUrl: location.href, fileName: anchor.getAttribute("download") || "" }).catch(() => {});
   }, true);
 
 '''
           if 'APOCALIPSE_CHATGPT_LIBRARY_DIRECT' not in s:
               if anchor not in s: raise SystemExit('content anchor missing')
               s = s.replace(anchor, direct + anchor, 1)
-
           old = '''  const revealFacebookUrl = async (element) => {
     const immediate = facebookUrlFor(element);
     if (immediate) return immediate;
@@ -64,9 +55,7 @@ jobs:
           new = '''  const revealFacebookUrl = async (element) => {
     if (!/(^|\\.)facebook\\.com$/i.test(location.hostname)) return null;
     const postText = element.closest?.('[role="article"],article')?.textContent || "";
-    // Sponsored/non-friend feed cards often expose a landing/post URL in the DOM,
-    // while Facebook's Copy link menu exposes the canonical playable video URL.
-    // Prefer that canonical path before trusting the first nearby anchor.
+    // Sponsored/non-friend cards can expose a landing URL; Copy link has the canonical video URL.
     if (/(?:patrocinado|sponsored)/i.test(postText)) {
       const menuUrl = await facebookUrlFromMenu(element);
       if (menuUrl) return menuUrl;
@@ -74,28 +63,17 @@ jobs:
     const immediate = facebookUrlFor(element);
     if (immediate) return immediate;
 '''
-          if old in s:
-              s = s.replace(old, new, 1)
-          elif 'Prefer that canonical path before trusting' not in s:
-              raise SystemExit('facebook reveal block missing')
+          if old in s: s = s.replace(old, new, 1)
+          elif 'Sponsored/non-friend cards' not in s: raise SystemExit('facebook reveal block missing')
           content.write_text(s, encoding='utf-8')
 
           bg = Path('browser-extension/background.js')
           s = bg.read_text(encoding='utf-8')
-          s = s.replace('''  if (!url || !item?.id || chatgptLibraryTransfers.has(item.id)) return;\n  chatgptLibraryTransfers.add(item.id);''', '''  if (!url) return;
-  const transferKey = Number.isInteger(item?.id) ? `download:${item.id}` : `direct:${url}`;
-  if (chatgptLibraryTransfers.has(transferKey)) return;
-  chatgptLibraryTransfers.add(transferKey);''', 1)
-          s = s.replace('''    await diagnostic("chatgpt.library.intercepted", state, { detail: `download_id=${item.id}` });\n    await cancelChromeDownload(item.id);\n    await eraseChromeDownload(item.id);''', '''    await diagnostic("chatgpt.library.intercepted", state, { detail: Number.isInteger(item?.id) ? `download_id=${item.id}` : "direct_click=1" });
-    if (Number.isInteger(item?.id)) {
-      await cancelChromeDownload(item.id);
-      await eraseChromeDownload(item.id);
-    }''', 1)
-          s = s.replace('''    chatgptLibraryTransfers.delete(item.id);\n  }\n}\n\nchrome.downloads.onCreated.addListener''', '''    chatgptLibraryTransfers.delete(transferKey);
-  }
-}
-
-chrome.downloads.onCreated.addListener''', 1)
+          old = '  if (!url || !item?.id || chatgptLibraryTransfers.has(item.id)) return;\n  chatgptLibraryTransfers.add(item.id);'
+          new = '  if (!url) return;\n  const transferKey = Number.isInteger(item?.id) ? `download:${item.id}` : `direct:${url}`;\n  if (chatgptLibraryTransfers.has(transferKey)) return;\n  chatgptLibraryTransfers.add(transferKey);'
+          if old in s: s = s.replace(old, new, 1)
+          s = s.replace('    await diagnostic("chatgpt.library.intercepted", state, { detail: `download_id=${item.id}` });\n    await cancelChromeDownload(item.id);\n    await eraseChromeDownload(item.id);', '    await diagnostic("chatgpt.library.intercepted", state, { detail: Number.isInteger(item?.id) ? `download_id=${item.id}` : "direct_click=1" });\n    if (Number.isInteger(item?.id)) {\n      await cancelChromeDownload(item.id);\n      await eraseChromeDownload(item.id);\n    }', 1)
+          s = s.replace('    chatgptLibraryTransfers.delete(item.id);\n  }\n}\n\nchrome.downloads.onCreated.addListener', '    chatgptLibraryTransfers.delete(transferKey);\n  }\n}\n\nchrome.downloads.onCreated.addListener', 1)
           marker = '''chrome.downloads.onCreated.addListener((item) => {
   if (!chatgptLibraryUrl(item?.finalUrl || item?.url || "")) return;
   void streamChatGPTLibraryDownload(item);
@@ -105,27 +83,20 @@ chrome.downloads.onCreated.addListener''', 1)
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type !== "APOCALIPSE_CHATGPT_LIBRARY_DIRECT") return;
   const url = chatgptLibraryUrl(message.url || "");
-  if (!url) {
-    reply({ ok: false, error: "invalid_chatgpt_library_url" });
-    return;
-  }
-  void streamChatGPTLibraryDownload({
-    url,
-    referrer: message.pageUrl || sender.tab?.url || "https://chatgpt.com/",
-    filename: message.fileName || "",
-  });
+  if (!url) { reply({ ok: false, error: "invalid_chatgpt_library_url" }); return; }
+  void streamChatGPTLibraryDownload({ url, referrer: message.pageUrl || sender.tab?.url || "https://chatgpt.com/", filename: message.fileName || "" });
   reply({ ok: true, target: "apocalipse" });
 });
 '''
           if 'invalid_chatgpt_library_url' not in s:
-              if marker not in s: raise SystemExit('background listener marker missing')
+              if marker not in s: raise SystemExit('background marker missing')
               s = s.replace(marker, handler, 1)
           bg.write_text(s, encoding='utf-8')
-
           manifest = Path('browser-extension/manifest.json')
-          m = manifest.read_text(encoding='utf-8')
-          m = m.replace('"version": "0.3.40"', '"version": "0.3.41"', 1)
+          m = manifest.read_text(encoding='utf-8').replace('"version": "0.3.40"', '"version": "0.3.41"', 1)
           manifest.write_text(m, encoding='utf-8')
+          PY
+          python /tmp/patch.py
       - name: Validate JavaScript
         run: |
           node --check browser-extension/content.js
