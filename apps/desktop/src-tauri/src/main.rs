@@ -2185,36 +2185,126 @@ fn read_general_log(state: State<'_, AppState>) -> Result<String, String> {
 
 #[tauri::command]
 fn export_diagnostics(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    use zip::write::SimpleFileOptions;
+
     let directory = configured_download_directory(&app, &state)?;
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |value| value.as_secs());
-    let destination = directory.join(format!("Apocalipse-Diagnostico-{stamp}.jsonl"));
-    let mut output = OpenOptions::new()
+    let local = chrono::Local::now();
+    let base = format!(
+        "Apocalipse-Diagnostico-{}",
+        local.format("%Y-%m-%d_%H-%M-%S")
+    );
+    let mut destination = directory.join(format!("{base}.zip"));
+    let mut suffix = 2_u32;
+    while destination.exists() {
+        destination = directory.join(format!("{base}-{suffix}.zip"));
+        suffix += 1;
+    }
+    let file = OpenOptions::new()
         .create_new(true)
         .write(true)
         .open(&destination)
         .map_err(|error| error.to_string())?;
-    let header = serde_json::json!({"type":"diagnostic_export","timestamp":stamp,"appVersion":env!("CARGO_PKG_VERSION"),"format":"apocalipse-diagnostics-v1"});
-    writeln!(output, "{}", header).map_err(|error| error.to_string())?;
+    let mut archive = zip::ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    archive
+        .start_file("events.jsonl", options)
+        .map_err(|error| error.to_string())?;
+    for index in (1..=4).rev() {
+        let path = state.log_path.with_extension(format!("log.{index}"));
+        if let Ok(contents) = fs::read_to_string(path) {
+            archive
+                .write_all(contents.as_bytes())
+                .map_err(|error| error.to_string())?;
+            if !contents.ends_with('\n') {
+                archive
+                    .write_all(b"\n")
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+    }
     if let Ok(contents) = fs::read_to_string(&state.log_path) {
-        output
+        archive
             .write_all(contents.as_bytes())
             .map_err(|error| error.to_string())?;
     }
+
+    archive
+        .start_file("summary.txt", options)
+        .map_err(|error| error.to_string())?;
+    writeln!(archive, "Apocalipse Download Manager diagnostic export")
+        .map_err(|error| error.to_string())?;
+    writeln!(archive, "Generated: {}", local.to_rfc3339()).map_err(|error| error.to_string())?;
+    writeln!(archive, "App version: {}", env!("CARGO_PKG_VERSION"))
+        .map_err(|error| error.to_string())?;
+    writeln!(archive, "Log schema: 3").map_err(|error| error.to_string())?;
+    writeln!(
+        archive,
+        "Clear internal logs never deletes this exported ZIP."
+    )
+    .map_err(|error| error.to_string())?;
+
+    archive
+        .start_file("system.json", options)
+        .map_err(|error| error.to_string())?;
+    let system = serde_json::json!({
+        "appVersion": env!("CARGO_PKG_VERSION"),
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "generatedAt": local.to_rfc3339(),
+        "diagnosticSchema": 3
+    });
+    archive
+        .write_all(
+            serde_json::to_string_pretty(&system)
+                .map_err(|error| error.to_string())?
+                .as_bytes(),
+        )
+        .map_err(|error| error.to_string())?;
+
+    archive
+        .start_file("matrix-rules.json", options)
+        .map_err(|error| error.to_string())?;
+    let rules = state
+        .site_rules
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    archive
+        .write_all(
+            serde_json::to_string_pretty(&rules)
+                .map_err(|error| error.to_string())?
+                .as_bytes(),
+        )
+        .map_err(|error| error.to_string())?;
+
+    archive.finish().map_err(|error| error.to_string())?;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "diagnostics.exported",
+        &format!(
+            "file={}",
+            destination
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("diagnostic.zip")
+        ),
+    );
     Ok(destination.display().to_string())
 }
 
 #[tauri::command]
 fn clear_general_log(state: State<'_, AppState>) -> Result<(), String> {
-    let rotated = state.log_path.with_extension("log.1");
     {
         let _write_guard = state
             .log_write_lock
             .lock()
             .map_err(|error| error.to_string())?;
-        for path in [&state.log_path, &rotated] {
+        let mut paths = vec![state.log_path.clone()];
+        paths.extend((1..=4).map(|index| state.log_path.with_extension(format!("log.{index}"))));
+        for path in paths {
             match fs::remove_file(path) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -2222,7 +2312,12 @@ fn clear_general_log(state: State<'_, AppState>) -> Result<(), String> {
             }
         }
     }
-    diagnostic_log(&state, "INFO", "log.cleared", "cleared_by_user");
+    diagnostic_log(
+        &state,
+        "INFO",
+        "log.cleared",
+        "cleared_by_user scope=internal_logs_only",
+    );
     Ok(())
 }
 

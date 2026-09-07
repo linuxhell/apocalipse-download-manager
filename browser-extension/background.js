@@ -138,6 +138,7 @@ async function diagnostic(event, state = {}, extra = {}) {
   const startedAt = Number(state.startedAt || 0);
   const detail = [
     extra.detail || "",
+    `extension_version=${chrome.runtime.getManifest().version}`,
     extra.contentType ? `content_type=${String(extra.contentType).slice(0, 160)}` : "",
     extra.disposition ? `content_disposition=${String(extra.disposition).slice(0, 240)}` : "",
     extra.error ? `error=${String(extra.error).slice(0, 1200).replace(/[\r\n]+/g, " ")}` : "",

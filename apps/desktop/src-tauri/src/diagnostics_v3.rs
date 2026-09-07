@@ -1,3 +1,4 @@
+use chrono::Local;
 use serde_json::json;
 use std::{
     collections::{HashMap, HashSet},
@@ -294,14 +295,21 @@ pub fn write_event(path: &Path, lock: &Mutex<()>, level: &str, event: &str, deta
     }
     rotate(path);
     let timestamp = now_ms();
+    let local = Local::now();
     let sanitized = sanitize_detail(detail);
     let trace = trace_for(&sanitized);
     let host = host_for(&sanitized);
     let status = status_for(&sanitized);
+    let extension_version = field(&sanitized, "extension_version").map(str::to_owned);
     let elapsed = elapsed_for(event, trace.as_deref(), timestamp);
     let record = json!({
         "schema": SCHEMA_VERSION,
+        "timestamp": local.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "date": local.format("%Y-%m-%d").to_string(),
+        "time": local.format("%H:%M:%S%.3f").to_string(),
         "tsMs": timestamp.to_string(),
+        "appVersion": env!("CARGO_PKG_VERSION"),
+        "extensionVersion": extension_version,
         "seq": SEQUENCE.fetch_add(1, Ordering::Relaxed),
         "session": session_id(),
         "level": level.chars().take(12).collect::<String>(),
