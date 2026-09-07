@@ -1,0 +1,111 @@
+name: Apply diagnostics library and Facebook fixes
+on:
+  push:
+    branches: [fix/rapidgator-preclick-0.3.29]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: fix/rapidgator-preclick-0.3.29 }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.x' }
+      - name: Patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/desktop/ui/index.html'); s=p.read_text()
+          s=s.replace('<span class="matrix-actions"><button id="matrix-import"', '<span class="matrix-actions"><button id="export-diagnostics" type="button" data-i18n="exportDiagnostics">Export diagnostics</button><button id="clear-internal-logs" type="button" data-i18n="clearInternalLogs">Clear internal logs</button><button id="matrix-import"')
+          s=s.replace('<span>v0.4.5</span>', '<span class="app-version">v0.4.6</span>')
+          p.write_text(s)
+
+          p=Path('apps/desktop/ui/app.js'); s=p.read_text()
+          for marker, text in [
+            ('    diagnostics: "Diagnostics",','    exportDiagnostics: "Export diagnostics", clearInternalLogs: "Clear internal logs", diagnosticsExported: "Diagnostics saved",\n'),
+            ('    diagnostics: "Diagnóstico",','    exportDiagnostics: "Exportar diagnóstico", clearInternalLogs: "Limpar logs internos", diagnosticsExported: "Diagnóstico salvo",\n'),
+            ('    diagnostics: "诊断",','    exportDiagnostics: "导出诊断", clearInternalLogs: "清除内部日志", diagnosticsExported: "诊断已保存",\n')]:
+            if text.strip() not in s and marker in s: s=s.replace(marker, text+marker, 1)
+          hook='document.querySelector("#clear-log").onclick = async (event) => {'
+          extra='''document.querySelector("#export-diagnostics").onclick = async (event) => {\n  const button = event.currentTarget; button.disabled = true;\n  try { const path = await invoke("export_diagnostics"); window.alert(`${t("diagnosticsExported")}: ${path}`); }\n  catch (error) { console.error(error); window.alert(String(error)); } finally { button.disabled = false; }\n};\ndocument.querySelector("#clear-internal-logs").onclick = async (event) => {\n  const button = event.currentTarget; button.disabled = true;\n  try { await invoke("clear_general_log"); if (logDialog.open) await refreshDiagnosticLog(); }\n  catch (error) { console.error(error); } finally { button.disabled = false; }\n};\n'''
+          if '#export-diagnostics' not in s: s=s.replace(hook, extra+hook, 1)
+          p.write_text(s)
+
+          p=Path('apps/desktop/ui/styles.css'); s=p.read_text()
+          if '.app-version {' not in s: s += '\n.app-version { font-size: 15px; font-weight: 700; letter-spacing: .03em; }\n'
+          p.write_text(s)
+
+          p=Path('Cargo.toml'); s=p.read_text().replace('version = "0.4.5"','version = "0.4.6"',1); p.write_text(s)
+
+          p=Path('browser-extension/background.js'); s=p.read_text()
+          anchor='const chatgptInFlight = new Set();'
+          if anchor in s and 'chatgptRecentCompleted' not in s:
+            s=s.replace(anchor, anchor+'\nconst chatgptRecentCompleted = new Map();\nconst CHATGPT_DEDUPE_MS = 120000;')
+          # Deduplicate repeated Chrome-created IDs for the same ChatGPT Library URL.
+          needle='if (!isChatGptLibraryUrl(item.url || item.finalUrl || "")) return;'
+          repl=needle+'\n  const chatgptKey = item.finalUrl || item.url || "";\n  const recentAt = chatgptRecentCompleted.get(chatgptKey);\n  if (recentAt && Date.now() - recentAt < CHATGPT_DEDUPE_MS) {\n    chrome.downloads.cancel(item.id).catch(() => {});\n    chrome.downloads.erase({ id: item.id }).catch(() => {});\n    sendDiagnostic("chatgpt.library.duplicate_suppressed", { source: "chrome.downloads", url: chatgptKey, detail: `download_id=${item.id}` });\n    return;\n  }'
+          if needle in s and 'duplicate_suppressed' not in s: s=s.replace(needle,repl,1)
+          # Mark URL completed after successful browser-authenticated blob transfer.
+          success='sendDiagnostic("chatgpt.library.completed"'
+          idx=s.find(success)
+          if idx>=0 and 'chatgptRecentCompleted.set' not in s:
+            line=s.rfind('\n',0,idx)+1
+            s=s[:line]+'    chatgptRecentCompleted.set(chatgptKey, Date.now());\n'+s[line:]
+          p.write_text(s)
+
+          # Facebook: use browser cookies with yt-dlp for facebook only; this helps authenticated/restricted reels while leaving YouTube untouched.
+          p=Path('apps/desktop/src-tauri/build.rs'); s=p.read_text()
+          marker='    // youtube_inspection_browser_context\n    command.arg(&url);'
+          if marker in s and 'facebook_inspection_browser_context' not in s:
+            s=s.replace(marker, '    if url.contains("facebook.com/") || url.contains("fb.watch/") {\n        command.args(["--cookies-from-browser", "chrome", "--retries", "10"]);\n    }\n    // facebook_inspection_browser_context\n'+marker)
+          # UI translations injected at build time as a safety net.
+          ui_marker='        if name == "app.js" {'
+          if ui_marker in s and 'exportDiagnostics' not in s:
+            inject='''        if name == "app.js" {\n            source = source.replace("    diagnostics: \\\"Diagnostics\\\",", "    exportDiagnostics: \\\"Export diagnostics\\\", clearInternalLogs: \\\"Clear internal logs\\\", diagnosticsExported: \\\"Diagnostics saved\\\",\\n    diagnostics: \\\"Diagnostics\\\",");\n'''
+            s=s.replace(ui_marker,inject,1)
+          p.write_text(s)
+          PY
+      - name: Add diagnostic export backend patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/desktop/src-tauri/src/main.rs'); s=p.read_text()
+          if 'fn export_diagnostics(' not in s:
+            marker='#[tauri::command]\nfn clear_general_log('
+            pos=s.find(marker)
+            if pos<0: raise SystemExit('clear_general_log marker not found')
+            fn=r'''#[tauri::command]
+fn export_diagnostics(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    let directory = configured_download_directory(&app, &state)?;
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |value| value.as_secs());
+    let destination = directory.join(format!("Apocalipse-Diagnostico-{stamp}.jsonl"));
+    let mut output = OpenOptions::new().create_new(true).write(true).open(&destination).map_err(|error| error.to_string())?;
+    let header = serde_json::json!({"type":"diagnostic_export","timestamp":stamp,"appVersion":env!("CARGO_PKG_VERSION"),"format":"apocalipse-diagnostics-v1"});
+    writeln!(output, "{}", header).map_err(|error| error.to_string())?;
+    if let Ok(contents) = fs::read_to_string(&state.log_path) { output.write_all(contents.as_bytes()).map_err(|error| error.to_string())?; }
+    Ok(destination.display().to_string())
+}
+
+'''
+            s=s[:pos]+fn+s[pos:]
+          # register command beside clear_general_log in invoke handler
+          reg='            clear_general_log,'
+          if reg in s and '            export_diagnostics,' not in s: s=s.replace(reg,'            export_diagnostics,\n'+reg,1)
+          p.write_text(s)
+          PY
+      - name: Format and check
+        run: |
+          cargo fmt --all
+          cargo check --workspace
+      - name: Commit patch and remove one-shot workflow
+        run: |
+          rm .github/workflows/apply-diagnostics-library-facebook.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix: diagnostics export library dedupe and facebook context"
+          git push
