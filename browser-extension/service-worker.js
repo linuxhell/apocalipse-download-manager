@@ -381,6 +381,32 @@ chrome.downloads.onChanged.addListener((delta) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.type === "APOCALIPSE_PAIR") {
+    const token = String(message.token || "").trim();
+    if (!token) {
+      bridgeConnected = false;
+      reply({ connected: false, error: "not_paired" });
+      return;
+    }
+    bridgeRequest("/v1/health", {}, token)
+      .then(async () => {
+        await chrome.storage.local.set({ pairingToken: token });
+        bridgeConnected = true;
+        ensureHeartbeat();
+        reply({ connected: true });
+      })
+      .catch((error) => {
+        bridgeConnected = false;
+        reply({ connected: false, error: String(error) });
+      });
+    return true;
+  }
+  if (message?.type === "APOCALIPSE_BRIDGE_STATUS") {
+    bridgeRequest("/v1/health")
+      .then(() => reply({ connected: true }))
+      .catch((error) => reply({ connected: false, error: String(error) }));
+    return true;
+  }
   if (message?.type === "APOCALIPSE_BLOB_BEGIN") {
     bridgeRequest("/v1/blob/begin", { method: "POST", body: JSON.stringify(message.request) }).then(reply)
       .catch((error) => reply({ error: String(error) }));
