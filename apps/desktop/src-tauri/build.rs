@@ -113,7 +113,8 @@ fn patch_main(manifest: &Path) {
     }
 
     if !source.contains("struct BridgeDiagnosticEvent") {
-        let marker = "#[derive(Deserialize)]\n#[serde(rename_all = \"camelCase\")]\nstruct BlobBegin {";
+        let marker =
+            "#[derive(Deserialize)]\n#[serde(rename_all = \"camelCase\")]\nstruct BlobBegin {";
         let diagnostic = r#"#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BridgeDiagnosticEvent {
@@ -280,7 +281,9 @@ fn patch_ui(manifest: &Path) {
     let ui = manifest.parent().expect("src-tauri parent").join("ui");
     for name in ["app.js", "index.html"] {
         let path = ui.join(name);
-        let Ok(original) = fs::read_to_string(&path) else { continue; };
+        let Ok(original) = fs::read_to_string(&path) else {
+            continue;
+        };
         let mut source = original.clone();
         source = source.replace("Matrix Ultimate v2 AI", "Matrix Ultimate v3 AI");
         source = source.replace(
