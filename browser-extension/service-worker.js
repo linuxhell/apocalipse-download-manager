@@ -322,6 +322,15 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
         requestContentType: formRequest?.contentType || null,
         startImmediately: immediateTakeover,
       }),
+    }).catch(async (error) => {
+      // If the bridge download fails, check if it's a known error to provide better fallback
+      if (error.message.includes("bridge_http_404") || error.message.includes("not found")) {
+        // Try direct browser download for non-existent files
+        bypassNextUntil = Date.now() + 30000;
+        chrome.downloads.download({ url, saveAs: false }, () => void chrome.runtime.lastError);
+        return true;
+      }
+      throw error; // Re-throw if not a handled 404 case
     });
     if (immediateTakeover && handoff.taskId) {
       await chrome.storage.session.set({

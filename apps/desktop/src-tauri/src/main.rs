@@ -3634,7 +3634,14 @@ fn start_download(
             .site_rules
             .lock()
             .ok()
-            .and_then(|rules| matching_site_rule(&task.source, &rules));
+            .and_then(|rules| matching_site_rule(&task.source, &rules))
+            // Ensure that the rapidgator rule is enforced for BrowserAssisted action
+            .map(|mut rule| {
+                if rule.id == "rapidgator" && rule.action != SiteRuleAction::BrowserAssisted {
+                    rule.action = SiteRuleAction::BrowserAssisted;
+                }
+                rule
+            });
         let configured_connections =
             if limits.adaptive_efficiency && limits.max_active_downloads <= 3 && task.priority >= 0
             {
