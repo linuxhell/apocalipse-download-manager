@@ -235,9 +235,23 @@ const eraseBrowserDownload = (id) => new Promise((resolve) => {
   });
 });
 
+function isChatGPTLibraryDownload(value) {
+  try {
+    const url = new URL(value);
+    return url.hostname.toLowerCase() === "chatgpt.com" && url.pathname === "/backend-api/estuary/content";
+  } catch {
+    return false;
+  }
+}
+
 async function takeBrowserDownload(item, eraseFromHistory = false) {
   let url = item.finalUrl || item.url;
   if (!item.id) return false;
+  // background.js owns ChatGPT Library downloads and streams them through the
+  // authenticated blob bridge. Never let the generic interception path suggest
+  // or recreate the original Chrome download, otherwise a second Save As flow
+  // can appear after Apocalipse has already accepted the transfer.
+  if (isChatGPTLibraryDownload(url)) return true;
   if (/^blob:https:\/\/web\.telegram\.org\//i.test(url)) {
     if (Date.now() < bypassNextUntil) {
       bypassNextUntil = 0;
@@ -323,14 +337,12 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
         startImmediately: immediateTakeover,
       }),
     }).catch(async (error) => {
-      // If the bridge download fails, check if it's a known error to provide better fallback
       if (error.message.includes("bridge_http_404") || error.message.includes("not found")) {
-        // Try direct browser download for non-existent files
         bypassNextUntil = Date.now() + 30000;
         chrome.downloads.download({ url, saveAs: false }, () => void chrome.runtime.lastError);
         return true;
       }
-      throw error; // Re-throw if not a handled 404 case
+      throw error;
     });
     if (immediateTakeover && handoff.taskId) {
       await chrome.storage.session.set({
@@ -389,81 +401,12 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       .catch((error) => reply({ error: String(error) }));
     return true;
   }
-  if (message?.type === "APOCALIPSE_FORM_SUBMIT" && message.request?.method === "POST") {
-    lastFormSubmission = message.request;
-    reply({ ok: true });
-    return;
-  }
-  if (message?.type === "APOCALIPSE_BYPASS_NEXT") {
-    bypassNextUntil = Date.now() + Math.min(Math.max(Number(message.ttlMs) || 15000, 2000), 30000);
-    reply({ ok: true });
-    return;
-  }
-  if (message?.type === "APOCALIPSE_SHORTCUT_STATE") {
-    const wasBypassHeld = bypassHeld;
-    bypassHeld = Boolean(message.bypassPressed);
-    forceHeld = Boolean(message.forcePressed);
-    if (wasBypassHeld && !bypassHeld) bypassUntil = Date.now() + 2000;
-    reply({ ok: true, forceHeld });
-    return;
-  }
-  if (message?.type === "APOCALIPSE_MEDIA" && sender.tab?.id) {
-    chrome.storage.session.set({ [`media:${sender.tab.id}`]: message.media });
-  }
-  if (message?.type === "APOCALIPSE_PROBE") {
-    fetch(message.url, { method: "HEAD", credentials: "include", redirect: "follow" })
-      .then((response) => reply({
-        size: Number(response.headers.get("content-length")) || null,
-        contentType: response.headers.get("content-type") || "",
-      }))
-      .catch(() => reply({ size: null }));
+  if (message?.type === "APOCALIPSE_GET_PAGE") {
+    sourcePageUrl(sender).then((pageUrl) => reply({ pageUrl })).catch(() => reply({ pageUrl: null }));
     return true;
   }
-  if (message?.type === "APOCALIPSE_SELECT_HLS") {
-    analyzeHls(message.urls, message.expectedDuration).then((items) => reply(items.find((item) => item.recommended) || null));
-    return true;
-  }
-  if (message?.type === "APOCALIPSE_ANALYZE_HLS") {
-    analyzeHls(message.urls, message.expectedDuration).then(reply);
-    return true;
-  }
-  if (message?.type === "APOCALIPSE_PAIR") {
-    const token = message.token.trim();
-    bridgeRequest("/v1/health", {}, token)
-      .then(() => chrome.storage.local.set({ pairingToken: token }))
-      .then(() => ensureHeartbeat())
-      .then(() => reply({ connected: true }))
-      .catch((error) => reply({ connected: false, error: String(error) }));
-    return true;
-  }
-  if (message?.type === "APOCALIPSE_BRIDGE_STATUS") {
-    bridgeRequest("/v1/health")
-      .then(() => reply({ connected: true }))
-      .catch(() => reply({ connected: false }));
-    return true;
-  }
-  if (message?.type === "APOCALIPSE_DOWNLOAD" && message.item?.url) {
-    sourcePageUrl(sender).then(async (pageUrl) => {
-      let url = message.item.url;
-      try {
-        const tabUrl = new URL(pageUrl);
-        if (/(^|\.)facebook\.com$/i.test(tabUrl.hostname)
-          && /(?:^|\/)(?:reel|reels|watch|videos|posts|share)(?:\/|$)/i.test(tabUrl.pathname)) url = tabUrl.href;
-      } catch {}
-      return bridgeRequest("/v1/download", {
-        method: "POST",
-        body: JSON.stringify({
-          url,
-          fileName: message.item.title || null,
-          pageUrl,
-          duration: Number.isFinite(message.item.duration) ? message.item.duration : null,
-          cookieHeader: await cookieHeaderFor([url, message.item.url, ...(message.item.requestUrls || []), pageUrl]),
-          userAgent: message.item.userAgent || null,
-        }),
-      });
-    })
-      .then(() => reply({ target: "apocalipse" }))
-      .catch((error) => reply({ target: "error", error: String(error) }));
+  if (message?.type === "APOCALIPSE_HLS_ANALYZE") {
+    analyzeHls(message.urls, message.duration).then(reply).catch((error) => reply({ error: String(error) }));
     return true;
   }
 });
