@@ -2,7 +2,7 @@ name: Browser extensions
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/rapidgator-preclick-0.3.29]
   workflow_dispatch:
 
 permissions:
