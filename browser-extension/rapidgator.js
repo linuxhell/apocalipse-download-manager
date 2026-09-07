@@ -14,9 +14,12 @@
     }
   };
 
-  const replayOriginalClick = (anchor) => {
+  const replayOriginalClick = async (anchor) => {
     replaying = true;
     try {
+      // Tell the generic download interceptor to ignore the fallback browser
+      // transfer, otherwise it could cancel the fresh Rapidgator request again.
+      await chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 15000 }).catch(() => {});
       anchor.click();
     } finally {
       setTimeout(() => { replaying = false; }, 0);
@@ -32,25 +35,21 @@
     const url = finalRapidgatorUrl(anchor.href);
     if (!url) return;
 
-    // Rapidgator's /download/<token> URL can be single-use/session-sensitive.
-    // Stop the browser before it consumes the URL and let Apocalipse perform
-    // the first request with the browser session context. If the bridge cannot
-    // accept the handoff, replay the original click so the download is not lost.
+    // Own the final Rapidgator link before Chrome can consume the one-shot URL.
     event.preventDefault();
     event.stopImmediatePropagation();
 
     chrome.runtime.sendMessage({
-      type: "APOCALIPSE_DOWNLOAD",
+      type: "APOCALIPSE_RAPIDGATOR_DOWNLOAD",
       item: {
         url,
-        requestUrls: [url],
         userAgent: navigator.userAgent,
         kind: "file",
         title: anchor.getAttribute("download") || null,
       },
     }, (result) => {
       const failed = Boolean(chrome.runtime.lastError) || result?.target !== "apocalipse";
-      if (failed) replayOriginalClick(anchor);
+      if (failed) void replayOriginalClick(anchor);
     });
   }, true);
 })();
