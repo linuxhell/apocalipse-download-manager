@@ -70,8 +70,24 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
 if 'invalid_chatgpt_library_url' not in s:
     if marker not in s: raise SystemExit('background marker missing')
     s = s.replace(marker, handler, 1)
+
+# Rapidgator: while this tab is armed, deny Chrome's own download UI. Fetch still
+# pauses the final response and streams it into Apocalipse, which owns destination selection.
+arm_old = '''    await debuggerAttach(debuggee);\n    await diagnostic("rapidgator.cdp.debugger_attached", state);\n    await debuggerCommand(debuggee, "Fetch.enable", {'''
+arm_new = '''    await debuggerAttach(debuggee);\n    await diagnostic("rapidgator.cdp.debugger_attached", state);\n    await debuggerCommand(debuggee, "Page.setDownloadBehavior", { behavior: "deny" }).catch(() => {});\n    await diagnostic("rapidgator.cdp.chrome_download_denied", state, { detail: "scope=tab" });\n    await debuggerCommand(debuggee, "Fetch.enable", {'''
+if 'rapidgator.cdp.chrome_download_denied' not in s:
+    if arm_old not in s: raise SystemExit('rapidgator arm marker missing')
+    s = s.replace(arm_old, arm_new, 1)
+
+disarm_old = '''  rapidgatorArmedTabs.delete(tabId);\n  await diagnostic("rapidgator.cdp.disarmed", state, { detail: `reason=${reason}` });\n  await debuggerDetach({ tabId });'''
+disarm_new = '''  rapidgatorArmedTabs.delete(tabId);\n  await diagnostic("rapidgator.cdp.disarmed", state, { detail: `reason=${reason}` });\n  await debuggerCommand({ tabId }, "Page.setDownloadBehavior", { behavior: "default" }).catch(() => {});\n  await debuggerDetach({ tabId });'''
+if 'behavior: "default"' not in s:
+    if disarm_old not in s: raise SystemExit('rapidgator disarm marker missing')
+    s = s.replace(disarm_old, disarm_new, 1)
 p.write_text(s, encoding='utf-8')
 
 p = Path('browser-extension/manifest.json')
-s = p.read_text(encoding='utf-8').replace('"version": "0.3.40"', '"version": "0.3.41"', 1)
+s = p.read_text(encoding='utf-8')
+for old_version in ('0.3.40', '0.3.41'):
+    s = s.replace(f'"version": "{old_version}"', '"version": "0.3.42"', 1)
 p.write_text(s, encoding='utf-8')
