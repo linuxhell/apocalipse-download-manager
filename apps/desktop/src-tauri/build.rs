@@ -348,7 +348,7 @@ struct BridgeDiagnosticEvent {
                 use std::os::windows::process::CommandExt;
                 command.as_std_mut().creation_flags(0x08000000);
             }
-            command.stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true);
+            command.stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
             let mut child = command.spawn().map_err(|error| format!("torrent_metadata_engine_unavailable: {error}"))?;
             let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
             let torrent = loop {
@@ -363,16 +363,7 @@ struct BridgeDiagnosticEvent {
                     break Ok(path);
                 }
                 if let Ok(Some(status)) = child.try_wait() {
-                    let stderr = child
-                        .stderr
-                        .take()
-                        .map(|mut stream| {
-                            let mut bytes = Vec::new();
-                            let _ = std::io::Read::read_to_end(&mut stream, &mut bytes);
-                            String::from_utf8_lossy(&bytes).into_owned()
-                        })
-                        .unwrap_or_default();
-                    break Err(external_error_detail(&stderr, status.code()));
+                    break Err(format!("torrent_metadata_process_exited_{:?}", status.code()));
                 }
                 if tokio::time::Instant::now() >= deadline {
                     break Err("torrent_metadata_timeout".to_owned());
