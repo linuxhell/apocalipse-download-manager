@@ -272,6 +272,10 @@ struct BridgeDiagnosticEvent {
             "10",
         ]);
     }
+    if url.contains("facebook.com/") || url.contains("fb.watch/") {
+        command.args(["--cookies-from-browser", "chrome", "--retries", "10"]);
+    }
+    // facebook_inspection_browser_context
     // youtube_inspection_browser_context
     command.arg(&url);"#;
         if source.contains(before) {

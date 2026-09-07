@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod diagnostics_v3;
+
 use apocalipse_core::{
     classify_url, cleanup_chunk_artifacts, partial_path, plan_download, BandwidthLimiter,
     Capabilities, DownloadEngine, DownloadEvent, DownloadId, DownloadKind, DownloadRequest,
@@ -837,12 +839,28 @@ struct BlobUpload {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct BridgeDiagnosticEvent {
+    event: String,
+    level: Option<String>,
+    trace_id: Option<String>,
+    source: Option<String>,
+    url: Option<String>,
+    status: Option<u16>,
+    bytes: Option<u64>,
+    duration_ms: Option<u64>,
+    detail: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct BlobBegin {
     file_name: String,
     total: u64,
     source: String,
     #[serde(default)]
     streaming: bool,
+    #[serde(default)]
+    prompt_for_destination: bool,
 }
 
 #[derive(Deserialize)]
@@ -1192,14 +1210,26 @@ async fn inspect_media_formats(
         )
     };
     let mut command = tokio::process::Command::new(executable);
-    command
-        .args([
-            "--dump-single-json",
-            "--no-playlist",
-            "--skip-download",
-            "--no-warnings",
-        ])
-        .arg(&url);
+    command.args([
+        "--dump-single-json",
+        "--no-playlist",
+        "--skip-download",
+        "--no-warnings",
+    ]);
+    if url.contains("youtube.com/") || url.contains("youtu.be/") {
+        command.args([
+            "--js-runtimes",
+            "quickjs",
+            "--retries",
+            "10",
+        ]);
+    }
+    if url.contains("facebook.com/") || url.contains("fb.watch/") {
+        command.args(["--cookies-from-browser", "chrome", "--retries", "10"]);
+    }
+    // facebook_inspection_browser_context
+    // youtube_inspection_browser_context
+    command.arg(&url);
     if let Some(credential) = credential {
         command
             .arg("--username")
@@ -1448,32 +1478,7 @@ fn sanitize_log_detail(detail: &str) -> String {
 }
 
 fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
-    let _write_guard = match state.log_write_lock.lock() {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
-    if let Some(parent) = state.log_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if fs::metadata(&state.log_path).is_ok_and(|metadata| metadata.len() > 2 * 1024 * 1024) {
-        let rotated = state.log_path.with_extension("log.1");
-        let _ = fs::remove_file(&rotated);
-        let _ = fs::rename(&state.log_path, rotated);
-    }
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |value| value.as_secs());
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&state.log_path)
-    {
-        let _ = writeln!(
-            file,
-            "[{timestamp}] {level} {event} {}",
-            sanitize_log_detail(detail)
-        );
-    }
+    diagnostics_v3::write_event(&state.log_path, &state.log_write_lock, level, event, detail);
 }
 
 fn remember_download_directory(state: &AppState, directory: &Path) -> Result<(), String> {
@@ -2184,6 +2189,29 @@ fn read_general_log(state: State<'_, AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn export_diagnostics(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    let directory = configured_download_directory(&app, &state)?;
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |value| value.as_secs());
+    let destination = directory.join(format!("Apocalipse-Diagnostico-{stamp}.jsonl"));
+    let mut output = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&destination)
+        .map_err(|error| error.to_string())?;
+    let header = serde_json::json!({"type":"diagnostic_export","timestamp":stamp,"appVersion":env!("CARGO_PKG_VERSION"),"format":"apocalipse-diagnostics-v1"});
+    writeln!(output, "{}", header).map_err(|error| error.to_string())?;
+    if let Ok(contents) = fs::read_to_string(&state.log_path) {
+        output
+            .write_all(contents.as_bytes())
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(destination.display().to_string())
+}
+
+#[tauri::command]
 fn clear_general_log(state: State<'_, AppState>) -> Result<(), String> {
     let rotated = state.log_path.with_extension("log.1");
     {
@@ -2440,73 +2468,46 @@ fn import_matrix_rules(state: State<'_, AppState>) -> Result<usize, String> {
 fn matrix_analyze(state: State<'_, AppState>) -> Result<MatrixStatus, String> {
     let queue = state.queue.lock().map_err(|error| error.to_string())?;
     let rules = state.site_rules.lock().map_err(|error| error.to_string())?;
-    let mut failures = HashMap::<String, HashSet<String>>::new();
+    let mut signals = diagnostics_v3::analyze(&state.log_path);
+    let mut queue_failures = HashMap::<String, HashSet<String>>::new();
     for task in queue
         .iter()
         .filter(|task| matches!(&task.state, DownloadState::Failed { .. }))
     {
         if let Ok(url) = url::Url::parse(&task.source) {
             if let Some(host) = url.host_str() {
-                failures
+                queue_failures
                     .entry(host.to_ascii_lowercase())
                     .or_default()
                     .insert(task.id.to_string());
             }
         }
     }
-
-    let mut log = fs::read_to_string(state.log_path.with_extension("log.1")).unwrap_or_default();
-    log.push_str(&fs::read_to_string(&state.log_path).unwrap_or_default());
-    let mut task_hosts = HashMap::<String, String>::new();
-    for line in log.lines() {
-        if !line.contains("task.enqueued") {
-            continue;
-        }
-        let task = line
-            .split_whitespace()
-            .find_map(|field| field.strip_prefix("task="));
-        let source = line
-            .split_whitespace()
-            .find_map(|field| field.strip_prefix("url="));
-        let identified = task
-            .zip(source)
-            .and_then(|(task, source)| host_from_url(source).map(|host| (task, host)));
-        if let Some((task, host)) = identified {
-            task_hosts.insert(task.to_owned(), host);
-        }
-    }
-    for line in log.lines().filter(|line| line.contains("http.failed")) {
-        let task = line
-            .split_whitespace()
-            .find_map(|field| field.strip_prefix("task="));
-        let identified = task.and_then(|task| task_hosts.get(task).map(|host| (task, host)));
-        if let Some((task, host)) = identified {
-            failures
-                .entry(host.clone())
-                .or_default()
-                .insert(task.to_owned());
-        }
+    for (host, task_ids) in queue_failures {
+        signals
+            .entry(host.clone())
+            .or_insert_with(|| diagnostics_v3::HostSignal { host, ..Default::default() })
+            .add_queue_failures(task_ids.len());
     }
 
-    let mut proposals = failures
+    let mut proposals = signals
         .into_iter()
-        .filter(|(host, _)| matching_site_rule(&format!("https://{host}/"), &rules).is_none())
-        .map(|(host, task_ids)| {
-            let count = task_ids.len();
-            MatrixRuleProposal {
-                confidence: (55 + count.saturating_sub(1).min(4) * 10) as u8,
-                reason: format!(
-                    "{count} failed download(s); retry with one conservative connection"
-                ),
-                host,
-                failures: count,
-            }
+        .filter(|(host, signal)| {
+            matching_site_rule(&format!("https://{host}/"), &rules).is_none()
+                && signal.conservative_rule_is_safe()
+        })
+        .map(|(host, signal)| MatrixRuleProposal {
+            failures: signal.failures,
+            confidence: signal.confidence(),
+            reason: signal.reason(),
+            host,
         })
         .collect::<Vec<_>>();
     proposals.sort_by(|left, right| {
         right
-            .failures
-            .cmp(&left.failures)
+            .confidence
+            .cmp(&left.confidence)
+            .then_with(|| right.failures.cmp(&left.failures))
             .then_with(|| left.host.cmp(&right.host))
     });
     let applied_rules = rules
@@ -2519,7 +2520,7 @@ fn matrix_analyze(state: State<'_, AppState>) -> Result<MatrixStatus, String> {
         })
         .collect::<Vec<_>>();
     Ok(MatrixStatus {
-        version: "Matrix Ultimate v2 AI".to_owned(),
+        version: "Matrix Ultimate v3 AI".to_owned(),
         active_rules: applied_rules.len(),
         proposals,
         applied_rules,
@@ -3348,8 +3349,26 @@ async fn inspect_torrent_metadata(
     state: State<'_, AppState>,
     source: String,
 ) -> Result<TorrentInspection, String> {
+    let started = Instant::now();
+    diagnostic_log(
+        &state,
+        "INFO",
+        "torrent.metadata.start",
+        &format!("kind={:?}", classify_url(&source)),
+    );
     match classify_url(&source) {
-        Some(DownloadKind::Torrent) => inspect_torrent_file(Path::new(&source)),
+        Some(DownloadKind::Torrent) => {
+            let result = inspect_torrent_file(Path::new(&source));
+            if let Ok(info) = &result {
+                diagnostic_log(
+                    &state,
+                    "INFO",
+                    "torrent.metadata.completed",
+                    &format!("files={} bytes={} elapsed_ms={}", info.files.len(), info.total_size, started.elapsed().as_millis()),
+                );
+            }
+            result
+        }
         Some(DownloadKind::Magnet) => {
             let (aria2, root) = {
                 let settings = state.settings.lock().map_err(|error| error.to_string())?;
@@ -3362,11 +3381,7 @@ async fn inspect_torrent_metadata(
                 (
                     configured_tool(
                         &settings.aria2_path,
-                        if cfg!(windows) {
-                            "aria2c.exe"
-                        } else {
-                            "aria2c"
-                        },
+                        if cfg!(windows) { "aria2c.exe" } else { "aria2c" },
                     ),
                     root,
                 )
@@ -3374,11 +3389,16 @@ async fn inspect_torrent_metadata(
             fs::create_dir_all(&root).map_err(|error| error.to_string())?;
             let mut command = tokio::process::Command::new(aria2);
             command
+                .current_dir(&root)
                 .args([
                     "--bt-metadata-only=true",
                     "--bt-save-metadata=true",
                     "--seed-time=0",
-                    "--summary-interval=0",
+                    "--summary-interval=1",
+                    "--console-log-level=warn",
+                    "--enable-dht=true",
+                    "--enable-peer-exchange=true",
+                    "--bt-enable-lpd=true",
                 ])
                 .arg(format!("--dir={}", root.display()))
                 .arg(&source);
@@ -3387,27 +3407,47 @@ async fn inspect_torrent_metadata(
                 use std::os::windows::process::CommandExt;
                 command.as_std_mut().creation_flags(0x08000000);
             }
-            let output = tokio::time::timeout(Duration::from_secs(120), command.output())
-                .await
-                .map_err(|_| "torrent_metadata_timeout".to_owned())?
-                .map_err(|error| error.to_string())?;
-            if !output.status.success() {
-                let _ = fs::remove_dir_all(&root);
-                return Err(external_error_detail(
-                    &String::from_utf8_lossy(&output.stderr),
-                    output.status.code(),
-                ));
+            command.stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
+            let mut child = command.spawn().map_err(|error| format!("torrent_metadata_engine_unavailable: {error}"))?;
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+            let torrent = loop {
+                let found = fs::read_dir(&root)
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|entry| entry.path())
+                    .find(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("torrent")));
+                if let Some(path) = found {
+                    break Ok(path);
+                }
+                if let Ok(Some(status)) = child.try_wait() {
+                    break Err(format!("torrent_metadata_process_exited_{:?}", status.code()));
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    break Err("torrent_metadata_timeout".to_owned());
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            };
+            let _ = child.kill().await;
+            let result = match torrent {
+                Ok(path) => inspect_torrent_file(&path),
+                Err(error) => Err(error),
+            };
+            match &result {
+                Ok(info) => diagnostic_log(
+                    &state,
+                    "INFO",
+                    "torrent.metadata.completed",
+                    &format!("files={} bytes={} elapsed_ms={}", info.files.len(), info.total_size, started.elapsed().as_millis()),
+                ),
+                Err(error) => diagnostic_log(
+                    &state,
+                    "ERROR",
+                    "torrent.metadata.failed",
+                    &format!("error={error} elapsed_ms={}", started.elapsed().as_millis()),
+                ),
             }
-            let torrent = fs::read_dir(&root)
-                .map_err(|error| error.to_string())?
-                .flatten()
-                .map(|entry| entry.path())
-                .find(|path| {
-                    path.extension()
-                        .is_some_and(|extension| extension.eq_ignore_ascii_case("torrent"))
-                })
-                .ok_or_else(|| "torrent_metadata_missing".to_owned())?;
-            let result = inspect_torrent_file(&torrent);
             let _ = fs::remove_dir_all(&root);
             result
         }
@@ -4718,7 +4758,32 @@ fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid:
     let state = app.state::<AppState>();
     let directory = configured_download_directory(app, &state)?;
     let file_name = validate_file_name(&request.file_name)?;
-    let destination = unique_destination(&directory, &file_name);
+    let destination = if request.prompt_for_destination {
+        show_main_window(app);
+        diagnostic_log(
+            &state,
+            "INFO",
+            "blob.destination_prompt",
+            &format!("file={file_name}"),
+        );
+        let Some(path) = rfd::FileDialog::new()
+            .set_directory(&directory)
+            .set_file_name(&file_name)
+            .save_file()
+        else {
+            diagnostic_log(&state, "INFO", "blob.destination_cancelled", "cancelled_by_user");
+            return Err("cancelled".to_owned());
+        };
+        if path.exists() {
+            fs::remove_file(&path).map_err(|error| error.to_string())?;
+        }
+        path
+    } else {
+        unique_destination(&directory, &file_name)
+    };
+    if let Some(parent) = destination.parent() {
+        remember_download_directory(&state, parent)?;
+    }
     let partial = partial_path(&destination);
     fs::File::create(&partial).map_err(|error| error.to_string())?;
     let mut task = DownloadTask::new(request.source, destination.clone());
@@ -4955,6 +5020,57 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         {
             Ok(()) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
             Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
+        }
+    } else if first.starts_with("POST /v1/diagnostic ") {
+        match serde_json::from_str::<BridgeDiagnosticEvent>(body) {
+            Ok(request)
+                if !request.event.trim().is_empty()
+                    && request.event.len() <= 96
+                    && request
+                        .event
+                        .chars()
+                        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')) =>
+            {
+                let level = request
+                    .level
+                    .as_deref()
+                    .map(str::to_ascii_uppercase)
+                    .filter(|level| matches!(level.as_str(), "DEBUG" | "INFO" | "WARN" | "ERROR"))
+                    .unwrap_or_else(|| "INFO".to_owned());
+                let trace = request
+                    .trace_id
+                    .as_deref()
+                    .filter(|value| value.len() <= 128 && !value.contains('\r') && !value.contains('\n'))
+                    .unwrap_or("none");
+                let source = request
+                    .source
+                    .as_deref()
+                    .filter(|value| value.len() <= 64 && !value.contains('\r') && !value.contains('\n'))
+                    .unwrap_or("browser");
+                let url = request
+                    .url
+                    .as_deref()
+                    .filter(|value| value.len() <= 4096 && !value.contains('\r') && !value.contains('\n'))
+                    .unwrap_or("none");
+                let detail = request
+                    .detail
+                    .as_deref()
+                    .filter(|value| value.len() <= 8192 && !value.contains('\r') && !value.contains('\n'))
+                    .unwrap_or("");
+                diagnostic_log(
+                    &app.state::<AppState>(),
+                    &level,
+                    &request.event,
+                    &format!(
+                        "trace={trace} source={source} url={url} status={} bytes={} duration_ms={} {detail}",
+                        request.status.map_or_else(|| "none".to_owned(), |value| value.to_string()),
+                        request.bytes.map_or_else(|| "none".to_owned(), |value| value.to_string()),
+                        request.duration_ms.map_or_else(|| "none".to_owned(), |value| value.to_string()),
+                    ),
+                );
+                bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}");
+            }
+            _ => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
         }
     } else if first.starts_with("POST /v1/blob/begin ") {
         match serde_json::from_str::<BlobBegin>(body)
@@ -5794,6 +5910,7 @@ fn main() {
             suggest_download_name,
             remove_downloads,
             read_general_log,
+            export_diagnostics,
             clear_general_log,
             get_log_editor,
             set_log_editor,

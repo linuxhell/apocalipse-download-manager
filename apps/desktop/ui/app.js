@@ -57,10 +57,10 @@ const catalogs = {
     preview: "Preview",
     stopRecording: "Stop and save",
     recordingActive: "Recording",
-    matrixPowered: "Powered by Matrix Ultimate v2 AI",
+    matrixPowered: "Powered by Matrix Ultimate v3 AI",
     matrixRollback: "Rollback",
     matrixAnalyze: "Analyze failures",
-    matrixDescription: "Matrix continuously monitors local failures and proposes safe rules. No rule executes website code.",
+    matrixDescription: "Matrix v3 correlates structured traces, HTTP failures, browser handoffs and content mismatches before proposing a safe rule. No rule executes website code.",
     matrixSummary: "{active} active rules · {proposals} proposals",
     matrixNoProposal: "No new rule is required.",
     matrixReason: "{count} failed download(s); retry with one conservative connection",
@@ -163,6 +163,7 @@ const catalogs = {
     removeFailed: "Could not remove the selected files",
     torrentP2PBlocked: "The current connection may be blocking or limiting BitTorrent/P2P traffic (VPN, firewall, or network).",
     torrentSelectOne: "Select at least one torrent file.",
+    exportDiagnostics: "Export diagnostics", clearInternalLogs: "Clear internal logs", diagnosticsExported: "Diagnostics saved",
     diagnostics: "Diagnostics",
     diagnosticsHint: "Safe activity log with credentials and URL parameters hidden",
     openLog: "Open diagnostic log",
@@ -243,10 +244,10 @@ const catalogs = {
     preview: "Pré-visualizar",
     stopRecording: "Parar e salvar",
     recordingActive: "Gravando",
-    matrixPowered: "Alimentada por Matrix Ultimate v2 AI",
+    matrixPowered: "Alimentada por Matrix Ultimate v3 AI",
     matrixRollback: "Reverter",
     matrixAnalyze: "Analisar falhas",
-    matrixDescription: "A Matrix monitora continuamente as falhas locais e propõe regras seguras. Nenhuma regra executa código de sites.",
+    matrixDescription: "A Matrix v3 correlaciona rastros estruturados, falhas HTTP, transferências do navegador e respostas incompatíveis antes de propor uma regra segura. Nenhuma regra executa código de sites.",
     matrixSummary: "{active} regras ativas · {proposals} propostas",
     matrixNoProposal: "Nenhuma nova regra necessária.",
     matrixReason: "{count} download(s) com falha; tentar novamente com uma conexão conservadora",
@@ -349,6 +350,7 @@ const catalogs = {
     removeFailed: "Não foi possível apagar os arquivos selecionados",
     torrentP2PBlocked: "A conexão atual pode estar bloqueando ou limitando tráfego BitTorrent/P2P (VPN, firewall ou rede).",
     torrentSelectOne: "Selecione pelo menos um arquivo do torrent.",
+    exportDiagnostics: "Exportar diagnóstico", clearInternalLogs: "Limpar logs internos", diagnosticsExported: "Diagnóstico salvo",
     diagnostics: "Diagnóstico",
     diagnosticsHint: "Log seguro de atividades com credenciais e parâmetros das URLs ocultados",
     openLog: "Abrir log de diagnóstico",
@@ -428,7 +430,7 @@ const catalogs = {
     preview: "预览",
     stopRecording: "停止并保存",
     recordingActive: "正在录制",
-    matrixPowered: "由 Matrix Ultimate v2 AI 驱动",
+    matrixPowered: "由 Matrix Ultimate v3 AI 驱动",
     matrixRollback: "回滚",
     matrixAnalyze: "分析故障",
     matrixDescription: "Matrix 会持续监控本地故障并建议安全规则。任何规则都不会执行网站代码。",
@@ -534,6 +536,7 @@ const catalogs = {
     removeFailed: "无法删除所选文件",
     torrentP2PBlocked: "当前连接可能正在阻止或限制 BitTorrent/P2P 流量（VPN、防火墙或网络）。",
     torrentSelectOne: "请至少选择一个种子文件。",
+    exportDiagnostics: "导出诊断", clearInternalLogs: "清除内部日志", diagnosticsExported: "诊断已保存",
     diagnostics: "诊断",
     diagnosticsHint: "隐藏凭据和网址参数的安全活动日志",
     openLog: "打开诊断日志",
@@ -1612,6 +1615,14 @@ document.querySelector("#open-log").onclick = async () => {
     logDialog.showModal();
   } catch (error) { console.error(error); }
 };
+document.querySelector("#export-diagnostics").onclick = async (event) => {
+  const button = event.currentTarget; button.disabled = true;
+  try { const path = await invoke("export_diagnostics"); window.alert(`${t("diagnosticsExported")}: ${path}`); } catch (error) { console.error(error); window.alert(String(error)); } finally { button.disabled = false; }
+};
+document.querySelector("#clear-internal-logs").onclick = async (event) => {
+  const button = event.currentTarget; button.disabled = true;
+  try { await invoke("clear_general_log"); if (logDialog.open) await refreshDiagnosticLog(); } catch (error) { console.error(error); } finally { button.disabled = false; }
+};
 document.querySelector("#clear-log").onclick = async (event) => {
   const button = event.currentTarget;
   button.disabled = true;
@@ -1947,7 +1958,8 @@ window.__TAURI__?.event?.listen?.("recording-completed", async (event) => {
     await refreshDownloads();
     exportTaskId = event.payload;
     const task = downloads.find((item) => item.id === exportTaskId);
-    document.querySelector("#export-source").textContent = task?.destination || "";
+    if (!task || !/\.recording\.webm$/i.test(task.destination)) return;
+    document.querySelector("#export-source").textContent = task.destination;
     document.querySelector("#export-destination").value = task?.destination?.replace(/[\\/][^\\/]+$/, "") || await invoke("default_download_directory");
     document.querySelector("#export-format").value = "mkv";
     document.querySelector("#export-video-codec").value = "copy";

@@ -23,6 +23,7 @@ static STARTED: OnceLock<Mutex<HashMap<String, u128>>> = OnceLock::new();
 
 #[derive(Clone, Debug, Default)]
 pub struct HostSignal {
+    #[allow(dead_code)]
     pub host: String,
     pub failures: usize,
     pub unique_traces: HashSet<String>,
