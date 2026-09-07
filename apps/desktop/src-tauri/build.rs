@@ -145,6 +145,53 @@ struct BridgeDiagnosticEvent {
         source = source.replacen(marker, &format!("{diagnostic}{marker}"), 1);
     }
 
+    if !source.contains("prompt_for_destination: bool") {
+        source = source.replacen(
+            "    #[serde(default)]\n    streaming: bool,\n}",
+            "    #[serde(default)]\n    streaming: bool,\n    #[serde(default)]\n    prompt_for_destination: bool,\n}",
+            1,
+        );
+    }
+
+    if !source.contains("blob.destination_prompt") {
+        let marker = r#"    let state = app.state::<AppState>();
+    let directory = configured_download_directory(app, &state)?;
+    let file_name = validate_file_name(&request.file_name)?;
+    let destination = unique_destination(&directory, &file_name);"#;
+        let replacement = r#"    let state = app.state::<AppState>();
+    let directory = configured_download_directory(app, &state)?;
+    let file_name = validate_file_name(&request.file_name)?;
+    let destination = if request.prompt_for_destination {
+        show_main_window(app);
+        diagnostic_log(
+            &state,
+            "INFO",
+            "blob.destination_prompt",
+            &format!("file={file_name}"),
+        );
+        let Some(path) = rfd::FileDialog::new()
+            .set_directory(&directory)
+            .set_file_name(&file_name)
+            .save_file()
+        else {
+            diagnostic_log(&state, "INFO", "blob.destination_cancelled", "cancelled_by_user");
+            return Err("cancelled".to_owned());
+        };
+        if path.exists() {
+            fs::remove_file(&path).map_err(|error| error.to_string())?;
+        }
+        path
+    } else {
+        unique_destination(&directory, &file_name)
+    };
+    if let Some(parent) = destination.parent() {
+        remember_download_directory(&state, parent)?;
+    }"#;
+        if source.contains(marker) {
+            source = source.replacen(marker, replacement, 1);
+        }
+    }
+
     if !source.contains("POST /v1/diagnostic ") {
         let marker = "    } else if first.starts_with(\"POST /v1/blob/begin \") {";
         let route = r#"    } else if first.starts_with("POST /v1/diagnostic ") {
