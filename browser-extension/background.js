@@ -2,12 +2,18 @@ importScripts("service-worker.js");
 
 const RAPIDGATOR_BRIDGE = "http://127.0.0.1:17654";
 
-async function rapidgatorCookieHeader(urls) {
-  const groups = await Promise.all([...new Set((urls || []).filter((url) => /^https?:/i.test(url)))]
-    .map((url) => chrome.cookies.getAll({ url }).catch(() => [])));
-  const values = new Map();
-  for (const cookie of groups.flat()) values.set(cookie.name, cookie.value);
-  return [...values].map(([name, value]) => `${name}=${value}`).join("; ");
+async function rapidgatorCookieHeader(url) {
+  const cookies = await chrome.cookies.getAll({ url }).catch(() => []);
+  // Match the browser's Cookie header as closely as possible. Do not merge
+  // cookies from the landing page or deduplicate names: Rapidgator can keep
+  // host/path-specific values with the same name and the final CDN request
+  // must receive only cookies that are actually valid for that URL.
+  cookies.sort((left, right) => {
+    const pathLength = String(right.path || "/").length - String(left.path || "/").length;
+    if (pathLength !== 0) return pathLength;
+    return Number(left.hostOnly) - Number(right.hostOnly);
+  });
+  return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
 }
 
 async function rapidgatorBridgeRequest(item, sender) {
@@ -27,11 +33,12 @@ async function rapidgatorBridgeRequest(item, sender) {
       fileName: item.title || null,
       pageUrl,
       duration: null,
-      cookieHeader: await rapidgatorCookieHeader([url, pageUrl]),
+      cookieHeader: await rapidgatorCookieHeader(url),
       userAgent: item.userAgent || null,
       requestMethod: "GET",
-      // An explicit empty body keeps the core on the single-request path:
-      // no HEAD, no Range 0-0 probe and no segmented preflight before the real GET.
+      // Empty body is an internal marker that disables HEAD/Range preflights.
+      // The core intentionally does NOT put this empty body on the wire, so
+      // Rapidgator receives a normal browser-like GET without Content-Length: 0.
       requestBody: "",
       requestContentType: null,
       startImmediately: true,
