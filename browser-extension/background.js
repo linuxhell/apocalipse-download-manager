@@ -1,7 +1,7 @@
 importScripts("service-worker.js");
 
 const RAPIDGATOR_BRIDGE = "http://127.0.0.1:17654";
-const rapidgatorTransports = new Map();
+const rapidgatorArmedTabs = new Map();
 
 const debuggerAttach = (debuggee) => new Promise((resolve, reject) => {
   chrome.debugger.attach(debuggee, "1.3", () => {
@@ -32,15 +32,6 @@ async function rapidgatorPairingToken() {
   return pairingToken;
 }
 
-async function rapidgatorBridgeHealth() {
-  const pairingToken = await rapidgatorPairingToken();
-  const response = await fetch(`${RAPIDGATOR_BRIDGE}/v1/health`, {
-    method: "GET",
-    headers: { "Authorization": `Bearer ${pairingToken}` },
-  });
-  if (!response.ok) throw new Error(`bridge_http_${response.status}`);
-}
-
 async function rapidgatorBridgePost(path, body) {
   const pairingToken = await rapidgatorPairingToken();
   const response = await fetch(`${RAPIDGATOR_BRIDGE}${path}`, {
@@ -55,35 +46,31 @@ async function rapidgatorBridgePost(path, body) {
   return response.json();
 }
 
-async function rapidgatorDiagnostic(event, transport = {}, extra = {}) {
-  const traceId = extra.traceId || transport.transportId || null;
-  const startedAt = Number(transport.startedAt || extra.startedAt || 0);
-  const durationMs = startedAt ? Math.max(0, Date.now() - startedAt) : null;
-  const detail = [
-    extra.detail || "",
-    extra.contentType ? `content_type=${String(extra.contentType).slice(0, 160)}` : "",
-    extra.disposition ? `content_disposition=${String(extra.disposition).slice(0, 200)}` : "",
-    extra.error ? `error=${String(extra.error).slice(0, 1000).replace(/[\r\n]+/g, " ")}` : "",
-    Number.isFinite(extra.chunkCount) ? `chunks=${extra.chunkCount}` : "",
-  ].filter(Boolean).join(" ");
-  await rapidgatorBridgePost("/v1/diagnostic", {
-    event,
-    level: extra.level || (extra.error ? "ERROR" : "INFO"),
-    traceId,
-    source: "chrome-extension",
-    url: extra.url || transport.url || null,
-    status: Number.isFinite(extra.status) ? extra.status : null,
-    bytes: Number.isFinite(extra.bytes) ? extra.bytes : (Number.isFinite(transport.bytes) ? transport.bytes : null),
-    durationMs,
-    detail: detail || null,
-  }).catch(() => {});
+async function rapidgatorBridgeHealth() {
+  const pairingToken = await rapidgatorPairingToken();
+  const response = await fetch(`${RAPIDGATOR_BRIDGE}/v1/health`, {
+    method: "GET",
+    headers: { "Authorization": `Bearer ${pairingToken}` },
+  });
+  if (!response.ok) throw new Error(`bridge_http_${response.status}`);
 }
 
-function rapidgatorResponseHeader(headers, name) {
+const finalRapidgatorUrl = (value) => {
+  try {
+    const url = new URL(value);
+    if (!/^s\d+\.rapidgator\.net$/i.test(url.hostname)) return null;
+    if (!/^\/download\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(url.pathname)) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+};
+
+function responseHeader(headers, name) {
   return (headers || []).find((header) => String(header.name || "").toLowerCase() === name.toLowerCase())?.value || "";
 }
 
-function rapidgatorFileName(disposition, fallbackUrl) {
+function fileNameFromDisposition(disposition, fallbackUrl) {
   const extended = disposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)?.[1];
   if (extended) {
     try { return decodeURIComponent(extended.replace(/^"|"$/g, "")); } catch {}
@@ -100,7 +87,7 @@ function rapidgatorFileName(disposition, fallbackUrl) {
   }
 }
 
-function rapidgatorBytesFromIo(data, base64Encoded) {
+function bytesFromIo(data, base64Encoded) {
   if (base64Encoded) {
     const binary = atob(data);
     const bytes = new Uint8Array(binary.length);
@@ -110,252 +97,218 @@ function rapidgatorBytesFromIo(data, base64Encoded) {
   return new TextEncoder().encode(data);
 }
 
-function rapidgatorHex(bytes) {
+function hex(bytes) {
   let value = "";
   for (const byte of bytes) value += byte.toString(16).padStart(2, "0");
   return value;
 }
 
-async function rapidgatorNotifyFrame(tabId, transport, ok, error = null) {
-  await chrome.tabs.sendMessage(tabId, {
-    type: "APOCALIPSE_RAPIDGATOR_BROWSER_TRANSPORT_DONE",
-    transportId: transport.transportId,
-    ok,
-    error,
-  }, { frameId: transport.frameId }).catch(() => {});
+async function diagnostic(event, state = {}, extra = {}) {
+  const startedAt = Number(state.startedAt || 0);
+  const detail = [
+    extra.detail || "",
+    extra.contentType ? `content_type=${String(extra.contentType).slice(0, 160)}` : "",
+    extra.disposition ? `content_disposition=${String(extra.disposition).slice(0, 240)}` : "",
+    extra.error ? `error=${String(extra.error).slice(0, 1200).replace(/[\r\n]+/g, " ")}` : "",
+    Number.isFinite(extra.chunkCount) ? `chunks=${extra.chunkCount}` : "",
+  ].filter(Boolean).join(" ");
+  await rapidgatorBridgePost("/v1/diagnostic", {
+    event,
+    level: extra.level || (extra.error ? "ERROR" : "INFO"),
+    traceId: state.traceId || null,
+    source: "chrome-extension",
+    url: extra.url || state.url || state.pageUrl || null,
+    status: Number.isFinite(extra.status) ? extra.status : null,
+    bytes: Number.isFinite(extra.bytes) ? extra.bytes : (Number.isFinite(state.bytes) ? state.bytes : null),
+    durationMs: startedAt ? Math.max(0, Date.now() - startedAt) : null,
+    detail: detail || null,
+  }).catch(() => {});
 }
 
-async function rapidgatorFinishTransport(tabId, ok, error = null) {
-  const transport = rapidgatorTransports.get(tabId);
-  if (!transport) return;
-  rapidgatorTransports.delete(tabId);
-  if (transport.timeoutId) clearTimeout(transport.timeoutId);
-  await rapidgatorNotifyFrame(tabId, transport, ok, error);
+async function disarmRapidgator(tabId, reason = "done") {
+  const state = rapidgatorArmedTabs.get(tabId);
+  if (!state) return;
+  rapidgatorArmedTabs.delete(tabId);
+  await diagnostic("rapidgator.cdp.disarmed", state, { detail: `reason=${reason}` });
   await debuggerDetach({ tabId });
 }
 
-async function rapidgatorStreamPausedResponse(tabId, params) {
-  const transport = rapidgatorTransports.get(tabId);
-  if (!transport || params.request?.url !== transport.url) return;
-  const debuggee = { tabId };
-  transport.requestId = params.requestId;
-  transport.responseSeen = true;
-  if (transport.timeoutId) {
-    clearTimeout(transport.timeoutId);
-    transport.timeoutId = null;
+async function armRapidgator(tabId, pageUrl) {
+  if (!tabId) throw new Error("rapidgator_tab_missing");
+  const existing = rapidgatorArmedTabs.get(tabId);
+  if (existing) {
+    existing.pageUrl = pageUrl || existing.pageUrl;
+    return { armed: true, reused: true, traceId: existing.traceId };
   }
 
+  await rapidgatorBridgeHealth();
+  const state = {
+    traceId: crypto.randomUUID(),
+    pageUrl: pageUrl || null,
+    url: null,
+    startedAt: Date.now(),
+    bytes: 0,
+    busy: false,
+  };
+  await diagnostic("rapidgator.cdp.arm_requested", state, { detail: `tab=${tabId}` });
+
+  const debuggee = { tabId };
   try {
-    const status = Number(params.responseStatusCode || 0);
-    const headers = params.responseHeaders || [];
-    const contentType = rapidgatorResponseHeader(headers, "content-type").toLowerCase();
-    const disposition = rapidgatorResponseHeader(headers, "content-disposition");
-    await rapidgatorDiagnostic("rapidgator.browser_transport.response_paused", transport, {
+    await debuggerAttach(debuggee);
+    await diagnostic("rapidgator.cdp.debugger_attached", state);
+    await debuggerCommand(debuggee, "Fetch.enable", {
+      patterns: [{ urlPattern: "https://s*.rapidgator.net/download/*", requestStage: "Response" }],
+    });
+    rapidgatorArmedTabs.set(tabId, state);
+    await diagnostic("rapidgator.cdp.fetch_armed", state, { detail: "pattern=s*.rapidgator.net/download/* stage=response" });
+    return { armed: true, reused: false, traceId: state.traceId };
+  } catch (error) {
+    await diagnostic("rapidgator.cdp.arm_failed", state, { level: "ERROR", error: String(error) });
+    await debuggerDetach(debuggee);
+    throw error;
+  }
+}
+
+async function streamRapidgatorResponse(tabId, params) {
+  const state = rapidgatorArmedTabs.get(tabId);
+  if (!state || state.busy) return;
+  const url = finalRapidgatorUrl(params.request?.url || "");
+  if (!url) return;
+  state.busy = true;
+  state.url = url;
+  state.startedAt = Date.now();
+  state.bytes = 0;
+
+  const debuggee = { tabId };
+  const status = Number(params.responseStatusCode || 0);
+  const headers = params.responseHeaders || [];
+  const contentType = responseHeader(headers, "content-type").toLowerCase();
+  const disposition = responseHeader(headers, "content-disposition");
+  const total = Number.parseInt(responseHeader(headers, "content-length"), 10) || 0;
+
+  await diagnostic("rapidgator.cdp.response_paused", state, {
+    status,
+    contentType,
+    disposition,
+    detail: `expected_bytes=${total}`,
+  });
+
+  if (status < 200 || status >= 300) {
+    state.busy = false;
+    await diagnostic("rapidgator.cdp.non_success_response", state, { level: "WARN", status, contentType });
+    await debuggerCommand(debuggee, "Fetch.continueRequest", { requestId: params.requestId }).catch(() => {});
+    return;
+  }
+
+  const isFile = contentType.includes("application/octet-stream")
+    || /attachment/i.test(disposition)
+    || /application\/(?:x-rar|zip|x-7z-compressed)/i.test(contentType);
+  if (!isFile) {
+    state.busy = false;
+    await diagnostic("rapidgator.cdp.response_not_file", state, { level: "WARN", status, contentType, disposition });
+    await debuggerCommand(debuggee, "Fetch.continueRequest", { requestId: params.requestId }).catch(() => {});
+    return;
+  }
+
+  let uploadId = null;
+  try {
+    const fileName = fileNameFromDisposition(disposition, url);
+    await diagnostic("rapidgator.cdp.blob_begin", state, {
       status,
       contentType,
       disposition,
-    });
-    if (status < 200 || status >= 300) throw new Error(`rapidgator_http_${status || "unknown"}`);
-    if (contentType.includes("application/json")) {
-      await rapidgatorDiagnostic("rapidgator.browser_transport.unexpected_json", transport, {
-        level: "ERROR",
-        status,
-        contentType,
-      });
-      throw new Error(`rapidgator_unexpected_${contentType || "response"}`);
-    }
-    if (contentType.includes("text/html")) {
-      await rapidgatorDiagnostic("rapidgator.browser_transport.unexpected_html", transport, {
-        level: "ERROR",
-        status,
-        contentType,
-      });
-      throw new Error(`rapidgator_unexpected_${contentType || "response"}`);
-    }
-
-    const total = Number.parseInt(rapidgatorResponseHeader(headers, "content-length"), 10) || 0;
-    const fileName = rapidgatorFileName(disposition, transport.url);
-    await rapidgatorDiagnostic("rapidgator.browser_transport.blob_begin", transport, {
-      status,
-      bytes: 0,
       detail: `expected_bytes=${total} file=${fileName}`,
     });
     const begin = await rapidgatorBridgePost("/v1/blob/begin", {
       fileName,
       total,
-      source: transport.pageUrl || transport.url,
+      source: state.pageUrl || url,
       streaming: total === 0,
     });
-    if (!begin?.uploadId) throw new Error("blob_begin_failed");
+    uploadId = begin?.uploadId || null;
+    if (!uploadId) throw new Error("blob_begin_failed");
 
     const body = await debuggerCommand(debuggee, "Fetch.takeResponseBodyAsStream", { requestId: params.requestId });
     if (!body?.stream) throw new Error("rapidgator_stream_unavailable");
 
     let chunks = 0;
-    let lastProgressBytes = 0;
     let lastProgressAt = Date.now();
+    let lastProgressBytes = 0;
     while (true) {
       const chunk = await debuggerCommand(debuggee, "IO.read", { handle: body.stream, size: 64 * 1024 });
-      const bytes = rapidgatorBytesFromIo(chunk.data || "", Boolean(chunk.base64Encoded));
+      const bytes = bytesFromIo(chunk.data || "", Boolean(chunk.base64Encoded));
       if (bytes.length) {
-        await rapidgatorBridgePost("/v1/blob/chunk", {
-          uploadId: begin.uploadId,
-          data: rapidgatorHex(bytes),
-        });
-        transport.bytes += bytes.length;
+        await rapidgatorBridgePost("/v1/blob/chunk", { uploadId, data: hex(bytes) });
+        state.bytes += bytes.length;
         chunks += 1;
         const now = Date.now();
-        if (transport.bytes - lastProgressBytes >= 1024 * 1024 || now - lastProgressAt >= 2000) {
-          lastProgressBytes = transport.bytes;
+        if (state.bytes - lastProgressBytes >= 1024 * 1024 || now - lastProgressAt >= 1500) {
+          lastProgressBytes = state.bytes;
           lastProgressAt = now;
-          await rapidgatorDiagnostic("rapidgator.browser_transport.progress", transport, {
-            bytes: transport.bytes,
-            chunkCount: chunks,
-          });
+          await diagnostic("rapidgator.cdp.progress", state, { bytes: state.bytes, chunkCount: chunks });
         }
       }
       if (chunk.eof) break;
     }
 
     await debuggerCommand(debuggee, "IO.close", { handle: body.stream }).catch(() => {});
-    await rapidgatorBridgePost("/v1/blob/end", { uploadId: begin.uploadId });
-    await rapidgatorDiagnostic("rapidgator.browser_transport.completed", transport, {
+    await rapidgatorBridgePost("/v1/blob/end", { uploadId });
+    await diagnostic("rapidgator.cdp.completed", state, {
       status,
-      bytes: transport.bytes,
+      bytes: state.bytes,
       chunkCount: chunks,
       detail: `expected_bytes=${total}`,
     });
+
+    // The bytes are already inside Apocalipse. Abort the browser-side response
+    // so Chrome never opens Save As and never creates the bogus JSON fallback.
     await debuggerCommand(debuggee, "Fetch.failRequest", {
       requestId: params.requestId,
       errorReason: "Aborted",
     }).catch(() => {});
-    await rapidgatorFinishTransport(tabId, true);
+    await disarmRapidgator(tabId, "completed");
   } catch (error) {
-    await rapidgatorDiagnostic("rapidgator.browser_transport.failed", transport, {
+    await diagnostic("rapidgator.cdp.failed", state, {
       level: "ERROR",
+      status,
+      bytes: state.bytes,
       error: String(error),
-      bytes: transport.bytes,
+      detail: uploadId ? `upload_id=${uploadId}` : "upload_not_started",
     });
     await debuggerCommand(debuggee, "Fetch.failRequest", {
       requestId: params.requestId,
       errorReason: "Aborted",
     }).catch(() => {});
-    await rapidgatorFinishTransport(tabId, false, String(error));
+    await disarmRapidgator(tabId, "failed");
   }
 }
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
   if (!source.tabId || method !== "Fetch.requestPaused") return;
-  const transport = rapidgatorTransports.get(source.tabId);
-  if (transport) {
-    void rapidgatorDiagnostic("rapidgator.browser_transport.debugger_event", transport, {
-      detail: `method=${method} request_stage=${params.responseStatusCode ? "response" : "request"}`,
-    });
-  }
-  void rapidgatorStreamPausedResponse(source.tabId, params);
+  if (!rapidgatorArmedTabs.has(source.tabId)) return;
+  void streamRapidgatorResponse(source.tabId, params);
 });
 
 chrome.debugger.onDetach.addListener((source, reason) => {
   if (!source.tabId) return;
-  const transport = rapidgatorTransports.get(source.tabId);
-  if (!transport) return;
-  rapidgatorTransports.delete(source.tabId);
-  if (transport.timeoutId) clearTimeout(transport.timeoutId);
-  void rapidgatorNotifyFrame(source.tabId, transport, false, `debugger_detached:${reason || "unknown"}`);
-  void rapidgatorDiagnostic("rapidgator.browser_transport.debugger_detached", transport, {
+  const state = rapidgatorArmedTabs.get(source.tabId);
+  if (!state) return;
+  rapidgatorArmedTabs.delete(source.tabId);
+  void diagnostic("rapidgator.cdp.debugger_detached", state, {
     level: "ERROR",
     error: reason || "unknown",
   });
 });
 
-chrome.downloads.onCreated.addListener((item) => {
-  const itemUrl = item.finalUrl || item.url || "";
-  const match = [...rapidgatorTransports.entries()].find(([, transport]) => transport.url === itemUrl);
-  if (!match) return;
-  const [tabId, transport] = match;
-  void rapidgatorDiagnostic("rapidgator.browser_transport.download_escape", transport, {
-    level: "ERROR",
-    error: "chrome_download_created_before_response_interception",
-  });
-  chrome.downloads.cancel(item.id, () => {
-    void chrome.runtime.lastError;
-    chrome.downloads.erase({ id: item.id }, () => void chrome.runtime.lastError);
-  });
-  void rapidgatorFinishTransport(tabId, false, "chrome_download_escape");
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (rapidgatorArmedTabs.has(tabId)) void disarmRapidgator(tabId, "tab_closed");
 });
 
-async function startRapidgatorBrowserTransport(item, sender) {
-  const tabId = sender.tab?.id;
-  if (!tabId) throw new Error("rapidgator_tab_missing");
-  if (rapidgatorTransports.has(tabId)) throw new Error("rapidgator_transfer_already_active");
-
-  const debuggee = { tabId };
-  const transportId = crypto.randomUUID();
-  const transport = {
-    transportId,
-    url: item.url,
-    pageUrl: sender.tab?.url || null,
-    frameId: Number.isInteger(sender.frameId) ? sender.frameId : 0,
-    startedAt: Date.now(),
-    bytes: 0,
-    responseSeen: false,
-    requestId: null,
-    timeoutId: null,
-  };
-
-  await rapidgatorBridgeHealth();
-  await rapidgatorDiagnostic("rapidgator.browser_transport.requested", transport, {
-    detail: `tab=${tabId} frame=${transport.frameId}`,
-  });
-  try {
-    await debuggerAttach(debuggee);
-    await rapidgatorDiagnostic("rapidgator.browser_transport.debugger_attached", transport);
-    await debuggerCommand(debuggee, "Fetch.enable", {
-      patterns: [{ urlPattern: item.url, requestStage: "Response" }],
-    });
-    await rapidgatorDiagnostic("rapidgator.browser_transport.fetch_enabled", transport);
-    rapidgatorTransports.set(tabId, transport);
-
-    // If the CDP response interception unexpectedly misses the download, keep
-    // the generic interceptor from re-sending this one-shot URL to the native
-    // HTTP engine. The escape listener above will cancel that browser download.
-    await chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 30000 }).catch(() => {});
-
-    const result = await chrome.tabs.sendMessage(tabId, {
-      type: "APOCALIPSE_RAPIDGATOR_START_BROWSER_TRANSPORT",
-      transportId,
-      url: item.url,
-    }, { frameId: transport.frameId });
-    if (!result?.started) throw new Error(result?.error || "rapidgator_browser_request_not_started");
-    await rapidgatorDiagnostic("rapidgator.browser_transport.browser_request_started", transport);
-
-    transport.timeoutId = setTimeout(() => {
-      const current = rapidgatorTransports.get(tabId);
-      if (!current || current.responseSeen) return;
-      void rapidgatorDiagnostic("rapidgator.browser_transport.response_timeout", current, {
-        level: "ERROR",
-        error: "no_Fetch.requestPaused_response_within_20s",
-      });
-      void rapidgatorFinishTransport(tabId, false, "rapidgator_response_interception_timeout");
-    }, 20000);
-
-    return { target: "apocalipse", transport: "browser_stream", transportId };
-  } catch (error) {
-    rapidgatorTransports.delete(tabId);
-    if (transport.timeoutId) clearTimeout(transport.timeoutId);
-    await rapidgatorDiagnostic("rapidgator.browser_transport.setup_failed", transport, {
-      level: "ERROR",
-      error: String(error),
-    });
-    await debuggerDetach(debuggee);
-    throw error;
-  }
-}
-
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
-  if (message?.type !== "APOCALIPSE_RAPIDGATOR_DOWNLOAD" || !message.item?.url) return;
-  startRapidgatorBrowserTransport(message.item, sender)
+  if (message?.type !== "APOCALIPSE_RAPIDGATOR_ARM") return;
+  const tabId = sender.tab?.id;
+  armRapidgator(tabId, message.pageUrl || sender.tab?.url || null)
     .then(reply)
-    .catch((error) => reply({ target: "error", error: String(error), noReplay: true }));
+    .catch((error) => reply({ armed: false, error: String(error) }));
   return true;
 });
