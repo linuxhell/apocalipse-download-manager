@@ -6,8 +6,12 @@
   const finalRapidgatorUrl = (value) => {
     try {
       const url = new URL(value, location.href);
-      if (!/(^|\.)rapidgator\.net$/i.test(url.hostname)) return null;
-      if (!/^\/download\//i.test(url.pathname)) return null;
+      // The real free-download handoff uses a numbered CDN host such as
+      // s14.rapidgator.net or s107.rapidgator.net. Never intercept forms or
+      // intermediate routes on rapidgator.net itself (for example
+      // /download/captcha), because those must stay entirely in the browser.
+      if (!/^s\d+\.rapidgator\.net$/i.test(url.hostname)) return null;
+      if (!/^\/download\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(url.pathname)) return null;
       return url.href;
     } catch {
       return null;
@@ -35,7 +39,7 @@
     const url = finalRapidgatorUrl(anchor.href);
     if (!url) return;
 
-    // Own the final Rapidgator link before Chrome can consume the one-shot URL.
+    // Own only the final one-shot CDN URL, after CAPTCHA/submit has completed.
     event.preventDefault();
     event.stopImmediatePropagation();
 
