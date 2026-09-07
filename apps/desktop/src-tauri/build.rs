@@ -202,6 +202,38 @@ struct BridgeDiagnosticEvent {
         source = source.replacen(marker, &format!("{route}{marker}"), 1);
     }
 
+    if !source.contains("youtube_inspection_browser_context") {
+        let before = r#"    command
+        .args([
+            "--dump-single-json",
+            "--no-playlist",
+            "--skip-download",
+            "--no-warnings",
+        ])
+        .arg(&url);"#;
+        let after = r#"    command.args([
+        "--dump-single-json",
+        "--no-playlist",
+        "--skip-download",
+        "--no-warnings",
+    ]);
+    if url.contains("youtube.com/") || url.contains("youtu.be/") {
+        command.args([
+            "--cookies-from-browser",
+            "chrome",
+            "--js-runtimes",
+            "quickjs",
+            "--retries",
+            "10",
+        ]);
+    }
+    // youtube_inspection_browser_context
+    command.arg(&url);"#;
+        if source.contains(before) {
+            source = source.replacen(before, after, 1);
+        }
+    }
+
     replace_function(
         &mut source,
         "fn diagnostic_log(",
@@ -267,14 +299,6 @@ struct BridgeDiagnosticEvent {
             host: rule.hosts.first().cloned().unwrap_or_default(),
         })
         .collect::<Vec<_>>();
-    drop(queue);
-    drop(rules);
-    diagnostic_log(
-        &state,
-        "INFO",
-        "matrix.v3.analyzed",
-        &format!("proposals={} active_rules={}", proposals.len(), applied_rules.len()),
-    );
     Ok(MatrixStatus {
         version: "Matrix Ultimate v3 AI".to_owned(),
         active_rules: applied_rules.len(),
