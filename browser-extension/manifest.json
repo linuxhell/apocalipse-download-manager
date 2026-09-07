@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.32",
+  "version": "0.3.33",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
-  "permissions": ["activeTab", "storage", "downloads", "alarms", "cookies", "webRequest", "clipboardRead", "clipboardWrite"],
+  "permissions": ["activeTab", "storage", "downloads", "alarms", "cookies", "webRequest", "clipboardRead", "clipboardWrite", "debugger"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "http://*/*", "https://*/*"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
