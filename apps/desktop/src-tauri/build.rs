@@ -284,6 +284,128 @@ struct BridgeDiagnosticEvent {
 }"#,
     );
 
+    replace_function(
+        &mut source,
+        "async fn inspect_torrent_metadata(",
+        r#"async fn inspect_torrent_metadata(
+    state: State<'_, AppState>,
+    source: String,
+) -> Result<TorrentInspection, String> {
+    let started = Instant::now();
+    diagnostic_log(
+        &state,
+        "INFO",
+        "torrent.metadata.start",
+        &format!("kind={:?}", classify_url(&source)),
+    );
+    match classify_url(&source) {
+        Some(DownloadKind::Torrent) => {
+            let result = inspect_torrent_file(Path::new(&source));
+            if let Ok(info) = &result {
+                diagnostic_log(
+                    &state,
+                    "INFO",
+                    "torrent.metadata.completed",
+                    &format!("files={} bytes={} elapsed_ms={}", info.files.len(), info.total_size, started.elapsed().as_millis()),
+                );
+            }
+            result
+        }
+        Some(DownloadKind::Magnet) => {
+            let (aria2, root) = {
+                let settings = state.settings.lock().map_err(|error| error.to_string())?;
+                let root = state
+                    .queue_path
+                    .parent()
+                    .unwrap_or(Path::new("."))
+                    .join("torrent-metadata")
+                    .join(uuid::Uuid::new_v4().to_string());
+                (
+                    configured_tool(
+                        &settings.aria2_path,
+                        if cfg!(windows) { "aria2c.exe" } else { "aria2c" },
+                    ),
+                    root,
+                )
+            };
+            fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+            let mut command = tokio::process::Command::new(aria2);
+            command
+                .args([
+                    "--bt-metadata-only=true",
+                    "--bt-save-metadata=true",
+                    "--seed-time=0",
+                    "--summary-interval=1",
+                    "--console-log-level=warn",
+                    "--enable-dht=true",
+                    "--enable-peer-exchange=true",
+                    "--bt-enable-lpd=true",
+                ])
+                .arg(format!("--dir={}", root.display()))
+                .arg(&source);
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                command.as_std_mut().creation_flags(0x08000000);
+            }
+            command.stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true);
+            let mut child = command.spawn().map_err(|error| format!("torrent_metadata_engine_unavailable: {error}"))?;
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+            let torrent = loop {
+                let found = fs::read_dir(&root)
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|entry| entry.path())
+                    .find(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("torrent")));
+                if let Some(path) = found {
+                    break Ok(path);
+                }
+                if let Ok(Some(status)) = child.try_wait() {
+                    let stderr = child
+                        .stderr
+                        .take()
+                        .map(|mut stream| {
+                            let mut bytes = Vec::new();
+                            let _ = std::io::Read::read_to_end(&mut stream, &mut bytes);
+                            String::from_utf8_lossy(&bytes).into_owned()
+                        })
+                        .unwrap_or_default();
+                    break Err(external_error_detail(&stderr, status.code()));
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    break Err("torrent_metadata_timeout".to_owned());
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            };
+            let _ = child.kill().await;
+            let result = match torrent {
+                Ok(path) => inspect_torrent_file(&path),
+                Err(error) => Err(error),
+            };
+            match &result {
+                Ok(info) => diagnostic_log(
+                    &state,
+                    "INFO",
+                    "torrent.metadata.completed",
+                    &format!("files={} bytes={} elapsed_ms={}", info.files.len(), info.total_size, started.elapsed().as_millis()),
+                ),
+                Err(error) => diagnostic_log(
+                    &state,
+                    "ERROR",
+                    "torrent.metadata.failed",
+                    &format!("error={error} elapsed_ms={}", started.elapsed().as_millis()),
+                ),
+            }
+            let _ = fs::remove_dir_all(&root);
+            result
+        }
+        _ => Err("not_a_torrent".to_owned()),
+    }
+}"#,
+    );
+
     if source != original {
         fs::write(path, source).expect("write patched main.rs");
     }
