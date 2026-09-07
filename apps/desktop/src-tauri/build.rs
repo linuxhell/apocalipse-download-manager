@@ -102,6 +102,18 @@ fn replace_function(source: &mut String, signature: &str, replacement: &str) {
     }
 }
 
+fn patch_diagnostics(manifest: &Path) {
+    let path = manifest.join("src/diagnostics_v3.rs");
+    let original = fs::read_to_string(&path).expect("read diagnostics_v3.rs");
+    let source = original.replace(
+        "pub struct HostSignal {\n    pub host: String,",
+        "pub struct HostSignal {\n    #[allow(dead_code)]\n    pub host: String,",
+    );
+    if source != original {
+        fs::write(path, source).expect("write patched diagnostics_v3.rs");
+    }
+}
+
 fn patch_main(manifest: &Path) {
     let path = manifest.join("src/main.rs");
     let original = fs::read_to_string(&path).expect("read main.rs");
@@ -303,6 +315,7 @@ fn patch_ui(manifest: &Path) {
 fn main() {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
     let manifest = Path::new(&manifest);
+    patch_diagnostics(manifest);
     patch_main(manifest);
     patch_ui(manifest);
     println!("cargo:rerun-if-changed=src/diagnostics_v3.rs");
