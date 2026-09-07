@@ -40,7 +40,10 @@ pub struct HostSignal {
 
 impl HostSignal {
     fn new(host: String) -> Self {
-        Self { host, ..Self::default() }
+        Self {
+            host,
+            ..Self::default()
+        }
     }
 
     pub fn add_queue_failures(&mut self, count: usize) {
@@ -203,34 +206,49 @@ fn field<'a>(detail: &'a str, name: &str) -> Option<&'a str> {
 }
 
 fn find_url(detail: &str) -> Option<&str> {
-    detail
-        .split_whitespace()
-        .find_map(|item| item.find("https://").or_else(|| item.find("http://")).map(|index| &item[index..]))
+    detail.split_whitespace().find_map(|item| {
+        item.find("https://")
+            .or_else(|| item.find("http://"))
+            .map(|index| &item[index..])
+    })
 }
 
 fn trace_for(detail: &str) -> Option<String> {
     field(detail, "trace")
         .or_else(|| field(detail, "task"))
         .or_else(|| field(detail, "transport"))
-        .map(|value| value.trim_matches(|character: char| !character.is_ascii_alphanumeric() && character != '-').to_owned())
+        .map(|value| {
+            value
+                .trim_matches(|character: char| {
+                    !character.is_ascii_alphanumeric() && character != '-'
+                })
+                .to_owned()
+        })
         .filter(|value| !value.is_empty())
 }
 
 fn host_for(detail: &str) -> Option<String> {
-    field(detail, "host")
-        .map(str::to_owned)
-        .or_else(|| {
-            find_url(detail).and_then(|raw| {
-                url::Url::parse(raw.trim_matches(|character: char| matches!(character, ')' | ']' | '}' | ',' | ';')))
-                    .ok()
-                    .and_then(|url| url.host_str().map(|host| host.to_ascii_lowercase()))
-            })
+    field(detail, "host").map(str::to_owned).or_else(|| {
+        find_url(detail).and_then(|raw| {
+            url::Url::parse(
+                raw.trim_matches(|character: char| {
+                    matches!(character, ')' | ']' | '}' | ',' | ';')
+                }),
+            )
+            .ok()
+            .and_then(|url| url.host_str().map(|host| host.to_ascii_lowercase()))
         })
+    })
 }
 
 fn status_for(detail: &str) -> Option<u16> {
     field(detail, "status")
-        .and_then(|value| value.trim_matches(|character: char| !character.is_ascii_digit()).parse().ok())
+        .and_then(|value| {
+            value
+                .trim_matches(|character: char| !character.is_ascii_digit())
+                .parse()
+                .ok()
+        })
         .or_else(|| {
             [403_u16, 404, 408, 429, 500, 502, 503, 504]
                 .into_iter()
@@ -241,7 +259,9 @@ fn status_for(detail: &str) -> Option<u16> {
 fn elapsed_for(event: &str, trace: Option<&str>, timestamp: u128) -> Option<u128> {
     let trace = trace?;
     let started = STARTED.get_or_init(|| Mutex::new(HashMap::new()));
-    let Ok(mut started) = started.lock() else { return None; };
+    let Ok(mut started) = started.lock() else {
+        return None;
+    };
     let starts = event.ends_with(".start")
         || event.ends_with(".started")
         || event == "task.enqueued"
@@ -255,9 +275,13 @@ fn elapsed_for(event: &str, trace: Option<&str>, timestamp: u128) -> Option<u128
         return Some(0);
     }
     if terminal {
-        return started.remove(trace).map(|start| timestamp.saturating_sub(start));
+        return started
+            .remove(trace)
+            .map(|start| timestamp.saturating_sub(start));
     }
-    started.get(trace).map(|start| timestamp.saturating_sub(*start))
+    started
+        .get(trace)
+        .map(|start| timestamp.saturating_sub(*start))
 }
 
 pub fn write_event(path: &Path, lock: &Mutex<()>, level: &str, event: &str, detail: &str) {
@@ -302,14 +326,20 @@ fn register_signal(
     explicit_host: Option<String>,
     status: Option<u16>,
 ) {
-    let host = explicit_host
-        .or_else(|| host_for(detail))
-        .or_else(|| trace.as_ref().and_then(|trace| trace_hosts.get(trace).cloned()));
-    let Some(host) = host else { return; };
+    let host = explicit_host.or_else(|| host_for(detail)).or_else(|| {
+        trace
+            .as_ref()
+            .and_then(|trace| trace_hosts.get(trace).cloned())
+    });
+    let Some(host) = host else {
+        return;
+    };
     if let Some(trace) = trace.as_ref() {
         trace_hosts.insert(trace.clone(), host.clone());
     }
-    let signal = signals.entry(host.clone()).or_insert_with(|| HostSignal::new(host));
+    let signal = signals
+        .entry(host.clone())
+        .or_insert_with(|| HostSignal::new(host));
     if let Some(trace) = trace {
         signal.unique_traces.insert(trace);
     }
@@ -344,7 +374,10 @@ fn register_signal(
     if lower_event == "http.failed" {
         signal.direct_http_failures += 1;
     }
-    if lower_event.contains("timeout") || lower_detail.contains("timeout") || lower_detail.contains("timed out") {
+    if lower_event.contains("timeout")
+        || lower_detail.contains("timeout")
+        || lower_detail.contains("timed out")
+    {
         signal.timeouts += 1;
     }
 }
@@ -354,12 +387,29 @@ fn parse_json_line(
     signals: &mut HashMap<String, HostSignal>,
     trace_hosts: &mut HashMap<String, String>,
 ) -> bool {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else { return false; };
-    let event = value.get("event").and_then(|item| item.as_str()).unwrap_or_default();
-    let detail = value.get("detail").and_then(|item| item.as_str()).unwrap_or_default();
-    let trace = value.get("trace").and_then(|item| item.as_str()).map(str::to_owned);
-    let host = value.get("host").and_then(|item| item.as_str()).map(str::to_owned);
-    let status = value.get("status").and_then(|item| item.as_u64()).map(|value| value as u16);
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        return false;
+    };
+    let event = value
+        .get("event")
+        .and_then(|item| item.as_str())
+        .unwrap_or_default();
+    let detail = value
+        .get("detail")
+        .and_then(|item| item.as_str())
+        .unwrap_or_default();
+    let trace = value
+        .get("trace")
+        .and_then(|item| item.as_str())
+        .map(str::to_owned);
+    let host = value
+        .get("host")
+        .and_then(|item| item.as_str())
+        .map(str::to_owned);
+    let status = value
+        .get("status")
+        .and_then(|item| item.as_u64())
+        .map(|value| value as u16);
     register_signal(signals, trace_hosts, event, detail, trace, host, status);
     true
 }
@@ -389,7 +439,9 @@ pub fn analyze(path: &Path) -> HashMap<String, HostSignal> {
         .collect::<Vec<_>>();
     paths.push(path.to_path_buf());
     for log_path in paths {
-        let Ok(contents) = fs::read_to_string(log_path) else { continue; };
+        let Ok(contents) = fs::read_to_string(log_path) else {
+            continue;
+        };
         for line in contents.lines().filter(|line| !line.trim().is_empty()) {
             if !parse_json_line(line, &mut signals, &mut trace_hosts) {
                 parse_legacy_line(line, &mut signals, &mut trace_hosts);

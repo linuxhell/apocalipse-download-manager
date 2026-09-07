@@ -1217,12 +1217,7 @@ async fn inspect_media_formats(
         "--no-warnings",
     ]);
     if url.contains("youtube.com/") || url.contains("youtu.be/") {
-        command.args([
-            "--js-runtimes",
-            "quickjs",
-            "--retries",
-            "10",
-        ]);
+        command.args(["--js-runtimes", "quickjs", "--retries", "10"]);
     }
     if url.contains("facebook.com/") || url.contains("fb.watch/") {
         command.args(["--cookies-from-browser", "chrome", "--retries", "10"]);
@@ -2486,7 +2481,10 @@ fn matrix_analyze(state: State<'_, AppState>) -> Result<MatrixStatus, String> {
     for (host, task_ids) in queue_failures {
         signals
             .entry(host.clone())
-            .or_insert_with(|| diagnostics_v3::HostSignal { host, ..Default::default() })
+            .or_insert_with(|| diagnostics_v3::HostSignal {
+                host,
+                ..Default::default()
+            })
             .add_queue_failures(task_ids.len());
     }
 
@@ -3364,7 +3362,12 @@ async fn inspect_torrent_metadata(
                     &state,
                     "INFO",
                     "torrent.metadata.completed",
-                    &format!("files={} bytes={} elapsed_ms={}", info.files.len(), info.total_size, started.elapsed().as_millis()),
+                    &format!(
+                        "files={} bytes={} elapsed_ms={}",
+                        info.files.len(),
+                        info.total_size,
+                        started.elapsed().as_millis()
+                    ),
                 );
             }
             result
@@ -3381,7 +3384,11 @@ async fn inspect_torrent_metadata(
                 (
                     configured_tool(
                         &settings.aria2_path,
-                        if cfg!(windows) { "aria2c.exe" } else { "aria2c" },
+                        if cfg!(windows) {
+                            "aria2c.exe"
+                        } else {
+                            "aria2c"
+                        },
                     ),
                     root,
                 )
@@ -3407,8 +3414,13 @@ async fn inspect_torrent_metadata(
                 use std::os::windows::process::CommandExt;
                 command.as_std_mut().creation_flags(0x08000000);
             }
-            command.stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
-            let mut child = command.spawn().map_err(|error| format!("torrent_metadata_engine_unavailable: {error}"))?;
+            command
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .kill_on_drop(true);
+            let mut child = command
+                .spawn()
+                .map_err(|error| format!("torrent_metadata_engine_unavailable: {error}"))?;
             let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
             let torrent = loop {
                 let found = fs::read_dir(&root)
@@ -3417,12 +3429,18 @@ async fn inspect_torrent_metadata(
                     .flatten()
                     .flatten()
                     .map(|entry| entry.path())
-                    .find(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("torrent")));
+                    .find(|path| {
+                        path.extension()
+                            .is_some_and(|extension| extension.eq_ignore_ascii_case("torrent"))
+                    });
                 if let Some(path) = found {
                     break Ok(path);
                 }
                 if let Ok(Some(status)) = child.try_wait() {
-                    break Err(format!("torrent_metadata_process_exited_{:?}", status.code()));
+                    break Err(format!(
+                        "torrent_metadata_process_exited_{:?}",
+                        status.code()
+                    ));
                 }
                 if tokio::time::Instant::now() >= deadline {
                     break Err("torrent_metadata_timeout".to_owned());
@@ -3439,7 +3457,12 @@ async fn inspect_torrent_metadata(
                     &state,
                     "INFO",
                     "torrent.metadata.completed",
-                    &format!("files={} bytes={} elapsed_ms={}", info.files.len(), info.total_size, started.elapsed().as_millis()),
+                    &format!(
+                        "files={} bytes={} elapsed_ms={}",
+                        info.files.len(),
+                        info.total_size,
+                        started.elapsed().as_millis()
+                    ),
                 ),
                 Err(error) => diagnostic_log(
                     &state,
@@ -4771,7 +4794,12 @@ fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid:
             .set_file_name(&file_name)
             .save_file()
         else {
-            diagnostic_log(&state, "INFO", "blob.destination_cancelled", "cancelled_by_user");
+            diagnostic_log(
+                &state,
+                "INFO",
+                "blob.destination_cancelled",
+                "cancelled_by_user",
+            );
             return Err("cancelled".to_owned());
         };
         if path.exists() {
@@ -5026,10 +5054,9 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             Ok(request)
                 if !request.event.trim().is_empty()
                     && request.event.len() <= 96
-                    && request
-                        .event
-                        .chars()
-                        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')) =>
+                    && request.event.chars().all(|character| {
+                        character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+                    }) =>
             {
                 let level = request
                     .level
@@ -5040,22 +5067,30 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                 let trace = request
                     .trace_id
                     .as_deref()
-                    .filter(|value| value.len() <= 128 && !value.contains('\r') && !value.contains('\n'))
+                    .filter(|value| {
+                        value.len() <= 128 && !value.contains('\r') && !value.contains('\n')
+                    })
                     .unwrap_or("none");
                 let source = request
                     .source
                     .as_deref()
-                    .filter(|value| value.len() <= 64 && !value.contains('\r') && !value.contains('\n'))
+                    .filter(|value| {
+                        value.len() <= 64 && !value.contains('\r') && !value.contains('\n')
+                    })
                     .unwrap_or("browser");
                 let url = request
                     .url
                     .as_deref()
-                    .filter(|value| value.len() <= 4096 && !value.contains('\r') && !value.contains('\n'))
+                    .filter(|value| {
+                        value.len() <= 4096 && !value.contains('\r') && !value.contains('\n')
+                    })
                     .unwrap_or("none");
                 let detail = request
                     .detail
                     .as_deref()
-                    .filter(|value| value.len() <= 8192 && !value.contains('\r') && !value.contains('\n'))
+                    .filter(|value| {
+                        value.len() <= 8192 && !value.contains('\r') && !value.contains('\n')
+                    })
                     .unwrap_or("");
                 diagnostic_log(
                     &app.state::<AppState>(),
