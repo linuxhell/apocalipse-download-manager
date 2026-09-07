@@ -97,12 +97,15 @@ fn replace_function(source: &mut String, signature: &str, replacement: &str) {
         .unwrap_or_else(|| panic!("unable to find function signature: {signature}"));
     let end = function_end(source, start)
         .unwrap_or_else(|| panic!("unable to find function end: {signature}"));
-    source.replace_range(start..end, replacement);
+    if &source[start..end] != replacement {
+        source.replace_range(start..end, replacement);
+    }
 }
 
 fn patch_main(manifest: &Path) {
     let path = manifest.join("src/main.rs");
-    let mut source = fs::read_to_string(&path).expect("read main.rs");
+    let original = fs::read_to_string(&path).expect("read main.rs");
+    let mut source = original.clone();
 
     if !source.contains("mod diagnostics_v3;") {
         let marker = "#![cfg_attr(not(debug_assertions), windows_subsystem = \"windows\")]\n";
@@ -150,22 +153,22 @@ struct BridgeDiagnosticEvent {
                 let trace = request
                     .trace_id
                     .as_deref()
-                    .filter(|value| value.len() <= 128 && !value.contains(['\r', '\n']))
+                    .filter(|value| value.len() <= 128 && !value.contains('\r') && !value.contains('\n'))
                     .unwrap_or("none");
                 let source = request
                     .source
                     .as_deref()
-                    .filter(|value| value.len() <= 64 && !value.contains(['\r', '\n']))
+                    .filter(|value| value.len() <= 64 && !value.contains('\r') && !value.contains('\n'))
                     .unwrap_or("browser");
                 let url = request
                     .url
                     .as_deref()
-                    .filter(|value| value.len() <= 4096 && !value.contains(['\r', '\n']))
+                    .filter(|value| value.len() <= 4096 && !value.contains('\r') && !value.contains('\n'))
                     .unwrap_or("none");
                 let detail = request
                     .detail
                     .as_deref()
-                    .filter(|value| value.len() <= 8192 && !value.contains(['\r', '\n']))
+                    .filter(|value| value.len() <= 8192 && !value.contains('\r') && !value.contains('\n'))
                     .unwrap_or("");
                 diagnostic_log(
                     &app.state::<AppState>(),
@@ -268,14 +271,17 @@ struct BridgeDiagnosticEvent {
 }"#,
     );
 
-    fs::write(path, source).expect("write patched main.rs");
+    if source != original {
+        fs::write(path, source).expect("write patched main.rs");
+    }
 }
 
 fn patch_ui(manifest: &Path) {
     let ui = manifest.parent().expect("src-tauri parent").join("ui");
     for name in ["app.js", "index.html"] {
         let path = ui.join(name);
-        let Ok(mut source) = fs::read_to_string(&path) else { continue; };
+        let Ok(original) = fs::read_to_string(&path) else { continue; };
+        let mut source = original.clone();
         source = source.replace("Matrix Ultimate v2 AI", "Matrix Ultimate v3 AI");
         source = source.replace(
             "Matrix continuously monitors local failures and proposes safe rules. No rule executes website code.",
@@ -285,7 +291,9 @@ fn patch_ui(manifest: &Path) {
             "A Matrix monitora continuamente as falhas locais e propõe regras seguras. Nenhuma regra executa código de sites.",
             "A Matrix v3 correlaciona rastros estruturados, falhas HTTP, transferências do navegador e respostas incompatíveis antes de propor uma regra segura. Nenhuma regra executa código de sites.",
         );
-        fs::write(path, source).expect("write patched UI");
+        if source != original {
+            fs::write(path, source).expect("write patched UI");
+        }
     }
 }
 
