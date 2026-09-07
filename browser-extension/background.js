@@ -55,6 +55,30 @@ async function rapidgatorBridgePost(path, body) {
   return response.json();
 }
 
+async function rapidgatorDiagnostic(event, transport = {}, extra = {}) {
+  const traceId = extra.traceId || transport.transportId || null;
+  const startedAt = Number(transport.startedAt || extra.startedAt || 0);
+  const durationMs = startedAt ? Math.max(0, Date.now() - startedAt) : null;
+  const detail = [
+    extra.detail || "",
+    extra.contentType ? `content_type=${String(extra.contentType).slice(0, 160)}` : "",
+    extra.disposition ? `content_disposition=${String(extra.disposition).slice(0, 200)}` : "",
+    extra.error ? `error=${String(extra.error).slice(0, 1000).replace(/[\r\n]+/g, " ")}` : "",
+    Number.isFinite(extra.chunkCount) ? `chunks=${extra.chunkCount}` : "",
+  ].filter(Boolean).join(" ");
+  await rapidgatorBridgePost("/v1/diagnostic", {
+    event,
+    level: extra.level || (extra.error ? "ERROR" : "INFO"),
+    traceId,
+    source: "chrome-extension",
+    url: extra.url || transport.url || null,
+    status: Number.isFinite(extra.status) ? extra.status : null,
+    bytes: Number.isFinite(extra.bytes) ? extra.bytes : (Number.isFinite(transport.bytes) ? transport.bytes : null),
+    durationMs,
+    detail: detail || null,
+  }).catch(() => {});
+}
+
 function rapidgatorResponseHeader(headers, name) {
   return (headers || []).find((header) => String(header.name || "").toLowerCase() === name.toLowerCase())?.value || "";
 }
@@ -92,16 +116,21 @@ function rapidgatorHex(bytes) {
   return value;
 }
 
-async function rapidgatorFinishTransport(tabId, ok, error = null) {
-  const transport = rapidgatorTransports.get(tabId);
-  if (!transport) return;
-  rapidgatorTransports.delete(tabId);
+async function rapidgatorNotifyFrame(tabId, transport, ok, error = null) {
   await chrome.tabs.sendMessage(tabId, {
     type: "APOCALIPSE_RAPIDGATOR_BROWSER_TRANSPORT_DONE",
     transportId: transport.transportId,
     ok,
     error,
   }, { frameId: transport.frameId }).catch(() => {});
+}
+
+async function rapidgatorFinishTransport(tabId, ok, error = null) {
+  const transport = rapidgatorTransports.get(tabId);
+  if (!transport) return;
+  rapidgatorTransports.delete(tabId);
+  if (transport.timeoutId) clearTimeout(transport.timeoutId);
+  await rapidgatorNotifyFrame(tabId, transport, ok, error);
   await debuggerDetach({ tabId });
 }
 
@@ -110,19 +139,47 @@ async function rapidgatorStreamPausedResponse(tabId, params) {
   if (!transport || params.request?.url !== transport.url) return;
   const debuggee = { tabId };
   transport.requestId = params.requestId;
+  transport.responseSeen = true;
+  if (transport.timeoutId) {
+    clearTimeout(transport.timeoutId);
+    transport.timeoutId = null;
+  }
 
   try {
     const status = Number(params.responseStatusCode || 0);
     const headers = params.responseHeaders || [];
     const contentType = rapidgatorResponseHeader(headers, "content-type").toLowerCase();
+    const disposition = rapidgatorResponseHeader(headers, "content-disposition");
+    await rapidgatorDiagnostic("rapidgator.browser_transport.response_paused", transport, {
+      status,
+      contentType,
+      disposition,
+    });
     if (status < 200 || status >= 300) throw new Error(`rapidgator_http_${status || "unknown"}`);
-    if (contentType.includes("application/json") || contentType.includes("text/html")) {
+    if (contentType.includes("application/json")) {
+      await rapidgatorDiagnostic("rapidgator.browser_transport.unexpected_json", transport, {
+        level: "ERROR",
+        status,
+        contentType,
+      });
+      throw new Error(`rapidgator_unexpected_${contentType || "response"}`);
+    }
+    if (contentType.includes("text/html")) {
+      await rapidgatorDiagnostic("rapidgator.browser_transport.unexpected_html", transport, {
+        level: "ERROR",
+        status,
+        contentType,
+      });
       throw new Error(`rapidgator_unexpected_${contentType || "response"}`);
     }
 
-    const disposition = rapidgatorResponseHeader(headers, "content-disposition");
     const total = Number.parseInt(rapidgatorResponseHeader(headers, "content-length"), 10) || 0;
     const fileName = rapidgatorFileName(disposition, transport.url);
+    await rapidgatorDiagnostic("rapidgator.browser_transport.blob_begin", transport, {
+      status,
+      bytes: 0,
+      detail: `expected_bytes=${total} file=${fileName}`,
+    });
     const begin = await rapidgatorBridgePost("/v1/blob/begin", {
       fileName,
       total,
@@ -134,6 +191,9 @@ async function rapidgatorStreamPausedResponse(tabId, params) {
     const body = await debuggerCommand(debuggee, "Fetch.takeResponseBodyAsStream", { requestId: params.requestId });
     if (!body?.stream) throw new Error("rapidgator_stream_unavailable");
 
+    let chunks = 0;
+    let lastProgressBytes = 0;
+    let lastProgressAt = Date.now();
     while (true) {
       const chunk = await debuggerCommand(debuggee, "IO.read", { handle: body.stream, size: 64 * 1024 });
       const bytes = rapidgatorBytesFromIo(chunk.data || "", Boolean(chunk.base64Encoded));
@@ -142,18 +202,40 @@ async function rapidgatorStreamPausedResponse(tabId, params) {
           uploadId: begin.uploadId,
           data: rapidgatorHex(bytes),
         });
+        transport.bytes += bytes.length;
+        chunks += 1;
+        const now = Date.now();
+        if (transport.bytes - lastProgressBytes >= 1024 * 1024 || now - lastProgressAt >= 2000) {
+          lastProgressBytes = transport.bytes;
+          lastProgressAt = now;
+          await rapidgatorDiagnostic("rapidgator.browser_transport.progress", transport, {
+            bytes: transport.bytes,
+            chunkCount: chunks,
+          });
+        }
       }
       if (chunk.eof) break;
     }
 
     await debuggerCommand(debuggee, "IO.close", { handle: body.stream }).catch(() => {});
     await rapidgatorBridgePost("/v1/blob/end", { uploadId: begin.uploadId });
+    await rapidgatorDiagnostic("rapidgator.browser_transport.completed", transport, {
+      status,
+      bytes: transport.bytes,
+      chunkCount: chunks,
+      detail: `expected_bytes=${total}`,
+    });
     await debuggerCommand(debuggee, "Fetch.failRequest", {
       requestId: params.requestId,
       errorReason: "Aborted",
     }).catch(() => {});
     await rapidgatorFinishTransport(tabId, true);
   } catch (error) {
+    await rapidgatorDiagnostic("rapidgator.browser_transport.failed", transport, {
+      level: "ERROR",
+      error: String(error),
+      bytes: transport.bytes,
+    });
     await debuggerCommand(debuggee, "Fetch.failRequest", {
       requestId: params.requestId,
       errorReason: "Aborted",
@@ -164,11 +246,42 @@ async function rapidgatorStreamPausedResponse(tabId, params) {
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
   if (!source.tabId || method !== "Fetch.requestPaused") return;
+  const transport = rapidgatorTransports.get(source.tabId);
+  if (transport) {
+    void rapidgatorDiagnostic("rapidgator.browser_transport.debugger_event", transport, {
+      detail: `method=${method} request_stage=${params.responseStatusCode ? "response" : "request"}`,
+    });
+  }
   void rapidgatorStreamPausedResponse(source.tabId, params);
 });
 
-chrome.debugger.onDetach.addListener((source) => {
-  if (source.tabId) rapidgatorTransports.delete(source.tabId);
+chrome.debugger.onDetach.addListener((source, reason) => {
+  if (!source.tabId) return;
+  const transport = rapidgatorTransports.get(source.tabId);
+  if (!transport) return;
+  rapidgatorTransports.delete(source.tabId);
+  if (transport.timeoutId) clearTimeout(transport.timeoutId);
+  void rapidgatorNotifyFrame(source.tabId, transport, false, `debugger_detached:${reason || "unknown"}`);
+  void rapidgatorDiagnostic("rapidgator.browser_transport.debugger_detached", transport, {
+    level: "ERROR",
+    error: reason || "unknown",
+  });
+});
+
+chrome.downloads.onCreated.addListener((item) => {
+  const itemUrl = item.finalUrl || item.url || "";
+  const match = [...rapidgatorTransports.entries()].find(([, transport]) => transport.url === itemUrl);
+  if (!match) return;
+  const [tabId, transport] = match;
+  void rapidgatorDiagnostic("rapidgator.browser_transport.download_escape", transport, {
+    level: "ERROR",
+    error: "chrome_download_created_before_response_interception",
+  });
+  chrome.downloads.cancel(item.id, () => {
+    void chrome.runtime.lastError;
+    chrome.downloads.erase({ id: item.id }, () => void chrome.runtime.lastError);
+  });
+  void rapidgatorFinishTransport(tabId, false, "chrome_download_escape");
 });
 
 async function startRapidgatorBrowserTransport(item, sender) {
@@ -178,27 +291,62 @@ async function startRapidgatorBrowserTransport(item, sender) {
 
   const debuggee = { tabId };
   const transportId = crypto.randomUUID();
+  const transport = {
+    transportId,
+    url: item.url,
+    pageUrl: sender.tab?.url || null,
+    frameId: Number.isInteger(sender.frameId) ? sender.frameId : 0,
+    startedAt: Date.now(),
+    bytes: 0,
+    responseSeen: false,
+    requestId: null,
+    timeoutId: null,
+  };
+
   await rapidgatorBridgeHealth();
-  await debuggerAttach(debuggee);
+  await rapidgatorDiagnostic("rapidgator.browser_transport.requested", transport, {
+    detail: `tab=${tabId} frame=${transport.frameId}`,
+  });
   try {
+    await debuggerAttach(debuggee);
+    await rapidgatorDiagnostic("rapidgator.browser_transport.debugger_attached", transport);
     await debuggerCommand(debuggee, "Fetch.enable", {
       patterns: [{ urlPattern: item.url, requestStage: "Response" }],
     });
-    rapidgatorTransports.set(tabId, {
-      transportId,
-      url: item.url,
-      pageUrl: sender.tab?.url || null,
-      frameId: Number.isInteger(sender.frameId) ? sender.frameId : 0,
-    });
+    await rapidgatorDiagnostic("rapidgator.browser_transport.fetch_enabled", transport);
+    rapidgatorTransports.set(tabId, transport);
+
+    // If the CDP response interception unexpectedly misses the download, keep
+    // the generic interceptor from re-sending this one-shot URL to the native
+    // HTTP engine. The escape listener above will cancel that browser download.
+    await chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 30000 }).catch(() => {});
+
     const result = await chrome.tabs.sendMessage(tabId, {
       type: "APOCALIPSE_RAPIDGATOR_START_BROWSER_TRANSPORT",
       transportId,
       url: item.url,
-    }, { frameId: Number.isInteger(sender.frameId) ? sender.frameId : 0 });
+    }, { frameId: transport.frameId });
     if (!result?.started) throw new Error(result?.error || "rapidgator_browser_request_not_started");
+    await rapidgatorDiagnostic("rapidgator.browser_transport.browser_request_started", transport);
+
+    transport.timeoutId = setTimeout(() => {
+      const current = rapidgatorTransports.get(tabId);
+      if (!current || current.responseSeen) return;
+      void rapidgatorDiagnostic("rapidgator.browser_transport.response_timeout", current, {
+        level: "ERROR",
+        error: "no_Fetch.requestPaused_response_within_20s",
+      });
+      void rapidgatorFinishTransport(tabId, false, "rapidgator_response_interception_timeout");
+    }, 20000);
+
     return { target: "apocalipse", transport: "browser_stream", transportId };
   } catch (error) {
     rapidgatorTransports.delete(tabId);
+    if (transport.timeoutId) clearTimeout(transport.timeoutId);
+    await rapidgatorDiagnostic("rapidgator.browser_transport.setup_failed", transport, {
+      level: "ERROR",
+      error: String(error),
+    });
     await debuggerDetach(debuggee);
     throw error;
   }
@@ -208,6 +356,6 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type !== "APOCALIPSE_RAPIDGATOR_DOWNLOAD" || !message.item?.url) return;
   startRapidgatorBrowserTransport(message.item, sender)
     .then(reply)
-    .catch((error) => reply({ target: "error", error: String(error) }));
+    .catch((error) => reply({ target: "error", error: String(error), noReplay: true }));
   return true;
 });
