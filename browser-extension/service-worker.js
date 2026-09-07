@@ -6,7 +6,10 @@ let bypassUntil = 0;
 let bypassNextUntil = 0;
 let forceHeld = false;
 let lastFormSubmission = null;
-let siteRules = [{ id: "uupdump", hosts: ["uupdump.net", "*.uupdump.net"], action: "uupdump_post", enabled: true }];
+let siteRules = [
+  { id: "uupdump", hosts: ["uupdump.net", "*.uupdump.net"], action: "uupdump_post", enabled: true },
+  { id: "rapidgator", hosts: ["rapidgator.net", "*.rapidgator.net"], action: "browser_assisted", enabled: true },
+];
 const recentFileResponses = [];
 const ASSISTED_PREFIX = "assisted-download:";
 const DIRECT_PREFIX = "direct-download:";
@@ -296,7 +299,12 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     return false;
   }
   if (!bridgeConnected || bypassHeld || Date.now() < bypassUntil) return false;
-  const immediateTakeover = Boolean(matchingRule(url, "browser_assisted"));
+  const browserAssisted = matchingRule(url, "browser_assisted");
+  if (browserAssisted) {
+    await markAssistedDownload(item, url);
+    return false;
+  }
+  const immediateTakeover = false;
   let cancelled = false;
   try {
     await cancelBrowserDownload(item.id);
