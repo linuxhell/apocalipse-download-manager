@@ -266,8 +266,6 @@ struct BridgeDiagnosticEvent {
     ]);
     if url.contains("youtube.com/") || url.contains("youtu.be/") {
         command.args([
-            "--cookies-from-browser",
-            "chrome",
             "--js-runtimes",
             "quickjs",
             "--retries",
@@ -402,6 +400,7 @@ struct BridgeDiagnosticEvent {
             fs::create_dir_all(&root).map_err(|error| error.to_string())?;
             let mut command = tokio::process::Command::new(aria2);
             command
+                .current_dir(&root)
                 .args([
                     "--bt-metadata-only=true",
                     "--bt-save-metadata=true",
@@ -475,7 +474,7 @@ struct BridgeDiagnosticEvent {
 
 fn patch_ui(manifest: &Path) {
     let ui = manifest.parent().expect("src-tauri parent").join("ui");
-    for name in ["app.js", "index.html"] {
+    for name in ["app.js", "index.html", "styles.css"] {
         let path = ui.join(name);
         let Ok(original) = fs::read_to_string(&path) else {
             continue;
@@ -490,6 +489,22 @@ fn patch_ui(manifest: &Path) {
             "A Matrix monitora continuamente as falhas locais e propõe regras seguras. Nenhuma regra executa código de sites.",
             "A Matrix v3 correlaciona rastros estruturados, falhas HTTP, transferências do navegador e respostas incompatíveis antes de propor uma regra segura. Nenhuma regra executa código de sites.",
         );
+        if name == "app.js" {
+            source = source.replace(
+                "    const task = downloads.find((item) => item.id === exportTaskId);\n    document.querySelector(\"#export-source\").textContent = task?.destination || \"\";",
+                "    const task = downloads.find((item) => item.id === exportTaskId);\n    if (!task || !/\\.recording\\.webm$/i.test(task.destination)) return;\n    document.querySelector(\"#export-source\").textContent = task.destination;",
+            );
+        }
+        if name == "styles.css" {
+            source = source.replace(
+                ".media-inspection { display: grid; grid-template-columns: 128px 1fr; gap: 14px; margin: 14px 0; padding: 12px; border: 1px solid #243844; border-radius: 12px; background: #0b151c; }\n.media-inspection img { width: 128px; height: 72px; object-fit: cover; border-radius: 8px; }",
+                ".media-inspection { display: grid; grid-template-columns: 1fr; gap: 12px; margin: 14px 0; padding: 12px; border: 1px solid #243844; border-radius: 12px; background: #0b151c; }\n.media-inspection img { width: 100%; height: 180px; object-fit: cover; border-radius: 10px; }",
+            );
+            source = source.replace(
+                "grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr);",
+                "grid-template-columns: minmax(0, 1.25fr) minmax(0, .75fr);",
+            );
+        }
         if source != original {
             fs::write(path, source).expect("write patched UI");
         }
@@ -505,5 +520,6 @@ fn main() {
     println!("cargo:rerun-if-changed=src/diagnostics_v3.rs");
     println!("cargo:rerun-if-changed=src/main.rs");
     println!("cargo:rerun-if-changed=../ui/app.js");
+    println!("cargo:rerun-if-changed=../ui/styles.css");
     tauri_build::build()
 }
