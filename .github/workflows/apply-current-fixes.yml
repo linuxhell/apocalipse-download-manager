@@ -1,0 +1,72 @@
+name: Apply current fixes
+
+on:
+  push:
+    branches: [fix/rapidgator-preclick-0.3.29]
+    paths: [.github/workflows/apply-current-fixes.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/rapidgator-preclick-0.3.29
+      - name: Patch sources
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          app = Path('apps/desktop/ui/app.js')
+          s = app.read_text(encoding='utf-8')
+          replacements = {
+            '    removeFailed: "Could not remove the selected files",': '    removeFailed: "Could not remove the selected files",\n    torrentP2PBlocked: "The current connection may be blocking or limiting BitTorrent/P2P traffic (VPN, firewall, or network).",\n    torrentSelectOne: "Select at least one torrent file.",',
+            '    removeFailed: "Não foi possível apagar os arquivos selecionados",': '    removeFailed: "Não foi possível apagar os arquivos selecionados",\n    torrentP2PBlocked: "A conexão atual pode estar bloqueando ou limitando tráfego BitTorrent/P2P (VPN, firewall ou rede).",\n    torrentSelectOne: "Selecione pelo menos um arquivo do torrent.",',
+            '    removeFailed: "无法删除所选文件",': '    removeFailed: "无法删除所选文件",\n    torrentP2PBlocked: "当前连接可能正在阻止或限制 BitTorrent/P2P 流量（VPN、防火墙或网络）。",\n    torrentSelectOne: "请至少选择一个种子文件。",',
+          }
+          for old, new in replacements.items():
+            if old in s and 'torrentP2PBlocked' not in s[s.find(old):s.find(old)+400]:
+              s = s.replace(old, new, 1)
+
+          s = s.replace('if (torrentSelection && !torrentSelection.length) throw new Error("Selecione pelo menos um arquivo do torrent.");', 'if (torrentSelection && !torrentSelection.length) throw new Error(t("torrentSelectOne"));')
+
+          old = '''document.querySelector("#analyze").onclick = async () => {\n  const url = document.querySelector("#url");\n  if (!url.reportValidity()) return;'''
+          new = '''document.querySelector("#analyze").onclick = async () => {\n  const analyzeButton = document.querySelector("#analyze");\n  if (analyzeButton.disabled) return;\n  const url = document.querySelector("#url");\n  if (!url.reportValidity()) return;\n  analyzeButton.disabled = true;'''
+          if old in s:
+            s = s.replace(old, new, 1)
+          old = '''  } catch (error) {\n    box.textContent = String(error);\n  }\n};\ndocument.querySelector("#enqueue").onclick'''
+          new = '''  } catch (error) {\n    const message = String(error);\n    box.textContent = message.includes("torrent_metadata_timeout") ? t("torrentP2PBlocked") : message;\n  } finally {\n    analyzeButton.disabled = false;\n  }\n};\ndocument.querySelector("#enqueue").onclick'''
+          if old in s:
+            s = s.replace(old, new, 1)
+          app.write_text(s, encoding='utf-8')
+
+          main = Path('apps/desktop/src-tauri/src/main.rs')
+          s = main.read_text(encoding='utf-8')
+          # Delete aria2 control sidecars whenever their associated downloaded/partial path is deleted.
+          needle = '''            if path.is_dir() {\n                fs::remove_dir_all(&path).map_err(|error| error.to_string())?;\n            } else {\n                fs::remove_file(&path).map_err(|error| error.to_string())?;\n            }'''
+          replacement = '''            if path.is_dir() {\n                fs::remove_dir_all(&path).map_err(|error| error.to_string())?;\n            } else {\n                fs::remove_file(&path).map_err(|error| error.to_string())?;\n                let aria2_control = PathBuf::from(format!("{}.aria2", path.display()));\n                if aria2_control.exists() {\n                    fs::remove_file(aria2_control).map_err(|error| error.to_string())?;\n                }\n            }'''
+          if needle in s and 'aria2_control' not in s:
+            s = s.replace(needle, replacement, 1)
+
+          # On tray restore, keep the main window at a usable minimum size as well as focusing it.
+          pattern = r'fn show_main_window\(app: &tauri::AppHandle\) \{.*?\n\}'
+          match = re.search(pattern, s, flags=re.S)
+          if match and 'tray_restore_minimum_size' not in match.group(0):
+            body = '''fn show_main_window(app: &tauri::AppHandle) {\n    if let Some(window) = app.get_webview_window("main") {\n        let _ = window.show();\n        let _ = window.unminimize();\n        // tray_restore_minimum_size\n        if let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor()) {\n            let logical = size.to_logical::<f64>(scale);\n            if logical.width < 1040.0 || logical.height < 640.0 {\n                let _ = window.set_size(tauri::LogicalSize::new(\n                    logical.width.max(1040.0),\n                    logical.height.max(640.0),\n                ));\n            }\n        }\n        let _ = window.set_always_on_top(true);\n        let _ = window.set_focus();\n        let _ = window.set_always_on_top(false);\n    }\n}'''
+            s = s[:match.start()] + body + s[match.end():]
+          main.write_text(s, encoding='utf-8')
+
+          # Remove this one-shot workflow from the resulting commit.
+          Path('.github/workflows/apply-current-fixes.yml').unlink()
+      - name: Commit fixes
+        run: |
+          git config user.name "linuxhell"
+          git config user.email "38770145+linuxhell@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: localize torrent network warning and clean aria2 sidecars"
+          git push origin HEAD:fix/rapidgator-preclick-0.3.29
