@@ -26,9 +26,23 @@ const debuggerCommand = (debuggee, method, params = {}) => new Promise((resolve,
   });
 });
 
-async function rapidgatorBridgePost(path, body) {
+async function rapidgatorPairingToken() {
   const { pairingToken = "" } = await chrome.storage.local.get({ pairingToken: "" });
   if (!pairingToken) throw new Error("not_paired");
+  return pairingToken;
+}
+
+async function rapidgatorBridgeHealth() {
+  const pairingToken = await rapidgatorPairingToken();
+  const response = await fetch(`${RAPIDGATOR_BRIDGE}/v1/health`, {
+    method: "GET",
+    headers: { "Authorization": `Bearer ${pairingToken}` },
+  });
+  if (!response.ok) throw new Error(`bridge_http_${response.status}`);
+}
+
+async function rapidgatorBridgePost(path, body) {
+  const pairingToken = await rapidgatorPairingToken();
   const response = await fetch(`${RAPIDGATOR_BRIDGE}${path}`, {
     method: "POST",
     headers: {
@@ -164,7 +178,7 @@ async function startRapidgatorBrowserTransport(item, sender) {
 
   const debuggee = { tabId };
   const transportId = crypto.randomUUID();
-  await rapidgatorBridgePost("/v1/health", {});
+  await rapidgatorBridgeHealth();
   await debuggerAttach(debuggee);
   try {
     await debuggerCommand(debuggee, "Fetch.enable", {
