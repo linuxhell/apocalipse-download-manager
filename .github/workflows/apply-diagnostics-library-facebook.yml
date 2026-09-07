@@ -14,6 +14,10 @@ jobs:
         with: { ref: fix/rapidgator-preclick-0.3.29 }
       - uses: actions/setup-python@v5
         with: { python-version: '3.x' }
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev pkg-config
       - name: Patch
         run: |
           python - <<'PY'
@@ -72,4 +76,3 @@ jobs:
           git add -A
           git commit -m "fix: diagnostics export library dedupe and facebook context"
           git push
-# trigger 2
