@@ -2,6 +2,7 @@ importScripts("service-worker.js");
 
 const RAPIDGATOR_BRIDGE = "http://127.0.0.1:17654";
 const rapidgatorArmedTabs = new Map();
+const chatgptLibraryTransfers = new Set();
 
 const debuggerAttach = (debuggee) => new Promise((resolve, reject) => {
   chrome.debugger.attach(debuggee, "1.3", () => {
@@ -66,6 +67,17 @@ const finalRapidgatorUrl = (value) => {
   }
 };
 
+const chatgptLibraryUrl = (value) => {
+  try {
+    const url = new URL(value);
+    if (url.hostname.toLowerCase() !== "chatgpt.com") return null;
+    if (url.pathname !== "/backend-api/estuary/content") return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+};
+
 function responseHeader(headers, name) {
   return (headers || []).find((header) => String(header.name || "").toLowerCase() === name.toLowerCase())?.value || "";
 }
@@ -84,6 +96,25 @@ function fileNameFromDisposition(disposition, fallbackUrl) {
     return token ? `rapidgator-${token}.bin` : "rapidgator-download.bin";
   } catch {
     return "rapidgator-download.bin";
+  }
+}
+
+function chatgptFileName(item, disposition, fallbackUrl) {
+  const itemName = String(item?.filename || "").split(/[\\/]/).pop();
+  if (itemName) return itemName;
+  const extended = disposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)?.[1];
+  if (extended) {
+    try { return decodeURIComponent(extended.replace(/^"|"$/g, "")); } catch {}
+  }
+  const quoted = disposition.match(/filename\s*=\s*"([^"]+)"/i)?.[1];
+  if (quoted) return quoted;
+  const plain = disposition.match(/filename\s*=\s*([^;]+)/i)?.[1]?.trim();
+  if (plain) return plain.replace(/^"|"$/g, "");
+  try {
+    const url = new URL(fallbackUrl);
+    return url.searchParams.get("filename") || url.searchParams.get("name") || "chatgpt-library-download";
+  } catch {
+    return "chatgpt-library-download";
   }
 }
 
@@ -124,6 +155,109 @@ async function diagnostic(event, state = {}, extra = {}) {
     detail: detail || null,
   }).catch(() => {});
 }
+
+const cancelChromeDownload = (id) => new Promise((resolve) => {
+  chrome.downloads.cancel(id, () => {
+    void chrome.runtime.lastError;
+    resolve();
+  });
+});
+
+const eraseChromeDownload = (id) => new Promise((resolve) => {
+  chrome.downloads.erase({ id }, () => {
+    void chrome.runtime.lastError;
+    resolve();
+  });
+});
+
+async function streamChatGPTLibraryDownload(item) {
+  const url = chatgptLibraryUrl(item?.finalUrl || item?.url || "");
+  if (!url || !item?.id || chatgptLibraryTransfers.has(item.id)) return;
+  chatgptLibraryTransfers.add(item.id);
+  const state = {
+    traceId: crypto.randomUUID(),
+    url,
+    pageUrl: item.referrer || "https://chatgpt.com/",
+    startedAt: Date.now(),
+    bytes: 0,
+  };
+  let uploadId = null;
+  try {
+    try {
+      bypassUntil = Date.now() + 15000;
+      bypassNextUntil = 0;
+    } catch {}
+    await diagnostic("chatgpt.library.intercepted", state, { detail: `download_id=${item.id}` });
+    await cancelChromeDownload(item.id);
+    await eraseChromeDownload(item.id);
+
+    const response = await fetch(url, {
+      method: "GET",
+      credentials: "include",
+      redirect: "follow",
+      cache: "no-store",
+    });
+    const disposition = response.headers.get("content-disposition") || "";
+    const contentType = response.headers.get("content-type") || "";
+    const total = Number.parseInt(response.headers.get("content-length") || "0", 10) || 0;
+    if (!response.ok) {
+      throw new Error(`chatgpt_http_${response.status}`);
+    }
+    const fileName = chatgptFileName(item, disposition, response.url || url);
+    await diagnostic("chatgpt.library.response", state, {
+      status: response.status,
+      contentType,
+      disposition,
+      detail: `expected_bytes=${total} file=${fileName}`,
+    });
+    const begin = await rapidgatorBridgePost("/v1/blob/begin", {
+      fileName,
+      total,
+      source: state.pageUrl || url,
+      streaming: total === 0,
+      promptForDestination: true,
+    });
+    uploadId = begin?.uploadId || null;
+    if (!uploadId) throw new Error("chatgpt_blob_begin_failed");
+    if (!response.body) throw new Error("chatgpt_response_stream_unavailable");
+
+    const reader = response.body.getReader();
+    let chunks = 0;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (value?.length) {
+        for (let offset = 0; offset < value.length; offset += 64 * 1024) {
+          const slice = value.subarray(offset, Math.min(value.length, offset + 64 * 1024));
+          await rapidgatorBridgePost("/v1/blob/chunk", { uploadId, data: hex(slice) });
+          state.bytes += slice.length;
+          chunks += 1;
+        }
+      }
+      if (done) break;
+    }
+    await rapidgatorBridgePost("/v1/blob/end", { uploadId });
+    await diagnostic("chatgpt.library.completed", state, {
+      status: response.status,
+      bytes: state.bytes,
+      chunkCount: chunks,
+      detail: `expected_bytes=${total}`,
+    });
+  } catch (error) {
+    await diagnostic("chatgpt.library.failed", state, {
+      level: "ERROR",
+      bytes: state.bytes,
+      error: String(error),
+      detail: uploadId ? `upload_id=${uploadId}` : "upload_not_started",
+    });
+  } finally {
+    chatgptLibraryTransfers.delete(item.id);
+  }
+}
+
+chrome.downloads.onCreated.addListener((item) => {
+  if (!chatgptLibraryUrl(item?.finalUrl || item?.url || "")) return;
+  void streamChatGPTLibraryDownload(item);
+});
 
 async function disarmRapidgator(tabId, reason = "done") {
   const state = rapidgatorArmedTabs.get(tabId);
@@ -224,6 +358,7 @@ async function streamRapidgatorResponse(tabId, params) {
       total,
       source: state.pageUrl || url,
       streaming: total === 0,
+      promptForDestination: true,
     });
     uploadId = begin?.uploadId || null;
     if (!uploadId) throw new Error("blob_begin_failed");
