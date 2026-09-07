@@ -28,10 +28,15 @@ jobs:
           python .github/scripts/apply_round_0_3_46.py
           python .github/scripts/apply_round_0_3_47.py
           python .github/scripts/apply_round_0_3_48.py
+          python .github/scripts/apply_round_0_3_49.py
       - name: Validate extension JavaScript
         run: |
           node --check browser-extension/content.js
           node --check browser-extension/background.js
+          node --check browser-extension/page-hook.js
+          node --check browser-extension/rapidgator.js
+          if (Select-String -Path browser-extension/manifest.json -Pattern '"debugger"' -Quiet) { throw 'debugger permission still present' }
+          if (Select-String -Path browser-extension/*.js -Pattern 'chrome\.debugger|Fetch\.enable|Fetch\.requestPaused|Fetch\.takeResponseBodyAsStream|IO\.read|Page\.setDownloadBehavior|Browser\.setDownloadBehavior' -Quiet) { throw 'CDP code still present in shipped extension' }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build desktop
