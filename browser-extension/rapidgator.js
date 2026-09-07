@@ -1,75 +1,51 @@
 (() => {
   if (!/(^|\.)rapidgator\.net$/i.test(location.hostname)) return;
 
-  let replaying = false;
-  const transportFrames = new Map();
+  let armed = false;
+  let arming = false;
 
-  const finalRapidgatorUrl = (value) => {
+  const arm = async () => {
+    if (armed || arming) return armed;
+    arming = true;
     try {
-      const url = new URL(value, location.href);
-      if (!/^s\d+\.rapidgator\.net$/i.test(url.hostname)) return null;
-      if (!/^\/download\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(url.pathname)) return null;
-      return url.href;
-    } catch {
-      return null;
+      const result = await chrome.runtime.sendMessage({
+        type: "APOCALIPSE_RAPIDGATOR_ARM",
+        pageUrl: location.href,
+      });
+      armed = Boolean(result?.armed);
+      if (!armed) {
+        console.warn("Apocalipse Rapidgator capture was not armed", result?.error || "unknown");
+      }
+      return armed;
+    } catch (error) {
+      console.warn("Apocalipse Rapidgator capture failed to arm", String(error));
+      return false;
+    } finally {
+      arming = false;
     }
   };
 
-  chrome.runtime.onMessage.addListener((message, _sender, reply) => {
-    if (message?.type === "APOCALIPSE_RAPIDGATOR_START_BROWSER_TRANSPORT" && message.url && message.transportId) {
-      try {
-        const url = finalRapidgatorUrl(message.url);
-        if (!url) throw new Error("invalid_rapidgator_transport_url");
-        const frame = document.createElement("iframe");
-        frame.hidden = true;
-        frame.setAttribute("aria-hidden", "true");
-        frame.style.cssText = "display:none!important;width:0!important;height:0!important;border:0!important";
-        frame.src = url;
-        transportFrames.set(message.transportId, frame);
-        (document.documentElement || document.body).append(frame);
-        reply({ started: true });
-      } catch (error) {
-        reply({ started: false, error: String(error) });
-      }
-      return;
-    }
-    if (message?.type === "APOCALIPSE_RAPIDGATOR_BROWSER_TRANSPORT_DONE" && message.transportId) {
-      const frame = transportFrames.get(message.transportId);
-      if (frame) frame.remove();
-      transportFrames.delete(message.transportId);
-      return;
-    }
+  // Arm CDP as soon as the Rapidgator page is available. The final free-download
+  // URL can be created by page JavaScript or navigation, so click interception
+  // alone is not reliable. The original click/navigation is intentionally left
+  // untouched; background.js captures the real 200 OK response before Chrome's
+  // download manager sees it.
+  void arm();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void arm();
   });
+  window.addEventListener("pageshow", () => void arm());
 
-  document.addEventListener("click", (event) => {
-    if (replaying || event.defaultPrevented || event.button !== 0) return;
-    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-
-    const anchor = event.target?.closest?.("a[href]");
-    if (!anchor) return;
-    const url = finalRapidgatorUrl(anchor.href);
-    if (!url) return;
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-
-    chrome.runtime.sendMessage({
-      type: "APOCALIPSE_RAPIDGATOR_DOWNLOAD",
-      item: {
-        url,
-        userAgent: navigator.userAgent,
-        kind: "file",
-        title: anchor.getAttribute("download") || null,
-      },
-    }, (result) => {
-      // Rapidgator free URLs are one-shot. If debugger/bridge setup fails before
-      // the browser request begins, keep the original page intact instead of
-      // replaying the click and wasting the token. The user can click again
-      // after the transport problem is corrected.
-      if (chrome.runtime.lastError || result?.target !== "apocalipse") {
-        console.warn("Apocalipse Rapidgator transport did not start", result?.error || chrome.runtime.lastError?.message || "unknown");
-      }
-      // Once the browser-authenticated request starts, never replay this URL.
-    });
+  // Re-arm immediately before likely download clicks as an extra guard if the
+  // service worker/debugger was restarted while the countdown page stayed open.
+  document.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const target = event.target?.closest?.("a,button,input[type=submit],input[type=button]");
+    if (!target) return;
+    const text = `${target.textContent || ""} ${target.value || ""} ${target.title || ""}`;
+    const href = target.href || "";
+    if (/descarr|download|baixar|clicar aqui/i.test(text) || /\/download\//i.test(href)) {
+      void arm();
+    }
   }, true);
 })();
