@@ -20,7 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Apply Facebook and ChatGPT Library test patches
-        run: python .github/scripts/apply_fb_library_test.py
+        run: |
+          python .github/scripts/apply_fb_library_test.py
+          python .github/scripts/apply_round_0_3_44.py
       - name: Validate extension JavaScript
         run: |
           node --check browser-extension/content.js
