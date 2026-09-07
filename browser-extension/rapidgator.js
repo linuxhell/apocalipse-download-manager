@@ -2,14 +2,11 @@
   if (!/(^|\.)rapidgator\.net$/i.test(location.hostname)) return;
 
   let replaying = false;
+  const transportFrames = new Map();
 
   const finalRapidgatorUrl = (value) => {
     try {
       const url = new URL(value, location.href);
-      // The real free-download handoff uses a numbered CDN host such as
-      // s14.rapidgator.net or s107.rapidgator.net. Never intercept forms or
-      // intermediate routes on rapidgator.net itself (for example
-      // /download/captcha), because those must stay entirely in the browser.
       if (!/^s\d+\.rapidgator\.net$/i.test(url.hostname)) return null;
       if (!/^\/download\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(url.pathname)) return null;
       return url.href;
@@ -21,14 +18,38 @@
   const replayOriginalClick = async (anchor) => {
     replaying = true;
     try {
-      // Tell the generic download interceptor to ignore the fallback browser
-      // transfer, otherwise it could cancel the fresh Rapidgator request again.
       await chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 15000 }).catch(() => {});
       anchor.click();
     } finally {
       setTimeout(() => { replaying = false; }, 0);
     }
   };
+
+  chrome.runtime.onMessage.addListener((message, _sender, reply) => {
+    if (message?.type === "APOCALIPSE_RAPIDGATOR_START_BROWSER_TRANSPORT" && message.url && message.transportId) {
+      try {
+        const url = finalRapidgatorUrl(message.url);
+        if (!url) throw new Error("invalid_rapidgator_transport_url");
+        const frame = document.createElement("iframe");
+        frame.hidden = true;
+        frame.setAttribute("aria-hidden", "true");
+        frame.style.cssText = "display:none!important;width:0!important;height:0!important;border:0!important";
+        frame.src = url;
+        transportFrames.set(message.transportId, frame);
+        (document.documentElement || document.body).append(frame);
+        reply({ started: true });
+      } catch (error) {
+        reply({ started: false, error: String(error) });
+      }
+      return;
+    }
+    if (message?.type === "APOCALIPSE_RAPIDGATOR_BROWSER_TRANSPORT_DONE" && message.transportId) {
+      const frame = transportFrames.get(message.transportId);
+      if (frame) frame.remove();
+      transportFrames.delete(message.transportId);
+      return;
+    }
+  });
 
   document.addEventListener("click", (event) => {
     if (replaying || event.defaultPrevented || event.button !== 0) return;
@@ -39,7 +60,6 @@
     const url = finalRapidgatorUrl(anchor.href);
     if (!url) return;
 
-    // Own only the final one-shot CDN URL, after CAPTCHA/submit has completed.
     event.preventDefault();
     event.stopImmediatePropagation();
 
@@ -52,8 +72,10 @@
         title: anchor.getAttribute("download") || null,
       },
     }, (result) => {
-      const failed = Boolean(chrome.runtime.lastError) || result?.target !== "apocalipse";
-      if (failed) void replayOriginalClick(anchor);
+      const failedBeforeBrowserRequest = Boolean(chrome.runtime.lastError) || result?.target !== "apocalipse";
+      if (failedBeforeBrowserRequest) void replayOriginalClick(anchor);
+      // Once the browser-authenticated request starts, never replay this one-shot
+      // URL. If the stream later fails the token has already been consumed.
     });
   }, true);
 })();
