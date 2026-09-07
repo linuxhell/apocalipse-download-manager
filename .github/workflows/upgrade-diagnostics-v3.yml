@@ -1,0 +1,155 @@
+name: Upgrade diagnostics v3 metadata and export
+on:
+  push:
+    branches: [fix/rapidgator-preclick-0.3.29]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: fix/rapidgator-preclick-0.3.29 }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: rustfmt }
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev pkg-config
+      - name: Patch diagnostics
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          cargo = Path('apps/desktop/src-tauri/Cargo.toml')
+          s = cargo.read_text()
+          if 'chrono = ' not in s:
+              s += '\nchrono = "0.4"\nzip = { version = "2", default-features = false, features = ["deflate"] }\n'
+          cargo.write_text(s)
+
+          p = Path('apps/desktop/src-tauri/src/diagnostics_v3.rs')
+          s = p.read_text()
+          if 'use chrono::Local;' not in s:
+              s = s.replace('use serde_json::json;\n', 'use chrono::Local;\nuse serde_json::json;\n', 1)
+          old = '''    let timestamp = now_ms();\n    let sanitized = sanitize_detail(detail);\n    let trace = trace_for(&sanitized);\n    let host = host_for(&sanitized);\n    let status = status_for(&sanitized);\n    let elapsed = elapsed_for(event, trace.as_deref(), timestamp);\n    let record = json!({\n        "schema": SCHEMA_VERSION,\n        "tsMs": timestamp.to_string(),\n        "seq": SEQUENCE.fetch_add(1, Ordering::Relaxed),\n        "session": session_id(),\n        "level": level.chars().take(12).collect::<String>(),\n        "event": event.chars().take(96).collect::<String>(),\n        "trace": trace,\n        "host": host,\n        "status": status,\n        "elapsedMs": elapsed.map(|value| value.min(u64::MAX as u128) as u64),\n        "detail": sanitized,\n    });'''
+          new = '''    let timestamp = now_ms();\n    let local = Local::now();\n    let sanitized = sanitize_detail(detail);\n    let trace = trace_for(&sanitized);\n    let host = host_for(&sanitized);\n    let status = status_for(&sanitized);\n    let extension_version = field(&sanitized, "extension_version").map(str::to_owned);\n    let elapsed = elapsed_for(event, trace.as_deref(), timestamp);\n    let record = json!({\n        "schema": SCHEMA_VERSION,\n        "timestamp": local.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),\n        "date": local.format("%Y-%m-%d").to_string(),\n        "time": local.format("%H:%M:%S%.3f").to_string(),\n        "tsMs": timestamp.to_string(),\n        "appVersion": env!("CARGO_PKG_VERSION"),\n        "extensionVersion": extension_version,\n        "seq": SEQUENCE.fetch_add(1, Ordering::Relaxed),\n        "session": session_id(),\n        "level": level.chars().take(12).collect::<String>(),\n        "event": event.chars().take(96).collect::<String>(),\n        "trace": trace,\n        "host": host,\n        "status": status,\n        "elapsedMs": elapsed.map(|value| value.min(u64::MAX as u128) as u64),\n        "detail": sanitized,\n    });'''
+          if old not in s:
+              raise SystemExit('diagnostics write_event marker not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          p = Path('browser-extension/background.js')
+          s = p.read_text()
+          marker = '    extra.detail || "",\n'
+          if 'extension_version=' not in s:
+              s = s.replace(marker, marker + '    `extension_version=${chrome.runtime.getManifest().version}`,\n', 1)
+          p.write_text(s)
+
+          p = Path('apps/desktop/src-tauri/src/main.rs')
+          s = p.read_text()
+          start = s.find('#[tauri::command]\nfn export_diagnostics(')
+          end = s.find('#[tauri::command]\nfn clear_general_log(', start)
+          if start < 0 or end < 0:
+              raise SystemExit('diagnostic export/clear markers not found')
+          replacement = r'''#[tauri::command]
+fn export_diagnostics(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    use zip::write::SimpleFileOptions;
+
+    let directory = configured_download_directory(&app, &state)?;
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let local = chrono::Local::now();
+    let base = format!("Apocalipse-Diagnostico-{}", local.format("%Y-%m-%d_%H-%M-%S"));
+    let mut destination = directory.join(format!("{base}.zip"));
+    let mut suffix = 2_u32;
+    while destination.exists() {
+        destination = directory.join(format!("{base}-{suffix}.zip"));
+        suffix += 1;
+    }
+    let file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&destination)
+        .map_err(|error| error.to_string())?;
+    let mut archive = zip::ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    archive.start_file("events.jsonl", options).map_err(|error| error.to_string())?;
+    for index in (1..=4).rev() {
+        let path = state.log_path.with_extension(format!("log.{index}"));
+        if let Ok(contents) = fs::read_to_string(path) {
+            archive.write_all(contents.as_bytes()).map_err(|error| error.to_string())?;
+            if !contents.ends_with('\n') { archive.write_all(b"\n").map_err(|error| error.to_string())?; }
+        }
+    }
+    if let Ok(contents) = fs::read_to_string(&state.log_path) {
+        archive.write_all(contents.as_bytes()).map_err(|error| error.to_string())?;
+    }
+
+    archive.start_file("summary.txt", options).map_err(|error| error.to_string())?;
+    writeln!(archive, "Apocalipse Download Manager diagnostic export").map_err(|error| error.to_string())?;
+    writeln!(archive, "Generated: {}", local.to_rfc3339()).map_err(|error| error.to_string())?;
+    writeln!(archive, "App version: {}", env!("CARGO_PKG_VERSION")).map_err(|error| error.to_string())?;
+    writeln!(archive, "Log schema: 3").map_err(|error| error.to_string())?;
+    writeln!(archive, "Exported files are snapshots; Clear internal logs never deletes this ZIP.").map_err(|error| error.to_string())?;
+
+    archive.start_file("system.json", options).map_err(|error| error.to_string())?;
+    let system = serde_json::json!({
+        "appVersion": env!("CARGO_PKG_VERSION"),
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "generatedAt": local.to_rfc3339(),
+        "diagnosticSchema": 3
+    });
+    archive.write_all(serde_json::to_string_pretty(&system).map_err(|error| error.to_string())?.as_bytes()).map_err(|error| error.to_string())?;
+
+    archive.start_file("matrix-rules.json", options).map_err(|error| error.to_string())?;
+    let rules = state.site_rules.lock().map_err(|error| error.to_string())?.clone();
+    archive.write_all(serde_json::to_string_pretty(&rules).map_err(|error| error.to_string())?.as_bytes()).map_err(|error| error.to_string())?;
+
+    archive.finish().map_err(|error| error.to_string())?;
+    diagnostic_log(&state, "INFO", "diagnostics.exported", &format!("file={}", destination.file_name().and_then(|name| name.to_str()).unwrap_or("diagnostic.zip")));
+    Ok(destination.display().to_string())
+}
+
+#[tauri::command]
+fn clear_general_log(state: State<'_, AppState>) -> Result<(), String> {
+    {
+        let _write_guard = state
+            .log_write_lock
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let mut paths = vec![state.log_path.clone()];
+        paths.extend((1..=4).map(|index| state.log_path.with_extension(format!("log.{index}"))));
+        for path in paths {
+            match fs::remove_file(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+    }
+    diagnostic_log(&state, "INFO", "log.cleared", "cleared_by_user scope=internal_logs_only");
+    Ok(())
+}
+
+'''
+          clear_end = s.find('#[tauri::command]\nfn get_log_editor(', end)
+          if clear_end < 0:
+              raise SystemExit('get_log_editor marker not found')
+          s = s[:start] + replacement + s[clear_end:]
+          p.write_text(s)
+          PY
+      - name: Check and normalize generated Rust
+        run: |
+          cargo check --workspace
+          cargo fmt --all
+          cargo fmt --all -- --check
+      - name: Commit and remove one-shot workflow
+        run: |
+          rm .github/workflows/upgrade-diagnostics-v3.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat: enrich diagnostics metadata and export zip"
+          git push
