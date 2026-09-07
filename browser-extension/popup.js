@@ -82,7 +82,19 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
   document.querySelector("#language").value = locale;
   translate();
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    chrome.tabs.sendMessage(tabs[0].id, { type: "APOCALIPSE_SCAN" }, (response) => {
+    const tab = tabs[0];
+    if (!tab?.id || !/^https?:/i.test(tab.url || "")) {
+      media = [];
+      render();
+      return;
+    }
+    chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_SCAN" }, (response) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        media = [];
+        render();
+        return;
+      }
       media = response?.media || [];
       render();
     });
