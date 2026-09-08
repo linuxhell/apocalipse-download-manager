@@ -493,7 +493,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
 });
 
-const APOCALIPSE_WORKER_BUILD = "0.3.68-self-contained";
+const APOCALIPSE_WORKER_BUILD = "0.3.69-hls-routing";
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type !== "APOCALIPSE_WORKER_DIAGNOSTICS") return;
   reply({
