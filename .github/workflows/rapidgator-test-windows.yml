@@ -31,6 +31,7 @@ jobs:
           python .github/scripts/fix_round_0_3_49_source.py
           python .github/scripts/apply_round_0_3_49.py
           python .github/scripts/apply_round_0_3_50.py
+          python .github/scripts/apply_round_0_3_51.py
       - name: Validate extension JavaScript
         run: |
           node --check browser-extension/content.js
