@@ -49,6 +49,8 @@ struct AppState {
     site_rules_path: PathBuf,
     global_bandwidth_limiter: Arc<BandwidthLimiter>,
     download_bandwidth_limiters: Mutex<HashMap<DownloadId, Arc<BandwidthLimiter>>>,
+    tray_show: MenuItem<tauri::Wry>,
+    tray_quit: MenuItem<tauri::Wry>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -234,6 +236,18 @@ struct UserSettings {
     associations: HashMap<String, bool>,
     #[serde(default = "default_link_password")]
     link_password: String,
+    #[serde(default = "default_language")]
+    language: String,
+}
+
+fn default_language() -> String { "en".to_owned() }
+
+fn tray_labels(language: &str) -> (&'static str, &'static str) {
+    match language {
+        "pt-BR" => ("Mostrar Apocalipse", "Sair"),
+        "zh-CN" => ("显示 Apocalipse", "退出"),
+        _ => ("Show Apocalipse", "Quit"),
+    }
 }
 
 const fn default_max_active() -> usize {
@@ -279,6 +293,7 @@ impl Default for UserSettings {
             dns_servers: Vec::new(),
             associations: HashMap::new(),
             link_password: default_link_password(),
+            language: default_language(),
         }
     }
 }
@@ -2413,6 +2428,20 @@ fn record_ui_diagnostic(
     detail: String,
 ) -> Result<(), String> {
     diagnostic_log(&state, &level, &format!("ui.{event}"), &detail);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_application_language(state: State<'_, AppState>, language: String) -> Result<(), String> {
+    if !matches!(language.as_str(), "en" | "pt-BR" | "zh-CN") { return Err("unsupported_language".to_owned()); }
+    let (show, quit) = tray_labels(&language);
+    state.tray_show.set_text(show).map_err(|error| error.to_string())?;
+    state.tray_quit.set_text(quit).map_err(|error| error.to_string())?;
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.language = language.clone();
+    save_settings(&state, &settings)?;
+    drop(settings);
+    diagnostic_log(&state, "INFO", "application.language_changed", &format!("language={language}"));
     Ok(())
 }
 
@@ -5643,6 +5672,9 @@ fn main() {
                 fs::write(&site_rules_path, data)?;
             }
             let initial_settings = load_settings(&settings_path);
+            let (show_label, quit_label) = tray_labels(&initial_settings.language);
+            let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
             cleanup_removed_associations();
             let arguments = std::env::args().collect::<Vec<_>>();
             let associated_source = arguments
@@ -5683,6 +5715,8 @@ fn main() {
                 site_rules_path,
                 global_bandwidth_limiter,
                 download_bandwidth_limiters: Mutex::new(HashMap::new()),
+                tray_show: show.clone(),
+                tray_quit: quit.clone(),
             });
             diagnostic_log(
                 &app.state::<AppState>(),
@@ -5705,8 +5739,6 @@ fn main() {
             if let Some(source) = associated_source {
                 queue_associated_source(app.handle(), source).map_err(std::io::Error::other)?;
             }
-            let show = MenuItem::with_id(app, "show", "Show Apocalipse", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
             // The detailed application artwork loses definition at the 16–24 px sizes used by
             // system trays. Keep a simplified, high-contrast asset specifically for this role.
@@ -5777,6 +5809,7 @@ fn main() {
             clear_general_log,
             export_diagnostic_bundle,
             record_ui_diagnostic,
+            set_application_language,
             get_log_editor,
             set_log_editor,
             open_log_external,

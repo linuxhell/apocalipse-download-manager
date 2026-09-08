@@ -1171,6 +1171,7 @@ document.querySelector("#language").onchange = (event) => {
   locale = event.target.value;
   localStorage.setItem("apocalipse.language", locale);
   translate();
+  invoke("set_application_language", { language: locale }).catch(console.error);
 };
 document.querySelectorAll(".tabs [data-filter]").forEach((button) => {
   button.onclick = () => {
