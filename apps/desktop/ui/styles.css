@@ -1,7 +1,7 @@
 :root {
   color-scheme: dark;
   font-family: Inter, "Segoe UI", system-ui, sans-serif;
-  background: #070a0f;
+  background: transparent;
   color: #e9f7fb;
   --cyan: #25d9ef;
   --line: #1b2a33;
@@ -19,6 +19,7 @@
   --window-opacity-percent: 100%;
   --corner-radius: 10px;
 }
+html { background: transparent; }
 :root[data-theme="inferno"] { --app-bg:#100806; --app-glow:#5a1c08; --sidebar:#160b08f2; --surface:#1b0f0b; --surface-2:#27130c; --input:#120906; --text:#fff2e8; --muted:#c19a85; --line:#4a2518; --cyan:#ff6a20; --accent:#ff6a20; --accent-2:#ffc247; }
 :root[data-theme="toxic"] { --app-bg:#071009; --app-glow:#214b12; --sidebar:#08130af2; --surface:#0c1a0e; --surface-2:#132718; --input:#071108; --text:#efffe9; --muted:#8eac86; --line:#24452a; --cyan:#82f23d; --accent:#82f23d; --accent-2:#d8ff3f; }
 :root[data-theme="synthwave"] { --app-bg:#0d0717; --app-glow:#39135f; --sidebar:#10091df2; --surface:#171027; --surface-2:#21143a; --input:#0d0818; --text:#fff0ff; --muted:#b69ac8; --line:#40265c; --cyan:#ff4fca; --accent:#ff4fca; --accent-2:#6ee7ff; }
