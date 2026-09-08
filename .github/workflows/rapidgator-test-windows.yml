@@ -37,6 +37,7 @@ jobs:
           python .github/scripts/apply_round_0_3_54.py
           python .github/scripts/apply_round_0_3_55.py
           python .github/scripts/apply_round_0_3_56.py
+          python .github/scripts/apply_round_0_3_57.py
       - name: Validate extension JavaScript
         run: |
           node --check browser-extension/content.js
@@ -52,6 +53,7 @@ jobs:
           if (-not (Select-String -Path browser-extension/background.js -Pattern 'background\.importScripts\.error' -Quiet)) { throw 'worker bootstrap error instrumentation missing' }
           if (-not (Select-String -Path browser-extension/background.js -Pattern 'APOCALIPSE_WORKER_DIAGNOSTICS' -Quiet)) { throw 'worker diagnostics probe missing' }
           if (-not (Select-String -Path browser-extension/popup.js -Pattern 'workerSelfTest' -Quiet)) { throw 'popup worker self-test missing' }
+          if (Select-String -Path apps/desktop/src-tauri/src/main.rs -Pattern 'start_file\("matrix-rules\.json"' -Quiet) { throw 'legacy matrix-rules.json still exported in diagnostics' }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build desktop
