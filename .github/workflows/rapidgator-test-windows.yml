@@ -44,6 +44,7 @@ jobs:
           python .github/scripts/apply_round_0_3_61.py
           python .github/scripts/apply_round_0_3_62.py
           python .github/scripts/apply_round_0_3_63.py
+          python .github/scripts/apply_round_0_3_64.py
       - name: Validate extension JavaScript
         run: |
           node --check browser-extension/content.js
@@ -59,6 +60,8 @@ jobs:
           $worker = Get-Content browser-extension/background.js -Raw
           if (($worker.Split('APOCALIPSE_WORKER_DIAGNOSTICS').Count - 1) -ne 1) { throw 'worker diagnostics listener is not unique' }
           if (Select-String -Path browser-extension/service-worker.js -Pattern '/v1/site-rules' -Quiet) { throw 'stale site-rules bridge request still present' }
+          if (-not (Select-String -Path browser-extension/page-hook.js -Pattern 'FORCE_PASSTHROUGH' -Quiet)) { throw 'force downstream passthrough trace missing' }
+          if (-not (Select-String -Path browser-extension/page-hook.js -Pattern 'forceDirectAnchorClassify' -Quiet)) { throw 'direct-anchor force classifier missing' }
           if (-not (Select-String -Path apps/desktop/src-tauri/src/main.rs -Pattern 'Access-Control-Allow-Private-Network: true' -Quiet)) { throw 'local/private network preflight header missing' }
           if (-not (Select-String -Path browser-extension/popup.js -Pattern 'directBridgeHealth' -Quiet)) { throw 'direct popup pairing missing' }
           if (-not (Select-String -Path browser-extension/popup.js -Pattern 'workerSelfTest' -Quiet)) { throw 'popup worker self-test missing' }
