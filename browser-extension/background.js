@@ -62,8 +62,6 @@ chrome.runtime.onStartup.addListener(ensureHeartbeat);
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === HEARTBEAT_ALARM) {
     bridgeRequest("/v1/health")
-      .then(() => bridgeRequest("/v1/site-rules"))
-      .then((rules) => { if (Array.isArray(rules)) siteRules = rules; })
       .then(() => flushAssistedDownloads())
       .then(() => flushDirectDownloads())
       .catch(() => {});
@@ -235,15 +233,33 @@ const eraseBrowserDownload = (id) => new Promise((resolve) => {
   });
 });
 
+function isChatGPTLibraryDownload(value) {
+  try {
+    const url = new URL(value);
+    return url.hostname.toLowerCase() === "chatgpt.com" && url.pathname === "/backend-api/estuary/content";
+  } catch {
+    return false;
+  }
+}
+
+function isRapidgatorFinalDownload(value) {
+  try {
+    const url = new URL(value);
+    return /^s\d+\.rapidgator\.net$/i.test(url.hostname)
+      && /^\/download\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 async function takeBrowserDownload(item, eraseFromHistory = false) {
   let url = item.finalUrl || item.url;
   if (!item.id) return false;
+  const modifierTabId = Number.isInteger(item.tabId) ? item.tabId : null;
+  if (bypassIsActive(modifierTabId)) return false;
   if (/^blob:https:\/\/web\.telegram\.org\//i.test(url)) {
-    if (Date.now() < bypassNextUntil) {
-      bypassNextUntil = 0;
-      return false;
-    }
-    if (!bridgeConnected || bypassHeld || Date.now() < bypassUntil) return false;
+    if (bypassIsActive(modifierTabId)) return false;
+    if (!bridgeConnected) return false;
     if (await handOffTelegramBlob(item)) {
       await cancelBrowserDownload(item.id).catch(() => {});
       if (eraseFromHistory) await eraseBrowserDownload(item.id);
@@ -291,11 +307,8 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
       formRequest = uupRequest;
     }
   }
-  if (Date.now() < bypassNextUntil) {
-    bypassNextUntil = 0;
-    return false;
-  }
-  if (!bridgeConnected || bypassHeld || Date.now() < bypassUntil) return false;
+  if (bypassIsActive(modifierTabId)) return false;
+  if (!bridgeConnected) return false;
   const immediateTakeover = Boolean(matchingRule(url, "browser_assisted"));
   let cancelled = false;
   try {
@@ -323,14 +336,12 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
         startImmediately: immediateTakeover,
       }),
     }).catch(async (error) => {
-      // If the bridge download fails, check if it's a known error to provide better fallback
       if (error.message.includes("bridge_http_404") || error.message.includes("not found")) {
-        // Try direct browser download for non-existent files
         bypassNextUntil = Date.now() + 30000;
         chrome.downloads.download({ url, saveAs: false }, () => void chrome.runtime.lastError);
         return true;
       }
-      throw error; // Re-throw if not a handled 404 case
+      throw error;
     });
     if (immediateTakeover && handoff.taskId) {
       await chrome.storage.session.set({
@@ -369,6 +380,36 @@ chrome.downloads.onChanged.addListener((delta) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.type === "APOCALIPSE_WORKER_PING") {
+    reply({ ok: true, version: chrome.runtime.getManifest().version });
+    return;
+  }
+  if (message?.type === "APOCALIPSE_PAIR") {
+    const token = String(message.token || "").trim();
+    if (!token) {
+      bridgeConnected = false;
+      reply({ connected: false, error: "not_paired" });
+      return;
+    }
+    bridgeRequest("/v1/health", {}, token)
+      .then(async () => {
+        await chrome.storage.local.set({ pairingToken: token });
+        bridgeConnected = true;
+        ensureHeartbeat();
+        reply({ connected: true });
+      })
+      .catch((error) => {
+        bridgeConnected = false;
+        reply({ connected: false, error: String(error) });
+      });
+    return true;
+  }
+  if (message?.type === "APOCALIPSE_BRIDGE_STATUS") {
+    bridgeRequest("/v1/health")
+      .then(() => reply({ connected: true }))
+      .catch((error) => reply({ connected: false, error: String(error) }));
+    return true;
+  }
   if (message?.type === "APOCALIPSE_BLOB_BEGIN") {
     bridgeRequest("/v1/blob/begin", { method: "POST", body: JSON.stringify(message.request) }).then(reply)
       .catch((error) => reply({ error: String(error) }));
@@ -389,81 +430,313 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       .catch((error) => reply({ error: String(error) }));
     return true;
   }
-  if (message?.type === "APOCALIPSE_FORM_SUBMIT" && message.request?.method === "POST") {
-    lastFormSubmission = message.request;
-    reply({ ok: true });
+  if (message?.type === "APOCALIPSE_GET_PAGE") {
+    sourcePageUrl(sender).then((pageUrl) => reply({ pageUrl })).catch(() => reply({ pageUrl: null }));
+    return true;
+  }
+  if (message?.type === "APOCALIPSE_HLS_ANALYZE") {
+    analyzeHls(message.urls, message.duration).then(reply).catch((error) => reply({ error: String(error) }));
+    return true;
+  }
+});
+
+const APOCALIPSE_WORKER_BUILD = "0.3.63-self-contained";
+chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.type !== "APOCALIPSE_WORKER_DIAGNOSTICS") return;
+  reply({
+    ok: true,
+    version: chrome.runtime.getManifest().version,
+    build: APOCALIPSE_WORKER_BUILD,
+    trace: [{ phase: "background.self_contained.ready", at: new Date().toISOString() }],
+    error: null,
+  });
+});
+
+
+const APOCALIPSE_BRIDGE = "http://127.0.0.1:17654";
+const activeCapturedUrls = new Map();
+const CAPTURE_TTL_MS = 20000;
+
+// Central modifier transaction state. Bypass always wins. Force survives the
+// initiating click long enough for async pages/CDNs to create the real download.
+let forceUntil = 0;
+let forceTabId = null;
+let bypassTabId = null;
+
+function armBypass(tabId, ttlMs = 4000) {
+  bypassUntil = Math.max(bypassUntil || 0, Date.now() + Math.max(500, Math.min(Number(ttlMs) || 4000, 30000)));
+  bypassTabId = Number.isInteger(tabId) ? tabId : null;
+  forceUntil = 0;
+  forceTabId = null;
+}
+function armForce(tabId, ttlMs = 20000) {
+  if (bypassHeld || Date.now() < (bypassUntil || 0)) return;
+  forceUntil = Math.max(forceUntil, Date.now() + Math.max(1000, Math.min(Number(ttlMs) || 20000, 30000)));
+  forceTabId = Number.isInteger(tabId) ? tabId : null;
+}
+function sameLeaseTab(leaseTabId, tabId) {
+  return leaseTabId == null || tabId == null || leaseTabId === tabId;
+}
+function bypassIsActive(tabId = null) {
+  try {
+    const now = Date.now();
+    return Boolean(bypassHeld)
+      || (now < Number(bypassUntil || 0) && sameLeaseTab(bypassTabId, tabId))
+      || now < Number(bypassNextUntil || 0);
+  } catch { return false; }
+}
+function forceIsActive(tabId = null) {
+  try {
+    if (bypassIsActive(tabId)) return false;
+    return Boolean(forceHeld) || (Date.now() < forceUntil && sameLeaseTab(forceTabId, tabId));
+  } catch { return false; }
+}
+
+async function pairingToken() {
+  const { pairingToken = "" } = await chrome.storage.local.get({ pairingToken: "" });
+  if (!pairingToken) throw new Error("not_paired");
+  return pairingToken;
+}
+
+async function bridgePost(path, body) {
+  const token = await pairingToken();
+  const response = await fetch(`${APOCALIPSE_BRIDGE}${path}`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`bridge_http_${response.status}`);
+  return response.json();
+}
+
+const chatgptLibraryUrl = (value) => {
+  try {
+    const url = new URL(value);
+    return url.hostname.toLowerCase() === "chatgpt.com" && url.pathname === "/backend-api/estuary/content" ? url.href : null;
+  } catch { return null; }
+};
+
+const rapidgatorFinalUrl = (value) => {
+  try {
+    const url = new URL(value);
+    if (!/^s\d+\.rapidgator\.net$/i.test(url.hostname)) return null;
+    if (!/^\/download\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(url.pathname)) return null;
+    return url.href;
+  } catch { return null; }
+};
+
+const genericHttpDownload = (value) => {
+  try {
+    const url = new URL(value);
+    return /^(https?):$/i.test(url.protocol) ? { url: url.href, kind: "forced" } : null;
+  } catch { return null; }
+};
+
+const recognizedDownload = (value) => {
+  const library = chatgptLibraryUrl(value);
+  if (library) return { url: library, kind: "chatgpt-library" };
+  const rapidgator = rapidgatorFinalUrl(value);
+  if (rapidgator) return { url: rapidgator, kind: "rapidgator" };
+  return null;
+};
+
+function dispositionFileName(disposition, fallback, hint = "") {
+  const safeHint = String(hint || "").split(/[\\/]/).pop();
+  if (safeHint) return safeHint;
+  const extended = String(disposition || "").match(/filename\*\s*=\s*UTF-8''([^;]+)/i)?.[1];
+  if (extended) {
+    try { return decodeURIComponent(extended.replace(/^"|"$/g, "")); } catch {}
+  }
+  const quoted = String(disposition || "").match(/filename\s*=\s*"([^"]+)"/i)?.[1];
+  if (quoted) return quoted;
+  const plain = String(disposition || "").match(/filename\s*=\s*([^;]+)/i)?.[1]?.trim();
+  if (plain) return plain.replace(/^"|"$/g, "");
+  try {
+    const url = new URL(fallback);
+    return url.searchParams.get("filename") || url.searchParams.get("name") || url.pathname.split("/").filter(Boolean).pop() || "download.bin";
+  } catch { return "download.bin"; }
+}
+
+function hex(bytes) {
+  let out = "";
+  for (const byte of bytes) out += byte.toString(16).padStart(2, "0");
+  return out;
+}
+
+async function diagnostic(event, state = {}, extra = {}) {
+  const detail = [
+    extra.detail || "",
+    `extension_version=${chrome.runtime.getManifest().version}`,
+    extra.error ? `error=${String(extra.error).slice(0, 1200).replace(/[\r\n]+/g, " ")}` : "",
+  ].filter(Boolean).join(" ");
+  await bridgePost("/v1/diagnostic", {
+    event,
+    level: extra.level || (extra.error ? "ERROR" : "INFO"),
+    traceId: state.traceId || null,
+    source: "chrome-extension",
+    url: state.url || state.pageUrl || null,
+    status: Number.isFinite(extra.status) ? extra.status : null,
+    bytes: Number.isFinite(extra.bytes) ? extra.bytes : (Number.isFinite(state.bytes) ? state.bytes : null),
+    durationMs: state.startedAt ? Math.max(0, Date.now() - state.startedAt) : null,
+    detail: detail || null,
+  }).catch(() => {});
+}
+
+function claim(url, source) {
+  const now = Date.now();
+  const current = activeCapturedUrls.get(url);
+  if (current && now - current.at < CAPTURE_TTL_MS) return false;
+  activeCapturedUrls.set(url, { at: now, source });
+  return true;
+}
+
+function release(url) {
+  activeCapturedUrls.delete(url);
+}
+
+async function waitWhilePaused(uploadId) {
+  while (true) {
+    const status = await bridgePost("/v1/blob/status", { uploadId });
+    if (!status?.paused) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+async function streamCapturedUrl(request) {
+  const recognized = recognizedDownload(request?.url || "") || (request?.force ? genericHttpDownload(request?.url || "") : null);
+  if (!recognized) throw new Error("unsupported_pre_download_url");
+  const { url, kind } = recognized;
+  if (!claim(url, request.source || "prehook")) return { ok: true, duplicate: true };
+
+  const state = {
+    traceId: crypto.randomUUID(),
+    url,
+    pageUrl: request.pageUrl || null,
+    startedAt: Date.now(),
+    bytes: 0,
+  };
+  let uploadId = null;
+  try {
+    await diagnostic(`${kind}.prehook.accepted`, state, { detail: `source=${request.source || "main-world"}` });
+    const response = await fetch(url, {
+      method: "GET",
+      credentials: "include",
+      redirect: "follow",
+      cache: "no-store",
+      referrer: request.pageUrl || undefined,
+    });
+    const disposition = response.headers.get("content-disposition") || "";
+    const contentType = response.headers.get("content-type") || "";
+    const total = Number.parseInt(response.headers.get("content-length") || "0", 10) || 0;
+    if (!response.ok) throw new Error(`${kind}_http_${response.status}`);
+    const fileName = dispositionFileName(disposition, response.url || url, request.fileName || "");
+    await diagnostic(`${kind}.prehook.response`, state, {
+      status: response.status,
+      detail: `expected_bytes=${total} content_type=${contentType.slice(0, 120)} file=${fileName}`,
+    });
+
+    const begin = await bridgePost("/v1/blob/begin", {
+      fileName,
+      total,
+      source: request.pageUrl || url,
+      streaming: total === 0,
+      promptForDestination: true,
+    });
+    uploadId = begin?.uploadId || null;
+    if (!uploadId) throw new Error("blob_begin_failed");
+    if (!response.body) throw new Error("response_stream_unavailable");
+
+    const reader = response.body.getReader();
+    let chunks = 0;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (value?.length) {
+        for (let offset = 0; offset < value.length; offset += 16 * 1024) {
+          const slice = value.subarray(offset, Math.min(value.length, offset + 16 * 1024));
+          await waitWhilePaused(uploadId);
+          await bridgePost("/v1/blob/chunk", { uploadId, data: hex(slice) });
+          state.bytes += slice.length;
+          chunks += 1;
+        }
+      }
+      if (done) break;
+    }
+    await bridgePost("/v1/blob/end", { uploadId });
+    await diagnostic(`${kind}.prehook.completed`, state, {
+      status: response.status,
+      bytes: state.bytes,
+      detail: `chunks=${chunks} expected_bytes=${total}`,
+    });
+    return { ok: true, kind, bytes: state.bytes };
+  } catch (error) {
+    await diagnostic(`${kind}.prehook.failed`, state, {
+      level: "ERROR",
+      bytes: state.bytes,
+      error: String(error),
+      detail: uploadId ? `upload_id=${uploadId}` : "upload_not_started",
+    });
+    throw error;
+  } finally {
+    release(url);
+  }
+}
+
+
+chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  const shortcutTabId = Number.isInteger(sender.tab?.id) ? sender.tab.id : null;
+  if (message?.type === "APOCALIPSE_SHORTCUT_STATE") {
+    bypassHeld = Boolean(message.bypassPressed);
+    forceHeld = Boolean(message.forcePressed) && !bypassHeld;
+    if (bypassHeld) armBypass(shortcutTabId, 4000);
+    else if (forceHeld) armForce(shortcutTabId, 20000);
+    reply({ ok: true, mode: bypassHeld ? "bypass" : (forceHeld ? "force" : "normal") });
     return;
   }
   if (message?.type === "APOCALIPSE_BYPASS_NEXT") {
-    bypassNextUntil = Date.now() + Math.min(Math.max(Number(message.ttlMs) || 15000, 2000), 30000);
+    armBypass(shortcutTabId, message.ttlMs);
+    reply({ ok: true, mode: "bypass" });
+    return;
+  }
+  if (message?.type === "APOCALIPSE_FORCE_NEXT") {
+    armForce(shortcutTabId, message.ttlMs);
+    reply({ ok: true, mode: "force" });
+    return;
+  }
+  if (message?.type === "APOCALIPSE_CAPTURE_TRACE") {
+    const state = { traceId: message.traceId || crypto.randomUUID(), pageUrl: message.pageUrl || sender.tab?.url || null, startedAt: Number(message.at || Date.now()), bytes: 0 };
+    const detail = Object.entries(message.detail || {}).map(([k,v]) => `${k}=${String(v ?? "").slice(0,180)}`).join(" ");
+    void diagnostic(`capture.${String(message.eventName || "event")}`, state, { detail: `mode=${message.mode || "normal"} ${detail}`.trim() });
     reply({ ok: true });
     return;
   }
-  if (message?.type === "APOCALIPSE_SHORTCUT_STATE") {
-    const wasBypassHeld = bypassHeld;
-    bypassHeld = Boolean(message.bypassPressed);
-    forceHeld = Boolean(message.forcePressed);
-    if (wasBypassHeld && !bypassHeld) bypassUntil = Date.now() + 2000;
-    reply({ ok: true, forceHeld });
+  if (message?.type !== "APOCALIPSE_PRE_DOWNLOAD_URL") return;
+  if (bypassIsActive(shortcutTabId)) {
+    reply({ ok: false, bypass: true });
     return;
   }
-  if (message?.type === "APOCALIPSE_MEDIA" && sender.tab?.id) {
-    chrome.storage.session.set({ [`media:${sender.tab.id}`]: message.media });
-  }
-  if (message?.type === "APOCALIPSE_PROBE") {
-    fetch(message.url, { method: "HEAD", credentials: "include", redirect: "follow" })
-      .then((response) => reply({
-        size: Number(response.headers.get("content-length")) || null,
-        contentType: response.headers.get("content-type") || "",
-      }))
-      .catch(() => reply({ size: null }));
-    return true;
-  }
-  if (message?.type === "APOCALIPSE_SELECT_HLS") {
-    analyzeHls(message.urls, message.expectedDuration).then((items) => reply(items.find((item) => item.recommended) || null));
-    return true;
-  }
-  if (message?.type === "APOCALIPSE_ANALYZE_HLS") {
-    analyzeHls(message.urls, message.expectedDuration).then(reply);
-    return true;
-  }
-  if (message?.type === "APOCALIPSE_PAIR") {
-    const token = message.token.trim();
-    bridgeRequest("/v1/health", {}, token)
-      .then(() => chrome.storage.local.set({ pairingToken: token }))
-      .then(() => ensureHeartbeat())
-      .then(() => reply({ connected: true }))
-      .catch((error) => reply({ connected: false, error: String(error) }));
-    return true;
-  }
-  if (message?.type === "APOCALIPSE_BRIDGE_STATUS") {
-    bridgeRequest("/v1/health")
-      .then(() => reply({ connected: true }))
-      .catch(() => reply({ connected: false }));
-    return true;
-  }
-  if (message?.type === "APOCALIPSE_DOWNLOAD" && message.item?.url) {
-    sourcePageUrl(sender).then(async (pageUrl) => {
-      let url = message.item.url;
-      try {
-        const tabUrl = new URL(pageUrl);
-        if (/(^|\.)facebook\.com$/i.test(tabUrl.hostname)
-          && /(?:^|\/)(?:reel|reels|watch|videos|posts|share)(?:\/|$)/i.test(tabUrl.pathname)) url = tabUrl.href;
-      } catch {}
-      return bridgeRequest("/v1/download", {
-        method: "POST",
-        body: JSON.stringify({
-          url,
-          fileName: message.item.title || null,
-          pageUrl,
-          duration: Number.isFinite(message.item.duration) ? message.item.duration : null,
-          cookieHeader: await cookieHeaderFor([url, message.item.url, ...(message.item.requestUrls || []), pageUrl]),
-          userAgent: message.item.userAgent || null,
-        }),
-      });
-    })
-      .then(() => reply({ target: "apocalipse" }))
-      .catch((error) => reply({ target: "error", error: String(error) }));
-    return true;
-  }
+  const request = {
+    url: message.url,
+    pageUrl: message.pageUrl || sender.tab?.url || null,
+    fileName: message.fileName || "",
+    source: message.source || "main-world",
+    force: Boolean(message.force) || forceIsActive(shortcutTabId),
+  };
+  streamCapturedUrl(request)
+    .then(reply)
+    .catch((error) => {
+      // Only on a real takeover failure, fall back to Chrome so the user does not
+      // lose a one-use link. Normal successful flow never reaches chrome.downloads.
+      const recognized = recognizedDownload(request.url) || (request.force ? genericHttpDownload(request.url) : null);
+      if (recognized) {
+        try {
+          bypassNextUntil = Date.now() + 15000;
+          chrome.downloads.download({ url: recognized.url, saveAs: true }, () => void chrome.runtime.lastError);
+        } catch {}
+      }
+      reply({ ok: false, error: String(error) });
+    });
+  return true;
 });

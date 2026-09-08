@@ -1,0 +1,173 @@
+name: Release builds
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64 portable
+            os: windows-latest
+            artifact: apocalipse-download-manager-windows-x64-portable
+            output: apocalipse-download-manager-windows-x64-portable.zip
+          - name: Linux x64 portable
+            os: ubuntu-latest
+            artifact: apocalipse-download-manager-linux-x64-portable
+            output: apocalipse-download-manager-linux-x64-portable.tar.gz
+          - name: macOS portable
+            os: macos-latest
+            artifact: apocalipse-download-manager-macos-portable
+            output: apocalipse-download-manager-macos-portable.zip
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Validate
+        shell: bash
+        run: |
+          cargo fmt --all -- --check
+          cargo test --workspace --locked
+
+      - name: Build desktop
+        run: cargo build --release --locked -p apocalipse-desktop
+
+      - name: Stage Windows portable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $package = "dist/Apocalipse Download Manager"
+          New-Item -ItemType Directory -Force $package | Out-Null
+          Copy-Item "target/release/apocalipse-desktop.exe" "$package/Apocalipse Download Manager.exe"
+          Copy-Item "README.md","LICENSE" $package
+          Compress-Archive -Path $package -DestinationPath "dist/${{ matrix.output }}" -Force
+
+      - name: Stage Linux portable
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          package="dist/Apocalipse Download Manager"
+          mkdir -p "$package"
+          install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
+          cp README.md LICENSE "$package/"
+          tar -C dist -czf "dist/${{ matrix.output }}" "Apocalipse Download Manager"
+
+      - name: Stage macOS portable
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app="dist/Apocalipse Download Manager.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
+          chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
+          cp packaging/macos/Info.plist "$app/Contents/Info.plist"
+          cp README.md LICENSE "$app/Contents/Resources/"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "dist/${{ matrix.output }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.output }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish clean release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Package current browser extensions
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 -c "import json; print(json.load(open('browser-extension/manifest.json'))['version'])")
+          stage=$(mktemp -d)
+          cp -R browser-extension "$stage/chromium"
+          (cd "$stage/chromium" && zip -qr "$GITHUB_WORKSPACE/dist/apocalipse-chrome-${version}.zip" .)
+          cp "$GITHUB_WORKSPACE/dist/apocalipse-chrome-${version}.zip" "$GITHUB_WORKSPACE/dist/apocalipse-edge-${version}.zip"
+
+          cp -R browser-extension "$stage/firefox"
+          python3 - "$stage/firefox/manifest.json" <<'PY'
+          import json
+          import sys
+
+          path = sys.argv[1]
+          with open(path, encoding="utf-8") as stream:
+              manifest = json.load(stream)
+          worker = manifest.pop("background", {}).get("service_worker")
+          if not worker:
+              raise SystemExit("Chromium background service worker is missing")
+          manifest["background"] = {"scripts": [worker]}
+          manifest["browser_specific_settings"] = {
+              "gecko": {
+                  "id": "apocalipse-download-manager@linuxhell",
+                  "strict_min_version": "140.0",
+                  "data_collection_permissions": {
+                      "required": [
+                          "authenticationInfo",
+                          "browsingActivity",
+                          "websiteContent"
+                      ]
+                  }
+              }
+          }
+          with open(path, "w", encoding="utf-8") as stream:
+              json.dump(manifest, stream, ensure_ascii=False, indent=2)
+              stream.write("\n")
+          PY
+          (cd "$stage/firefox" && zip -qr "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}-unsigned.xpi" .)
+
+      - name: Publish only current files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            tag="${{ github.ref_name }}"
+          else
+            version=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")
+            tag="v${version}"
+          fi
+          prerelease=()
+          if [[ "$tag" =~ (alpha|beta|rc) ]]; then
+            prerelease=(--prerelease)
+          fi
+          gh release view "$tag" >/dev/null 2>&1 ||
+            gh release create "$tag" --target "${{ github.sha }}" --generate-notes "${prerelease[@]}"
+          gh release view "$tag" --json assets --jq '.assets[].name' |
+            while IFS= read -r asset; do
+              [[ -n "$asset" ]] && gh release delete-asset "$tag" "$asset" --yes
+            done
+          gh release upload "$tag" dist/* --clobber
+

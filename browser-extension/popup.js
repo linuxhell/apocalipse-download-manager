@@ -25,6 +25,75 @@ const setBridgeStatus = (connected) => {
   label.dataset.i18n = connected ? "connected" : "disconnected";
   label.textContent = t(label.dataset.i18n);
 };
+const POPUP_BRIDGE = "http://127.0.0.1:17654";
+const directBridgeHealth = async (token) => {
+  const value = String(token || "").trim();
+  if (!value) throw new Error("not_paired");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4000);
+  try {
+    const response = await fetch(`${POPUP_BRIDGE}/v1/health`, {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${value}` },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`bridge_http_${response.status}`);
+    const payload = await response.json().catch(() => ({}));
+    if (payload?.ok === false) throw new Error("bridge_health_failed");
+    return true;
+  } finally { clearTimeout(timeout); }
+};
+const workerBridgeStatus = (timeoutMs = 1800) => new Promise((resolve) => {
+  let settled = false;
+  const finish = (value) => { if (settled) return; settled = true; resolve(value); };
+  const timer = setTimeout(() => finish({ connected: false, error: "service_worker_timeout" }), timeoutMs);
+  try {
+    chrome.runtime.sendMessage({ type: "APOCALIPSE_BRIDGE_STATUS" }, (status) => {
+      clearTimeout(timer);
+      const error = chrome.runtime.lastError;
+      if (error) finish({ connected: false, error: error.message || "service_worker_unavailable" });
+      else finish(status || { connected: false, error: "service_worker_no_response" });
+    });
+  } catch (error) {
+    clearTimeout(timer);
+    finish({ connected: false, error: String(error) });
+  }
+});
+const workerSelfTest = (timeoutMs = 1800) => new Promise((resolve) => {
+  let settled = false;
+  const finish = (value) => { if (settled) return; settled = true; resolve(value); };
+  const timer = setTimeout(() => finish({ ok: false, error: "service_worker_timeout" }), timeoutMs);
+  try {
+    chrome.runtime.sendMessage({ type: "APOCALIPSE_WORKER_DIAGNOSTICS" }, (status) => {
+      clearTimeout(timer);
+      const error = chrome.runtime.lastError;
+      if (error) finish({ ok: false, error: error.message || "service_worker_unavailable" });
+      else finish(status || { ok: false, error: "service_worker_no_response" });
+    });
+  } catch (error) {
+    clearTimeout(timer);
+    finish({ ok: false, error: String(error) });
+  }
+});
+
+const lastWorkerBootstrap = async () => {
+  const stored = await chrome.storage.local.get({ workerBootstrapTrace: [] });
+  const trace = Array.isArray(stored.workerBootstrapTrace) ? stored.workerBootstrapTrace : [];
+  return trace.at(-1) || null;
+};
+
+const showWorkerWarning = async (worker = null) => {
+  const label = document.querySelector("#bridge-label");
+  const last = await lastWorkerBootstrap();
+  const phase = last?.phase || "sem_rastro_de_bootstrap";
+  const reason = worker?.error || last?.error || "worker_sem_resposta";
+  label.removeAttribute("data-i18n");
+  if (locale === "pt_BR") label.textContent = `Desktop conectado; motor de captura indisponível (${phase}: ${reason}).`;
+  else if (locale === "zh_CN") label.textContent = `桌面端已连接；捕获引擎不可用 (${phase}: ${reason}).`;
+  else label.textContent = `Desktop connected; capture engine unavailable (${phase}: ${reason}).`;
+};
+
 const showBridgeError = (error) => {
   const label = document.querySelector("#bridge-label");
   label.removeAttribute("data-i18n");
@@ -82,15 +151,36 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
   document.querySelector("#language").value = locale;
   translate();
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    chrome.tabs.sendMessage(tabs[0].id, { type: "APOCALIPSE_SCAN" }, (response) => {
+    const tab = tabs[0];
+    if (!tab?.id || !/^https?:/i.test(tab.url || "")) {
+      media = [];
+      render();
+      return;
+    }
+    chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_SCAN" }, (response) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        media = [];
+        render();
+        return;
+      }
       media = response?.media || [];
       render();
     });
   });
 });
-chrome.storage.local.get({ pairingToken: "" }, ({ pairingToken }) => {
+chrome.storage.local.get({ pairingToken: "" }, async ({ pairingToken }) => {
   document.querySelector("#pairing-token").value = pairingToken;
-  chrome.runtime.sendMessage({ type: "APOCALIPSE_BRIDGE_STATUS" }, (status) => setBridgeStatus(Boolean(status?.connected)));
+  if (!pairingToken) { setBridgeStatus(false); return; }
+  try {
+    await directBridgeHealth(pairingToken);
+    setBridgeStatus(true);
+    const worker = await workerSelfTest();
+    if (!worker?.ok) await showWorkerWarning(worker);
+  } catch (error) {
+    setBridgeStatus(false);
+    showBridgeError(String(error));
+  }
 });
 chrome.storage.local.get({ forceShortcut: "Shift", bypassShortcut: "Alt" }, (value) => {
   document.querySelector("#force-shortcut").value = value.forceShortcut;
@@ -107,21 +197,37 @@ const saveShortcuts = (changed) => {
 };
 document.querySelector("#force-shortcut").onchange = () => saveShortcuts("force");
 document.querySelector("#bypass-shortcut").onchange = () => saveShortcuts("bypass");
-setInterval(() => {
-  chrome.runtime.sendMessage({ type: "APOCALIPSE_BRIDGE_STATUS" }, (status) => {
-    if (chrome.runtime.lastError) return;
-    setBridgeStatus(Boolean(status?.connected));
-  });
+setInterval(async () => {
+  const { pairingToken = "" } = await chrome.storage.local.get({ pairingToken: "" });
+  if (!pairingToken) { setBridgeStatus(false); return; }
+  try {
+    await directBridgeHealth(pairingToken);
+    setBridgeStatus(true);
+  } catch (error) {
+    setBridgeStatus(false);
+    showBridgeError(String(error));
+  }
 }, 5000);
-document.querySelector("#connect").onclick = () => {
-  const token = document.querySelector("#pairing-token").value;
+document.querySelector("#connect").onclick = async () => {
+  const token = document.querySelector("#pairing-token").value.trim();
   const button = document.querySelector("#connect");
   button.disabled = true;
-  chrome.runtime.sendMessage({ type: "APOCALIPSE_PAIR", token }, (status) => {
+  try {
+    await directBridgeHealth(token);
+    await chrome.storage.local.set({ pairingToken: token });
+    setBridgeStatus(true);
+    // Wake/synchronize the worker, but never make the button depend on it.
+    const worker = await workerSelfTest();
+    if (!worker?.ok) {
+      try { chrome.runtime.sendMessage({ type: "APOCALIPSE_PAIR", token }, () => void chrome.runtime.lastError); } catch {}
+      await showWorkerWarning(worker);
+    }
+  } catch (error) {
+    setBridgeStatus(false);
+    showBridgeError(String(error));
+  } finally {
     button.disabled = false;
-    setBridgeStatus(Boolean(status?.connected));
-    if (!status?.connected) showBridgeError(status?.error || chrome.runtime.lastError?.message || "unavailable");
-  });
+  }
 };
 document.querySelector("#language").onchange = (event) => {
   locale = event.target.value;

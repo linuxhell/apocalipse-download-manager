@@ -17,8 +17,13 @@
   document.addEventListener("keydown", sendShortcutState, true);
   document.addEventListener("keyup", sendShortcutState, true);
   document.addEventListener("pointerdown", (event) => {
-    if (!modifierPressed(event, shortcutKeys.bypass)) return;
-    chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 15000 }).catch(() => {});
+    const bypass = modifierPressed(event, shortcutKeys.bypass);
+    const force = modifierPressed(event, shortcutKeys.force);
+    if (bypass) {
+      chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 }).catch(() => {});
+    } else if (force) {
+      chrome.runtime.sendMessage({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 }).catch(() => {});
+    }
   }, true);
   window.addEventListener("blur", () => chrome.runtime.sendMessage({
     type: "APOCALIPSE_SHORTCUT_STATE",
@@ -47,6 +52,68 @@
   const absolute = (value) => {
     try { return new URL(value, location.href).href; } catch { return null; }
   };
+  // Intercept ChatGPT Library links before Chrome creates its own download dialog.
+  // Use composedPath + nearby link discovery because ChatGPT may wrap the visible
+  // download control in buttons/spans instead of making the clicked node the anchor.
+  const chatgptLibraryLinkForEvent = (event) => {
+    const candidates = [];
+    for (const node of event.composedPath?.() || []) {
+      if (node?.href) candidates.push(node);
+      const closest = node?.closest?.('a[href*="/backend-api/estuary/content"]');
+      if (closest) candidates.push(closest);
+      const nested = node?.querySelector?.('a[href*="/backend-api/estuary/content"]');
+      if (nested) candidates.push(nested);
+    }
+    const target = event.target;
+    for (let parent = target; parent && parent !== document.documentElement; parent = parent.parentElement) {
+      const nested = parent.querySelector?.('a[href*="/backend-api/estuary/content"]');
+      if (nested) candidates.push(nested);
+      if (parent.matches?.('a[href*="/backend-api/estuary/content"]')) candidates.push(parent);
+      if (candidates.length) break;
+    }
+    for (const candidate of candidates) {
+      try {
+        const parsed = new URL(candidate.href, location.href);
+        if (parsed.hostname.toLowerCase() === "chatgpt.com" && parsed.pathname === "/backend-api/estuary/content") {
+          return { url: parsed.href, fileName: candidate.getAttribute?.("download") || "" };
+        }
+      } catch {}
+    }
+    return null;
+  };
+  const interceptChatgptLibrary = (event) => {
+    if (event.defaultPrevented || (typeof event.button === "number" && event.button !== 0)) return;
+    const found = chatgptLibraryLinkForEvent(event);
+    if (!found) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    chrome.runtime.sendMessage({
+      type: "APOCALIPSE_CHATGPT_LIBRARY_DIRECT",
+      url: found.url,
+      pageUrl: location.href,
+      fileName: found.fileName,
+    }).catch(() => {});
+  };
+  document.addEventListener("pointerdown", interceptChatgptLibrary, true);
+  document.addEventListener("click", interceptChatgptLibrary, true);
+
+  const looksLikeChatgptLibraryDownloadControl = (event) => {
+    if (!/(^|\.)chatgpt\.com$/i.test(location.hostname)) return false;
+    const path = location.pathname.toLowerCase();
+    if (!path.includes("library")) return false;
+    for (const node of event.composedPath?.() || []) {
+      const label = `${node?.getAttribute?.("aria-label") || ""} ${node?.title || ""} ${node?.textContent || ""}`.trim();
+      if (/(?:download|baixar|下载)/i.test(label)) return true;
+      const href = node?.href || node?.closest?.('a[href*="/backend-api/estuary/content"]')?.href;
+      if (href && /\/backend-api\/estuary\/content/i.test(href)) return true;
+    }
+    return false;
+  };
+  document.addEventListener("pointerdown", (event) => {
+    if (!looksLikeChatgptLibraryDownloadControl(event)) return;
+    chrome.runtime.sendMessage({ type: "APOCALIPSE_CHATGPT_LIBRARY_ARM_DENY" }).catch(() => {});
+  }, true);
+
   const copyTextNow = (value) => {
     void navigator.clipboard.writeText(value).catch(() => {});
     const input = document.createElement("textarea");
@@ -61,6 +128,37 @@
     input.remove();
     return copied;
   };
+  const recentNetworkMediaUrl = () => {
+    try {
+      const entries = performance.getEntriesByType("resource");
+      for (let i = entries.length - 1; i >= 0; i -= 1) {
+        const name = String(entries[i]?.name || "");
+        if (!/^https?:/i.test(name)) continue;
+        if (/\.(?:mp4|webm|m3u8|mpd)(?:[?#]|$)/i.test(name)
+            || /(?:video|manifest|playlist|master|DVIDS|dvidshub)/i.test(name)) return name;
+      }
+    } catch {}
+    return null;
+  };
+
+  const safeMediaFileName = (fallback = "video.mp4", blob = null) => {
+    const title = (document.title || "video").replace(/[<>:\"/\\|?*]+/g, "_").trim().slice(0, 100) || "video";
+    const type = String(blob?.type || "").toLowerCase();
+    const ext = type.includes("webm") ? ".webm" : type.includes("ogg") ? ".ogv" : ".mp4";
+    if (/\.[A-Za-z0-9]{2,5}$/.test(fallback)) return fallback;
+    return `${title}${ext}`;
+  };
+  const uploadBlobUrl = async (url, fileName = null) => {
+    if (!/^blob:/i.test(String(url || ""))) throw new Error("not_blob_url");
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`blob_http_${response.status}`);
+    const blob = await response.blob();
+    if (!blob.size) throw new Error("empty_blob_url");
+    const name = safeMediaFileName(fileName || "video", blob);
+    await uploadBlob(blob, name);
+    return { ok: true, bytes: blob.size, fileName: name };
+  };
+
   const uploadBlob = async (blob, fileName) => {
     const begin = await chrome.runtime.sendMessage({
       type: "APOCALIPSE_BLOB_BEGIN",
@@ -107,6 +205,7 @@
     try {
       const parsed = new URL(url, location.href);
       if (!/(^|\.)facebook\.com$/i.test(parsed.hostname)) return false;
+      if (/\/(?:watch\/hashtag|hashtag)(?:\/|$)/i.test(parsed.pathname)) return false;
       return /(?:^|\/)(?:reel|reels|watch|videos|posts|share)(?:\/|$)/i.test(parsed.pathname)
         || /\/(?:permalink|story)\.php$/i.test(parsed.pathname)
         || parsed.searchParams.has("fbid")
@@ -161,6 +260,24 @@
     }
     return null;
   };
+  const facebookMediaId = (url) => {
+    try {
+      const parsed = new URL(url, location.href);
+      const numeric = parsed.pathname.match(/\/(?:reel|reels|videos|posts)\/(\d+)/i)?.[1]
+        || parsed.searchParams.get("v")
+        || parsed.searchParams.get("fbid")
+        || parsed.searchParams.get("story_fbid");
+      if (numeric) return numeric;
+      const shared = parsed.pathname.match(/\/share\/[rv]\/([^/?#]+)/i)?.[1];
+      if (shared) return shared.replace(/[^A-Za-z0-9_-]+/g, "");
+    } catch {}
+    return null;
+  };
+  const facebookDownloadTitle = (url) => {
+    const id = facebookMediaId(url);
+    return id ? `${id}.mp4` : "facebook-video.mp4";
+  };
+
   const waitForFacebookUrl = async (element, attempts = 20) => {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -228,14 +345,15 @@
     return "clipboard-copied";
   };
   const revealFacebookUrl = async (element) => {
-    const immediate = facebookUrlFor(element);
-    if (immediate) return immediate;
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
     const postText = element.closest?.('[role="article"],article')?.textContent || "";
-    if (/(?:patrocinado|sponsored)/i.test(postText)) {
+    const sponsored = /(?:patrocinado|sponsored)/i.test(postText);
+    if (sponsored) {
       const menuUrl = await facebookUrlFromMenu(element);
-      if (menuUrl) return menuUrl;
+      if (menuUrl && menuUrl !== "clipboard-copied") return menuUrl;
     }
+    const immediate = facebookUrlFor(element);
+    if (immediate) return immediate;
     const rect = element.getBoundingClientRect();
     const target = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
       || element.closest?.('a[href],[role="link"]') || element;
@@ -311,10 +429,16 @@
     const bypass = modifierPressed(event, shortcutKeys.bypass);
     const force = modifierPressed(event, shortcutKeys.force);
     if (bypass) {
-      chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 15000 }).catch(() => {});
+      chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 }).catch(() => {});
       return;
     }
-    if ((event.ctrlKey || event.shiftKey || event.altKey) && !force) return;
+    if (force) {
+      // Force is a transaction, not an instruction to steal the visible href.
+      // Let the page run and observe the real downstream file request/download.
+      chrome.runtime.sendMessage({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 }).catch(() => {});
+      return;
+    }
+    if (event.ctrlKey || event.shiftKey || event.altKey) return;
     const anchor = event.target.closest?.("a[href]");
     const anchorUrl = absolute(anchor?.href);
     if (!anchorUrl || /\/undefined(?:$|[?#])/i.test(anchorUrl)) return;
@@ -390,14 +514,35 @@
     for (const overlay of activeOverlays.values()) {
       if (!overlay.element.isConnected || overlay.pageUrl !== location.href) overlay.cleanup();
     }
+    const isFacebookReelsPage = /(^|\.)facebook\.com$/i.test(location.hostname)
+      && /(?:^|\/)reels?(?:\/|$)/i.test(location.pathname);
+    let activeFacebookReel = null;
+    if (isFacebookReelsPage) {
+      const viewportCenter = innerHeight / 2;
+      const candidates = [...document.querySelectorAll("video")]
+        .map((video) => ({ video, rect: video.getBoundingClientRect() }))
+        .filter(({ rect }) => rect.width >= 100 && rect.height >= 55 && rect.bottom > 0 && rect.top < innerHeight)
+        .sort((left, right) => {
+          const leftCenter = Math.abs((left.rect.top + left.rect.bottom) / 2 - viewportCenter);
+          const rightCenter = Math.abs((right.rect.top + right.rect.bottom) / 2 - viewportCenter);
+          return leftCenter - rightCenter;
+        });
+      activeFacebookReel = candidates[0]?.video || null;
+      for (const overlay of [...activeOverlays.values()]) {
+        if (overlay.element?.tagName === "VIDEO" && overlay.element !== activeFacebookReel) overlay.cleanup();
+      }
+    }
+
     document.querySelectorAll("video,audio").forEach((element) => {
       if (element.dataset.apocalipseButton) return;
       const isYouTubeVideo = element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch";
       const isFacebookVideo = element.tagName === "VIDEO" && /(^|\.)facebook\.com$/i.test(location.hostname);
+      if (isFacebookReelsPage && isFacebookVideo && element !== activeFacebookReel) return;
       const tikTokUrl = element.tagName === "VIDEO" ? tikTokUrlFor(element) : null;
       const isTikTokVideo = Boolean(tikTokUrl);
       const url = isFacebookVideo ? facebookUrlFor(element) || location.href : tikTokUrl || downloadUrlFor(element);
-      const canDownload = Boolean(url && /^https?:/.test(url));
+      const liveMediaUrl = element.currentSrc || element.src || "";
+      const canDownload = Boolean((url && /^https?:/.test(url)) || /^blob:/i.test(liveMediaUrl));
       const canRecord = element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
         && Boolean(element.captureStream || element.webkitCaptureStream);
       if (!canDownload && !canRecord) return;
@@ -422,15 +567,57 @@
           setTimeout(() => { button.textContent = originalText; }, 2500);
           return;
         }
-        const currentUrl = resolved?.url || resolved || (isYouTubeVideo ? location.href : null);
-        if (!currentUrl || (isFacebookVideo && !isFacebookMediaUrl(currentUrl))) {
+        const liveSource = String(element.currentSrc || element.src || "");
+        const liveBlobUrl = /^blob:/i.test(liveSource) ? liveSource : null;
+        const liveHttpUrl = /^https?:/i.test(liveSource) ? liveSource : null;
+        const networkMediaUrl = recentNetworkMediaUrl();
+
+        // For a real <video>, the source feeding the player is more authoritative
+        // than location.href. Try readable blob first; for MSE blobs, fall through
+        // to the most recent underlying media request captured by Performance API.
+        if (liveBlobUrl) {
+          try {
+            const fallbackName = isFacebookVideo ? facebookDownloadTitle(location.href) : null;
+            await uploadBlobUrl(liveBlobUrl, fallbackName);
+            button.textContent = "✓";
+            button.title = "Enviado ao Apocalipse";
+            setTimeout(() => { button.textContent = originalText; }, 1500);
+            return;
+          } catch (error) {
+            console.debug("Apocalipse live blob is MSE/unreadable; trying network media", error);
+          }
+        }
+
+        let currentUrl = liveHttpUrl || networkMediaUrl || resolved?.url || resolved || (isYouTubeVideo ? location.href : null);
+        const facebookPlayableUrl = isFacebookVideo && currentUrl && (
+          isFacebookMediaUrl(currentUrl)
+          || /\.(?:mp4|webm|m3u8|mpd)(?:[?#]|$)/i.test(currentUrl)
+          || /(?:fbcdn|fbsbx|video)/i.test(currentUrl)
+        );
+        if (!currentUrl || (isFacebookVideo && !facebookPlayableUrl)) {
           button.textContent = "⚠";
           button.title = "Abra o vídeo ou use os três pontos e Copiar link";
           setTimeout(() => { button.textContent = originalText; }, 2500);
           return;
         }
+        if (/^blob:/i.test(String(currentUrl || ""))) {
+          try {
+            await uploadBlobUrl(currentUrl);
+            button.textContent = "✓";
+            button.title = "Enviado ao Apocalipse";
+            setTimeout(() => { button.textContent = originalText; }, 1500);
+            return;
+          } catch (error) {
+            console.debug("Apocalipse direct blob failed", error);
+          }
+        }
         const copiedToClipboard = isFacebookVideo ? copyTextNow(currentUrl) : false;
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls: resolved?.requestUrls || [], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
+        const directFacebookMedia = isFacebookVideo ? absolute(element.currentSrc || element.src) : null;
+        const requestUrls = [...new Set([
+          ...(resolved?.requestUrls || []),
+          ...(directFacebookMedia && /^https?:/i.test(directFacebookMedia) ? [directFacebookMedia] : []),
+        ])];
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls, userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
           const failed = !copiedToClipboard && (chrome.runtime.lastError || result?.target !== "apocalipse");
           button.textContent = failed ? "⚠" : "✓";
           if (failed) button.title = result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable";
@@ -610,4 +797,54 @@
     })().then((media) => reply({ pageUrl: location.href, media })).catch(() => reply({ pageUrl: location.href, media: found }));
     return true;
   });
+
+  // MAIN-world pre-download relay (no CDP). The page hook traps the final URL
+  // before Chrome creates a native download, while this isolated-world script
+  // retains access to chrome.runtime and the existing Alt/Shift configuration.
+  const postApocalipseShortcutConfig = () => {
+    window.postMessage({
+      source: "apocalipse-extension",
+      type: "shortcut-config",
+      bypass: shortcutKeys.bypass,
+      force: shortcutKeys.force,
+    }, "*");
+  };
+  postApocalipseShortcutConfig();
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && (changes.forceShortcut || changes.bypassShortcut)) {
+      setTimeout(postApocalipseShortcutConfig, 0);
+    }
+  });
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    const data = event.data;
+    if (data?.source === "apocalipse-page-hook" && data.type === "capture-trace") {
+      chrome.runtime.sendMessage({ type: "APOCALIPSE_CAPTURE_TRACE", eventName: data.eventName, mode: data.mode, detail: data.detail || {}, traceId: data.traceId, pageUrl: location.href, at: data.at || Date.now() }).catch(() => {});
+      return;
+    }
+    if (!data || data.source !== "apocalipse-page-hook" || data.type !== "pre-download-url") return;
+    chrome.runtime.sendMessage({
+      type: "APOCALIPSE_PRE_DOWNLOAD_URL",
+      url: data.url,
+      pageUrl: location.href,
+      fileName: data.fileName || "",
+      source: data.kind || "main-world",
+      force: Boolean(data.force),
+    }).then((result) => {
+      window.postMessage({
+        source: "apocalipse-extension",
+        type: "pre-download-result",
+        requestId: data.requestId,
+        result,
+      }, "*");
+    }).catch((error) => {
+      window.postMessage({
+        source: "apocalipse-extension",
+        type: "pre-download-result",
+        requestId: data.requestId,
+        result: { ok: false, error: String(error) },
+      }, "*");
+    });
+  });
+
 })();
