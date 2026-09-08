@@ -646,11 +646,24 @@ function visibleDownloads() {
   return visible;
 }
 
-function renderDownloads() {
+const failedThumbnailUrls = new Set();
+let lastDownloadRenderSignature = "";
+
+function renderDownloads(force = false) {
   const list = document.querySelector("#download-list");
   const empty = document.querySelector("#empty");
-  list.replaceChildren();
   const visible = visibleDownloads();
+  const signature = JSON.stringify({
+    locale,
+    page: activePage,
+    filter: activeFilter,
+    query: historyQuery,
+    selected: [...selectedIds].sort(),
+    tasks: visible,
+  });
+  if (!force && signature === lastDownloadRenderSignature) return;
+  lastDownloadRenderSignature = signature;
+  list.replaceChildren();
   list.hidden = visible.length === 0;
   empty.hidden = visible.length !== 0;
   for (const task of visible) {
@@ -673,17 +686,19 @@ function renderDownloads() {
       className: "download-icon",
       textContent: "⇩",
     });
-    if (task.thumbnail) {
+    if (task.thumbnail && !failedThumbnailUrls.has(task.thumbnail)) {
       const thumbnail = document.createElement("img");
       thumbnail.className = "download-thumbnail";
       thumbnail.alt = "";
       thumbnail.referrerPolicy = "no-referrer";
       thumbnail.src = task.thumbnail;
       thumbnail.onerror = () => {
-        icon.classList.remove("has-thumbnail");
+        failedThumbnailUrls.add(task.thumbnail);
         icon.replaceChildren(document.createTextNode("⇩"));
       };
       icon.replaceChildren(thumbnail);
+      icon.classList.add("has-thumbnail");
+    } else if (task.thumbnail) {
       icon.classList.add("has-thumbnail");
     }
     const info = Object.assign(document.createElement("div"), {
@@ -878,7 +893,7 @@ function translate() {
   const activeNavigation = document.querySelector(`nav [data-page="${activePage}"]`);
   if (activeNavigation) document.querySelector("main > header h1").textContent = activeNavigation.querySelector("b")?.textContent || t("downloads");
   document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
-  renderDownloads();
+  renderDownloads(true);
   if (activePage === "link") {
     document.querySelector("#link-local-path").textContent = linkLocalPath || t("linkDrives");
     document.querySelector("#link-remote-path").textContent = linkRemotePath || t("linkDrives");

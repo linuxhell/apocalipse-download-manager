@@ -172,7 +172,10 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
       render();
       return;
     }
-    chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_SCAN" }, (response) => {
+    // Social sites contain many cross-origin iframes. Without an explicit
+    // frame, Chrome may return the empty scan from an advertisement/player
+    // iframe instead of the visible page.
+    chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_SCAN" }, { frameId: 0 }, (response) => {
       const error = chrome.runtime.lastError;
       if (error) {
         media = [];
