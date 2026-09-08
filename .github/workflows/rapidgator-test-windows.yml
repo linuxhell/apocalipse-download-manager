@@ -35,6 +35,7 @@ jobs:
           python .github/scripts/apply_round_0_3_52.py
           python .github/scripts/apply_round_0_3_53.py
           python .github/scripts/apply_round_0_3_54.py
+          python .github/scripts/apply_round_0_3_55.py
       - name: Validate extension JavaScript
         run: |
           node --check browser-extension/content.js
@@ -46,6 +47,7 @@ jobs:
           if (Select-String -Path browser-extension/*.js -Pattern 'chrome\.debugger|Fetch\.enable|Fetch\.requestPaused|Fetch\.takeResponseBodyAsStream|IO\.read|Page\.setDownloadBehavior|Browser\.setDownloadBehavior' -Quiet) { throw 'CDP code still present in shipped extension' }
           if (Select-String -Path browser-extension/service-worker.js -Pattern '/v1/site-rules' -Quiet) { throw 'stale site-rules bridge request still present' }
           if (-not (Select-String -Path apps/desktop/src-tauri/src/main.rs -Pattern 'Access-Control-Allow-Private-Network: true' -Quiet)) { throw 'local/private network preflight header missing' }
+          if (-not (Select-String -Path browser-extension/popup.js -Pattern 'directBridgeHealth' -Quiet)) { throw 'direct popup pairing missing' }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build desktop
