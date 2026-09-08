@@ -408,7 +408,7 @@ footer .bridge-waiting i {
 dialog {
   width: min(560px, calc(100vw - 40px));
   max-height: calc(100vh - 30px);
-  overflow-y: auto;
+  overflow: hidden;
   border: 1px solid #27414c;
   border-radius: 14px;
   background: #0d151c;
@@ -422,18 +422,18 @@ dialog::backdrop {
 }
 dialog form {
   padding: 22px;
-}
-#add-dialog {
-  width: min(980px, calc(100vw - 40px));
+  box-sizing: border-box;
+  max-height: calc(100vh - 30px);
   overflow-y: auto;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
 }
+#add-dialog {
+  width: min(980px, calc(100vw - 40px));
+}
 #add-dialog form {
   display: grid;
-  box-sizing: border-box;
   min-height: 100%;
-  max-height: none;
 }
 .add-dialog-grid {
   display: grid;
@@ -592,7 +592,7 @@ dialog input:focus {
   box-sizing: border-box;
   height: min(850px, calc(100vh - 60px));
   max-height: none;
-  overflow: hidden;
+  overflow-y: auto;
 }
 #settings-dialog form { grid-template-rows: auto minmax(0, 1fr) auto; }
 #tools-dialog form { grid-template-rows: auto auto minmax(0, 1fr) auto; }
@@ -1015,17 +1015,12 @@ nav button:hover, nav button.active, .download-icon { color: var(--accent); }
   .history-search { max-width: none; }
 }
 @media (max-width: 760px) {
-  #add-dialog { overflow-y: auto; }
   #add-dialog form { display: block; }
   .add-dialog-grid { display: block; }
   .add-dialog-destination { margin-top: 14px; padding-left: 0; border-left: 0; }
-  #settings-dialog, #tools-dialog { overflow-y: auto; }
-  #settings-dialog form, #tools-dialog form { display: block; height: auto; max-height: none; overflow: visible; }
+  #settings-dialog form, #tools-dialog form { display: block; height: auto; }
   .settings-columns { display: block; }
   .settings-columns > div { max-height: none; overflow: visible; padding-right: 0; }
   .settings-columns > div + div { padding-left: 0; border-left: 0; }
   #tools-dialog #tool-list { grid-template-columns: 1fr; }
-}
-@media (max-height: 680px) {
-  #add-dialog { overflow-y: auto; }
 }
