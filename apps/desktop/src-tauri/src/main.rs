@@ -4917,8 +4917,7 @@ fn queue_from_bridge(
             let query = expanded
                 .query_pairs()
                 .filter(|(name, _)| {
-                    !name.eq_ignore_ascii_case("bytestart")
-                        && !name.eq_ignore_ascii_case("byteend")
+                    !name.eq_ignore_ascii_case("bytestart") && !name.eq_ignore_ascii_case("byteend")
                 })
                 .map(|(name, value)| (name.into_owned(), value.into_owned()))
                 .collect::<Vec<_>>();
