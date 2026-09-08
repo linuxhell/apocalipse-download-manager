@@ -56,6 +56,17 @@
       ],
       "run_at": "document_start",
       "all_frames": false
+    },
+    {
+      "matches": [
+        "https://tiktok.com/*",
+        "https://*.tiktok.com/*"
+      ],
+      "js": [
+        "tiktok-media-fix.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
     }
   ],
   "icons": {
