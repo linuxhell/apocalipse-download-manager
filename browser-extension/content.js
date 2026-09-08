@@ -228,8 +228,21 @@
   const tikTokUrlFor = (element) => {
     if (!/(^|\.)tiktok\.com$/i.test(location.hostname)) return null;
     if (isTikTokVideoUrl(location.href)) return location.href;
+    const videoRect = element?.getBoundingClientRect?.();
+    const card = element?.closest?.([
+      "article",
+      '[data-e2e*="feed"]',
+      '[data-e2e*="recommend"]',
+      '[class*="DivItemContainer"]',
+      '[class*="DivVideoContainer"]',
+    ].join(","));
+    const cardAnchors = [...(card?.querySelectorAll?.('a[href*="/video/"]') || [])];
+    for (const anchor of cardAnchors) {
+      const url = absolute(anchor.href);
+      if (isTikTokVideoUrl(url)) return url;
+    }
     let container = element;
-    for (let depth = 0; container && depth < 12; depth += 1, container = container.parentElement) {
+    for (let depth = 0; container && depth < 28; depth += 1, container = container.parentElement) {
       const anchors = container.querySelectorAll?.('a[href*="/video/"]') || [];
       for (const anchor of anchors) {
         const url = absolute(anchor.href);
@@ -238,6 +251,18 @@
       const markup = (container.innerHTML || "").replaceAll("\\/", "/");
       const path = markup.match(/\/@[^/"'<>\\s]+\/video\/\d+/i)?.[0];
       if (path && isTikTokVideoUrl(path)) return absolute(path);
+    }
+    if (videoRect) {
+      const nearest = [...document.querySelectorAll('a[href*="/video/"]')]
+        .map((anchor) => ({ anchor, url: absolute(anchor.href), rect: anchor.getBoundingClientRect() }))
+        .filter(({ url, rect }) => isTikTokVideoUrl(url) && rect.width > 0 && rect.height > 0
+          && rect.bottom >= videoRect.top && rect.top <= videoRect.bottom)
+        .sort((left, right) => {
+          const videoCenter = (videoRect.top + videoRect.bottom) / 2;
+          return Math.abs((left.rect.top + left.rect.bottom) / 2 - videoCenter)
+            - Math.abs((right.rect.top + right.rect.bottom) / 2 - videoCenter);
+        })[0];
+      if (nearest) return nearest.url;
     }
     return null;
   };
@@ -595,6 +620,9 @@
     }
     const isFacebookReelsPage = /(^|\.)facebook\.com$/i.test(location.hostname)
       && /(?:^|\/)reels?(?:\/|$)/i.test(location.pathname);
+    const isInstagramReelsPage = /(^|\.)instagram\.com$/i.test(location.hostname)
+      && /(?:^|\/)reels?(?:\/|$)/i.test(location.pathname);
+    const isTikTokPage = /(^|\.)tiktok\.com$/i.test(location.hostname);
     let activeFacebookReel = null;
     if (isFacebookReelsPage) {
       const viewportCenter = innerHeight / 2;
@@ -611,12 +639,40 @@
         if (overlay.element?.tagName === "VIDEO" && overlay.element !== activeFacebookReel) overlay.cleanup();
       }
     }
+    let activeInstagramReel = null;
+    if (isInstagramReelsPage) {
+      const viewportCenter = innerHeight / 2;
+      activeInstagramReel = [...document.querySelectorAll("video")]
+        .map((video) => ({ video, rect: video.getBoundingClientRect() }))
+        .filter(({ rect }) => rect.width >= 100 && rect.height >= 55 && rect.bottom > 0 && rect.top < innerHeight)
+        .sort((left, right) =>
+          Math.abs((left.rect.top + left.rect.bottom) / 2 - viewportCenter)
+          - Math.abs((right.rect.top + right.rect.bottom) / 2 - viewportCenter))[0]?.video || null;
+      for (const overlay of [...activeOverlays.values()]) {
+        if (overlay.element?.tagName === "VIDEO" && overlay.element !== activeInstagramReel) overlay.cleanup();
+      }
+    }
+    let activeTikTokVideo = null;
+    if (isTikTokPage) {
+      const viewportCenter = innerHeight / 2;
+      activeTikTokVideo = [...document.querySelectorAll("video")]
+        .map((video) => ({ video, rect: video.getBoundingClientRect() }))
+        .filter(({ rect }) => rect.width >= 100 && rect.height >= 55 && rect.bottom > 0 && rect.top < innerHeight)
+        .sort((left, right) =>
+          Math.abs((left.rect.top + left.rect.bottom) / 2 - viewportCenter)
+          - Math.abs((right.rect.top + right.rect.bottom) / 2 - viewportCenter))[0]?.video || null;
+      for (const overlay of [...activeOverlays.values()]) {
+        if (overlay.element?.tagName === "VIDEO" && overlay.element !== activeTikTokVideo) overlay.cleanup();
+      }
+    }
 
     document.querySelectorAll("video,audio").forEach((element) => {
       if (element.dataset.apocalipseButton) return;
       const isYouTubeVideo = element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch";
       const isFacebookVideo = element.tagName === "VIDEO" && /(^|\.)facebook\.com$/i.test(location.hostname);
       if (isFacebookReelsPage && isFacebookVideo && element !== activeFacebookReel) return;
+      if (isInstagramReelsPage && element.tagName === "VIDEO" && element !== activeInstagramReel) return;
+      if (isTikTokPage && element.tagName === "VIDEO" && element !== activeTikTokVideo) return;
       const tikTokUrl = element.tagName === "VIDEO" ? tikTokUrlFor(element) : null;
       const isTikTokVideo = Boolean(tikTokUrl);
       const url = isFacebookVideo ? facebookUrlFor(element) || location.href : tikTokUrl || downloadUrlFor(element);
@@ -638,7 +694,7 @@
         event.stopPropagation();
         const originalText = button.textContent;
         button.textContent = "…";
-        trace("overlay_download_clicked", "download", { tag: element.tagName, facebook: isFacebookVideo, tiktok: isTikTokVideo, overlays: activeOverlays.size });
+        trace("overlay_download_clicked", "download", { tag: element.tagName, facebook: isFacebookVideo, tiktokPage: isTikTokPage, tiktokPermalink: isTikTokVideo, overlays: activeOverlays.size });
         const visibleFacebookUrl = isFacebookVideo && isFacebookMediaUrl(location.href) ? location.href : null;
         const resolved = visibleFacebookUrl || (isFacebookVideo ? await revealFacebookUrl(element) : tikTokUrlFor(element) || await resolveDownloadUrl(element));
         if (resolved === "clipboard-copied") {
@@ -704,6 +760,8 @@
         ])];
         trace("overlay_download_candidate_selected", "download", {
           facebook: isFacebookVideo,
+          tiktokPage: isTikTokPage,
+          tiktokPermalink: Boolean(isTikTokVideoUrl(currentUrl)),
           directPlayer: Boolean(liveHttpUrl && currentUrl === liveHttpUrl),
           networkMedia: Boolean(networkMediaUrl && currentUrl === networkMediaUrl),
           pageFallback: Boolean(isFacebookVideo && isFacebookMediaUrl(currentUrl)),
@@ -896,6 +954,13 @@
       }
       }));
     })().then((media) => reply({ pageUrl: location.href, media })).catch(() => reply({ pageUrl: location.href, media: found }));
+    trace("popup_scan_completed", "scan", {
+      frame: window === window.top ? "top" : "child",
+      detected: found.length,
+      videos: found.filter((item) => item.kind === "video").length,
+      audio: found.filter((item) => item.kind === "audio").length,
+      images: found.filter((item) => item.kind === "image").length,
+    });
     return true;
   });
 
