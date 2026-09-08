@@ -7,7 +7,6 @@ let bypassNextUntil = 0;
 let forceHeld = false;
 let lastShortcutMode = "normal";
 let diagnosticOutbox = [];
-let lastFormSubmission = null;
 const recentFileResponses = [];
 const ASSISTED_PREFIX = "assisted-download:";
 const DIRECT_PREFIX = "direct-download:";
@@ -264,7 +263,6 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     const index = recentFileResponses.indexOf(recentResponse);
     if (index >= 0) recentFileResponses.splice(index, 1);
   }
-  let formRequest = null;
   if (bypassIsActive(modifierTabId)) return false;
   if (!bridgeConnected) {
     void diagnostic("browser_download.bridge_unavailable", state, { level: "WARN", detail: `disposable=${disposable} file=${fileNameFromPath(item.filename) || "unknown"}` });
@@ -291,12 +289,6 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     await cancelBrowserDownload(item.id);
     cancelled = true;
     if (eraseFromHistory) await eraseBrowserDownload(item.id);
-    formRequest ||= lastFormSubmission
-      && Date.now() - lastFormSubmission.capturedAt < 30000
-      && pageUrl === lastFormSubmission.pageUrl
-      ? lastFormSubmission
-      : null;
-    if (formRequest) lastFormSubmission = null;
     const handoff = await bridgeRequest("/v1/download", {
       method: "POST",
       body: JSON.stringify({
@@ -306,9 +298,9 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
         duration: null,
         cookieHeader: await cookieHeaderFor([url, item.url, pageUrl]),
         userAgent: navigator.userAgent,
-        requestMethod: formRequest?.method || "GET",
-        requestBody: formRequest?.body || null,
-        requestContentType: formRequest?.contentType || null,
+        requestMethod: "GET",
+        requestBody: null,
+        requestContentType: null,
         startImmediately: false,
       }),
     }).catch(async (error) => {

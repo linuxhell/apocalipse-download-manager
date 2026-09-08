@@ -30,25 +30,6 @@
     bypassPressed: false,
     forcePressed: false,
   }).catch(() => {}));
-  document.addEventListener("submit", (event) => {
-    const form = event.target;
-    if (!(form instanceof HTMLFormElement) || String(form.method || "get").toLowerCase() !== "post") return;
-    const data = new FormData(form, event.submitter || undefined);
-    const body = new URLSearchParams();
-    for (const [name, value] of data) if (typeof value === "string") body.append(name, value);
-    chrome.runtime.sendMessage({
-      type: "APOCALIPSE_FORM_SUBMIT",
-      request: {
-        url: absolute(form.action || location.href),
-        pageUrl: location.href,
-        method: "POST",
-        body: body.toString(),
-        contentType: "application/x-www-form-urlencoded",
-        capturedAt: Date.now(),
-      },
-    }).catch(() => {});
-  }, true);
-
   const absolute = (value) => {
     try { return new URL(value, location.href).href; } catch { return null; }
   };
@@ -114,23 +95,10 @@
     chrome.runtime.sendMessage({ type: "APOCALIPSE_CHATGPT_LIBRARY_ARM_DENY" }).catch(() => {});
   }, true);
 
-  const copyTextNow = (value) => {
-    void navigator.clipboard.writeText(value).catch(() => {});
-    const input = document.createElement("textarea");
-    input.value = value;
-    input.setAttribute("readonly", "");
-    input.style.cssText = "position:fixed;left:-10000px;top:0;opacity:0";
-    document.documentElement.append(input);
-    input.select();
-    input.setSelectionRange(0, input.value.length);
-    let copied = false;
-    try { copied = document.execCommand("copy"); } catch {}
-    input.remove();
-    return copied;
-  };
   const recentNetworkMediaUrl = () => {
     try {
       const entries = performance.getEntriesByType("resource");
+      const facebookPage = /(^|\.)facebook\.com$/i.test(location.hostname);
       for (let i = entries.length - 1; i >= 0; i -= 1) {
         const name = String(entries[i]?.name || "");
         if (!/^https?:/i.test(name)) continue;
@@ -139,6 +107,14 @@
         // similarly named hosts. Passing one of those to the desktop incorrectly
         // selects NativeHttp/direct_http instead of the HLS pipeline.
         if (/\.(?:mp4|webm|m3u8|mpd)(?:[?#]|$)/i.test(name)) return name;
+        // Facebook CDN paths frequently omit a file extension. initiatorType=video
+        // is browser evidence that the response feeds the player, unlike a host
+        // name or a loose "video" substring.
+        if (facebookPage && entries[i]?.initiatorType === "video") {
+          try {
+            if (/(^|\.)fbcdn\.net$/i.test(new URL(name).hostname)) return name;
+          } catch {}
+        }
       }
     } catch {}
     return null;
@@ -365,13 +341,6 @@
     }
     if (!copyItem) return null;
     copyItem.click();
-    for (let attempt = 0; attempt < 15; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      try {
-        const copied = (await navigator.clipboard.readText()).trim();
-        if (isFacebookMediaUrl(copied)) return copied;
-      } catch {}
-    }
     return "clipboard-copied";
   };
   const revealFacebookUrl = async (element) => {
@@ -700,7 +669,9 @@
 
         // A resolved HLS manifest is more authoritative than incidental network
         // traffic or a generic HTTP source exposed by the player.
-        let currentUrl = resolved?.url || resolved || liveHttpUrl || networkMediaUrl || (isYouTubeVideo ? location.href : null);
+        let currentUrl = isFacebookVideo
+          ? (liveHttpUrl || networkMediaUrl || resolved?.url || resolved)
+          : (resolved?.url || resolved || liveHttpUrl || networkMediaUrl || (isYouTubeVideo ? location.href : null));
         const facebookPlayableUrl = isFacebookVideo && currentUrl && (
           isFacebookMediaUrl(currentUrl)
           || /\.(?:mp4|webm|m3u8|mpd)(?:[?#]|$)/i.test(currentUrl)
@@ -724,14 +695,20 @@
             console.debug("Apocalipse direct blob failed", error);
           }
         }
-        const copiedToClipboard = isFacebookVideo ? copyTextNow(currentUrl) : false;
         const directFacebookMedia = isFacebookVideo ? absolute(element.currentSrc || element.src) : null;
         const requestUrls = [...new Set([
           ...(resolved?.requestUrls?.length ? resolved.requestUrls : (/\.m3u8(?:$|[?#])/i.test(String(currentUrl)) ? hlsForPage().candidates : [])),
           ...(directFacebookMedia && /^https?:/i.test(directFacebookMedia) ? [directFacebookMedia] : []),
         ])];
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls, userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
-          const failed = !copiedToClipboard && (chrome.runtime.lastError || result?.target !== "apocalipse");
+        trace("overlay_download_candidate_selected", "download", {
+          facebook: isFacebookVideo,
+          directPlayer: Boolean(liveHttpUrl && currentUrl === liveHttpUrl),
+          networkMedia: Boolean(networkMediaUrl && currentUrl === networkMediaUrl),
+          pageFallback: Boolean(isFacebookVideo && isFacebookMediaUrl(currentUrl)),
+          candidate: currentUrl,
+        });
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls, userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: isFacebookVideo ? facebookDownloadTitle(visibleFacebookUrl || location.href) : document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
+          const failed = chrome.runtime.lastError || result?.target !== "apocalipse";
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";
           if (failed) button.title = result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable";

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.71",
+  "version": "0.3.72",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -10,9 +10,7 @@
     "downloads",
     "alarms",
     "cookies",
-    "webRequest",
-    "clipboardRead",
-    "clipboardWrite"
+    "webRequest"
   ],
   "host_permissions": [
     "http://127.0.0.1/*",
