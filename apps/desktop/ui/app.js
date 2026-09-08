@@ -47,6 +47,7 @@ const catalogs = {
     sourceUrl: "Source URL",
     cancel: "Cancel",
     analyze: "Analyze",
+    torrentMetadataSeeking: "Finding peers and receiving torrent metadata",
     saveTo: "Save to",
     fileName: "File name",
     queued: "Queued",
@@ -218,6 +219,7 @@ const catalogs = {
     sourceUrl: "URL de origem",
     cancel: "Cancelar",
     analyze: "Analisar",
+    torrentMetadataSeeking: "Procurando pares e recebendo metadados do torrent",
     saveTo: "Salvar em",
     fileName: "Nome do arquivo",
     queued: "Na fila",
@@ -1771,9 +1773,13 @@ document.querySelector("#task-connections").oninput = (event) => {
 document.querySelector("#analyze").onclick = async () => {
   const url = document.querySelector("#url");
   if (!url.reportValidity()) return;
+  const analyzeButton = document.querySelector("#analyze");
+  if (analyzeButton.disabled) return;
+  analyzeButton.disabled = true;
   const box = document.querySelector("#analysis");
   box.hidden = false;
   box.textContent = "…";
+  let metadataTimer = null;
   try {
     const plan = await invoke("inspect_url", { url: url.value });
     const fileName = document.querySelector("#file-name");
@@ -1786,7 +1792,19 @@ document.querySelector("#analyze").onclick = async () => {
     }
     box.textContent = `${plan.primary} · ${plan.reason}`;
     if (plan.primary === "YtDlp") await showMediaInspection(url.value);
-    else if (plan.primary === "Aria2Rpc" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) await showTorrentInspection(url.value);
+    else if (plan.primary === "Aria2Rpc" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) {
+      const startedAt = Date.now();
+      const updateMetadataStatus = () => {
+        const seconds = Math.floor((Date.now() - startedAt) / 1000);
+        box.textContent = `${t("torrentMetadataSeeking")} · ${seconds}s`;
+      };
+      updateMetadataStatus();
+      metadataTimer = window.setInterval(updateMetadataStatus, 1000);
+      await showTorrentInspection(url.value);
+      window.clearInterval(metadataTimer);
+      metadataTimer = null;
+      box.textContent = `${plan.primary} · ${plan.reason}`;
+    }
     else if (plan.primary === "NM3u8DlRe") {
       const select = document.querySelector("#media-format");
       select.replaceChildren();
@@ -1801,6 +1819,9 @@ document.querySelector("#analyze").onclick = async () => {
     document.querySelector("#enqueue").hidden = false;
   } catch (error) {
     box.textContent = String(error);
+  } finally {
+    if (metadataTimer) window.clearInterval(metadataTimer);
+    analyzeButton.disabled = false;
   }
 };
 document.querySelector("#enqueue").onclick = async () => {
