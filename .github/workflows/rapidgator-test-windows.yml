@@ -40,6 +40,7 @@ jobs:
           python .github/scripts/apply_round_0_3_57.py
           python .github/scripts/apply_round_0_3_58.py
           python .github/scripts/apply_round_0_3_59.py
+          python .github/scripts/apply_round_0_3_60.py
       - name: Validate extension JavaScript
         run: |
           node --check browser-extension/content.js
@@ -47,6 +48,7 @@ jobs:
           node --check browser-extension/page-hook.js
           node --check browser-extension/rapidgator.js
           node --check browser-extension/popup.js
+          node --check apps/desktop/ui/app.js
           if (Select-String -Path browser-extension/manifest.json -Pattern '"debugger"' -Quiet) { throw 'debugger permission still present' }
           if (Select-String -Path browser-extension/*.js -Pattern 'chrome\.debugger|Fetch\.enable|Fetch\.requestPaused|Fetch\.takeResponseBodyAsStream|IO\.read|Page\.setDownloadBehavior|Browser\.setDownloadBehavior' -Quiet) { throw 'CDP code still present in shipped extension' }
           if (Select-String -Path browser-extension/service-worker.js -Pattern '/v1/site-rules' -Quiet) { throw 'stale site-rules bridge request still present' }
@@ -58,6 +60,7 @@ jobs:
           if (Select-String -Path apps/desktop/src-tauri/src/main.rs -Pattern 'start_file\("matrix-rules\.json"' -Quiet) { throw 'legacy matrix-rules.json still exported in diagnostics' }
           if (-not (Select-String -Path apps/desktop/ui/index.html -Pattern 'id="download-connections"' -Quiet)) { throw 'per-download thread slider missing' }
           if (-not (Select-String -Path apps/desktop/ui/app.js -Pattern 'connectionsOverride' -Quiet)) { throw 'per-download thread override not wired' }
+          if (Select-String -Path apps/desktop/ui/app.js -Pattern 'document\.querySelector\("#manage-site-rules"\)\.onclick|document\.querySelector\("#pick-log-editor"\)\.onclick|document\.querySelector\("#open-log"\)\.onclick' -Quiet) { throw 'removed controls still have direct event handlers' }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build desktop
