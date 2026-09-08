@@ -13,8 +13,6 @@
         <div><strong>APOCALIPSE</strong><small>DOWNLOAD MANAGER</small></div>
       </div>
       <nav>
-        <button data-page="settings" data-settings-target="general"><span>⚙</span><b data-i18n="general">General</b></button>
-        <button data-settings-target="browsers"><span>◎</span><b data-i18n="browsers">Browsers</b></button>
         <button class="active" data-page="downloads">
           <span>⇩</span><b data-i18n="downloads">Downloads</b>
         </button>
@@ -31,11 +29,10 @@
         <button data-page="tools">
           <span>⌁</span><b data-i18n="tools">Tools</b>
         </button>
-        <button data-settings-target="themes"><span>◐</span><b data-i18n="themes">Themes</b></button>
-        <button data-settings-target="language"><span>A</span><b data-i18n="language">Language</b></button>
-        <button data-settings-target="advanced"><span>☷</span><b data-i18n="advanced">Advanced</b></button>
+        <button data-page="themes"><span>◐</span><b data-i18n="themes">Themes</b></button>
+        <button data-page="language"><span>A</span><b data-i18n="language">Language</b></button>
         <button data-page="logs"><span>▤</span><b data-i18n="logs">Logs</b></button>
-        <button data-settings-target="about"><span>ⓘ</span><b data-i18n="about">About</b></button>
+        <button data-settings-target="general"><span>⚙</span><b data-i18n="settings">Settings</b></button>
         <button id="donate-paypal" type="button">
           <span>♥</span><b data-i18n="donatePaypal">Donate via PayPal</b>
         </button>
@@ -56,11 +53,7 @@
           <p id="page-description" class="page-description" data-i18n="downloadsDescription">Manage direct downloads, progress, speed and completed files.</p>
         </div>
         <div class="actions">
-          <select id="language" aria-label="Language">
-            <option value="en">English</option>
-            <option value="pt-BR">Português (Brasil)</option>
-            <option value="zh-CN">简体中文</option></select
-          ><button id="add" class="primary">
+          <button id="add" class="primary">
             <span>＋</span><b data-i18n="addDownload">Add download</b>
           </button>
         </div>
@@ -102,6 +95,41 @@
         <div class="log-toolbar"><input id="log-search" type="search" data-i18n-placeholder="searchLogs" placeholder="Search events…" /><select id="log-level"><option value="" data-i18n="allLevels">All levels</option><option>ERROR</option><option>WARN</option><option>INFO</option><option>DEBUG</option></select></div>
         <div id="log-event-list" class="log-event-list"></div>
         <p id="log-empty" data-i18n="emptyLog">No diagnostic events recorded yet.</p>
+      </section>
+      <section id="themes-panel" class="appearance-page" hidden>
+        <section class="appearance-card">
+          <h2 data-i18n="chooseTheme">Choose theme</h2>
+          <label for="theme" data-i18n="appearanceTheme">Interface theme</label>
+          <select id="theme">
+            <option value="void">Alien Void</option><option value="inferno">Inferno</option><option value="toxic">Toxic Reactor</option>
+            <option value="synthwave">Synthwave</option><option value="royal">Royal Nebula</option><option value="crimson">Blood Moon</option>
+            <option value="arctic">Arctic Signal</option><option value="obsidian">Obsidian Black</option><option value="monochrome">Monochrome</option>
+            <option value="midnight">Midnight Blue</option><option value="forest">Dark Forest</option><option value="graphite">Graphite Steel</option>
+            <option value="deepsea">Deep Sea</option><option value="eclipse">Purple Eclipse</option><option value="hazard">Hazard Black &amp; Yellow</option>
+            <option value="cyberstorm">Cyber Storm</option><option value="ultraviolet">Ultraviolet Pulse</option><option value="emeraldgold">Emerald &amp; Gold</option>
+            <option value="scarletice">Scarlet Ice</option><option value="coppernavy">Copper Navy</option><option value="solarizednight">Solarized Night</option>
+          </select>
+          <small data-i18n="themeHint">Colors and text contrast are adjusted together for readability.</small>
+        </section>
+        <section class="appearance-card appearance-options">
+          <h2 data-i18n="themeOptions">Theme options</h2>
+          <label class="appearance-toggle"><span><b data-i18n="windowTransparency">Window transparency</b><small data-i18n="windowTransparencyHint">Make the application window transparent</small></span><input id="transparency-enabled" type="checkbox" /></label>
+          <label class="appearance-range"><span><b data-i18n="transparencyLevel">Transparency level</b><output id="transparency-value">30%</output></span><input id="transparency-level" type="range" min="0" max="70" value="30" /></label>
+          <label class="appearance-toggle"><span><b data-i18n="roundedCorners">Rounded corners</b><small data-i18n="roundedCornersHint">Use rounded corners on windows, panels and controls</small></span><input id="rounded-enabled" type="checkbox" checked /></label>
+          <label class="appearance-range"><span><b data-i18n="cornerRadius">Corner radius</b><output id="corner-radius-value">10 px</output></span><input id="corner-radius" type="range" min="0" max="28" value="10" /></label>
+          <label class="appearance-select"><span><b data-i18n="interfaceSize">Interface size</b><small data-i18n="interfaceSizeHint">Adjust text and element sizes</small></span><select id="interface-size"><option value="compact" data-i18n="compact">Compact</option><option value="normal" data-i18n="normal">Normal</option><option value="large" data-i18n="large">Large</option></select></label>
+        </section>
+      </section>
+      <section id="language-panel" class="appearance-page language-page" hidden>
+        <section class="appearance-card">
+          <h2 data-i18n="chooseLanguage">Choose language</h2>
+          <p data-i18n="languageHint">The entire application and tray menu use the selected language.</p>
+          <div class="language-choices">
+            <button type="button" data-language-choice="pt-BR">Português (Brasil)</button>
+            <button type="button" data-language-choice="en">English</button>
+            <button type="button" data-language-choice="zh-CN">简体中文</button>
+          </div>
+        </section>
       </section>
       <section class="panel">
         <div class="toolbar">
@@ -298,33 +326,6 @@
         </div>
         <div class="settings-columns">
         <div>
-        <section class="pairing-settings theme-settings">
-          <label for="theme" data-i18n="appearanceTheme">Interface theme</label>
-          <select id="theme">
-            <option value="void">Alien Void</option>
-            <option value="inferno">Inferno</option>
-            <option value="toxic">Toxic Reactor</option>
-            <option value="synthwave">Synthwave</option>
-            <option value="royal">Royal Nebula</option>
-            <option value="crimson">Blood Moon</option>
-            <option value="arctic">Arctic Signal</option>
-            <option value="obsidian">Obsidian Black</option>
-            <option value="monochrome">Monochrome</option>
-            <option value="midnight">Midnight Blue</option>
-            <option value="forest">Dark Forest</option>
-            <option value="graphite">Graphite Steel</option>
-            <option value="deepsea">Deep Sea</option>
-            <option value="eclipse">Purple Eclipse</option>
-            <option value="hazard">Hazard Black &amp; Yellow</option>
-            <option value="cyberstorm">Cyber Storm</option>
-            <option value="ultraviolet">Ultraviolet Pulse</option>
-            <option value="emeraldgold">Emerald &amp; Gold</option>
-            <option value="scarletice">Scarlet Ice</option>
-            <option value="coppernavy">Copper Navy</option>
-            <option value="solarizednight">Solarized Night</option>
-          </select>
-          <small data-i18n="themeHint">Colors and text contrast are adjusted together for readability.</small>
-        </section>
         <label class="setting-toggle">
           <input id="autostart" type="checkbox" />
           <span
@@ -340,10 +341,6 @@
           <label class="setting-toggle compact-toggle"><input id="adaptive-efficiency" type="checkbox" /><span><b data-i18n="adaptiveEfficiency">Adaptive efficiency</b><small data-i18n="adaptiveEfficiencyHint">Optimizes queue order and connection use for the current workload.</small></span></label>
           <label class="setting-toggle compact-toggle"><input id="schedule-enabled" type="checkbox" /><span><b data-i18n="scheduler">Download schedule</b><small data-i18n="schedulerHint">Automatically pauses outside the permitted local time window.</small></span></label>
           <div class="credential-grid"><label><span data-i18n="scheduleStart">Start</span><input id="schedule-start" type="time" value="00:00" /></label><label><span data-i18n="scheduleEnd">End</span><input id="schedule-end" type="time" value="23:59" /></label></div>
-        </section>
-        <section id="about-settings" class="pairing-settings">
-          <b>Apocalipse Download Manager 0.4.6</b>
-          <small data-i18n="aboutDescription">Native open-source download manager. Interface, core, extensions and diagnostics are built to work as one system.</small>
         </section>
         <label class="setting-toggle">
           <input id="capture-clipboard" type="checkbox" />
