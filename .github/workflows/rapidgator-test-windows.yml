@@ -45,6 +45,7 @@ jobs:
           python .github/scripts/apply_round_0_3_62.py
           python .github/scripts/apply_round_0_3_63.py
           python .github/scripts/apply_round_0_3_64.py
+          python .github/scripts/apply_round_0_3_65.py
       - name: Validate extension JavaScript
         run: |
           node --check browser-extension/content.js
@@ -62,6 +63,10 @@ jobs:
           if (Select-String -Path browser-extension/service-worker.js -Pattern '/v1/site-rules' -Quiet) { throw 'stale site-rules bridge request still present' }
           if (-not (Select-String -Path browser-extension/page-hook.js -Pattern 'FORCE_PASSTHROUGH' -Quiet)) { throw 'force downstream passthrough trace missing' }
           if (-not (Select-String -Path browser-extension/page-hook.js -Pattern 'forceDirectAnchorClassify' -Quiet)) { throw 'direct-anchor force classifier missing' }
+          if (-not (Select-String -Path browser-extension/background.js -Pattern 'function forceIsActive' -Quiet)) { throw 'central force transaction gate missing' }
+          if (-not (Select-String -Path browser-extension/background.js -Pattern 'function armBypass' -Quiet)) { throw 'central bypass transaction gate missing' }
+          if (-not (Select-String -Path browser-extension/content.js -Pattern 'APOCALIPSE_FORCE_NEXT' -Quiet)) { throw 'force lease signalling missing' }
+          if (Select-String -Path browser-extension/background.js -Pattern 'isChatGPTLibraryDownload\(url\) \|\| \(bridgeConnected && isRapidgatorFinalDownload\(url\)\)' -Quiet) { throw 'stale early cancellation for Library/Rapidgator remains' }
           if (-not (Select-String -Path apps/desktop/src-tauri/src/main.rs -Pattern 'Access-Control-Allow-Private-Network: true' -Quiet)) { throw 'local/private network preflight header missing' }
           if (-not (Select-String -Path browser-extension/popup.js -Pattern 'directBridgeHealth' -Quiet)) { throw 'direct popup pairing missing' }
           if (-not (Select-String -Path browser-extension/popup.js -Pattern 'workerSelfTest' -Quiet)) { throw 'popup worker self-test missing' }
