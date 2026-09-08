@@ -53,6 +53,10 @@ pub struct DownloadTask {
     pub priority: i8,
     #[serde(default)]
     pub bandwidth_limit: Option<u64>,
+    /// User-selected connection count for this task only. `None` keeps the
+    /// global/site behavior and preserves compatibility with older queues.
+    #[serde(default)]
+    pub connections_override: Option<usize>,
     #[serde(default)]
     pub sha256: Option<String>,
     #[serde(default)]
@@ -85,6 +89,7 @@ impl DownloadTask {
             mirrors: Vec::new(),
             priority: 0,
             bandwidth_limit: None,
+            connections_override: None,
             sha256: None,
             integrity_verified: false,
             created_at: SystemTime::now()

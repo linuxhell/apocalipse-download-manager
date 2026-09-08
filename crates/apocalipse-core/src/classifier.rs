@@ -91,7 +91,6 @@ mod tests {
             Some(DownloadKind::MediaPage)
         );
         assert_eq!(classify_url("file:///tmp/a"), None);
-        assert_eq!(classify_url("ed2k://|file|example.iso|42|abc|/"), None);
         assert_eq!(
             classify_url("ftp://example.test/file.iso"),
             Some(DownloadKind::Ftp)

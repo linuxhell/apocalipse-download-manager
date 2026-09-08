@@ -127,8 +127,12 @@ const render = () => {
         image.src = chrome.runtime.getURL("icons/alien-48.png");
       };
     }
-    row.querySelector("b").textContent = item.title || item.url.split("/").pop();
-    row.querySelector("small").textContent = [formatBytes(item.size), formatDuration(item.duration), item.recommended ? t("recommended") : "", new URL(item.url).hostname].filter(Boolean).join(" · ");
+    let parsed;
+    try { parsed = new URL(item.url); } catch { parsed = null; }
+    const pathName = parsed?.pathname?.split("/").filter(Boolean).pop() || "";
+    const extension = (pathName.match(/\.([a-z0-9]{2,8})$/i)?.[1] || item.ext || (/\.m3u8(?:$|[?#])/i.test(item.url) ? "m3u8" : item.kind)).toUpperCase();
+    row.querySelector("b").textContent = item.title || decodeURIComponent(pathName) || item.url;
+    row.querySelector("small").textContent = [extension, formatBytes(item.size), formatDuration(item.duration), item.recommended ? t("recommended") : "", parsed?.hostname].filter(Boolean).join(" · ");
     const button = row.querySelector("button");
     button.textContent = t("download");
     button.onclick = () => chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item }, (result) => {

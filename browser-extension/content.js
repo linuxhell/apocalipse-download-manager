@@ -365,7 +365,17 @@
     const add = (url, kind, element, thumbnail) => {
       url = absolute(url);
       if (!url || !/^https?:/.test(url)) return;
-      items.set(`${kind}:${url}`, { url, kind, thumbnail: thumbnail ?? thumbnailFor(element, kind), title: titleFor(element), size: null });
+      const resource = performance.getEntriesByName(url).at(-1);
+      const measuredSize = Number(resource?.encodedBodySize || resource?.transferSize || 0);
+      const duration = Number(element?.duration);
+      items.set(`${kind}:${url}`, {
+        url,
+        kind,
+        thumbnail: thumbnail ?? thumbnailFor(element, kind),
+        title: titleFor(element),
+        size: measuredSize > 0 && !/\.m3u8(?:$|[?#])/i.test(url) ? measuredSize : null,
+        duration: Number.isFinite(duration) && duration > 0 ? duration : null,
+      });
     };
     document.querySelectorAll("video").forEach((element) => {
       add(element.currentSrc || element.src, "video", element);
@@ -387,7 +397,7 @@
     });
     document.querySelectorAll("img").forEach((element) => add(element.currentSrc || element.src, "image", element));
     performance.getEntriesByType("resource").forEach((entry) => {
-      if (/\.m3u8(?:$|[?#])/i.test(entry.name)) add(entry.name, "video", null, document.querySelector("video")?.poster || "");
+      if (/\.m3u8(?:$|[?#])/i.test(entry.name)) add(entry.name, "video", document.querySelector("video"), document.querySelector("video")?.poster || "");
     });
     return [...items.values()];
   };
@@ -405,6 +415,15 @@
     const value = Math.max(0, Math.floor(seconds));
     return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
   };
+  const trace = (eventName, mode, detail = {}) => chrome.runtime.sendMessage({
+    type: "APOCALIPSE_CAPTURE_TRACE",
+    eventName,
+    mode,
+    traceId: crypto.randomUUID(),
+    pageUrl: location.href,
+    at: Date.now(),
+    detail,
+  }).catch(() => {});
   const downloadableLink = (anchor) => {
     const url = absolute(anchor?.href);
     if (!url || !/^https?:/i.test(url)) return null;
@@ -559,6 +578,7 @@
         event.stopPropagation();
         const originalText = button.textContent;
         button.textContent = "…";
+        trace("overlay_download_clicked", "download", { tag: element.tagName, facebook: isFacebookVideo, tiktok: isTikTokVideo, overlays: activeOverlays.size });
         const visibleFacebookUrl = isFacebookVideo && isFacebookMediaUrl(location.href) ? location.href : null;
         const resolved = visibleFacebookUrl || (isFacebookVideo ? await revealFacebookUrl(element) : tikTokUrlFor(element) || await resolveDownloadUrl(element));
         if (resolved === "clipboard-copied") {
@@ -595,6 +615,7 @@
           || /(?:fbcdn|fbsbx|video)/i.test(currentUrl)
         );
         if (!currentUrl || (isFacebookVideo && !facebookPlayableUrl)) {
+          trace("overlay_download_unresolved", "download", { liveBlob: Boolean(liveBlobUrl), liveHttp: Boolean(liveHttpUrl), networkMedia: Boolean(networkMediaUrl), facebook: isFacebookVideo });
           button.textContent = "⚠";
           button.title = "Abra o vídeo ou use os três pontos e Copiar link";
           setTimeout(() => { button.textContent = originalText; }, 2500);
@@ -619,6 +640,7 @@
         ])];
         chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls, userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
           const failed = !copiedToClipboard && (chrome.runtime.lastError || result?.target !== "apocalipse");
+          trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";
           if (failed) button.title = result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable";
           setTimeout(() => { button.textContent = originalText; }, 1500);
@@ -641,12 +663,14 @@
           event.preventDefault();
           event.stopPropagation();
           if (recorder?.state === "recording") {
+            trace("recording_stop_clicked", "record", { elapsedMs: Date.now() - startedAt });
             recorder.stop();
             record.disabled = true;
             record.textContent = labels.uploading;
             return;
           }
           try {
+            trace("recording_start_clicked", "record", { captureStream: Boolean(element.captureStream || element.webkitCaptureStream), mediaRecorder: Boolean(globalThis.MediaRecorder) });
             const capture = element.captureStream?.bind(element) || element.webkitCaptureStream?.bind(element);
             if (!capture || !globalThis.MediaRecorder) throw new Error("capture_not_supported");
             if (Number.isFinite(element.duration)) element.currentTime = 0;
@@ -661,6 +685,7 @@
               request: { fileName: `${safeTitle}.recording.webm`, total: 0, source: location.href, streaming: true },
             });
             if (!begin?.uploadId) throw new Error(begin?.error || "recording_begin_failed");
+            trace("recording_bridge_started", "record", { uploadId: begin.uploadId, mimeType });
             let uploadQueue = Promise.resolve();
             let uploadError = null;
             recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
@@ -680,7 +705,9 @@
                 const result = await chrome.runtime.sendMessage({ type: "APOCALIPSE_BLOB_END", request: { uploadId: begin.uploadId } });
                 if (result?.error) throw new Error(result.error);
                 record.textContent = `✓ ${labels.done}`;
+                trace("recording_completed", "record", { uploadId: begin.uploadId, elapsedMs: Date.now() - startedAt });
               } catch (error) {
+                trace("recording_upload_failed", "record", { uploadId: begin.uploadId, error: String(error) });
                 console.error("Apocalipse recorder upload", error);
                 record.textContent = "⚠";
               } finally {
@@ -704,6 +731,7 @@
               if (status?.stop && recorder?.state === "recording") recorder.stop();
             }, 1000);
           } catch (error) {
+            trace("recording_start_failed", "record", { error: String(error) });
             console.error("Apocalipse recorder", error);
             record.textContent = "⚠";
             record.title = labels.unavailable;
@@ -748,6 +776,8 @@
         activeOverlays.delete(element);
       };
       activeOverlays.set(element, { element, pageUrl: location.href, cleanup: cleanupOverlay });
+      const duplicateButtons = document.querySelectorAll(".apocalipse-media-download").length - activeOverlays.size * 2;
+      trace("overlay_installed", "overlay", { tag: element.tagName, canDownload, canRecord, active: activeOverlays.size, duplicateDelta: duplicateButtons });
       position();
       addEventListener("scroll", position, { passive: true });
       addEventListener("resize", position, { passive: true });

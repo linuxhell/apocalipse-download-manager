@@ -5,6 +5,8 @@ let bypassHeld = false;
 let bypassUntil = 0;
 let bypassNextUntil = 0;
 let forceHeld = false;
+let lastShortcutMode = "normal";
+let diagnosticOutbox = [];
 let lastFormSubmission = null;
 let siteRules = [{ id: "uupdump", hosts: ["uupdump.net", "*.uupdump.net"], action: "uupdump_post", enabled: true }];
 const recentFileResponses = [];
@@ -59,9 +61,16 @@ function ensureHeartbeat() {
 ensureHeartbeat();
 chrome.runtime.onInstalled.addListener(ensureHeartbeat);
 chrome.runtime.onStartup.addListener(ensureHeartbeat);
+async function refreshSiteRules() {
+  const rules = await bridgeRequest("/v1/site-rules");
+  if (Array.isArray(rules) && rules.length) siteRules = rules;
+}
+void bridgeRequest("/v1/health").then(() => refreshSiteRules()).catch(() => {});
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === HEARTBEAT_ALARM) {
     bridgeRequest("/v1/health")
+      .then(() => refreshSiteRules())
+      .then(() => flushDiagnosticOutbox())
       .then(() => flushAssistedDownloads())
       .then(() => flushDirectDownloads())
       .catch(() => {});
@@ -256,7 +265,12 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
   let url = item.finalUrl || item.url;
   if (!item.id) return false;
   const modifierTabId = Number.isInteger(item.tabId) ? item.tabId : null;
-  if (bypassIsActive(modifierTabId)) return false;
+  const state = { traceId: crypto.randomUUID(), url, pageUrl: item.referrer || null, startedAt: Date.now(), bytes: 0 };
+  const rapidgator = isRapidgatorFinalDownload(url);
+  if (bypassIsActive(modifierTabId)) {
+    void diagnostic("browser_download.bypassed", state, { detail: `tab=${modifierTabId ?? "none"} rapidgator=${rapidgator}` });
+    return false;
+  }
   if (/^blob:https:\/\/web\.telegram\.org\//i.test(url)) {
     if (bypassIsActive(modifierTabId)) return false;
     if (!bridgeConnected) return false;
@@ -308,8 +322,12 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     }
   }
   if (bypassIsActive(modifierTabId)) return false;
-  if (!bridgeConnected) return false;
+  if (!bridgeConnected) {
+    void diagnostic("browser_download.bridge_unavailable", state, { level: "WARN", detail: `rapidgator=${rapidgator} file=${fileNameFromPath(item.filename) || "unknown"}` });
+    return false;
+  }
   const immediateTakeover = Boolean(matchingRule(url, "browser_assisted"));
+  void diagnostic("browser_download.detected", state, { detail: `rapidgator=${rapidgator} assisted=${immediateTakeover} force=${forceIsActive(modifierTabId)} file=${fileNameFromPath(item.filename) || "unknown"}` });
   let cancelled = false;
   try {
     await cancelBrowserDownload(item.id);
@@ -350,7 +368,8 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
       setTimeout(() => void checkDirectDownload(handoff.taskId).catch(() => {}), 1500);
     }
     return true;
-  } catch {
+  } catch (error) {
+    void diagnostic("browser_download.takeover_failed", state, { level: "ERROR", error: String(error), detail: `rapidgator=${rapidgator} cancelled=${cancelled}` });
     if (cancelled) {
       bypassUntil = Date.now() + 2000;
       chrome.downloads.download({ url, saveAs: false }, () => void chrome.runtime.lastError);
@@ -384,6 +403,39 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     reply({ ok: true, version: chrome.runtime.getManifest().version });
     return;
   }
+  if (message?.type === "APOCALIPSE_DOWNLOAD") {
+    const item = message.item || {};
+    const traceId = crypto.randomUUID();
+    Promise.all([
+      sourcePageUrl(sender),
+      cookieHeaderFor([item.url, sender.tab?.url]),
+    ]).then(([pageUrl, cookieHeader]) => bridgeRequest("/v1/download", {
+      method: "POST",
+      body: JSON.stringify({
+        url: item.url,
+        fileName: item.fileName || item.filename || null,
+        pageUrl,
+        title: item.title || null,
+        thumbnail: item.thumbnail || null,
+        mediaKind: item.kind || null,
+        expectedSize: Number.isFinite(item.size) ? item.size : null,
+        duration: Number.isFinite(item.duration) ? item.duration : null,
+        cookieHeader: cookieHeader || null,
+        userAgent: item.userAgent || globalThis.navigator?.userAgent || null,
+        requestMethod: null,
+        requestBody: null,
+        requestContentType: null,
+        startImmediately: false,
+      }),
+    })).then((result) => {
+      void diagnostic("popup.download_handed_off", { traceId, url: item.url, pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { detail: `kind=${item.kind || "unknown"} thumbnail=${Boolean(item.thumbnail)}` });
+      reply({ ok: true, target: "desktop", ...result });
+    }).catch((error) => {
+      void diagnostic("popup.download_failed", { traceId, url: item.url, pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { level: "ERROR", error: String(error), detail: `kind=${item.kind || "unknown"}` });
+      reply({ ok: false, target: "error", error: String(error) });
+    });
+    return true;
+  }
   if (message?.type === "APOCALIPSE_PAIR") {
     const token = String(message.token || "").trim();
     if (!token) {
@@ -396,6 +448,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         await chrome.storage.local.set({ pairingToken: token });
         bridgeConnected = true;
         ensureHeartbeat();
+        await refreshSiteRules();
         reply({ connected: true });
       })
       .catch((error) => {
@@ -440,7 +493,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
 });
 
-const APOCALIPSE_WORKER_BUILD = "0.3.63-self-contained";
+const APOCALIPSE_WORKER_BUILD = "0.3.68-self-contained";
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type !== "APOCALIPSE_WORKER_DIAGNOSTICS") return;
   reply({
@@ -572,7 +625,7 @@ async function diagnostic(event, state = {}, extra = {}) {
     `extension_version=${chrome.runtime.getManifest().version}`,
     extra.error ? `error=${String(extra.error).slice(0, 1200).replace(/[\r\n]+/g, " ")}` : "",
   ].filter(Boolean).join(" ");
-  await bridgePost("/v1/diagnostic", {
+  const payload = {
     event,
     level: extra.level || (extra.error ? "ERROR" : "INFO"),
     traceId: state.traceId || null,
@@ -582,7 +635,34 @@ async function diagnostic(event, state = {}, extra = {}) {
     bytes: Number.isFinite(extra.bytes) ? extra.bytes : (Number.isFinite(state.bytes) ? state.bytes : null),
     durationMs: state.startedAt ? Math.max(0, Date.now() - state.startedAt) : null,
     detail: detail || null,
-  }).catch(() => {});
+    clientTimestamp: new Date().toISOString(),
+  };
+  try {
+    await bridgePost("/v1/diagnostic", payload);
+  } catch {
+    diagnosticOutbox.push(payload);
+    diagnosticOutbox = diagnosticOutbox.slice(-500);
+    await chrome.storage.local.set({ diagnosticOutbox }).catch(() => {});
+  }
+}
+
+async function flushDiagnosticOutbox() {
+  if (!diagnosticOutbox.length) {
+    const stored = await chrome.storage.local.get({ diagnosticOutbox: [] }).catch(() => ({ diagnosticOutbox: [] }));
+    diagnosticOutbox = Array.isArray(stored.diagnosticOutbox) ? stored.diagnosticOutbox.slice(-500) : [];
+  }
+  if (!diagnosticOutbox.length) return;
+  const pending = diagnosticOutbox;
+  diagnosticOutbox = [];
+  for (let index = 0; index < pending.length; index += 1) {
+    try { await bridgePost("/v1/diagnostic", { ...pending[index], delayed: true }); }
+    catch {
+      diagnosticOutbox = pending.slice(index).concat(diagnosticOutbox).slice(-500);
+      await chrome.storage.local.set({ diagnosticOutbox }).catch(() => {});
+      return;
+    }
+  }
+  await chrome.storage.local.set({ diagnosticOutbox: [] }).catch(() => {});
 }
 
 function claim(url, source) {
@@ -692,16 +772,24 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     forceHeld = Boolean(message.forcePressed) && !bypassHeld;
     if (bypassHeld) armBypass(shortcutTabId, 4000);
     else if (forceHeld) armForce(shortcutTabId, 20000);
-    reply({ ok: true, mode: bypassHeld ? "bypass" : (forceHeld ? "force" : "normal") });
+    const mode = bypassHeld ? "bypass" : (forceHeld ? "force" : "normal");
+    if (mode !== lastShortcutMode) {
+      const state = { traceId: crypto.randomUUID(), pageUrl: sender.tab?.url || null, startedAt: Date.now() };
+      void diagnostic("shortcut.state", state, { detail: `mode=${mode} previous=${lastShortcutMode} tab=${shortcutTabId ?? "none"} frame=${sender.frameId ?? 0}` });
+      lastShortcutMode = mode;
+    }
+    reply({ ok: true, mode });
     return;
   }
   if (message?.type === "APOCALIPSE_BYPASS_NEXT") {
     armBypass(shortcutTabId, message.ttlMs);
+    void diagnostic("shortcut.bypass_armed", { traceId: crypto.randomUUID(), pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { detail: `tab=${shortcutTabId ?? "none"} ttl_ms=${message.ttlMs || 0}` });
     reply({ ok: true, mode: "bypass" });
     return;
   }
   if (message?.type === "APOCALIPSE_FORCE_NEXT") {
     armForce(shortcutTabId, message.ttlMs);
+    void diagnostic("shortcut.force_armed", { traceId: crypto.randomUUID(), pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { detail: `tab=${shortcutTabId ?? "none"} ttl_ms=${message.ttlMs || 0}` });
     reply({ ok: true, mode: "force" });
     return;
   }
@@ -714,6 +802,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
   if (message?.type !== "APOCALIPSE_PRE_DOWNLOAD_URL") return;
   if (bypassIsActive(shortcutTabId)) {
+    void diagnostic("capture.bypassed_to_browser", { traceId: crypto.randomUUID(), url: message.url, pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { detail: `tab=${shortcutTabId ?? "none"} source=${message.source || "main-world"}` });
     reply({ ok: false, bypass: true });
     return;
   }
@@ -724,6 +813,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     source: message.source || "main-world",
     force: Boolean(message.force) || forceIsActive(shortcutTabId),
   };
+  void diagnostic("capture.decision", { traceId: crypto.randomUUID(), url: request.url, pageUrl: request.pageUrl, startedAt: Date.now() }, { detail: `mode=${request.force ? "force" : "auto"} tab=${shortcutTabId ?? "none"} source=${request.source}` });
   streamCapturedUrl(request)
     .then(reply)
     .catch((error) => {

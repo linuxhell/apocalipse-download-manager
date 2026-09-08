@@ -11,7 +11,7 @@
 - Native tray, themes, clipboard detection and protocol/file associations
 - Per-tool updates for yt-dlp, FFmpeg, ffprobe, aria2, N_m3u8DL-RE and QuickJS
 - Apocalipse Link authenticated local/remote file browsing and transfers
-- Matrix Ultimate v2 AI continuous diagnostics, correction proposals and per-site rollback
+- End-to-end structured diagnostics with privacy-safe ZIP export
 - CI on Windows, Linux and macOS
 
 ## Next — reliability and security
@@ -28,4 +28,4 @@
 - ARM64 builds for Windows and Linux and native Apple Silicon validation
 - AppImage and optional native installers
 - Direct internet connectivity through an encrypted resumable relay
-- Further Matrix versions with signed, reviewable rule updates
+- Signed, reviewable site-rule updates

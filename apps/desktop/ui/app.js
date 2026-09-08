@@ -6,12 +6,13 @@ const catalogs = {
     torrents: "Torrents",
     tools: "Tools",
     settings: "Settings",
+    general: "General", browsers: "Browsers", themes: "Themes", language: "Language", advanced: "Advanced", about: "About", aboutDescription: "Native open-source download manager. Interface, core, extensions and diagnostics are built to work as one system.",
+    logs: "Logs", logsDescription: "End-to-end diagnostics for extension, shortcuts, interface, bridge and downloads.", exportLog: "Export log", searchLogs: "Search events…", allLevels: "All levels",
     downloadsDescription: "Manage direct downloads, progress, speed and completed files.",
     mediaDescription: "Videos, audio, recordings and exports detected by Apocalipse.",
     recordingsDescription: "Follow active recordings, stop and save, export or open completed captures.",
     torrentsDescription: "Manage torrents, file selection, peers and previews.",
     linkDescription: "Transfer files securely between this computer and a remote Apocalipse.",
-    matrixPageDescription: "Continuous diagnostics and isolated site corrections with individual rollback.",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
     toolbox: "TOOLBOX", update: "Update", mediaPlayer: "VLC / mpv / media player",
@@ -57,24 +58,6 @@ const catalogs = {
     preview: "Preview",
     stopRecording: "Stop and save",
     recordingActive: "Recording",
-    matrixPowered: "Powered by Matrix Ultimate v2 AI",
-    matrixRollback: "Rollback",
-    matrixAnalyze: "Analyze failures",
-    matrixDescription: "Matrix continuously monitors local failures and proposes safe rules. No rule executes website code.",
-    matrixSummary: "{active} active rules · {proposals} proposals",
-    matrixNoProposal: "No new rule is required.",
-    matrixReason: "{count} failed download(s); retry with one conservative connection",
-    matrixApply: "Apply rule",
-    matrixConfirm: "Apply the isolated correction for {host}? You can roll it back afterward.",
-    matrixAvailable: "{count} correction(s) available",
-    matrixApplied: "Applied corrections",
-    matrixRollbackConfirm: "Roll back the correction for {host}? Other corrections will remain active.",
-    matrixAnalyzing: "Analyzing…",
-    matrixChecking: "Checking download failures…",
-    matrixDone: "analysis completed now",
-    matrixAnalysisFailed: "Analysis failed",
-    matrixRollbackDone: "rollback completed",
-    matrixRollbackUnavailable: "Rollback unavailable",
     linkThisComputer: "This computer",
     linkRemoteControl: "Control remote computer",
     linkRemoteId: "Remote ID",
@@ -139,6 +122,9 @@ const catalogs = {
     dnsScopeHint: "Applied to the native HTTP engine and aria2. SOCKS5H continues resolving through the proxy.",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
+    taskConnections: "Threads for this download",
+    taskConnectionsHint: "Only changes this task. Use 1 on sites that reject segmented downloads.",
+    downloadBandwidthLimit: "This download limit", megabytesPerSecond: "MB/s", unlimited: "Unlimited", smartAutomation: "Smart automation", bandwidthPanel: "Bandwidth", adaptiveEfficiency: "Adaptive efficiency", adaptiveEfficiencyHint: "Optimizes queue order and connection use for the current workload.", scheduler: "Download schedule", schedulerHint: "Automatically pauses outside the permitted local time window.", scheduleStart: "Start", scheduleEnd: "End", bandwidthPanelHint: "Set limits without changing the window size.", currentBandwidth: "Current usage", globalBandwidthLimit: "Global download limit",
     defaults: "Default",
     extensionPairing: "Browser extension pairing",
     pairingToken: "Pairing token",
@@ -180,7 +166,6 @@ const catalogs = {
     resetRules: "Restore defaults",
     exportRecording: "Export completed recording", outputFormat: "Output format", videoCodec: "Video codec", audioCodec: "Audio codec", export: "Export",
     searchHistory: "Search downloads…", importList: "Import list", advancedOptions: "Advanced options", mirrorUrls: "Mirror URLs (one per line)", priority: "Priority", priorityHigh: "High", priorityNormal: "Normal", priorityLow: "Low", verifyIntegrity: "Verify SHA-256", integrityPrompt: "Optional expected SHA-256 (leave blank to calculate only):", integrityOk: "SHA-256 verified",
-    smartAutomation: "Smart automation", adaptiveEfficiency: "Adaptive efficiency", adaptiveEfficiencyHint: "Optimizes queue order and connection use for the current workload.", scheduler: "Download schedule", schedulerHint: "Automatically pauses outside the permitted local time window.", scheduleStart: "Start", scheduleEnd: "End", matrixImport: "Import", matrixExport: "Export", matrixImportDone: "Matrix rules imported", matrixExportDone: "Matrix rules exported", bandwidthPanel: "Bandwidth", bandwidthPanelHint: "Set limits without changing the window size.", globalBandwidthLimit: "Global download limit", downloadBandwidthLimit: "This download limit", bandwidthAction: "Bandwidth", bandwidthPrompt: "Download limit in MB/s (0 = unlimited):", currentBandwidth: "Current usage", unlimited: "Unlimited", megabytesPerSecond: "MB/s",
   },
   "pt-BR": {
     downloads: "Downloads",
@@ -189,12 +174,13 @@ const catalogs = {
     torrents: "Torrents",
     tools: "Ferramentas",
     settings: "Configurações",
+    general: "Geral", browsers: "Navegadores", themes: "Temas", language: "Idioma", advanced: "Avançado", about: "Sobre", aboutDescription: "Gerenciador de downloads nativo e de código aberto. Interface, núcleo, extensões e diagnóstico funcionam como um único sistema.",
+    logs: "Logs", logsDescription: "Diagnóstico de ponta a ponta da extensão, atalhos, interface, ponte e downloads.", exportLog: "Exportar log", searchLogs: "Pesquisar eventos…", allLevels: "Todos os níveis",
     downloadsDescription: "Gerencie downloads diretos, progresso, velocidade e arquivos concluídos.",
     mediaDescription: "Vídeos, áudios, gravações e exportações detectados pelo Apocalipse.",
     recordingsDescription: "Acompanhe gravações ativas, pare e salve, exporte ou abra capturas concluídas.",
     torrentsDescription: "Gerencie torrents, escolha de arquivos, pares e pré-visualizações.",
     linkDescription: "Transfira arquivos com segurança entre este computador e um Apocalipse remoto.",
-    matrixPageDescription: "Diagnóstico contínuo e correções isoladas por site, com reversão individual.",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
     toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", mediaPlayer: "VLC / mpv / reprodutor de mídia",
@@ -241,24 +227,6 @@ const catalogs = {
     preview: "Pré-visualizar",
     stopRecording: "Parar e salvar",
     recordingActive: "Gravando",
-    matrixPowered: "Alimentada por Matrix Ultimate v2 AI",
-    matrixRollback: "Reverter",
-    matrixAnalyze: "Analisar falhas",
-    matrixDescription: "A Matrix monitora continuamente as falhas locais e propõe regras seguras. Nenhuma regra executa código de sites.",
-    matrixSummary: "{active} regras ativas · {proposals} propostas",
-    matrixNoProposal: "Nenhuma nova regra necessária.",
-    matrixReason: "{count} download(s) com falha; tentar novamente com uma conexão conservadora",
-    matrixApply: "Aplicar regra",
-    matrixConfirm: "Aplicar a correção isolada para {host}? Depois você poderá revertê-la.",
-    matrixAvailable: "{count} correção(ões) disponível(is)",
-    matrixApplied: "Correções aplicadas",
-    matrixRollbackConfirm: "Reverter a correção de {host}? As outras correções continuarão ativas.",
-    matrixAnalyzing: "Analisando…",
-    matrixChecking: "Verificando falhas de download…",
-    matrixDone: "análise concluída agora",
-    matrixAnalysisFailed: "Falha na análise",
-    matrixRollbackDone: "reversão concluída",
-    matrixRollbackUnavailable: "Reversão indisponível",
     linkThisComputer: "Este computador",
     linkRemoteControl: "Controlar computador remoto",
     linkRemoteId: "ID remoto",
@@ -323,6 +291,9 @@ const catalogs = {
     dnsScopeHint: "Aplicado ao motor HTTP nativo e ao aria2. O SOCKS5H continua resolvendo pelo proxy.",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
+    taskConnections: "Threads para este download",
+    taskConnectionsHint: "Altera somente esta tarefa. Use 1 em sites que não aceitam downloads segmentados.",
+    downloadBandwidthLimit: "Limite deste download", megabytesPerSecond: "MB/s", unlimited: "Ilimitado", smartAutomation: "Automação inteligente", bandwidthPanel: "Banda", adaptiveEfficiency: "Eficiência adaptativa", adaptiveEfficiencyHint: "Otimiza a ordem da fila e o uso de conexões para a carga atual.", scheduler: "Agendamento de downloads", schedulerHint: "Pausa automaticamente fora do horário local permitido.", scheduleStart: "Início", scheduleEnd: "Fim", bandwidthPanelHint: "Defina limites sem alterar o tamanho da janela.", currentBandwidth: "Uso atual", globalBandwidthLimit: "Limite global de download",
     defaults: "Padrão",
     extensionPairing: "Conexão com a extensão",
     pairingToken: "Token de pareamento",
@@ -364,7 +335,6 @@ const catalogs = {
     resetRules: "Restaurar padrões",
     exportRecording: "Exportar gravação concluída", outputFormat: "Formato de saída", videoCodec: "Codec de vídeo", audioCodec: "Codec de áudio", export: "Exportar",
     searchHistory: "Pesquisar downloads…", importList: "Importar lista", advancedOptions: "Opções avançadas", mirrorUrls: "URLs espelho (uma por linha)", priority: "Prioridade", priorityHigh: "Alta", priorityNormal: "Normal", priorityLow: "Baixa", verifyIntegrity: "Verificar SHA-256", integrityPrompt: "SHA-256 esperado opcional (deixe vazio apenas para calcular):", integrityOk: "SHA-256 verificado",
-    smartAutomation: "Automação inteligente", adaptiveEfficiency: "Eficiência adaptativa", adaptiveEfficiencyHint: "Otimiza a ordem da fila e o uso de conexões para a carga atual.", scheduler: "Agendamento de downloads", schedulerHint: "Pausa automaticamente fora do horário local permitido.", scheduleStart: "Início", scheduleEnd: "Fim", matrixImport: "Importar", matrixExport: "Exportar", matrixImportDone: "Regras da Matrix importadas", matrixExportDone: "Regras da Matrix exportadas", bandwidthPanel: "Banda", bandwidthPanelHint: "Defina limites sem alterar o tamanho da janela.", globalBandwidthLimit: "Limite global de download", downloadBandwidthLimit: "Limite deste download", bandwidthAction: "Banda", bandwidthPrompt: "Limite do download em MB/s (0 = ilimitado):", currentBandwidth: "Uso atual", unlimited: "Ilimitado", megabytesPerSecond: "MB/s",
   },
   "zh-CN": {
     downloads: "下载",
@@ -373,12 +343,13 @@ const catalogs = {
     torrents: "种子",
     tools: "工具",
     settings: "设置",
+    general: "常规", browsers: "浏览器", themes: "主题", language: "语言", advanced: "高级", about: "关于", aboutDescription: "原生开源下载管理器。界面、核心、扩展和诊断作为一个系统协同工作。",
+    logs: "日志", logsDescription: "扩展、快捷键、界面、桥接和下载的端到端诊断。", exportLog: "导出日志", searchLogs: "搜索事件…", allLevels: "所有级别",
     downloadsDescription: "管理直接下载、进度、速度和已完成文件。",
     mediaDescription: "管理 Apocalipse 检测到的视频、音频、录制和导出。",
     recordingsDescription: "查看正在录制的内容、停止并保存、导出或打开已完成的录制。",
     torrentsDescription: "管理种子、文件选择、节点和预览。",
     linkDescription: "在本机与远程 Apocalipse 之间安全传输文件。",
-    matrixPageDescription: "持续诊断及可单独回滚的网站修正规则。",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
     toolbox: "工具箱", update: "更新", mediaPlayer: "VLC / mpv / 媒体播放器",
@@ -424,24 +395,6 @@ const catalogs = {
     preview: "预览",
     stopRecording: "停止并保存",
     recordingActive: "正在录制",
-    matrixPowered: "由 Matrix Ultimate v2 AI 驱动",
-    matrixRollback: "回滚",
-    matrixAnalyze: "分析故障",
-    matrixDescription: "Matrix 会持续监控本地故障并建议安全规则。任何规则都不会执行网站代码。",
-    matrixSummary: "{active} 条启用规则 · {proposals} 条建议",
-    matrixNoProposal: "无需添加新规则。",
-    matrixReason: "{count} 个下载失败；使用一个保守连接重试",
-    matrixApply: "应用规则",
-    matrixConfirm: "是否为 {host} 应用隔离修复？之后可以回滚。",
-    matrixAvailable: "有 {count} 个可用修复",
-    matrixApplied: "已应用的修复",
-    matrixRollbackConfirm: "是否回滚 {host} 的修复？其他修复将保持启用。",
-    matrixAnalyzing: "正在分析…",
-    matrixChecking: "正在检查下载故障…",
-    matrixDone: "分析刚刚完成",
-    matrixAnalysisFailed: "分析失败",
-    matrixRollbackDone: "回滚完成",
-    matrixRollbackUnavailable: "回滚不可用",
     linkThisComputer: "此电脑",
     linkRemoteControl: "控制远程电脑",
     linkRemoteId: "远程 ID",
@@ -506,6 +459,9 @@ const catalogs = {
     dnsScopeHint: "应用于原生 HTTP 引擎和 aria2。SOCKS5H 仍通过代理解析。",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
+    taskConnections: "此下载的线程数",
+    taskConnectionsHint: "仅更改此任务。对于不允许分段下载的网站，请使用 1。",
+    downloadBandwidthLimit: "此下载的限制", megabytesPerSecond: "MB/秒", unlimited: "不限速", smartAutomation: "智能自动化", bandwidthPanel: "带宽", adaptiveEfficiency: "自适应效率", adaptiveEfficiencyHint: "根据当前负载优化队列顺序和连接使用。", scheduler: "下载计划", schedulerHint: "在允许的本地时间之外自动暂停。", scheduleStart: "开始", scheduleEnd: "结束", bandwidthPanelHint: "无需改变窗口大小即可设置限制。", currentBandwidth: "当前使用量", globalBandwidthLimit: "全局下载限制",
     defaults: "默认",
     extensionPairing: "浏览器扩展配对",
     pairingToken: "配对令牌",
@@ -547,18 +503,21 @@ const catalogs = {
     resetRules: "恢复默认值",
     exportRecording: "导出已完成的录制", outputFormat: "输出格式", videoCodec: "视频编码", audioCodec: "音频编码", export: "导出",
     searchHistory: "搜索下载…", importList: "导入列表", advancedOptions: "高级选项", mirrorUrls: "镜像网址（每行一个）", priority: "优先级", priorityHigh: "高", priorityNormal: "普通", priorityLow: "低", verifyIntegrity: "验证 SHA-256", integrityPrompt: "可选的预期 SHA-256（留空则仅计算）：", integrityOk: "SHA-256 已验证",
-    smartAutomation: "智能自动化", adaptiveEfficiency: "自适应效率", adaptiveEfficiencyHint: "根据当前负载优化队列顺序和连接使用。", scheduler: "下载计划", schedulerHint: "在允许的本地时间之外自动暂停。", scheduleStart: "开始", scheduleEnd: "结束", matrixImport: "导入", matrixExport: "导出", matrixImportDone: "Matrix 规则已导入", matrixExportDone: "Matrix 规则已导出", bandwidthPanel: "带宽", bandwidthPanelHint: "无需改变窗口大小即可设置限制。", globalBandwidthLimit: "全局下载限制", downloadBandwidthLimit: "此下载的限制", bandwidthAction: "带宽", bandwidthPrompt: "下载限制（MB/秒，0 = 不限速）：", currentBandwidth: "当前使用量", unlimited: "不限速", megabytesPerSecond: "MB/秒",
   },
 };
 
 let locale = localStorage.getItem("apocalipse.language") || "en";
+const valid = ["void", "inferno", "toxic", "synthwave", "royal", "crimson", "arctic", "obsidian", "monochrome", "midnight", "forest", "graphite", "deepsea", "eclipse", "hazard", "cyberstorm", "ultraviolet", "emeraldgold", "scarletice", "coppernavy", "solarizednight"];
 const applyTheme = (theme) => {
-  const valid = ["void", "inferno", "toxic", "synthwave", "royal", "crimson", "arctic", "obsidian", "monochrome", "midnight", "forest", "graphite", "deepsea", "eclipse", "hazard", "cyberstorm", "ultraviolet", "emeraldgold", "scarletice", "coppernavy", "matrixcode", "solarizednight"];
   document.documentElement.dataset.theme = valid.includes(theme) ? theme : "void";
 };
 applyTheme(localStorage.getItem("apocalipse.theme") || "void");
 let pendingReferer = null;
 let pendingDuration = null;
+let pendingTitle = null;
+let pendingThumbnail = null;
+let pendingMediaKind = null;
+let pendingExpectedSize = null;
 let pendingCookieHeader = null;
 let pendingUserAgent = null;
 let pendingRequestMethod = null;
@@ -579,11 +538,23 @@ let selectionPointerActive = false;
 let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
+const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", logs: "logsDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
 const invoke = (command, args = {}) => {
   const bridge = window.__TAURI__?.core?.invoke;
   if (!bridge) throw new Error("Desktop bridge unavailable in preview");
-  return bridge(command, args);
+  const started = performance.now();
+  const quiet = new Set(["list_downloads", "read_general_log", "get_bridge_pairing"]);
+  if (!quiet.has(command) && command !== "record_ui_diagnostic") bridge("record_ui_diagnostic", { level: "DEBUG", event: "command_started", detail: `command=${command}` }).catch(() => {});
+  return bridge(command, args).then((result) => {
+    if (!quiet.has(command) && command !== "record_ui_diagnostic") bridge("record_ui_diagnostic", { level: "DEBUG", event: "command_completed", detail: `command=${command} duration_ms=${Math.round(performance.now() - started)}` }).catch(() => {});
+    return result;
+  }).catch((error) => {
+    if (command !== "record_ui_diagnostic") bridge("record_ui_diagnostic", { level: "ERROR", event: "command_failed", detail: `command=${command} duration_ms=${Math.round(performance.now() - started)} error=${String(error)}` }).catch(() => {});
+    throw error;
+  });
 };
+window.addEventListener("error", (event) => invoke("record_ui_diagnostic", { level: "ERROR", event: "javascript_error", detail: `message=${event.message} file=${event.filename || "inline"} line=${event.lineno || 0} column=${event.colno || 0}` }).catch(() => {}));
+window.addEventListener("unhandledrejection", (event) => invoke("record_ui_diagnostic", { level: "ERROR", event: "unhandled_rejection", detail: `reason=${String(event.reason)}` }).catch(() => {}));
 
 function stateName(state) {
   return t(stateKey(state));
@@ -856,10 +827,8 @@ function translate() {
     .querySelectorAll("[data-i18n-placeholder]")
     .forEach((element) => (element.placeholder = t(element.dataset.i18nPlaceholder)));
   document.querySelector("#language").value = locale;
-  const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", matrix: "matrixPageDescription" };
   document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
   renderDownloads();
-  if (activePage === "matrix") refreshMatrix().catch(console.error);
   if (activePage === "link") {
     document.querySelector("#link-local-path").textContent = linkLocalPath || t("linkDrives");
     document.querySelector("#link-remote-path").textContent = linkRemotePath || t("linkDrives");
@@ -901,7 +870,7 @@ document.querySelector("#import-list").onclick = async (event) => {
     for (const url of urls) {
       try {
         const fileName = await invoke("suggest_download_name", { url });
-        downloads.push(await invoke("enqueue_download", { url, destinationDirectory, fileName, formatSelection: null, torrentSelection: null, mirrors: null, priority: 0, bandwidthLimit: null, context: {} }));
+        downloads.push(await invoke("enqueue_download", { url, destinationDirectory, fileName, formatSelection: null, torrentSelection: null, mirrors: null, priority: 0, bandwidthLimit: null, connectionsOverride: 8, context: {} }));
       } catch (error) { console.warn("import", url, error); }
     }
     renderDownloads();
@@ -910,19 +879,60 @@ document.querySelector("#import-list").onclick = async (event) => {
 };
 document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data-page="tools"])').forEach((button) => {
   button.onclick = () => {
+    const openedAt = performance.now();
     activePage = button.dataset.page;
     document.querySelectorAll("nav [data-page]").forEach((item) => item.classList.toggle("active", item === button));
     const heading = button.querySelector("b")?.textContent || t("downloads");
     document.querySelector("header h1").textContent = heading;
-    const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", matrix: "matrixPageDescription" };
     document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
     document.querySelector("#apocalipse-link-panel").hidden = activePage !== "link";
-    document.querySelector("#matrix-panel").hidden = activePage !== "matrix";
-    document.querySelector(".metrics").hidden = ["link", "matrix"].includes(activePage);
-    document.querySelector(".panel").hidden = ["link", "matrix"].includes(activePage);
+    document.querySelector("#logs-panel").hidden = activePage !== "logs";
+    document.querySelector(".metrics").hidden = ["link", "logs"].includes(activePage);
+    document.querySelector(".panel").hidden = ["link", "logs"].includes(activePage);
     renderDownloads();
+    invoke("record_ui_diagnostic", { level: "INFO", event: "page_opened", detail: `page=${activePage} panel_present=${activePage === "link" ? Boolean(document.querySelector("#apocalipse-link-panel")) : activePage === "logs" ? Boolean(document.querySelector("#logs-panel")) : true} duration_ms=${Math.round(performance.now() - openedAt)}` }).catch(() => {});
+    if (activePage === "logs") refreshLogEvents().catch(console.error);
   };
 });
+
+let logEvents = [];
+function renderLogEvents() {
+  const root = document.querySelector("#log-event-list");
+  const empty = document.querySelector("#log-empty");
+  const query = document.querySelector("#log-search").value.trim().toLowerCase();
+  const level = document.querySelector("#log-level").value;
+  const visible = logEvents.filter((item) => (!level || item.level === level) && (!query || JSON.stringify(item).toLowerCase().includes(query))).slice(-1000).reverse();
+  root.replaceChildren();
+  empty.hidden = visible.length > 0;
+  for (const item of visible) {
+    const row = document.createElement("article");
+    row.className = `log-event level-${String(item.level || "INFO").toLowerCase()}`;
+    const header = document.createElement("header");
+    header.append(
+      Object.assign(document.createElement("time"), { textContent: item.timestamp || item.time || "" }),
+      Object.assign(document.createElement("b"), { textContent: item.level || "INFO" }),
+      Object.assign(document.createElement("strong"), { textContent: item.event || "legacy" }),
+      Object.assign(document.createElement("small"), { textContent: item.source || "desktop" }),
+    );
+    row.append(header, Object.assign(document.createElement("p"), { textContent: item.detail || item.raw || "" }));
+    root.append(row);
+  }
+}
+async function refreshLogEvents() {
+  const contents = await invoke("read_general_log");
+  logEvents = String(contents || "").split(/\r?\n/).filter(Boolean).map((line) => {
+    try { return JSON.parse(line); } catch { return { level: / ERROR /.test(line) ? "ERROR" : / WARN /.test(line) ? "WARN" : "INFO", event: "legacy", raw: line }; }
+  });
+  renderLogEvents();
+}
+document.querySelector("#log-search").oninput = renderLogEvents;
+document.querySelector("#log-level").onchange = renderLogEvents;
+document.querySelector("#export-logs").onclick = async (event) => {
+  event.currentTarget.disabled = true;
+  try { await invoke("export_diagnostic_bundle"); } catch (error) { window.alert(String(error)); }
+  finally { event.currentTarget.disabled = false; }
+};
+document.querySelector("#clear-logs").onclick = async () => { await invoke("clear_general_log"); await refreshLogEvents(); };
 
 let linkLocalPath = "";
 let linkRemotePath = "";
@@ -1027,99 +1037,6 @@ document.querySelector("#link-upload-local").onclick = async () => {
     updateLinkTransferButtons();
   }
 };
-async function refreshMatrix() {
-  const status = await invoke("matrix_analyze");
-  document.querySelector("#matrix-summary").textContent = tf("matrixSummary", { active: status.activeRules, proposals: status.proposals.length });
-  const alert = document.querySelector("#matrix-alert");
-  alert.hidden = !status.proposals.length;
-  alert.textContent = status.proposals.length;
-  alert.title = tf("matrixAvailable", { count: status.proposals.length });
-  const root = document.querySelector("#matrix-proposals");
-  root.replaceChildren();
-  if (!status.proposals.length) {
-    root.append(Object.assign(document.createElement("p"), { textContent: t("matrixNoProposal") }));
-  } else {
-    for (const proposal of status.proposals) {
-      const row = document.createElement("div");
-      row.className = "matrix-proposal";
-      const info = document.createElement("span");
-      info.append(Object.assign(document.createElement("b"), { textContent: proposal.host }), Object.assign(document.createElement("small"), { textContent: tf("matrixReason", { count: proposal.failures }) }));
-      const confidence = Object.assign(document.createElement("b"), { textContent: `${proposal.confidence}%` });
-      const apply = Object.assign(document.createElement("button"), { type: "button", textContent: t("matrixApply") });
-      apply.onclick = async () => {
-        if (!window.confirm(tf("matrixConfirm", { host: proposal.host }))) return;
-        apply.disabled = true;
-        try { await invoke("matrix_apply_rule", { host: proposal.host }); await refreshMatrix(); }
-        catch (error) { console.error(error); }
-        finally { apply.disabled = false; }
-      };
-      row.append(info, confidence, apply);
-      root.append(row);
-    }
-  }
-  if (status.appliedRules.length) {
-    const title = Object.assign(document.createElement("b"), { className: "matrix-section-title", textContent: t("matrixApplied") });
-    root.append(title);
-    for (const rule of status.appliedRules) {
-      const row = document.createElement("div");
-      row.className = "matrix-proposal matrix-applied";
-      const info = document.createElement("span");
-      info.append(
-        Object.assign(document.createElement("b"), { textContent: rule.name }),
-        Object.assign(document.createElement("small"), { textContent: rule.host }),
-      );
-      const rollback = Object.assign(document.createElement("button"), { type: "button", textContent: t("matrixRollback") });
-      rollback.onclick = async () => {
-        if (!window.confirm(tf("matrixRollbackConfirm", { host: rule.host }))) return;
-        rollback.disabled = true;
-        try { await invoke("matrix_rollback_rule", { id: rule.id }); await refreshMatrix(); }
-        catch (error) { console.error(error); }
-        finally { rollback.disabled = false; }
-      };
-      row.append(info, rollback);
-      root.append(row);
-    }
-  }
-}
-document.querySelector('[data-page="matrix"]').addEventListener("click", () => refreshMatrix().catch(console.error));
-document.querySelector("#matrix-import").onclick = async (event) => {
-  const button = event.currentTarget;
-  button.disabled = true;
-  try {
-    const count = await invoke("import_matrix_rules");
-    if (count) window.alert(`${t("matrixImportDone")}: ${count}`);
-    await refreshMatrix();
-  } catch (error) { window.alert(String(error)); }
-  finally { button.disabled = false; }
-};
-document.querySelector("#matrix-export").onclick = async (event) => {
-  const button = event.currentTarget;
-  button.disabled = true;
-  try {
-    const count = await invoke("export_matrix_rules");
-    if (count) window.alert(`${t("matrixExportDone")}: ${count}`);
-  } catch (error) { window.alert(String(error)); }
-  finally { button.disabled = false; }
-};
-
-refreshMatrix().catch(console.error);
-setInterval(() => refreshMatrix().catch(console.error), 5000);
-document.querySelector("#matrix-scan").onclick = async () => {
-  const button = document.querySelector("#matrix-scan");
-  const summary = document.querySelector("#matrix-summary");
-  button.disabled = true;
-  button.textContent = t("matrixAnalyzing");
-  summary.textContent = t("matrixChecking");
-  try {
-    await refreshMatrix();
-    summary.textContent += ` · ${t("matrixDone")}`;
-  } catch (error) {
-    summary.textContent = `${t("matrixAnalysisFailed")}: ${error}`;
-  } finally {
-    button.disabled = false;
-    button.textContent = t("matrixAnalyze");
-  }
-};
 function updateLogEditorControls() {
   const configured = Boolean(document.querySelector("#log-editor").value.trim());
   document.querySelector("#remove-log-editor").disabled = !configured;
@@ -1215,8 +1132,27 @@ function resetMediaInspection() {
   document.querySelector("#media-title").textContent = "";
   document.querySelector("#media-duration").textContent = "";
   document.querySelector("#media-format").replaceChildren();
+  document.querySelector("#media-format-control").hidden = false;
   document.querySelector("#torrent-inspection").hidden = true;
   document.querySelector("#torrent-files").replaceChildren();
+}
+
+function showCapturedPreview({ title, thumbnail, kind, duration, size, showFormats = false }) {
+  const panel = document.querySelector("#media-inspection");
+  const image = document.querySelector("#media-thumbnail");
+  document.querySelector("#media-title").textContent = title || document.querySelector("#file-name").value || t("newTask");
+  document.querySelector("#media-duration").textContent = [
+    kind ? String(kind).toUpperCase() : "",
+    Number.isFinite(size) && size > 0 ? formatBytes(size) : "",
+    Number.isFinite(duration) && duration > 0 ? `${t("duration")}: ${secondsLabel(duration)}` : "",
+  ].filter(Boolean).join(" · ");
+  document.querySelector("#media-format-control").hidden = !showFormats;
+  image.hidden = !thumbnail;
+  if (thumbnail) {
+    image.src = thumbnail;
+    image.onerror = () => { image.hidden = true; image.removeAttribute("src"); };
+  } else image.removeAttribute("src");
+  panel.hidden = false;
 }
 
 async function showTorrentInspection(source) {
@@ -1242,6 +1178,10 @@ document.querySelectorAll("#add,#empty-add").forEach(
       document.querySelector("#analyze").hidden = false;
       pendingReferer = null;
       pendingDuration = null;
+      pendingTitle = null;
+      pendingThumbnail = null;
+      pendingMediaKind = null;
+      pendingExpectedSize = null;
       pendingCookieHeader = null;
       pendingUserAgent = null;
       pendingRequestMethod = null;
@@ -1261,6 +1201,7 @@ document.querySelector("#language").onchange = (event) => {
   locale = event.target.value;
   localStorage.setItem("apocalipse.language", locale);
   translate();
+  invoke("set_application_language", { language: locale }).catch(console.error);
 };
 document.querySelectorAll(".tabs [data-filter]").forEach((button) => {
   button.onclick = () => {
@@ -1396,7 +1337,7 @@ document.querySelector("#save-website-credential").onclick = async (event) => {
     button.disabled = false;
   }
 };
-document.querySelector('[data-page="settings"]').onclick = async () => {
+const openSettings = async (target = "general") => {
   try {
     const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations, websiteCredentials] = await Promise.all([
       invoke("get_autostart"),
@@ -1452,10 +1393,29 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
     renderWebsiteCredentials(websiteCredentials);
     updateLogEditorControls();
     settingsDialog.showModal();
+    const targetElement = {
+      general: document.querySelector("#autostart"),
+      browsers: document.querySelector(".association-settings"),
+      themes: document.querySelector(".theme-settings"),
+      language: document.querySelector("#language"),
+      advanced: document.querySelector("#proxy-enabled"),
+      about: document.querySelector("#about-settings"),
+    }[target];
+    targetElement?.scrollIntoView?.({ block: "center" });
+    targetElement?.focus?.();
+    invoke("record_ui_diagnostic", { level: "INFO", event: "settings_section_opened", detail: `section=${target} found=${Boolean(targetElement)}` }).catch(() => {});
   } catch (error) {
     console.error(error);
   }
 };
+document.querySelectorAll("nav [data-settings-target]").forEach((button) => {
+  button.onclick = () => {
+    document.querySelectorAll("nav button").forEach((item) => item.classList.toggle("active", item === button));
+    document.querySelector("main > header h1").textContent = button.querySelector("b")?.textContent || t("settings");
+    document.querySelector("#page-description").textContent = t("settingsDescription");
+    openSettings(button.dataset.settingsTarget).catch(console.error);
+  };
+});
 document
   .querySelectorAll("[data-settings-close]")
   .forEach((button) => (button.onclick = () => {
@@ -1730,6 +1690,7 @@ async function showMediaInspection(url) {
   const select = document.querySelector("#media-format");
   select.replaceChildren();
   option(select, "bestvideo+bestaudio/best", t("bestQuality"));
+  document.querySelector("#media-format-control").hidden = false;
   for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
     option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
   try {
@@ -1760,6 +1721,9 @@ document.querySelector("#media-format").onchange = (event) => {
   const base = input.value.replace(/\.[^.]+$/, "");
   input.value = `${base}.${audio[1]}`;
 };
+document.querySelector("#task-connections").oninput = (event) => {
+  document.querySelector("#task-connections-value").value = event.target.value;
+};
 document.querySelector("#analyze").onclick = async () => {
   const url = document.querySelector("#url");
   if (!url.reportValidity()) return;
@@ -1780,16 +1744,14 @@ document.querySelector("#analyze").onclick = async () => {
     if (plan.primary === "YtDlp") await showMediaInspection(url.value);
     else if (plan.primary === "Aria2Rpc" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) await showTorrentInspection(url.value);
     else if (plan.primary === "NM3u8DlRe") {
-      const panel = document.querySelector("#media-inspection");
       const select = document.querySelector("#media-format");
       select.replaceChildren();
       option(select, "", t("bestQuality"));
       for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
         option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
-      document.querySelector("#media-title").textContent = "HLS";
-      document.querySelector("#media-duration").textContent = "";
-      document.querySelector("#media-thumbnail").hidden = true;
-      panel.hidden = false;
+      showCapturedPreview({ title: pendingTitle || "HLS", thumbnail: pendingThumbnail, kind: "M3U8 / HLS", duration: pendingDuration, size: pendingExpectedSize, showFormats: true });
+    } else if (pendingMediaKind === "image" || /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)(?:$|[?#])/i.test(url.value)) {
+      showCapturedPreview({ title: pendingTitle || fileName.value, thumbnail: pendingThumbnail || url.value, kind: pendingMediaKind || "image", duration: null, size: pendingExpectedSize });
     }
     document.querySelector("#analyze").hidden = true;
     document.querySelector("#enqueue").hidden = false;
@@ -1810,11 +1772,12 @@ document.querySelector("#enqueue").onclick = async () => {
         url: url.value,
         destinationDirectory: document.querySelector("#destination").value,
         fileName: document.querySelector("#file-name").value,
-        formatSelection: document.querySelector("#media-inspection").hidden ? null : document.querySelector("#media-format").value,
+        formatSelection: document.querySelector("#media-inspection").hidden || document.querySelector("#media-format-control").hidden ? null : document.querySelector("#media-format").value,
         torrentSelection,
         mirrors: document.querySelector("#mirrors").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
         priority: Number(document.querySelector("#priority").value),
         bandwidthLimit: Math.round((Number(document.querySelector("#download-bandwidth-limit").value) || 0) * 1024 * 1024) || null,
+        connectionsOverride: Number(document.querySelector("#task-connections").value) || 8,
         context: {
           referer: pendingReferer,
           knownDuration: pendingDuration,
@@ -1832,6 +1795,12 @@ document.querySelector("#enqueue").onclick = async () => {
     document.querySelector("#mirrors").value = "";
     document.querySelector("#priority").value = "0";
     document.querySelector("#download-bandwidth-limit").value = "0";
+    document.querySelector("#task-connections").value = "8";
+    document.querySelector("#task-connections-value").value = "8";
+    pendingTitle = null;
+    pendingThumbnail = null;
+    pendingMediaKind = null;
+    pendingExpectedSize = null;
     resetMediaInspection();
   } catch (error) {
     const box = document.querySelector("#analysis");
@@ -1879,6 +1848,10 @@ setInterval(async () => {
     if (dialog.open) return;
     pendingReferer = null;
     pendingDuration = null;
+    pendingTitle = null;
+    pendingThumbnail = null;
+    pendingMediaKind = null;
+    pendingExpectedSize = null;
     pendingCookieHeader = null;
     pendingUserAgent = null;
     pendingRequestMethod = null;
@@ -1908,6 +1881,10 @@ async function consumeBridgeDownload() {
     lastClipboardLink = request.url;
     pendingReferer = request.pageUrl || null;
     pendingDuration = Number.isFinite(request.duration) ? request.duration : null;
+    pendingTitle = request.title || null;
+    pendingThumbnail = request.thumbnail || null;
+    pendingMediaKind = request.mediaKind || null;
+    pendingExpectedSize = Number.isFinite(request.expectedSize) ? request.expectedSize : null;
     pendingCookieHeader = request.cookieHeader || null;
     pendingUserAgent = request.userAgent || null;
     pendingRequestMethod = request.requestMethod || null;
@@ -1919,6 +1896,9 @@ async function consumeBridgeDownload() {
     document.querySelector("#enqueue").hidden = true;
     document.querySelector("#analyze").hidden = false;
     resetMediaInspection();
+    if (pendingThumbnail || pendingTitle || pendingMediaKind === "image") {
+      showCapturedPreview({ title: pendingTitle, thumbnail: pendingThumbnail || (pendingMediaKind === "image" ? request.url : null), kind: pendingMediaKind, duration: pendingDuration, size: pendingExpectedSize });
+    }
     document.querySelector("#destination").value = await invoke("default_download_directory");
     await refreshDestinationHistory();
     await invoke("activate_main_window");
