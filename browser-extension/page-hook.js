@@ -8,6 +8,7 @@
   let forceGestureUntil = 0;
   let bypassGestureUntil = 0;
   let activeTraceId = "";
+  const pendingNavigationFallbacks = new Map();
 
   const canonicalKey = (event) => {
     if (event.altKey) held.add("Alt"); else held.delete("Alt");
@@ -41,9 +42,14 @@
       const u = new URL(anchor.href, location.href);
       if (!/^(https?):$/i.test(u.protocol)) return null;
       const here = new URL(location.href);
-      // A same-document/current-page target is an action trigger, not the file.
-      // Let the page execute and capture the downstream primitive instead.
-      if (u.origin === here.origin && u.pathname === here.pathname && u.search === here.search) return null;
+      // Explicit download actions often point back to the current route. The
+      // authenticated GET itself can return the one-use file response.
+      if (u.origin === here.origin && u.pathname === here.pathname && u.search === here.search) {
+        const label = `${anchor.getAttribute?.("aria-label") || ""} ${anchor.title || ""} ${anchor.textContent || ""}`;
+        return /download|baixar|descargar|télécharger|scarica|herunterladen|下载/i.test(label)
+          ? { url: u.href, kind: "forced-action", method: "GET" }
+          : null;
+      }
       if (anchor.hasAttribute("download")) return { url: u.href, kind: "forced" };
       const path = u.pathname.toLowerCase();
       if (/\.(?:7z|apk|avi|bin|bz2|csv|deb|dmg|docx?|epub|exe|flac|gz|iso|jpeg?|m4a|mkv|mov|mp3|mp4|msi|pdf|png|pptx?|rar|rpm|tar|tgz|torrent|txt|wav|webm|webp|xlsx?|xz|zip)(?:$|\.)/i.test(path)) return { url: u.href, kind: "forced" };
@@ -64,7 +70,7 @@
     return null;
   };
 
-  const emit = (candidate, primitive) => {
+  const emit = (candidate, primitive, fallbackOnFailure = false) => {
     if (!candidate || bypassActive()) { if (candidate && bypassActive()) trace("BYPASS", { primitive, url: safeUrl(candidate.url) }); return false; }
     const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     trace(forceActive() ? "FORCE_CAPTURE" : "AUTO_ACCEPT", { primitive, kind: candidate.kind, url: safeUrl(candidate.url), requestId });
@@ -77,9 +83,23 @@
       primitive,
       fileName: candidate.kind === "chatgpt-library" ? activeLibraryFileName : "",
       force: forceActive(),
+      method: candidate.method || "GET",
+      body: candidate.body || null,
+      contentType: candidate.contentType || null,
     }, "*");
+    if (fallbackOnFailure) pendingNavigationFallbacks.set(requestId, candidate.url);
     return true;
   };
+
+  addEventListener("message", (event) => {
+    if (event.source !== window || event.data?.source !== "apocalipse-extension" || event.data.type !== "pre-download-result") return;
+    const fallback = pendingNavigationFallbacks.get(event.data.requestId);
+    pendingNavigationFallbacks.delete(event.data.requestId);
+    if (!fallback || event.data.result?.ok) return;
+    bypassGestureUntil = Date.now() + 5000;
+    trace("FORCE_CAPTURE_FALLBACK", { url: safeUrl(fallback), error: String(event.data.result?.error || "takeover_failed") });
+    location.assign(fallback);
+  });
 
   // Remember which Library row opened the Radix menu. The menu itself is portaled
   // under <body>, so this association must be captured before the menu item is clicked.
@@ -102,14 +122,14 @@
   const originalAnchorClick = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function(...args) {
     const candidate = classify(this.href) || forceDirectAnchorClassify(this);
-    if (emit(candidate, "anchor.click")) return;
+    if (emit(candidate, "anchor.click", true)) return;
     return originalAnchorClick.apply(this, args);
   };
 
   const originalOpen = window.open;
   window.open = function(url, ...args) {
     const candidate = classify(url) || forceClassify(url);
-    if (emit(candidate, "window.open")) return null;
+    if (emit(candidate, "window.open", true)) return null;
     return originalOpen.call(this, url, ...args);
   };
 
@@ -143,7 +163,7 @@
     if (!candidate || bypassActive()) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    emit(candidate, "document.click");
+    emit(candidate, "document.click", true);
   }, false);
 
   // Some pages call Location.assign/replace instead of clicking an anchor.
@@ -152,7 +172,7 @@
       const original = Location.prototype[method];
       Location.prototype[method] = function(url) {
         const candidate = classify(url) || forceClassify(url);
-        if (emit(candidate, `location.${method}`)) return;
+        if (emit(candidate, `location.${method}`, true)) return;
         return original.call(this, url);
       };
     } catch {}
