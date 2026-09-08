@@ -19,7 +19,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply Facebook and ChatGPT Library test patches
+      - name: Apply test patches
         run: |
           python .github/scripts/apply_fb_library_test.py
           python .github/scripts/apply_round_0_3_44.py
@@ -28,7 +28,9 @@ jobs:
           python .github/scripts/apply_round_0_3_46.py
           python .github/scripts/apply_round_0_3_47.py
           python .github/scripts/apply_round_0_3_48.py
+          python .github/scripts/fix_round_0_3_49_source.py
           python .github/scripts/apply_round_0_3_49.py
+          python .github/scripts/apply_round_0_3_50.py
       - name: Validate extension JavaScript
         run: |
           node --check browser-extension/content.js
@@ -45,18 +47,18 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content "browser-extension/manifest.json" -Raw | ConvertFrom-Json).version
-          $package = "dist/Apocalipse Download Manager Rapidgator Test $version"
+          $package = "dist/Apocalipse Download Manager Shortcut Logs Test $version"
           New-Item -ItemType Directory -Force "$package/browser extensions" | Out-Null
           Copy-Item "target/release/apocalipse-desktop.exe" "$package/Apocalipse Download Manager.exe"
           Copy-Item "browser-extension" "$package/browser extensions/unpacked-development-extension" -Recurse
           Compress-Archive -Path "browser-extension/*" -DestinationPath "$package/browser extensions/apocalipse-chrome-$version.zip" -Force
           Copy-Item "$package/browser extensions/apocalipse-chrome-$version.zip" "$package/browser extensions/apocalipse-edge-$version.zip" -Force
           Copy-Item "README.md","LICENSE" $package
-          Compress-Archive -Path $package -DestinationPath "dist/apocalipse-download-manager-windows-x64-rapidgator-test-$version.zip"
+          Compress-Archive -Path $package -DestinationPath "dist/apocalipse-download-manager-windows-x64-shortcut-logs-test-$version.zip"
       - name: Upload Windows test artifact
         uses: actions/upload-artifact@v4
         with:
-          name: apocalipse-windows-rapidgator-test
-          path: dist/apocalipse-download-manager-windows-x64-rapidgator-test-*.zip
+          name: apocalipse-windows-shortcut-logs-test
+          path: dist/apocalipse-download-manager-windows-x64-shortcut-logs-test-*.zip
           if-no-files-found: error
           retention-days: 14
