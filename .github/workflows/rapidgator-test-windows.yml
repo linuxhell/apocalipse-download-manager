@@ -32,6 +32,7 @@ jobs:
           python .github/scripts/apply_round_0_3_49.py
           python .github/scripts/apply_round_0_3_50.py
           python .github/scripts/apply_round_0_3_51.py
+          python .github/scripts/apply_round_0_3_52.py
       - name: Validate extension JavaScript
         run: |
           node --check browser-extension/content.js
@@ -40,6 +41,7 @@ jobs:
           node --check browser-extension/rapidgator.js
           if (Select-String -Path browser-extension/manifest.json -Pattern '"debugger"' -Quiet) { throw 'debugger permission still present' }
           if (Select-String -Path browser-extension/*.js -Pattern 'chrome\.debugger|Fetch\.enable|Fetch\.requestPaused|Fetch\.takeResponseBodyAsStream|IO\.read|Page\.setDownloadBehavior|Browser\.setDownloadBehavior' -Quiet) { throw 'CDP code still present in shipped extension' }
+          if (Select-String -Path browser-extension/service-worker.js -Pattern '/v1/site-rules' -Quiet) { throw 'stale site-rules bridge request still present' }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build desktop
