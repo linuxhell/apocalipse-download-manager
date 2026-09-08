@@ -5,18 +5,13 @@ import json
 p = Path('apps/desktop/src-tauri/src/main.rs')
 s = p.read_text(encoding='utf-8')
 
-# Add explicit Private Network Access permission to the HTTP response string.
-lines = s.splitlines(keepends=True)
-inserted = False
-for index, line in enumerate(lines):
-    if 'Access-Control-Allow-Methods: GET, POST, OPTIONS' in line:
-        newline = '\r\n' if line.endswith('\r\n') else '\n'
-        lines.insert(index + 1, 'Access-Control-Allow-Private-Network: true\\r\\' + newline)
-        inserted = True
-        break
-if not inserted:
-    raise SystemExit('bridge allow-methods source line not found')
-s = ''.join(lines)
+# Keep this insertion inside the existing Rust string literal. Using explicit
+# \r\n escapes avoids source-line-continuation edge cases.
+needle_header = '{cors}Access-Control-Allow-Headers:'
+replacement_header = '{cors}Access-Control-Allow-Private-Network: true\\r\\nAccess-Control-Allow-Headers:'
+if needle_header not in s:
+    raise SystemExit('bridge CORS response string not found')
+s = s.replace(needle_header, replacement_header, 1)
 
 # Log every request before origin/auth so preflight failures are visible.
 needle = '''    let origin = bridge_origin(headers);\n    let has_origin = headers.lines().any(|line| {\n'''
@@ -38,7 +33,7 @@ if old_origin in s:
 elif 'bridge.origin.rejected' not in s:
     raise SystemExit('origin reject block not found')
 
-# 0.3.53 already adds bridge.auth.failed. Only add it if that earlier patch did not.
+# 0.3.53 already adds bridge.auth.failed.
 if 'bridge.auth.failed' not in s:
     old_auth = '''    if !bridge_authorized(headers, &token) {\n        bridge_response(&mut stream, "401 Unauthorized", origin, "{\\"ok\\":false}");\n        return;\n    }\n'''
     new_auth = '''    if !bridge_authorized(headers, &token) {\n        diagnostic_log(&state, "WARN", "bridge.auth.failed", "invalid_or_missing_token");\n        bridge_response(&mut stream, "401 Unauthorized", origin, "{\\"ok\\":false}");\n        return;\n    }\n'''
