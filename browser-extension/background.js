@@ -326,13 +326,27 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     void diagnostic("browser_download.bridge_unavailable", state, { level: "WARN", detail: `rapidgator=${rapidgator} file=${fileNameFromPath(item.filename) || "unknown"}` });
     return false;
   }
-  const immediateTakeover = Boolean(matchingRule(url, "browser_assisted"));
-  void diagnostic("browser_download.detected", state, { detail: `rapidgator=${rapidgator} assisted=${immediateTakeover} force=${forceIsActive(modifierTabId)} file=${fileNameFromPath(item.filename) || "unknown"}` });
+  const browserAssisted = Boolean(matchingRule(url, "browser_assisted"));
+  void diagnostic("browser_download.detected", state, { detail: `rapidgator=${rapidgator} assisted=${browserAssisted} force=${forceIsActive(modifierTabId)} file=${fileNameFromPath(item.filename) || "unknown"}` });
+
+  // Disposable links are consumed by their first request. At this point Chrome
+  // already owns that original response; cancelling it and asking the desktop to
+  // GET the same URL again produces a 404 on Rapidgator and equivalent hosts.
+  // Let the browser finish the one valid response, then register the completed
+  // file in Apocalipse through browser-download-complete. This applies to every
+  // site using the generic browser_assisted rule, not to a hard-coded host.
+  if (browserAssisted) {
+    await markAssistedDownload(item, url);
+    void diagnostic("browser_download.assisted_original_response", state, {
+      detail: `rapidgator=${rapidgator} force=${forceIsActive(modifierTabId)} download_id=${item.id}`,
+    });
+    return false;
+  }
   let cancelled = false;
   try {
     await cancelBrowserDownload(item.id);
     cancelled = true;
-    if (eraseFromHistory || immediateTakeover) await eraseBrowserDownload(item.id);
+    if (eraseFromHistory) await eraseBrowserDownload(item.id);
     formRequest ||= lastFormSubmission
       && Date.now() - lastFormSubmission.capturedAt < 30000
       && pageUrl === lastFormSubmission.pageUrl
@@ -351,7 +365,7 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
         requestMethod: formRequest?.method || "GET",
         requestBody: formRequest?.body || null,
         requestContentType: formRequest?.contentType || null,
-        startImmediately: immediateTakeover,
+        startImmediately: false,
       }),
     }).catch(async (error) => {
       if (error.message.includes("bridge_http_404") || error.message.includes("not found")) {
@@ -361,12 +375,6 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
       }
       throw error;
     });
-    if (immediateTakeover && handoff.taskId) {
-      await chrome.storage.session.set({
-        [`${DIRECT_PREFIX}${handoff.taskId}`]: { url },
-      });
-      setTimeout(() => void checkDirectDownload(handoff.taskId).catch(() => {}), 1500);
-    }
     return true;
   } catch (error) {
     void diagnostic("browser_download.takeover_failed", state, { level: "ERROR", error: String(error), detail: `rapidgator=${rapidgator} cancelled=${cancelled}` });
@@ -493,7 +501,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
 });
 
-const APOCALIPSE_WORKER_BUILD = "0.3.69-hls-routing";
+const APOCALIPSE_WORKER_BUILD = "0.3.70-disposable-links";
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type !== "APOCALIPSE_WORKER_DIAGNOSTICS") return;
   reply({
