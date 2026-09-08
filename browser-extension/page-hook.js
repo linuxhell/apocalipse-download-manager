@@ -46,7 +46,7 @@
       // authenticated GET itself can return the one-use file response.
       if (u.origin === here.origin && u.pathname === here.pathname && u.search === here.search) {
         const label = `${anchor.getAttribute?.("aria-label") || ""} ${anchor.title || ""} ${anchor.textContent || ""}`;
-        return /download|baixar|descargar|télécharger|scarica|herunterladen|下载/i.test(label)
+        return /download|baixar|descarregar|descargar|télécharger|scarica|herunterladen|下载/i.test(label)
           ? { url: u.href, kind: "forced-action", method: "GET" }
           : null;
       }
@@ -110,7 +110,16 @@
     const target = event.target instanceof Element ? event.target : null;
     const clickable = target?.closest?.("a[href],button,[role=button],[role=menuitem]");
     trace(forcePressed() ? "FORCE_ARMED" : (bypassActive() ? "BYPASS_ARMED" : "AUTO_GESTURE"), { tag: clickable?.tagName || target?.tagName || "", role: clickable?.getAttribute?.("role") || "", text: String(clickable?.innerText || clickable?.textContent || "").trim().slice(0,120), href: safeUrl(clickable?.href || "") });
-    if (forcePressed() && clickable && !classify(clickable.href || "") && !forceDirectAnchorClassify(clickable)) trace("FORCE_PASSTHROUGH", { tag: clickable.tagName || "", role: clickable.getAttribute?.("role") || "", href: safeUrl(clickable.href || "") });
+    if (forcePressed() && clickable && !classify(clickable.href || "")) {
+      const forcedAction = forceDirectAnchorClassify(clickable);
+      trace(forcedAction ? "FORCE_ACTION_CLASSIFIED" : "FORCE_PASSTHROUGH", {
+        tag: clickable.tagName || "",
+        role: clickable.getAttribute?.("role") || "",
+        kind: forcedAction?.kind || "none",
+        text: String(clickable.innerText || clickable.textContent || "").trim().slice(0,120),
+        href: safeUrl(clickable.href || ""),
+      });
+    }
     const button = event.target?.closest?.('button[data-testid^="file-row-actions-"]');
     if (!button || location.hostname !== "chatgpt.com") return;
     const label = button.getAttribute("aria-label") || "";
