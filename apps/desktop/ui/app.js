@@ -162,11 +162,6 @@ const catalogs = {
     chooseEditor: "Choose editor…",
     removeEditor: "Remove editor",
     openExternal: "Open in editor",
-    siteRules: "Site rules",
-    siteRulesHint: "Versioned fixes that can change site behavior without rebuilding the application",
-    manageRules: "Manage rules",
-    saveRules: "Validate and save",
-    resetRules: "Restore defaults",
     exportRecording: "Export completed recording", outputFormat: "Output format", videoCodec: "Video codec", audioCodec: "Audio codec", export: "Export",
     searchHistory: "Search downloads…", importList: "Import list", advancedOptions: "Advanced options", mirrorUrls: "Mirror URLs (one per line)", priority: "Priority", priorityHigh: "High", priorityNormal: "Normal", priorityLow: "Low", verifyIntegrity: "Verify SHA-256", integrityPrompt: "Optional expected SHA-256 (leave blank to calculate only):", integrityOk: "SHA-256 verified",
   },
@@ -334,11 +329,6 @@ const catalogs = {
     chooseEditor: "Escolher editor…",
     removeEditor: "Remover editor",
     openExternal: "Abrir no editor",
-    siteRules: "Regras por site",
-    siteRulesHint: "Correções versionadas que alteram o comportamento dos sites sem recompilar o aplicativo",
-    manageRules: "Gerenciar regras",
-    saveRules: "Validar e salvar",
-    resetRules: "Restaurar padrões",
     exportRecording: "Exportar gravação concluída", outputFormat: "Formato de saída", videoCodec: "Codec de vídeo", audioCodec: "Codec de áudio", export: "Exportar",
     searchHistory: "Pesquisar downloads…", importList: "Importar lista", advancedOptions: "Opções avançadas", mirrorUrls: "URLs espelho (uma por linha)", priority: "Prioridade", priorityHigh: "Alta", priorityNormal: "Normal", priorityLow: "Baixa", verifyIntegrity: "Verificar SHA-256", integrityPrompt: "SHA-256 esperado opcional (deixe vazio apenas para calcular):", integrityOk: "SHA-256 verificado",
   },
@@ -505,11 +495,6 @@ const catalogs = {
     chooseEditor: "选择编辑器…",
     removeEditor: "移除编辑器",
     openExternal: "在编辑器中打开",
-    siteRules: "站点规则",
-    siteRulesHint: "无需重新编译应用程序即可更改站点行为的版本化修复",
-    manageRules: "管理规则",
-    saveRules: "验证并保存",
-    resetRules: "恢复默认值",
     exportRecording: "导出已完成的录制", outputFormat: "输出格式", videoCodec: "视频编码", audioCodec: "音频编码", export: "导出",
     searchHistory: "搜索下载…", importList: "导入列表", advancedOptions: "高级选项", mirrorUrls: "镜像网址（每行一个）", priority: "优先级", priorityHigh: "高", priorityNormal: "普通", priorityLow: "低", verifyIntegrity: "验证 SHA-256", integrityPrompt: "可选的预期 SHA-256（留空则仅计算）：", integrityOk: "SHA-256 已验证",
   },
@@ -881,7 +866,6 @@ const clearDialog = document.querySelector("#clear-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
 const toolsDialog = document.querySelector("#tools-dialog");
 const logDialog = document.querySelector("#log-dialog");
-const siteRulesDialog = document.querySelector("#site-rules-dialog");
 const exportDialog = document.querySelector("#export-dialog");
 const bandwidthDialog = document.querySelector("#bandwidth-dialog");
 let exportTaskId = null;
@@ -957,9 +941,12 @@ async function refreshLogEvents() {
 document.querySelector("#log-search").oninput = renderLogEvents;
 document.querySelector("#log-level").onchange = renderLogEvents;
 document.querySelector("#export-logs").onclick = async (event) => {
-  event.currentTarget.disabled = true;
+  // Event.currentTarget is cleared after the handler yields. Keep the element
+  // itself so every completion path (saved, cancelled, or failed) re-enables it.
+  const button = event.currentTarget;
+  button.disabled = true;
   try { await invoke("export_diagnostic_bundle"); } catch (error) { window.alert(String(error)); }
-  finally { event.currentTarget.disabled = false; }
+  finally { button.disabled = false; }
 };
 document.querySelector("#clear-logs").onclick = async () => { await invoke("clear_general_log"); await refreshLogEvents(); };
 
@@ -1600,7 +1587,8 @@ document.querySelector("#export-format").onchange = (event) => {
   document.querySelector("#export-video-codec").disabled = ["mp3", "m4a", "opus", "flac", "wav"].includes(event.target.value);
 };
 document.querySelector("#export-recording").onclick = async (event) => {
-  event.currentTarget.disabled = true;
+  const button = event.currentTarget;
+  button.disabled = true;
   try {
     await invoke("export_recording", {
       id: exportTaskId,
@@ -1612,7 +1600,7 @@ document.querySelector("#export-recording").onclick = async (event) => {
     exportDialog.close();
     await refreshDownloads();
   } catch (error) { console.error(error); }
-  finally { event.currentTarget.disabled = false; }
+  finally { button.disabled = false; }
 };
 async function refreshDiagnosticLog() {
   const output = document.querySelector("#diagnostic-log");
@@ -1657,34 +1645,6 @@ document.querySelector("#remove-log-editor").onclick = async () => {
 document.querySelectorAll("[data-log-close]").forEach((button) => {
   button.onclick = () => logDialog.close();
 });
-document.querySelector("#manage-site-rules").onclick = async () => {
-  try {
-    document.querySelector("#site-rules-json").value = await invoke("get_site_rules");
-    document.querySelector("#site-rules-error").hidden = true;
-    siteRulesDialog.showModal();
-  } catch (error) { console.error(error); }
-};
-document.querySelector("#save-site-rules").onclick = async () => {
-  const errorBox = document.querySelector("#site-rules-error");
-  try {
-    document.querySelector("#site-rules-json").value = await invoke("set_site_rules", {
-      json: document.querySelector("#site-rules-json").value,
-    });
-    errorBox.hidden = true;
-  } catch (error) {
-    errorBox.textContent = String(error);
-    errorBox.hidden = false;
-  }
-};
-document.querySelector("#reset-site-rules").onclick = async () => {
-  try {
-    document.querySelector("#site-rules-json").value = await invoke("reset_site_rules");
-    document.querySelector("#site-rules-error").hidden = true;
-  } catch (error) { console.error(error); }
-};
-document.querySelectorAll("[data-site-rules-close]").forEach((button) => {
-  button.onclick = () => siteRulesDialog.close();
-});
 document.querySelectorAll("[data-tool-pick]").forEach((button) => {
   button.onclick = async () => {
     const input = document.querySelector(`#tool-${button.dataset.toolPick}`);
@@ -1697,13 +1657,14 @@ document.querySelectorAll("[data-tool-pick]").forEach((button) => {
   };
 });
 document.querySelector("#pick-media-player").onclick = async (event) => {
-  event.currentTarget.disabled = true;
+  const button = event.currentTarget;
+  button.disabled = true;
   try {
     const input = document.querySelector("#media-player");
     const selected = await invoke("pick_executable", { initialPath: input.value });
     if (selected) input.value = selected;
   } catch (error) { console.error(error); }
-  finally { event.currentTarget.disabled = false; }
+  finally { button.disabled = false; }
 };
 function updateLimitLabels() {
   document.querySelector("#max-tasks-value").value = document.querySelector("#max-tasks").value;

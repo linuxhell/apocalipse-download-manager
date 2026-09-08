@@ -60,10 +60,6 @@
       if (url.hostname.toLowerCase() === "chatgpt.com" && url.pathname === "/backend-api/estuary/content") {
         return { url: url.href, kind: "chatgpt-library" };
       }
-      if (/^s\d+\.rapidgator\.net$/i.test(url.hostname)
-          && /^\/download\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(url.pathname)) {
-        return { url: url.href, kind: "rapidgator" };
-      }
     } catch {}
     return null;
   };

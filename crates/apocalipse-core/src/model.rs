@@ -30,6 +30,8 @@ pub struct DownloadTask {
     #[serde(default)]
     pub progress_percent: Option<f64>,
     #[serde(default)]
+    pub resume_supported: Option<bool>,
+    #[serde(default)]
     pub download_speed: Option<u64>,
     #[serde(default)]
     pub upload_speed: Option<u64>,
@@ -77,6 +79,7 @@ impl DownloadTask {
             received: 0,
             total: None,
             progress_percent: None,
+            resume_supported: None,
             download_speed: None,
             upload_speed: None,
             torrent_selection: Vec::new(),

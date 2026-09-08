@@ -87,6 +87,7 @@ pub enum DownloadEvent {
         resumed_at: u64,
         total: Option<u64>,
         connections: usize,
+        resume_supported: bool,
     },
     Progress {
         received: u64,
@@ -243,6 +244,12 @@ impl DownloadEngine {
         }
         let response = builder.send().await?.error_for_status()?;
         let resumed = existing > 0 && response.status() == StatusCode::PARTIAL_CONTENT;
+        let resume_supported = resumed
+            || response
+                .headers()
+                .get(header::ACCEPT_RANGES)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.eq_ignore_ascii_case("bytes"));
         let start = if resumed { existing } else { 0 };
         let total = response.content_length().map(|size| size + start);
         let content_type = response
@@ -256,6 +263,7 @@ impl DownloadEngine {
                 resumed_at: start,
                 total,
                 connections: 1,
+                resume_supported,
             })
             .await;
         let file = if resumed {
@@ -387,6 +395,7 @@ impl DownloadEngine {
                 resumed_at: resumed,
                 total: Some(total),
                 connections: worker_count,
+                resume_supported: true,
             })
             .await;
         while let Some(result) = jobs.next().await {

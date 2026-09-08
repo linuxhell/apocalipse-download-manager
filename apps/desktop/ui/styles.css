@@ -306,9 +306,6 @@ h1 {
   font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
   user-select: text;
 }
-.rules-editor {
-  width: min(900px, 82vw);
-}
 .credential-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -335,17 +332,6 @@ h1 {
 }
 @media (min-width: 621px) and (max-width: 1050px) {
   .website-credential-form { grid-template-columns: 1fr 1fr; }
-}
-#site-rules-json {
-  width: 100%;
-  min-height: 430px;
-  resize: vertical;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: 12px;
-  background: #071018;
-  color: #b8ced7;
-  font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 .ghost:disabled,
 .primary:disabled {
@@ -799,6 +785,15 @@ footer .bridge-connected i {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.resume-capability {
+  display: block;
+  margin-top: 7px;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--text);
+}
+.resume-capability[data-supported="true"] { color: #55dca3; }
+.resume-capability[data-supported="false"] { color: #ff8b8b; }
 .task-progress {
   height: 4px;
   margin-top: 8px;
@@ -908,7 +903,7 @@ body, dialog { color: var(--text); }
   border-color: var(--line);
   color: var(--text);
 }
-dialog input, dialog select, .media-inspection select, #diagnostic-log, #site-rules-json {
+dialog input, dialog select, .media-inspection select, #diagnostic-log {
   background: var(--input);
   border-color: var(--line);
   color: var(--text);
