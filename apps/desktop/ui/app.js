@@ -56,6 +56,10 @@ const catalogs = {
     failed: "Failed",
     pause: "Pause",
     resume: "Resume",
+    resumeCapability: "Resume capability:",
+    resumeYes: "Yes",
+    resumeNo: "No",
+    resumeChecking: "Checking…",
     retry: "Retry",
     openFolder: "Open folder",
     preview: "Preview",
@@ -223,6 +227,10 @@ const catalogs = {
     failed: "Falhou",
     pause: "Pausar",
     resume: "Continuar",
+    resumeCapability: "Capacidade de continuar:",
+    resumeYes: "Sim",
+    resumeNo: "Não",
+    resumeChecking: "Verificando…",
     retry: "Tentar novamente",
     openFolder: "Abrir pasta",
     preview: "Pré-visualizar",
@@ -389,6 +397,10 @@ const catalogs = {
     failed: "失败",
     pause: "暂停",
     resume: "继续",
+    resumeCapability: "续传能力：",
+    resumeYes: "是",
+    resumeNo: "否",
+    resumeChecking: "检查中…",
     retry: "重试",
     openFolder: "打开文件夹",
     preview: "预览",
@@ -698,6 +710,16 @@ function renderDownloads() {
         : `${progressText}${torrentStats}`;
     progress.append(bar);
     info.append(progress, details);
+    const resumeCapability = document.createElement("strong");
+    resumeCapability.className = "resume-capability";
+    const resumeValue = task.resume_supported === true
+      ? t("resumeYes")
+      : task.resume_supported === false
+        ? t("resumeNo")
+        : t("resumeChecking");
+    resumeCapability.textContent = `${t("resumeCapability")} ${resumeValue}`;
+    resumeCapability.dataset.supported = task.resume_supported === true ? "true" : task.resume_supported === false ? "false" : "unknown";
+    info.append(resumeCapability);
     const state = Object.assign(document.createElement("span"), {
       className: "download-state",
       textContent: /\.recording\.webm$/i.test(task.destination) && stateKey(task.state) === "downloading" ? t("recordingActive") : stateName(task.state),
@@ -1559,6 +1581,7 @@ document.querySelector("#save-tools").onclick = async (event) => {
     await invoke("set_tool_paths", {
       ffmpeg: document.querySelector("#tool-ffmpeg").value,
       ytDlp: document.querySelector("#tool-yt-dlp").value,
+      qjs: document.querySelector("#tool-qjs").value,
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
       aria2: document.querySelector("#tool-aria2").value,
     });
