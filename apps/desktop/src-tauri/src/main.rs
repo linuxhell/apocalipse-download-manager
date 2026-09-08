@@ -1105,7 +1105,11 @@ fn inspect_url(url: String) -> Result<PlanResponse, String> {
 async fn inspect_media_formats(
     state: State<'_, AppState>,
     url: String,
+    cookie_header: Option<String>,
+    user_agent: Option<String>,
+    referer: Option<String>,
 ) -> Result<MediaInspection, String> {
+    log_network_route(&state, "media_inspection", "YtDlp").await;
     let (executable, quickjs, credential) = {
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
         (
@@ -1128,6 +1132,32 @@ async fn inspect_media_formats(
         .arg("--js-runtimes")
         .arg(format!("quickjs:{}", quickjs.display()))
         .arg(&url);
+    if let Some(cookie) = cookie_header.as_deref().filter(|value| !value.is_empty()) {
+        command.arg("--add-headers").arg(format!("Cookie:{cookie}"));
+    } else if url.contains("youtube.com/") || url.contains("youtu.be/") {
+        // Manual URLs do not carry an extension identity. Reuse the browser
+        // session so inspection and the actual download see the same YouTube
+        // authentication/challenge state.
+        command.args(["--cookies-from-browser", "chrome"]);
+    }
+    if let Some(value) = user_agent.as_deref().filter(|value| !value.is_empty()) {
+        command.arg("--user-agent").arg(value);
+    }
+    if let Some(value) = referer.as_deref().filter(|value| !value.is_empty()) {
+        command.arg("--referer").arg(value);
+    }
+    diagnostic_log(
+        &state,
+        "INFO",
+        "yt_dlp.inspection_identity",
+        &format!(
+            "url={} cookies={} user_agent={} referer={}",
+            redact_url(&url),
+            cookie_header.as_deref().map_or(0, |value| value.split(';').filter(|item| item.contains('=')).count()),
+            user_agent.is_some(),
+            referer.as_deref().map(redact_url).unwrap_or_else(|| "none".to_owned()),
+        ),
+    );
     if let Some(credential) = credential {
         command
             .arg("--username")
@@ -1464,6 +1494,7 @@ async fn run_download(
         "http.start",
         &format!("task={id} url={}", redact_url(&request.url)),
     );
+    log_network_route(&app.state::<AppState>(), &id.to_string(), "NativeHttp").await;
     update_task(&app, id, true, |task| {
         task.state = DownloadState::Inspecting
     });
@@ -1656,6 +1687,69 @@ fn epoch_seconds() -> u64 {
         .map_or(0, |value| value.as_secs())
 }
 
+async fn log_network_route(state: &AppState, operation: &str, engine: &str) {
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = tokio::process::Command::new("powershell.exe");
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            r#"$ErrorActionPreference='SilentlyContinue'; $routes=@(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | Sort-Object RouteMetric,InterfaceMetric | ForEach-Object { $r=$_; $a=Get-NetAdapter -InterfaceIndex $r.InterfaceIndex; $dns=(Get-DnsClientServerAddress -InterfaceIndex $r.InterfaceIndex -AddressFamily IPv4).ServerAddresses; [pscustomobject]@{ifIndex=$r.InterfaceIndex; interface=$r.InterfaceAlias; description=$a.InterfaceDescription; status=$a.Status; metric=($r.RouteMetric+$r.InterfaceMetric); nextHop=$r.NextHop; dns=@($dns); vpnCandidate=([bool](($r.InterfaceAlias+' '+$a.InterfaceDescription) -match '(?i)vpn|avira|phantom|wireguard|wintun|openvpn|tap|tun|tailscale|zerotier'))} }); [pscustomobject]@{vpnDetected=([bool]($routes | Where-Object { $_.vpnCandidate })); routes=$routes} | ConvertTo-Json -Compress -Depth 5"#,
+        ]);
+        use std::os::windows::process::CommandExt;
+        command.as_std_mut().creation_flags(0x08000000);
+        command
+    };
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let mut command = tokio::process::Command::new("sh");
+        command.args(["-c", "ip -j route show default 2>/dev/null || ip route show default 2>/dev/null"]);
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = tokio::process::Command::new("sh");
+        command.args(["-c", "route -n get default 2>/dev/null; scutil --proxy 2>/dev/null"]);
+        command
+    };
+    match tokio::time::timeout(Duration::from_secs(5), command.output()).await {
+        Ok(Ok(output)) if output.status.success() => {
+            let snapshot = String::from_utf8_lossy(&output.stdout)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(12_000)
+                .collect::<String>();
+            diagnostic_log(
+                state,
+                "INFO",
+                "network.route_snapshot",
+                &format!("operation={operation} engine={engine} snapshot={snapshot}"),
+            );
+        }
+        Ok(Ok(output)) => diagnostic_log(
+            state,
+            "WARN",
+            "network.route_snapshot_failed",
+            &format!("operation={operation} engine={engine} status={}", output.status),
+        ),
+        Ok(Err(error)) => diagnostic_log(
+            state,
+            "WARN",
+            "network.route_snapshot_failed",
+            &format!("operation={operation} engine={engine} error={error}"),
+        ),
+        Err(_) => diagnostic_log(
+            state,
+            "WARN",
+            "network.route_snapshot_failed",
+            &format!("operation={operation} engine={engine} error=timeout"),
+        ),
+    }
+}
+
 async fn run_external_download(
     app: tauri::AppHandle,
     id: DownloadId,
@@ -1669,6 +1763,8 @@ async fn run_external_download(
         "external.start",
         &format!("task={id} engine={kind:?} url={}", redact_url(&task.source)),
     );
+    log_network_route(&app.state::<AppState>(), &id.to_string(), &format!("{kind:?}"))
+        .await;
     update_task(&app, id, true, |item| {
         item.state = DownloadState::Downloading;
         item.progress_percent = Some(0.0);

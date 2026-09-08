@@ -1745,7 +1745,6 @@ function option(select, value, label) {
 }
 
 async function showMediaInspection(url) {
-  resetMediaInspection();
   const panel = document.querySelector("#media-inspection");
   const select = document.querySelector("#media-format");
   select.replaceChildren();
@@ -1754,7 +1753,12 @@ async function showMediaInspection(url) {
   for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
     option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
   try {
-    const media = await invoke("inspect_media_formats", { url });
+    const media = await invoke("inspect_media_formats", {
+      url,
+      cookieHeader: pendingCookieHeader,
+      userAgent: pendingUserAgent,
+      referer: pendingReferer,
+    });
     pendingTitle = media.title || pendingTitle;
     pendingThumbnail = media.thumbnail || pendingThumbnail;
     pendingDuration = Number.isFinite(media.duration) ? media.duration : pendingDuration;
@@ -1769,12 +1773,17 @@ async function showMediaInspection(url) {
     panel.hidden = false;
   } catch (error) {
     console.warn(error);
-    document.querySelector("#media-title").textContent = t("mediaUnavailable");
-    document.querySelector("#media-duration").textContent = "";
-    const thumbnail = document.querySelector("#media-thumbnail");
-    thumbnail.hidden = true;
-    thumbnail.removeAttribute("src");
-    panel.hidden = false;
+    // The extension may already have supplied trustworthy title/thumbnail
+    // metadata. Preserve it when yt-dlp inspection is blocked by a VPN,
+    // CAPTCHA or transient anti-bot response.
+    showCapturedPreview({
+      title: pendingTitle || t("mediaUnavailable"),
+      thumbnail: pendingThumbnail,
+      kind: pendingMediaKind || "video",
+      duration: pendingDuration,
+      size: pendingExpectedSize,
+      showFormats: true,
+    });
   }
 }
 document.querySelector("#media-format").onchange = (event) => {
@@ -1804,7 +1813,9 @@ document.querySelector("#analyze").onclick = async () => {
       "suggest_download_name",
       { url: url.value },
     );
-    if (plan.primary !== "NativeHttp" || !fileName.value.trim()) {
+    const currentName = fileName.value.trim();
+    const genericName = /^(?:watch|reel|video|download)(?:\.[a-z0-9]{1,10})?$/i.test(currentName);
+    if (!currentName || (genericName && !pendingTitle)) {
       fileName.value = suggestedFileName;
     }
     box.textContent = `${plan.primary} · ${plan.reason}`;
