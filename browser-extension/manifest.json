@@ -45,6 +45,17 @@
       ],
       "run_at": "document_start",
       "all_frames": true
+    },
+    {
+      "matches": [
+        "https://instagram.com/*",
+        "https://*.instagram.com/*"
+      ],
+      "js": [
+        "instagram-media-fix.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
     }
   ],
   "icons": {
