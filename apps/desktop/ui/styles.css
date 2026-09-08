@@ -914,6 +914,7 @@ nav button:hover, nav button.active, .download-icon { color: var(--accent); }
 }
 .appearance-page { display:grid; grid-template-columns:minmax(260px,.9fr) minmax(360px,1.1fr); gap:18px; }
 .appearance-page[hidden] { display:none; }
+.metrics[hidden], .panel[hidden], .logs-panel[hidden], .link-panel[hidden] { display:none; }
 .appearance-card { display:grid; align-content:start; gap:14px; padding:20px; border:1px solid var(--line); border-radius:var(--corner-radius); background:color-mix(in srgb,var(--surface) var(--window-opacity-percent),transparent); }
 .appearance-card h2 { margin:0 0 4px; }
 .appearance-card > small,.appearance-card > p,.appearance-toggle small,.appearance-select small { color:var(--muted); }
