@@ -10,9 +10,7 @@
     "downloads",
     "alarms",
     "cookies",
-    "webRequest",
-    "clipboardRead",
-    "clipboardWrite"
+    "webRequest"
   ],
   "host_permissions": [
     "http://127.0.0.1/*",
