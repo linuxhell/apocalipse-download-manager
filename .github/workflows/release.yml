@@ -163,6 +163,8 @@ jobs:
           else
             version=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")
             tag="v${version}"
+            git tag --force "$tag" "${{ github.sha }}"
+            git push origin "refs/tags/$tag" --force
           fi
           prerelease=()
           if [[ "$tag" =~ (alpha|beta|rc) ]]; then
