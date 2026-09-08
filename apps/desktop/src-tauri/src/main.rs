@@ -784,6 +784,10 @@ struct BlobFinish {
 struct DownloadContext {
     referer: Option<String>,
     known_duration: Option<f64>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    thumbnail: Option<String>,
     cookie_header: Option<String>,
     user_agent: Option<String>,
     request_method: Option<String>,
@@ -2822,7 +2826,38 @@ fn validate_file_name(name: &str) -> Result<String, String> {
     {
         return Err("invalid_file_name".to_owned());
     }
-    Ok(name.to_owned())
+    // Keep enough headroom for yt-dlp's temporary format suffixes and for the
+    // Windows legacy MAX_PATH limit. Preserve the extension while shortening
+    // unusually long titles from social networks.
+    const MAX_FILE_NAME_UTF16: usize = 120;
+    if name.encode_utf16().count() <= MAX_FILE_NAME_UTF16 {
+        return Ok(name.to_owned());
+    }
+    let path = Path::new(name);
+    let extension = path.extension().and_then(|value| value.to_str());
+    let extension_chars = extension.map_or(0, |value| value.encode_utf16().count() + 1);
+    let stem_limit = MAX_FILE_NAME_UTF16.saturating_sub(extension_chars).max(1);
+    let mut used = 0;
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download")
+        .chars()
+        .take_while(|character| {
+            let width = character.len_utf16();
+            if used + width > stem_limit {
+                false
+            } else {
+                used += width;
+                true
+            }
+        })
+        .collect::<String>()
+        .trim_end_matches([' ', '.'])
+        .to_owned();
+    Ok(extension
+        .map(|extension| format!("{stem}.{extension}"))
+        .unwrap_or(stem))
 }
 
 fn append_source_extension(file_name: String, source: &str, kind: DownloadKind) -> String {
@@ -3391,7 +3426,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             "qjs" => (
                 "quickjs-ng/quickjs",
                 "qjs.exe",
-                &["windows", "x86_64", ".zip"],
+                &["qjs-windows-x86_64.exe"],
                 &["--version"],
             ),
             "aria2" => (
@@ -3447,9 +3482,13 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                     .and_then(|value| value.as_str())
                     .unwrap_or("")
                     .to_ascii_lowercase();
-                asset_markers
-                    .iter()
-                    .all(|marker| name.contains(&marker.to_ascii_lowercase()))
+                match id.as_str() {
+                    "qjs" => name == "qjs-windows-x86_64.exe",
+                    "ffmpeg" => name.ends_with("win64-gpl.zip") && !name.contains("shared"),
+                    _ => asset_markers
+                        .iter()
+                        .all(|marker| name.contains(&marker.to_ascii_lowercase())),
+                }
             })
             .ok_or_else(|| format!("compatible_release_asset_not_found:{repository}:{tag}"))?;
         let asset_name = asset
@@ -3473,37 +3512,42 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         let sha256 = format!("{:x}", Sha256::digest(&bytes));
         let temporary =
             std::env::temp_dir().join(format!("apocalipse-tool-update-{}", uuid::Uuid::new_v4()));
-        let archive_path = temporary.join("release.zip");
-        let extracted = temporary.join("extracted");
-        fs::create_dir_all(&extracted).map_err(|error| error.to_string())?;
-        fs::write(&archive_path, &bytes).map_err(|error| error.to_string())?;
-        let mut extractor = Command::new("tar.exe");
-        extractor
-            .arg("-xf")
-            .arg(&archive_path)
-            .arg("-C")
-            .arg(&extracted);
-        use std::os::windows::process::CommandExt;
-        extractor.creation_flags(0x08000000);
-        let extraction = extractor.output().map_err(|error| error.to_string())?;
-        if !extraction.status.success() {
-            let _ = fs::remove_dir_all(&temporary);
-            return Err(format!(
-                "release_extraction_failed:{}",
-                String::from_utf8_lossy(&extraction.stderr).trim()
-            ));
-        }
-        let replacement_path = find_named_file(&extracted, executable_name, 0)
-            .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
-        let replacement = fs::read(replacement_path).map_err(|error| error.to_string())?;
-        let ffprobe_replacement = if id == "ffmpeg" {
-            fs::read(
-                find_named_file(&extracted, "ffprobe.exe", 0)
-                    .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?,
-            )
-            .map_err(|error| error.to_string())?
+        let (replacement, ffprobe_replacement) = if id == "qjs" {
+            (bytes.to_vec(), Vec::new())
         } else {
-            Vec::new()
+            let archive_path = temporary.join("release.zip");
+            let extracted = temporary.join("extracted");
+            fs::create_dir_all(&extracted).map_err(|error| error.to_string())?;
+            fs::write(&archive_path, &bytes).map_err(|error| error.to_string())?;
+            let mut extractor = Command::new("tar.exe");
+            extractor
+                .arg("-xf")
+                .arg(&archive_path)
+                .arg("-C")
+                .arg(&extracted);
+            use std::os::windows::process::CommandExt;
+            extractor.creation_flags(0x08000000);
+            let extraction = extractor.output().map_err(|error| error.to_string())?;
+            if !extraction.status.success() {
+                let _ = fs::remove_dir_all(&temporary);
+                return Err(format!(
+                    "release_extraction_failed:{}",
+                    String::from_utf8_lossy(&extraction.stderr).trim()
+                ));
+            }
+            let replacement_path = find_named_file(&extracted, executable_name, 0)
+                .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
+            let replacement = fs::read(replacement_path).map_err(|error| error.to_string())?;
+            let ffprobe_replacement = if id == "ffmpeg" {
+                fs::read(
+                    find_named_file(&extracted, "ffprobe.exe", 0)
+                        .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?,
+                )
+                .map_err(|error| error.to_string())?
+            } else {
+                Vec::new()
+            };
+            (replacement, ffprobe_replacement)
         };
         let _ = fs::remove_dir_all(&temporary);
         if replacement.len() < 32_768 || (id == "ffmpeg" && ffprobe_replacement.len() < 32_768) {
@@ -3513,14 +3557,38 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             .parent()
             .ok_or_else(|| "tool_target_has_no_directory".to_owned())?;
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        let staged = parent.join(format!(".{executable_name}.apocalipse-new"));
+        let staged = parent.join(format!(".apocalipse-new-{executable_name}"));
         let backup = parent.join(format!(".{executable_name}.apocalipse-backup"));
         let ffprobe = parent.join("ffprobe.exe");
-        let ffprobe_staged = parent.join(".ffprobe.exe.apocalipse-new");
+        let ffprobe_staged = parent.join(".apocalipse-new-ffprobe.exe");
         let ffprobe_backup = parent.join(".ffprobe.exe.apocalipse-backup");
         fs::write(&staged, &replacement).map_err(|error| error.to_string())?;
         if id == "ffmpeg" {
             fs::write(&ffprobe_staged, &ffprobe_replacement).map_err(|error| error.to_string())?;
+        }
+        let candidate_version = match version_line(&staged, version_args) {
+            Some(version) => version,
+            None => {
+                let _ = fs::remove_file(&staged);
+                let _ = fs::remove_file(&ffprobe_staged);
+                return Err("downloaded_tool_validation_failed".to_owned());
+            }
+        };
+        if id == "ffmpeg" && version_line(&ffprobe_staged, &["-version"]).is_none() {
+            let _ = fs::remove_file(&staged);
+            let _ = fs::remove_file(&ffprobe_staged);
+            return Err("downloaded_ffprobe_validation_failed".to_owned());
+        }
+        if candidate_version == before {
+            let _ = fs::remove_file(&staged);
+            let _ = fs::remove_file(&ffprobe_staged);
+            diagnostic_log(
+                &state,
+                "INFO",
+                "tool.already_current",
+                &format!("tool={id} version={before} asset={asset_name}"),
+            );
+            return Ok(format!("{id} already current ({before})"));
         }
         if backup.exists() {
             fs::remove_file(&backup).map_err(|error| error.to_string())?;
@@ -3722,6 +3790,20 @@ fn enqueue_download_impl(
         task.known_duration = context
             .known_duration
             .filter(|duration| duration.is_finite() && *duration > 0.0);
+        task.display_title = context.title.and_then(|value| {
+            let value = value
+                .chars()
+                .filter(|character| !character.is_control())
+                .take(512)
+                .collect::<String>();
+            (!value.trim().is_empty()).then(|| value.trim().to_owned())
+        });
+        task.thumbnail = context.thumbnail.filter(|value| {
+            value.len() <= 8192
+                && (value.starts_with("https://")
+                    || value.starts_with("http://")
+                    || value.starts_with("data:image/"))
+        });
         let cookie_header = context.cookie_header.filter(|value| {
             value.len() <= 16_384 && !value.contains('\r') && !value.contains('\n')
         });
@@ -4086,6 +4168,8 @@ fn redownload_downloads(
         task.format_selection = original.format_selection.clone();
         task.referer = original.referer.clone();
         task.known_duration = original.known_duration;
+        task.display_title = original.display_title.clone();
+        task.thumbnail = original.thumbnail.clone();
         if let Some(identity) = saved_identities.get(&original.id) {
             repeated_identities.push((task.id, identity.clone()));
         }
@@ -4796,6 +4880,8 @@ fn queue_from_bridge(
         let context = DownloadContext {
             referer: request.page_url,
             known_duration: request.duration,
+            title: request.title,
+            thumbnail: request.thumbnail,
             cookie_header: request.cookie_header,
             user_agent: request.user_agent,
             request_method: request.request_method,
