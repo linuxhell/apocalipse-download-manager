@@ -173,7 +173,7 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     emit(candidate, "document.click", true);
-  }, false);
+  }, true);
 
   // Some pages call Location.assign/replace instead of clicking an anchor.
   for (const method of ["assign", "replace"]) {
