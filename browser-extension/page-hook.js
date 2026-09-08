@@ -70,7 +70,7 @@
     return null;
   };
 
-  const emit = (candidate, primitive, fallbackOnFailure = false) => {
+  const emit = (candidate, primitive, fallbackOnFailure = false, replayAnchor = null) => {
     if (!candidate || bypassActive()) { if (candidate && bypassActive()) trace("BYPASS", { primitive, url: safeUrl(candidate.url) }); return false; }
     const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     trace(forceActive() ? "FORCE_CAPTURE" : "AUTO_ACCEPT", { primitive, kind: candidate.kind, url: safeUrl(candidate.url), requestId });
@@ -87,7 +87,12 @@
       body: candidate.body || null,
       contentType: candidate.contentType || null,
     }, "*");
-    if (fallbackOnFailure) pendingNavigationFallbacks.set(requestId, candidate.url);
+    if (fallbackOnFailure) {
+      pendingNavigationFallbacks.set(requestId, {
+        url: candidate.url,
+        replayAnchor: replayAnchor instanceof HTMLAnchorElement ? replayAnchor : null,
+      });
+    }
     return true;
   };
 
@@ -97,8 +102,14 @@
     pendingNavigationFallbacks.delete(event.data.requestId);
     if (!fallback || event.data.result?.ok) return;
     bypassGestureUntil = Date.now() + 5000;
-    trace("FORCE_CAPTURE_FALLBACK", { url: safeUrl(fallback), error: String(event.data.result?.error || "takeover_failed") });
-    location.assign(fallback);
+    const replayClick = fallback.replayAnchor?.isConnected;
+    trace("FORCE_CAPTURE_FALLBACK", {
+      url: safeUrl(fallback.url),
+      replay: replayClick ? "original-click" : "navigation",
+      error: String(event.data.result?.error || "takeover_failed"),
+    });
+    if (replayClick) fallback.replayAnchor.click();
+    else location.assign(fallback.url);
   });
 
   // Remember which Library row opened the Radix menu. The menu itself is portaled
@@ -131,7 +142,7 @@
   const originalAnchorClick = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function(...args) {
     const candidate = classify(this.href) || forceDirectAnchorClassify(this);
-    if (emit(candidate, "anchor.click", true)) return;
+    if (emit(candidate, "anchor.click", true, this)) return;
     return originalAnchorClick.apply(this, args);
   };
 
@@ -172,7 +183,7 @@
     if (!candidate || bypassActive()) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    emit(candidate, "document.click", true);
+    emit(candidate, "document.click", true, anchor);
   }, true);
 
   // Some pages call Location.assign/replace instead of clicking an anchor.
