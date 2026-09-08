@@ -456,6 +456,7 @@
     return null;
   };
   const forceKnownHlsDownload = (event) => {
+    if (/^(?:www\.)?youtube\.com$/i.test(location.hostname) && location.pathname === "/watch") return false;
     const control = looksLikeDownloadControl(event);
     const video = document.querySelector("video");
     const hls = hlsForPage();
@@ -574,6 +575,9 @@
   const resolveDownloadUrl = async (element) => {
     const immediate = downloadUrlFor(element);
     if (element.tagName !== "VIDEO") return immediate;
+    // YouTube has its own format-selection pipeline (video + audio merging).
+    // Keep both regular videos and live streams out of the generic HLS route.
+    if (/^(?:www\.)?youtube\.com$/i.test(location.hostname) && location.pathname === "/watch") return immediate;
     const hls = hlsForPage();
     if (!hls.candidates.length) return immediate;
     try {
