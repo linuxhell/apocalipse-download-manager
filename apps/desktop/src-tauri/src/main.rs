@@ -1153,9 +1153,15 @@ async fn inspect_media_formats(
         &format!(
             "url={} cookies={} user_agent={} referer={}",
             redact_url(&url),
-            cookie_header.as_deref().map_or(0, |value| value.split(';').filter(|item| item.contains('=')).count()),
+            cookie_header.as_deref().map_or(0, |value| value
+                .split(';')
+                .filter(|item| item.contains('='))
+                .count()),
             user_agent.is_some(),
-            referer.as_deref().map(redact_url).unwrap_or_else(|| "none".to_owned()),
+            referer
+                .as_deref()
+                .map(redact_url)
+                .unwrap_or_else(|| "none".to_owned()),
         ),
     );
     if let Some(credential) = credential {
@@ -1704,13 +1710,19 @@ async fn log_network_route(state: &AppState, operation: &str, engine: &str) {
     #[cfg(target_os = "linux")]
     let mut command = {
         let mut command = tokio::process::Command::new("sh");
-        command.args(["-c", "ip -j route show default 2>/dev/null || ip route show default 2>/dev/null"]);
+        command.args([
+            "-c",
+            "ip -j route show default 2>/dev/null || ip route show default 2>/dev/null",
+        ]);
         command
     };
     #[cfg(target_os = "macos")]
     let mut command = {
         let mut command = tokio::process::Command::new("sh");
-        command.args(["-c", "route -n get default 2>/dev/null; scutil --proxy 2>/dev/null"]);
+        command.args([
+            "-c",
+            "route -n get default 2>/dev/null; scutil --proxy 2>/dev/null",
+        ]);
         command
     };
     match tokio::time::timeout(Duration::from_secs(5), command.output()).await {
@@ -1733,7 +1745,10 @@ async fn log_network_route(state: &AppState, operation: &str, engine: &str) {
             state,
             "WARN",
             "network.route_snapshot_failed",
-            &format!("operation={operation} engine={engine} status={}", output.status),
+            &format!(
+                "operation={operation} engine={engine} status={}",
+                output.status
+            ),
         ),
         Ok(Err(error)) => diagnostic_log(
             state,
@@ -1763,8 +1778,12 @@ async fn run_external_download(
         "external.start",
         &format!("task={id} engine={kind:?} url={}", redact_url(&task.source)),
     );
-    log_network_route(&app.state::<AppState>(), &id.to_string(), &format!("{kind:?}"))
-        .await;
+    log_network_route(
+        &app.state::<AppState>(),
+        &id.to_string(),
+        &format!("{kind:?}"),
+    )
+    .await;
     update_task(&app, id, true, |item| {
         item.state = DownloadState::Downloading;
         item.progress_percent = Some(0.0);
@@ -4892,6 +4911,32 @@ fn queue_from_bridge(
             }
             has_byte_start && has_byte_end
         });
+    if partial_video_candidate {
+        if let Ok(mut expanded) = url::Url::parse(&request.url) {
+            let original = request.url.clone();
+            let query = expanded
+                .query_pairs()
+                .filter(|(name, _)| {
+                    !name.eq_ignore_ascii_case("bytestart")
+                        && !name.eq_ignore_ascii_case("byteend")
+                })
+                .map(|(name, value)| (name.into_owned(), value.into_owned()))
+                .collect::<Vec<_>>();
+            expanded.set_query(None);
+            expanded.query_pairs_mut().extend_pairs(query);
+            request.url = expanded.into();
+            diagnostic_log(
+                &state,
+                "INFO",
+                "bridge.partial_media_candidate_expanded",
+                &format!(
+                    "candidate={} expanded={}",
+                    redact_url(&original),
+                    redact_url(&request.url)
+                ),
+            );
+        }
+    }
     let image_mislabeled_as_video = request
         .media_kind
         .as_deref()
@@ -4910,21 +4955,16 @@ fn queue_from_bridge(
                     "avif" | "bmp" | "gif" | "ico" | "jpg" | "jpeg" | "png" | "svg" | "webp"
                 )
             });
-    if partial_video_candidate || image_mislabeled_as_video {
+    if image_mislabeled_as_video {
         if let Some(page_url) = request
             .page_url
             .clone()
             .filter(|url| matches!(classify_url(url), Some(DownloadKind::MediaPage)))
         {
-            let event = if partial_video_candidate {
-                "bridge.partial_media_candidate_rejected"
-            } else {
-                "bridge.video_image_candidate_rejected"
-            };
             diagnostic_log(
                 &state,
                 "WARN",
-                event,
+                "bridge.video_image_candidate_rejected",
                 &format!(
                     "candidate={} fallback={}",
                     redact_url(&request.url),
