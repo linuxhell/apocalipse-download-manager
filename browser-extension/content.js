@@ -446,7 +446,7 @@
     for (const node of event.composedPath?.() || []) {
       const label = `${node?.getAttribute?.("aria-label") || ""} ${node?.getAttribute?.("data-title") || ""} ${node?.title || ""} ${node?.textContent || ""}`
         .replace(/\s+/g, " ").trim().slice(0, 240);
-      if (/(?:download|baixar|descargar|télécharger|下载)/i.test(label)) return { node, label };
+      if (/(?:download|baixar|descarregar|descargar|télécharger|下载)/i.test(label)) return { node, label };
       if (node?.hasAttribute?.("download")) return { node, label };
     }
     return null;
