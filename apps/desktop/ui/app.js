@@ -6,7 +6,10 @@ const catalogs = {
     torrents: "Torrents",
     tools: "Tools",
     settings: "Settings",
-    general: "General", browsers: "Browsers", themes: "Themes", language: "Language", advanced: "Advanced", about: "About", aboutDescription: "Native open-source download manager. Interface, core, extensions and diagnostics are built to work as one system.",
+    themes: "Themes", language: "Language",
+    themesDescription: "Personalize colors, transparency, corners and interface size.",
+    languageDescription: "Choose the language used throughout Apocalipse and in the tray menu.",
+    chooseTheme: "Choose theme", themeOptions: "Theme options", windowTransparency: "Window transparency", windowTransparencyHint: "Make the application window transparent", transparencyLevel: "Transparency level", roundedCorners: "Rounded corners", roundedCornersHint: "Use rounded corners on windows, panels and controls", cornerRadius: "Corner radius", interfaceSize: "Interface size", interfaceSizeHint: "Adjust text and element sizes", compact: "Compact", normal: "Normal", large: "Large", chooseLanguage: "Choose language", languageHint: "The entire application and tray menu use the selected language.",
     logs: "Logs", logsDescription: "End-to-end diagnostics for extension, shortcuts, interface, bridge and downloads.", exportLog: "Export log", searchLogs: "Search events…", allLevels: "All levels",
     downloadsDescription: "Manage direct downloads, progress, speed and completed files.",
     mediaDescription: "Videos, audio, recordings and exports detected by Apocalipse.",
@@ -174,7 +177,10 @@ const catalogs = {
     torrents: "Torrents",
     tools: "Ferramentas",
     settings: "Configurações",
-    general: "Geral", browsers: "Navegadores", themes: "Temas", language: "Idioma", advanced: "Avançado", about: "Sobre", aboutDescription: "Gerenciador de downloads nativo e de código aberto. Interface, núcleo, extensões e diagnóstico funcionam como um único sistema.",
+    themes: "Temas", language: "Idioma",
+    themesDescription: "Personalize cores, transparência, cantos e tamanho da interface.",
+    languageDescription: "Escolha o idioma usado em todo o Apocalipse e no menu da bandeja.",
+    chooseTheme: "Escolher tema", themeOptions: "Opções do tema", windowTransparency: "Transparência da janela", windowTransparencyHint: "Deixa a janela do aplicativo transparente", transparencyLevel: "Nível de transparência", roundedCorners: "Cantos arredondados", roundedCornersHint: "Usar cantos arredondados nas janelas, painéis e controles", cornerRadius: "Raio dos cantos", interfaceSize: "Tamanho da interface", interfaceSizeHint: "Ajusta o tamanho dos textos e elementos", compact: "Compacto", normal: "Normal", large: "Grande", chooseLanguage: "Escolher idioma", languageHint: "Todo o aplicativo e o menu da bandeja usam o idioma selecionado.",
     logs: "Logs", logsDescription: "Diagnóstico de ponta a ponta da extensão, atalhos, interface, ponte e downloads.", exportLog: "Exportar log", searchLogs: "Pesquisar eventos…", allLevels: "Todos os níveis",
     downloadsDescription: "Gerencie downloads diretos, progresso, velocidade e arquivos concluídos.",
     mediaDescription: "Vídeos, áudios, gravações e exportações detectados pelo Apocalipse.",
@@ -343,7 +349,10 @@ const catalogs = {
     torrents: "种子",
     tools: "工具",
     settings: "设置",
-    general: "常规", browsers: "浏览器", themes: "主题", language: "语言", advanced: "高级", about: "关于", aboutDescription: "原生开源下载管理器。界面、核心、扩展和诊断作为一个系统协同工作。",
+    themes: "主题", language: "语言",
+    themesDescription: "自定义颜色、透明度、圆角和界面大小。",
+    languageDescription: "选择整个 Apocalipse 和托盘菜单使用的语言。",
+    chooseTheme: "选择主题", themeOptions: "主题选项", windowTransparency: "窗口透明度", windowTransparencyHint: "使应用程序窗口透明", transparencyLevel: "透明度级别", roundedCorners: "圆角", roundedCornersHint: "为窗口、面板和控件使用圆角", cornerRadius: "圆角半径", interfaceSize: "界面大小", interfaceSizeHint: "调整文本和元素大小", compact: "紧凑", normal: "正常", large: "大", chooseLanguage: "选择语言", languageHint: "整个应用程序和托盘菜单都使用所选语言。",
     logs: "日志", logsDescription: "扩展、快捷键、界面、桥接和下载的端到端诊断。", exportLog: "导出日志", searchLogs: "搜索事件…", allLevels: "所有级别",
     downloadsDescription: "管理直接下载、进度、速度和已完成文件。",
     mediaDescription: "管理 Apocalipse 检测到的视频、音频、录制和导出。",
@@ -512,6 +521,21 @@ const applyTheme = (theme) => {
   document.documentElement.dataset.theme = valid.includes(theme) ? theme : "void";
 };
 applyTheme(localStorage.getItem("apocalipse.theme") || "void");
+const appearanceDefaults = { transparencyEnabled: false, transparencyLevel: 30, roundedEnabled: true, cornerRadius: 10, interfaceSize: "normal" };
+function readAppearance() {
+  try { return { ...appearanceDefaults, ...JSON.parse(localStorage.getItem("apocalipse.appearance") || "{}") }; }
+  catch { return { ...appearanceDefaults }; }
+}
+function applyAppearance(settings = readAppearance()) {
+  const transparency = Math.max(0, Math.min(70, Number(settings.transparencyLevel) || 0));
+  const radius = Math.max(0, Math.min(28, Number(settings.cornerRadius) || 0));
+  document.documentElement.dataset.transparency = settings.transparencyEnabled ? "on" : "off";
+  document.documentElement.dataset.rounded = settings.roundedEnabled ? "on" : "off";
+  document.documentElement.dataset.uiSize = ["compact", "normal", "large"].includes(settings.interfaceSize) ? settings.interfaceSize : "normal";
+  document.documentElement.style.setProperty("--window-opacity-percent", settings.transparencyEnabled ? `${100 - transparency}%` : "100%");
+  document.documentElement.style.setProperty("--corner-radius", settings.roundedEnabled ? `${radius}px` : "0px");
+}
+applyAppearance();
 let pendingReferer = null;
 let pendingDuration = null;
 let pendingTitle = null;
@@ -538,7 +562,7 @@ let selectionPointerActive = false;
 let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
-const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", logs: "logsDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
+const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
 const invoke = (command, args = {}) => {
   const bridge = window.__TAURI__?.core?.invoke;
   if (!bridge) throw new Error("Desktop bridge unavailable in preview");
@@ -826,7 +850,10 @@ function translate() {
   document
     .querySelectorAll("[data-i18n-placeholder]")
     .forEach((element) => (element.placeholder = t(element.dataset.i18nPlaceholder)));
-  document.querySelector("#language").value = locale;
+  document.querySelectorAll("[data-language-choice]").forEach((button) =>
+    button.classList.toggle("active", button.dataset.languageChoice === locale));
+  const activeNavigation = document.querySelector(`nav [data-page="${activePage}"]`);
+  if (activeNavigation) document.querySelector("main > header h1").textContent = activeNavigation.querySelector("b")?.textContent || t("downloads");
   document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
   renderDownloads();
   if (activePage === "link") {
@@ -887,8 +914,10 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
     document.querySelector("#apocalipse-link-panel").hidden = activePage !== "link";
     document.querySelector("#logs-panel").hidden = activePage !== "logs";
-    document.querySelector(".metrics").hidden = ["link", "logs"].includes(activePage);
-    document.querySelector(".panel").hidden = ["link", "logs"].includes(activePage);
+    document.querySelector("#themes-panel").hidden = activePage !== "themes";
+    document.querySelector("#language-panel").hidden = activePage !== "language";
+    document.querySelector(".metrics").hidden = ["link", "logs", "themes", "language"].includes(activePage);
+    document.querySelector(".panel").hidden = ["link", "logs", "themes", "language"].includes(activePage);
     renderDownloads();
     invoke("record_ui_diagnostic", { level: "INFO", event: "page_opened", detail: `page=${activePage} panel_present=${activePage === "link" ? Boolean(document.querySelector("#apocalipse-link-panel")) : activePage === "logs" ? Boolean(document.querySelector("#logs-panel")) : true} duration_ms=${Math.round(performance.now() - openedAt)}` }).catch(() => {});
     if (activePage === "logs") refreshLogEvents().catch(console.error);
@@ -1197,12 +1226,15 @@ document.querySelectorAll("#add,#empty-add").forEach(
       dialog.showModal();
     }),
 );
-document.querySelector("#language").onchange = (event) => {
-  locale = event.target.value;
+const selectLanguage = (language) => {
+  locale = ["en", "pt-BR", "zh-CN"].includes(language) ? language : "en";
   localStorage.setItem("apocalipse.language", locale);
   translate();
   invoke("set_application_language", { language: locale }).catch(console.error);
 };
+document.querySelectorAll("[data-language-choice]").forEach((button) => {
+  button.onclick = () => selectLanguage(button.dataset.languageChoice);
+});
 document.querySelectorAll(".tabs [data-filter]").forEach((button) => {
   button.onclick = () => {
     activeFilter = button.dataset.filter;
@@ -1395,11 +1427,6 @@ const openSettings = async (target = "general") => {
     settingsDialog.showModal();
     const targetElement = {
       general: document.querySelector("#autostart"),
-      browsers: document.querySelector(".association-settings"),
-      themes: document.querySelector(".theme-settings"),
-      language: document.querySelector("#language"),
-      advanced: document.querySelector("#proxy-enabled"),
-      about: document.querySelector("#about-settings"),
     }[target];
     targetElement?.scrollIntoView?.({ block: "center" });
     targetElement?.focus?.();
@@ -1422,7 +1449,40 @@ document
     applyTheme(localStorage.getItem("apocalipse.theme") || "void");
     settingsDialog.close();
   }));
-document.querySelector("#theme").onchange = (event) => applyTheme(event.target.value);
+document.querySelector("#theme").onchange = (event) => {
+  localStorage.setItem("apocalipse.theme", event.target.value);
+  applyTheme(event.target.value);
+};
+function syncAppearanceControls() {
+  const settings = readAppearance();
+  document.querySelector("#transparency-enabled").checked = settings.transparencyEnabled;
+  document.querySelector("#transparency-level").value = settings.transparencyLevel;
+  document.querySelector("#transparency-level").disabled = !settings.transparencyEnabled;
+  document.querySelector("#transparency-value").textContent = `${settings.transparencyLevel}%`;
+  document.querySelector("#rounded-enabled").checked = settings.roundedEnabled;
+  document.querySelector("#corner-radius").value = settings.cornerRadius;
+  document.querySelector("#corner-radius").disabled = !settings.roundedEnabled;
+  document.querySelector("#corner-radius-value").textContent = `${settings.cornerRadius} px`;
+  document.querySelector("#interface-size").value = settings.interfaceSize;
+}
+function saveAppearanceFromControls() {
+  const settings = {
+    transparencyEnabled: document.querySelector("#transparency-enabled").checked,
+    transparencyLevel: Number(document.querySelector("#transparency-level").value),
+    roundedEnabled: document.querySelector("#rounded-enabled").checked,
+    cornerRadius: Number(document.querySelector("#corner-radius").value),
+    interfaceSize: document.querySelector("#interface-size").value,
+  };
+  localStorage.setItem("apocalipse.appearance", JSON.stringify(settings));
+  applyAppearance(settings);
+  syncAppearanceControls();
+  invoke("record_ui_diagnostic", { level: "INFO", event: "appearance_changed", detail: `transparency=${settings.transparencyEnabled} level=${settings.transparencyLevel} rounded=${settings.roundedEnabled} radius=${settings.cornerRadius} size=${settings.interfaceSize}` }).catch(() => {});
+}
+["transparency-enabled", "transparency-level", "rounded-enabled", "corner-radius", "interface-size"].forEach((id) => {
+  document.querySelector(`#${id}`).oninput = saveAppearanceFromControls;
+  document.querySelector(`#${id}`).onchange = saveAppearanceFromControls;
+});
+syncAppearanceControls();
 document.querySelector("#save-settings").onclick = async () => {
   const button = document.querySelector("#save-settings");
   const directory = document.querySelector("#default-directory");

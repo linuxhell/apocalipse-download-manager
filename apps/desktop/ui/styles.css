@@ -16,6 +16,8 @@
   --text: #e9f7fb;
   --accent: #25d9ef;
   --accent-2: #45a9ff;
+  --window-opacity-percent: 100%;
+  --corner-radius: 10px;
 }
 :root[data-theme="inferno"] { --app-bg:#100806; --app-glow:#5a1c08; --sidebar:#160b08f2; --surface:#1b0f0b; --surface-2:#27130c; --input:#120906; --text:#fff2e8; --muted:#c19a85; --line:#4a2518; --cyan:#ff6a20; --accent:#ff6a20; --accent-2:#ffc247; }
 :root[data-theme="toxic"] { --app-bg:#071009; --app-glow:#214b12; --sidebar:#08130af2; --surface:#0c1a0e; --surface-2:#132718; --input:#071108; --text:#efffe9; --muted:#8eac86; --line:#24452a; --cyan:#82f23d; --accent:#82f23d; --accent-2:#d8ff3f; }
@@ -46,7 +48,8 @@ body {
   display: grid;
   grid-template-columns: 240px 1fr;
   background:
-    radial-gradient(circle at 75% 0, var(--app-glow) 0, transparent 32%), var(--app-bg);
+    radial-gradient(circle at 75% 0, color-mix(in srgb, var(--app-glow) var(--window-opacity-percent), transparent) 0, transparent 32%),
+    color-mix(in srgb, var(--app-bg) var(--window-opacity-percent), transparent);
 }
 aside {
   height: 100vh;
@@ -92,7 +95,7 @@ nav button {
   border: 0;
   background: transparent;
   color: #8398a2;
-  border-radius: 10px;
+  border-radius: var(--corner-radius);
   padding: 12px;
   display: flex;
   align-items: center;
@@ -909,8 +912,36 @@ nav button:hover, nav button.active, .download-icon { color: var(--accent); }
   border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
   color: color-mix(in srgb, var(--accent) 55%, var(--text));
 }
-.theme-settings select { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
-.theme-settings small { color: var(--muted); }
+.appearance-page { display:grid; grid-template-columns:minmax(260px,.9fr) minmax(360px,1.1fr); gap:18px; }
+.appearance-page[hidden] { display:none; }
+.appearance-card { display:grid; align-content:start; gap:14px; padding:20px; border:1px solid var(--line); border-radius:var(--corner-radius); background:color-mix(in srgb,var(--surface) var(--window-opacity-percent),transparent); }
+.appearance-card h2 { margin:0 0 4px; }
+.appearance-card > small,.appearance-card > p,.appearance-toggle small,.appearance-select small { color:var(--muted); }
+.appearance-card > select,.appearance-select select { width:100%; padding:11px 13px; border:1px solid var(--line); border-radius:var(--corner-radius); color:var(--text); background:var(--input); }
+.appearance-options { gap:0; }
+.appearance-toggle,.appearance-range,.appearance-select { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:16px 0; border-bottom:1px solid var(--line); }
+.appearance-options > :last-child { border-bottom:0; }
+.appearance-toggle span,.appearance-select span { display:grid; gap:4px; }
+.appearance-toggle input { width:42px; height:22px; accent-color:var(--accent); }
+.appearance-range { display:grid; }
+.appearance-range span { display:flex; justify-content:space-between; gap:12px; }
+.appearance-range input { width:100%; accent-color:var(--accent); }
+.appearance-range input:disabled { opacity:.4; }
+.appearance-select select { width:160px; }
+.language-page { grid-template-columns:minmax(320px,720px); }
+.language-choices { display:grid; gap:10px; }
+.language-choices button { padding:14px 16px; border:1px solid var(--line); border-radius:var(--corner-radius); background:var(--surface-2); color:var(--text); text-align:left; cursor:pointer; }
+.language-choices button.active { border-color:var(--accent); background:color-mix(in srgb,var(--accent) 18%,var(--surface)); color:var(--accent); }
+:root[data-ui-size="compact"] { font-size:14px; }
+:root[data-ui-size="normal"] { font-size:16px; }
+:root[data-ui-size="large"] { font-size:18px; }
+:root[data-rounded="off"] *, :root[data-rounded="off"] *::before, :root[data-rounded="off"] *::after { border-radius:0 !important; }
+:root[data-transparency="on"] aside { background:color-mix(in srgb,var(--sidebar) var(--window-opacity-percent),transparent); }
+:root[data-transparency="on"] .panel,
+:root[data-transparency="on"] .metrics article,
+:root[data-transparency="on"] .logs-panel,
+:root[data-transparency="on"] .link-panel > div,
+:root[data-transparency="on"] .engine { background:color-mix(in srgb,var(--surface) var(--window-opacity-percent),transparent); }
 @media (max-width: 950px) {
   body {
     grid-template-columns: 78px 1fr;
@@ -932,6 +963,7 @@ nav button:hover, nav button.active, .download-icon { color: var(--accent); }
   .metrics {
     grid-template-columns: repeat(2, 1fr);
   }
+  .appearance-page { grid-template-columns:1fr; }
 }
 @media (max-width: 760px) {
   #add-dialog { overflow-y: auto; }
