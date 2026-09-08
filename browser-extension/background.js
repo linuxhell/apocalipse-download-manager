@@ -274,8 +274,8 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
   void diagnostic("browser_download.detected", state, { detail: `disposable=${disposable} assisted=${browserAssisted} force=${forceIsActive(modifierTabId)} file=${fileNameFromPath(item.filename) || "unknown"}` });
 
   // Disposable links are consumed by their first request. At this point Chrome
-  // already owns that original response; cancelling it and asking the desktop to
-  // Repeating a consumed, one-use response URL commonly produces a 404.
+  // already owns that original response; repeating it on the desktop commonly
+  // produces a 404.
   // Let the browser finish the one valid response, then register the completed
   // file in Apocalipse through browser-download-complete. This applies to every
   // equivalent disposable-download pattern, not to a hard-coded host.
@@ -444,7 +444,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
 });
 
-const APOCALIPSE_WORKER_BUILD = "0.3.70-disposable-links";
+const APOCALIPSE_WORKER_BUILD = "0.3.71-pre-response-takeover";
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type !== "APOCALIPSE_WORKER_DIAGNOSTICS") return;
   reply({
@@ -641,8 +641,11 @@ async function streamCapturedUrl(request) {
   let uploadId = null;
   try {
     await diagnostic(`${kind}.prehook.accepted`, state, { detail: `source=${request.source || "main-world"}` });
+    const method = String(request.method || "GET").toUpperCase() === "POST" ? "POST" : "GET";
     const response = await fetch(url, {
-      method: "GET",
+      method,
+      body: method === "POST" ? request.body || null : undefined,
+      headers: method === "POST" && request.contentType ? { "Content-Type": request.contentType } : undefined,
       credentials: "include",
       redirect: "follow",
       cache: "no-store",
@@ -652,6 +655,9 @@ async function streamCapturedUrl(request) {
     const contentType = response.headers.get("content-type") || "";
     const total = Number.parseInt(response.headers.get("content-length") || "0", 10) || 0;
     if (!response.ok) throw new Error(`${kind}_http_${response.status}`);
+    if (/text\/html|application\/xhtml/i.test(contentType) && !/attachment|filename=/i.test(disposition)) {
+      throw new Error(`${kind}_not_a_file_response`);
+    }
     const fileName = dispositionFileName(disposition, response.url || url, request.fileName || "");
     await diagnostic(`${kind}.prehook.response`, state, {
       status: response.status,
@@ -752,20 +758,16 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     fileName: message.fileName || "",
     source: message.source || "main-world",
     force: Boolean(message.force) || forceIsActive(shortcutTabId),
+    method: message.method || "GET",
+    body: message.body || null,
+    contentType: message.contentType || null,
   };
   void diagnostic("capture.decision", { traceId: crypto.randomUUID(), url: request.url, pageUrl: request.pageUrl, startedAt: Date.now() }, { detail: `mode=${request.force ? "force" : "auto"} tab=${shortcutTabId ?? "none"} source=${request.source}` });
   streamCapturedUrl(request)
     .then(reply)
     .catch((error) => {
-      // Only on a real takeover failure, fall back to Chrome so the user does not
-      // lose a one-use link. Normal successful flow never reaches chrome.downloads.
-      const recognized = recognizedDownload(request.url) || (request.force ? genericHttpDownload(request.url) : null);
-      if (recognized) {
-        try {
-          bypassNextUntil = Date.now() + 15000;
-          chrome.downloads.download({ url: recognized.url, saveAs: true }, () => void chrome.runtime.lastError);
-        } catch {}
-      }
+      // The MAIN-world hook replays the original navigation when takeover fails.
+      // Keeping fallback there preserves the site's exact click semantics.
       reply({ ok: false, error: String(error) });
     });
   return true;
