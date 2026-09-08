@@ -13,6 +13,8 @@
         <div><strong>APOCALIPSE</strong><small>DOWNLOAD MANAGER</small></div>
       </div>
       <nav>
+        <button data-page="settings" data-settings-target="general"><span>⚙</span><b data-i18n="general">General</b></button>
+        <button data-settings-target="browsers"><span>◎</span><b data-i18n="browsers">Browsers</b></button>
         <button class="active" data-page="downloads">
           <span>⇩</span><b data-i18n="downloads">Downloads</b>
         </button>
@@ -26,13 +28,14 @@
           <span>◉</span><b data-i18n="torrents">Torrents</b>
         </button>
         <button data-page="link"><span>↔</span><b>Apocalipse Link</b></button>
-        <button data-page="logs"><span>▤</span><b data-i18n="logs">Logs</b></button>
         <button data-page="tools">
           <span>⌁</span><b data-i18n="tools">Tools</b>
         </button>
-        <button data-page="settings">
-          <span>⚙</span><b data-i18n="settings">Settings</b>
-        </button>
+        <button data-settings-target="themes"><span>◐</span><b data-i18n="themes">Themes</b></button>
+        <button data-settings-target="language"><span>A</span><b data-i18n="language">Language</b></button>
+        <button data-settings-target="advanced"><span>☷</span><b data-i18n="advanced">Advanced</b></button>
+        <button data-page="logs"><span>▤</span><b data-i18n="logs">Logs</b></button>
+        <button data-settings-target="about"><span>ⓘ</span><b data-i18n="about">About</b></button>
         <button id="donate-paypal" type="button">
           <span>♥</span><b data-i18n="donatePaypal">Donate via PayPal</b>
         </button>
@@ -182,8 +185,10 @@
           <div>
             <strong id="media-title"></strong>
             <span id="media-duration"></span>
-            <label for="media-format" data-i18n="qualityFormat">Quality and format</label>
-            <select id="media-format"></select>
+            <div id="media-format-control">
+              <label for="media-format" data-i18n="qualityFormat">Quality and format</label>
+              <select id="media-format"></select>
+            </div>
           </div>
         </section>
         <section id="torrent-inspection" class="destination-history" hidden>
@@ -335,6 +340,10 @@
           <label class="setting-toggle compact-toggle"><input id="adaptive-efficiency" type="checkbox" /><span><b data-i18n="adaptiveEfficiency">Adaptive efficiency</b><small data-i18n="adaptiveEfficiencyHint">Optimizes queue order and connection use for the current workload.</small></span></label>
           <label class="setting-toggle compact-toggle"><input id="schedule-enabled" type="checkbox" /><span><b data-i18n="scheduler">Download schedule</b><small data-i18n="schedulerHint">Automatically pauses outside the permitted local time window.</small></span></label>
           <div class="credential-grid"><label><span data-i18n="scheduleStart">Start</span><input id="schedule-start" type="time" value="00:00" /></label><label><span data-i18n="scheduleEnd">End</span><input id="schedule-end" type="time" value="23:59" /></label></div>
+        </section>
+        <section id="about-settings" class="pairing-settings">
+          <b>Apocalipse Download Manager 0.4.6</b>
+          <small data-i18n="aboutDescription">Native open-source download manager. Interface, core, extensions and diagnostics are built to work as one system.</small>
         </section>
         <label class="setting-toggle">
           <input id="capture-clipboard" type="checkbox" />

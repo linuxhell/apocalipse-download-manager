@@ -722,6 +722,7 @@ footer .bridge-connected i {
 .media-inspection > div { min-width: 0; display: grid; gap: 6px; }
 .media-inspection strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .media-inspection span { color: #8da3b1; font-size: 12px; }
+.media-inspection #media-format-control { display: grid; gap: 6px; }
 .media-inspection label { margin: 2px 0 0; }
 .media-inspection select { width: 100%; min-width: 0; padding: 10px; color: #eaf6fb; background: #081117; border: 1px solid #2a4655; border-radius: 8px; }
 .download-list {

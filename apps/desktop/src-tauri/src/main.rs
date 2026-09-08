@@ -818,6 +818,14 @@ struct BridgeDownload {
     url: String,
     file_name: Option<String>,
     page_url: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    thumbnail: Option<String>,
+    #[serde(default)]
+    media_kind: Option<String>,
+    #[serde(default)]
+    expected_size: Option<u64>,
     duration: Option<f64>,
     cookie_header: Option<String>,
     user_agent: Option<String>,
@@ -1067,6 +1075,10 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                         url: request.url,
                         file_name: None,
                         page_url: None,
+                        title: None,
+                        thumbnail: None,
+                        media_kind: None,
+                        expected_size: None,
                         duration: None,
                         cookie_header: None,
                         user_agent: None,
@@ -1395,7 +1407,6 @@ fn load_settings(path: &Path) -> UserSettings {
         .ok()
         .and_then(|data| serde_json::from_slice(&data).ok())
         .unwrap_or_default();
-    settings.associations.remove("ed2k");
     settings
 }
 
@@ -2059,7 +2070,7 @@ async fn run_external_download(
                 "--enable-peer-exchange=true",
                 "--bt-enable-lpd=true",
                 "--bt-max-peers=100",
-                "--bt-prioritize-piece=head=32M,tail=32M",
+                "--bt-prioritize-piece=head=64M,tail=64M",
                 "--file-allocation=trunc",
                 "--seed-time=0",
             ]);
@@ -3239,19 +3250,30 @@ fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
         active_torrent_video(root.parent().unwrap_or(Path::new(".")))
             .ok_or_else(|| "torrent_video_not_available".to_owned())?
     };
-    let mut command = Command::new(
-        player.unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "vlc.exe" } else { "vlc" })),
+    let player = player.unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "vlc.exe" } else { "vlc" }));
+    diagnostic_log(
+        &state,
+        "INFO",
+        "torrent.preview_requested",
+        &format!("task={id} file={} player={}", video.display(), player.display()),
     );
+    let mut command = Command::new(&player);
     command.arg(video);
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000);
     }
-    command
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+    match command.spawn() {
+        Ok(_) => {
+            diagnostic_log(&state, "INFO", "torrent.preview_opened", &format!("task={id} file={}", video.display()));
+            Ok(())
+        }
+        Err(error) => {
+            diagnostic_log(&state, "ERROR", "torrent.preview_failed", &format!("task={id} player={} error={error}", player.display()));
+            Err(error.to_string())
+        }
+    }
 }
 
 #[tauri::command]
@@ -4456,14 +4478,41 @@ fn queue_from_bridge(
 ) -> Result<Option<DownloadId>, String> {
     let state = app.state::<AppState>();
     classify_url(&request.url).ok_or_else(|| "unsupported_url".to_owned())?;
+    let cookie_names = request
+        .cookie_header
+        .as_deref()
+        .map(|value| {
+            value
+                .split(';')
+                .filter_map(|item| item.trim().split_once('=').map(|(name, _)| name.trim()))
+                .filter(|name| {
+                    !name.is_empty()
+                        && name.len() <= 80
+                        && name
+                            .chars()
+                            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+                })
+                .take(24)
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "none".to_owned());
     diagnostic_log(
         &state,
         "INFO",
         "bridge.download",
         &format!(
-            "url={} method={}",
+            "url={} method={} media_kind={} thumbnail={} expected_size={} user_agent={} cookie_count={} cookie_names={} cookie_bytes={}",
             redact_url(&request.url),
-            request.request_method.as_deref().unwrap_or("GET")
+            request.request_method.as_deref().unwrap_or("GET"),
+            request.media_kind.as_deref().unwrap_or("none"),
+            request.thumbnail.is_some(),
+            request.expected_size.map_or_else(|| "unknown".to_owned(), |value| value.to_string()),
+            request.user_agent.as_deref().map(|value| value.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_else(|| "none".to_owned()),
+            request.cookie_header.as_deref().map_or(0, |value| value.split(';').filter(|item| item.contains('=')).count()),
+            cookie_names,
+            request.cookie_header.as_deref().map_or(0, str::len),
         ),
     );
     if request.start_immediately {
@@ -4606,6 +4655,10 @@ fn queue_associated_source(app: &tauri::AppHandle, source: String) -> Result<(),
             url: source,
             file_name: None,
             page_url: None,
+            title: None,
+            thumbnail: None,
+            media_kind: None,
+            expected_size: None,
             duration: None,
             cookie_header: None,
             user_agent: None,
@@ -5026,6 +5079,10 @@ fn forward_to_running_instance(source: &str, token: &str) -> bool {
         url: source.to_owned(),
         file_name: None,
         page_url: None,
+        title: None,
+        thumbnail: None,
+        media_kind: None,
+        expected_size: None,
         duration: None,
         cookie_header: None,
         user_agent: None,
@@ -5370,36 +5427,6 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<AutostartStatus
 const ASSOCIATION_IDS: [&str; 5] = ["m3u8", "torrent", "magnet", "ftp", "sftp"];
 
 #[cfg(target_os = "windows")]
-fn cleanup_removed_associations() {
-    for key in [
-        r"HKCU\Software\Classes\ed2k",
-        r"HKCU\Software\Classes\Apocalipse.ed2k",
-    ] {
-        let _ = Command::new("reg.exe").args(["DELETE", key, "/f"]).status();
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn cleanup_removed_associations() {
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        return;
-    };
-    let entry = home.join(".local/share/applications/apocalipse-download-manager.desktop");
-    let Ok(source) = fs::read_to_string(&entry) else {
-        return;
-    };
-    let updated = source.replace("x-scheme-handler/ed2k;", "");
-    if updated != source && fs::write(&entry, updated).is_ok() {
-        let _ = Command::new("update-desktop-database")
-            .arg(entry.parent().unwrap_or(Path::new(".")))
-            .status();
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn cleanup_removed_associations() {}
-
-#[cfg(target_os = "windows")]
 fn configure_association(id: &str, enabled: bool, _: &HashMap<String, bool>) -> Result<(), String> {
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let root = if matches!(id, "m3u8" | "torrent") {
@@ -5675,7 +5702,6 @@ fn main() {
             let (show_label, quit_label) = tray_labels(&initial_settings.language);
             let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
-            cleanup_removed_associations();
             let arguments = std::env::args().collect::<Vec<_>>();
             let associated_source = arguments
                 .iter()

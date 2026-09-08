@@ -6,6 +6,7 @@ const catalogs = {
     torrents: "Torrents",
     tools: "Tools",
     settings: "Settings",
+    general: "General", browsers: "Browsers", themes: "Themes", language: "Language", advanced: "Advanced", about: "About", aboutDescription: "Native open-source download manager. Interface, core, extensions and diagnostics are built to work as one system.",
     logs: "Logs", logsDescription: "End-to-end diagnostics for extension, shortcuts, interface, bridge and downloads.", exportLog: "Export log", searchLogs: "Search events…", allLevels: "All levels",
     downloadsDescription: "Manage direct downloads, progress, speed and completed files.",
     mediaDescription: "Videos, audio, recordings and exports detected by Apocalipse.",
@@ -173,6 +174,7 @@ const catalogs = {
     torrents: "Torrents",
     tools: "Ferramentas",
     settings: "Configurações",
+    general: "Geral", browsers: "Navegadores", themes: "Temas", language: "Idioma", advanced: "Avançado", about: "Sobre", aboutDescription: "Gerenciador de downloads nativo e de código aberto. Interface, núcleo, extensões e diagnóstico funcionam como um único sistema.",
     logs: "Logs", logsDescription: "Diagnóstico de ponta a ponta da extensão, atalhos, interface, ponte e downloads.", exportLog: "Exportar log", searchLogs: "Pesquisar eventos…", allLevels: "Todos os níveis",
     downloadsDescription: "Gerencie downloads diretos, progresso, velocidade e arquivos concluídos.",
     mediaDescription: "Vídeos, áudios, gravações e exportações detectados pelo Apocalipse.",
@@ -341,6 +343,7 @@ const catalogs = {
     torrents: "种子",
     tools: "工具",
     settings: "设置",
+    general: "常规", browsers: "浏览器", themes: "主题", language: "语言", advanced: "高级", about: "关于", aboutDescription: "原生开源下载管理器。界面、核心、扩展和诊断作为一个系统协同工作。",
     logs: "日志", logsDescription: "扩展、快捷键、界面、桥接和下载的端到端诊断。", exportLog: "导出日志", searchLogs: "搜索事件…", allLevels: "所有级别",
     downloadsDescription: "管理直接下载、进度、速度和已完成文件。",
     mediaDescription: "管理 Apocalipse 检测到的视频、音频、录制和导出。",
@@ -511,6 +514,10 @@ const applyTheme = (theme) => {
 applyTheme(localStorage.getItem("apocalipse.theme") || "void");
 let pendingReferer = null;
 let pendingDuration = null;
+let pendingTitle = null;
+let pendingThumbnail = null;
+let pendingMediaKind = null;
+let pendingExpectedSize = null;
 let pendingCookieHeader = null;
 let pendingUserAgent = null;
 let pendingRequestMethod = null;
@@ -1125,8 +1132,27 @@ function resetMediaInspection() {
   document.querySelector("#media-title").textContent = "";
   document.querySelector("#media-duration").textContent = "";
   document.querySelector("#media-format").replaceChildren();
+  document.querySelector("#media-format-control").hidden = false;
   document.querySelector("#torrent-inspection").hidden = true;
   document.querySelector("#torrent-files").replaceChildren();
+}
+
+function showCapturedPreview({ title, thumbnail, kind, duration, size, showFormats = false }) {
+  const panel = document.querySelector("#media-inspection");
+  const image = document.querySelector("#media-thumbnail");
+  document.querySelector("#media-title").textContent = title || document.querySelector("#file-name").value || t("newTask");
+  document.querySelector("#media-duration").textContent = [
+    kind ? String(kind).toUpperCase() : "",
+    Number.isFinite(size) && size > 0 ? formatBytes(size) : "",
+    Number.isFinite(duration) && duration > 0 ? `${t("duration")}: ${secondsLabel(duration)}` : "",
+  ].filter(Boolean).join(" · ");
+  document.querySelector("#media-format-control").hidden = !showFormats;
+  image.hidden = !thumbnail;
+  if (thumbnail) {
+    image.src = thumbnail;
+    image.onerror = () => { image.hidden = true; image.removeAttribute("src"); };
+  } else image.removeAttribute("src");
+  panel.hidden = false;
 }
 
 async function showTorrentInspection(source) {
@@ -1152,6 +1178,10 @@ document.querySelectorAll("#add,#empty-add").forEach(
       document.querySelector("#analyze").hidden = false;
       pendingReferer = null;
       pendingDuration = null;
+      pendingTitle = null;
+      pendingThumbnail = null;
+      pendingMediaKind = null;
+      pendingExpectedSize = null;
       pendingCookieHeader = null;
       pendingUserAgent = null;
       pendingRequestMethod = null;
@@ -1307,7 +1337,7 @@ document.querySelector("#save-website-credential").onclick = async (event) => {
     button.disabled = false;
   }
 };
-document.querySelector('[data-page="settings"]').onclick = async () => {
+const openSettings = async (target = "general") => {
   try {
     const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations, websiteCredentials] = await Promise.all([
       invoke("get_autostart"),
@@ -1363,10 +1393,29 @@ document.querySelector('[data-page="settings"]').onclick = async () => {
     renderWebsiteCredentials(websiteCredentials);
     updateLogEditorControls();
     settingsDialog.showModal();
+    const targetElement = {
+      general: document.querySelector("#autostart"),
+      browsers: document.querySelector(".association-settings"),
+      themes: document.querySelector(".theme-settings"),
+      language: document.querySelector("#language"),
+      advanced: document.querySelector("#proxy-enabled"),
+      about: document.querySelector("#about-settings"),
+    }[target];
+    targetElement?.scrollIntoView?.({ block: "center" });
+    targetElement?.focus?.();
+    invoke("record_ui_diagnostic", { level: "INFO", event: "settings_section_opened", detail: `section=${target} found=${Boolean(targetElement)}` }).catch(() => {});
   } catch (error) {
     console.error(error);
   }
 };
+document.querySelectorAll("nav [data-settings-target]").forEach((button) => {
+  button.onclick = () => {
+    document.querySelectorAll("nav button").forEach((item) => item.classList.toggle("active", item === button));
+    document.querySelector("main > header h1").textContent = button.querySelector("b")?.textContent || t("settings");
+    document.querySelector("#page-description").textContent = t("settingsDescription");
+    openSettings(button.dataset.settingsTarget).catch(console.error);
+  };
+});
 document
   .querySelectorAll("[data-settings-close]")
   .forEach((button) => (button.onclick = () => {
@@ -1641,6 +1690,7 @@ async function showMediaInspection(url) {
   const select = document.querySelector("#media-format");
   select.replaceChildren();
   option(select, "bestvideo+bestaudio/best", t("bestQuality"));
+  document.querySelector("#media-format-control").hidden = false;
   for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
     option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
   try {
@@ -1694,16 +1744,14 @@ document.querySelector("#analyze").onclick = async () => {
     if (plan.primary === "YtDlp") await showMediaInspection(url.value);
     else if (plan.primary === "Aria2Rpc" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) await showTorrentInspection(url.value);
     else if (plan.primary === "NM3u8DlRe") {
-      const panel = document.querySelector("#media-inspection");
       const select = document.querySelector("#media-format");
       select.replaceChildren();
       option(select, "", t("bestQuality"));
       for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
         option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
-      document.querySelector("#media-title").textContent = "HLS";
-      document.querySelector("#media-duration").textContent = "";
-      document.querySelector("#media-thumbnail").hidden = true;
-      panel.hidden = false;
+      showCapturedPreview({ title: pendingTitle || "HLS", thumbnail: pendingThumbnail, kind: "M3U8 / HLS", duration: pendingDuration, size: pendingExpectedSize, showFormats: true });
+    } else if (pendingMediaKind === "image" || /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)(?:$|[?#])/i.test(url.value)) {
+      showCapturedPreview({ title: pendingTitle || fileName.value, thumbnail: pendingThumbnail || url.value, kind: pendingMediaKind || "image", duration: null, size: pendingExpectedSize });
     }
     document.querySelector("#analyze").hidden = true;
     document.querySelector("#enqueue").hidden = false;
@@ -1724,7 +1772,7 @@ document.querySelector("#enqueue").onclick = async () => {
         url: url.value,
         destinationDirectory: document.querySelector("#destination").value,
         fileName: document.querySelector("#file-name").value,
-        formatSelection: document.querySelector("#media-inspection").hidden ? null : document.querySelector("#media-format").value,
+        formatSelection: document.querySelector("#media-inspection").hidden || document.querySelector("#media-format-control").hidden ? null : document.querySelector("#media-format").value,
         torrentSelection,
         mirrors: document.querySelector("#mirrors").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
         priority: Number(document.querySelector("#priority").value),
@@ -1749,6 +1797,10 @@ document.querySelector("#enqueue").onclick = async () => {
     document.querySelector("#download-bandwidth-limit").value = "0";
     document.querySelector("#task-connections").value = "8";
     document.querySelector("#task-connections-value").value = "8";
+    pendingTitle = null;
+    pendingThumbnail = null;
+    pendingMediaKind = null;
+    pendingExpectedSize = null;
     resetMediaInspection();
   } catch (error) {
     const box = document.querySelector("#analysis");
@@ -1796,6 +1848,10 @@ setInterval(async () => {
     if (dialog.open) return;
     pendingReferer = null;
     pendingDuration = null;
+    pendingTitle = null;
+    pendingThumbnail = null;
+    pendingMediaKind = null;
+    pendingExpectedSize = null;
     pendingCookieHeader = null;
     pendingUserAgent = null;
     pendingRequestMethod = null;
@@ -1825,6 +1881,10 @@ async function consumeBridgeDownload() {
     lastClipboardLink = request.url;
     pendingReferer = request.pageUrl || null;
     pendingDuration = Number.isFinite(request.duration) ? request.duration : null;
+    pendingTitle = request.title || null;
+    pendingThumbnail = request.thumbnail || null;
+    pendingMediaKind = request.mediaKind || null;
+    pendingExpectedSize = Number.isFinite(request.expectedSize) ? request.expectedSize : null;
     pendingCookieHeader = request.cookieHeader || null;
     pendingUserAgent = request.userAgent || null;
     pendingRequestMethod = request.requestMethod || null;
@@ -1836,6 +1896,9 @@ async function consumeBridgeDownload() {
     document.querySelector("#enqueue").hidden = true;
     document.querySelector("#analyze").hidden = false;
     resetMediaInspection();
+    if (pendingThumbnail || pendingTitle || pendingMediaKind === "image") {
+      showCapturedPreview({ title: pendingTitle, thumbnail: pendingThumbnail || (pendingMediaKind === "image" ? request.url : null), kind: pendingMediaKind, duration: pendingDuration, size: pendingExpectedSize });
+    }
     document.querySelector("#destination").value = await invoke("default_download_directory");
     await refreshDestinationHistory();
     await invoke("activate_main_window");

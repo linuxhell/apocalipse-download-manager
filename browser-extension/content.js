@@ -365,7 +365,17 @@
     const add = (url, kind, element, thumbnail) => {
       url = absolute(url);
       if (!url || !/^https?:/.test(url)) return;
-      items.set(`${kind}:${url}`, { url, kind, thumbnail: thumbnail ?? thumbnailFor(element, kind), title: titleFor(element), size: null });
+      const resource = performance.getEntriesByName(url).at(-1);
+      const measuredSize = Number(resource?.encodedBodySize || resource?.transferSize || 0);
+      const duration = Number(element?.duration);
+      items.set(`${kind}:${url}`, {
+        url,
+        kind,
+        thumbnail: thumbnail ?? thumbnailFor(element, kind),
+        title: titleFor(element),
+        size: measuredSize > 0 && !/\.m3u8(?:$|[?#])/i.test(url) ? measuredSize : null,
+        duration: Number.isFinite(duration) && duration > 0 ? duration : null,
+      });
     };
     document.querySelectorAll("video").forEach((element) => {
       add(element.currentSrc || element.src, "video", element);
@@ -387,7 +397,7 @@
     });
     document.querySelectorAll("img").forEach((element) => add(element.currentSrc || element.src, "image", element));
     performance.getEntriesByType("resource").forEach((entry) => {
-      if (/\.m3u8(?:$|[?#])/i.test(entry.name)) add(entry.name, "video", null, document.querySelector("video")?.poster || "");
+      if (/\.m3u8(?:$|[?#])/i.test(entry.name)) add(entry.name, "video", document.querySelector("video"), document.querySelector("video")?.poster || "");
     });
     return [...items.values()];
   };
