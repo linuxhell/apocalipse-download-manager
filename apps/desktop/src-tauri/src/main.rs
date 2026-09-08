@@ -1590,6 +1590,62 @@ async fn download_with_mirrors(
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no_download_source")))
 }
 
+fn finalize_media_page_download(
+    app: &tauri::AppHandle,
+    id: DownloadId,
+    requested_destination: &Path,
+    work_directory: &Path,
+) -> Result<(), String> {
+    let mut candidates = fs::read_dir(work_directory)
+        .map_err(|error| error.to_string())?
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let metadata = entry.metadata().ok()?;
+            let name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
+            (metadata.is_file()
+                && metadata.len() > 0
+                && !name.contains(".part")
+                && !name.ends_with(".ytdl"))
+            .then_some((path, metadata.len()))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|(_, size)| std::cmp::Reverse(*size));
+    let (source, size) = candidates
+        .into_iter()
+        .next()
+        .ok_or_else(|| "yt_dlp_final_file_missing".to_owned())?;
+    let source_extension = source.extension().and_then(|value| value.to_str());
+    let destination = if requested_destination.extension().is_none() {
+        source_extension
+            .map(|extension| requested_destination.with_extension(extension))
+            .unwrap_or_else(|| requested_destination.to_path_buf())
+    } else {
+        requested_destination.to_path_buf()
+    };
+    if destination.exists() {
+        return Err("yt_dlp_destination_already_exists".to_owned());
+    }
+    fs::copy(&source, &destination).map_err(|error| error.to_string())?;
+    let _ = fs::remove_dir_all(work_directory);
+    update_task(app, id, true, |item| {
+        item.destination = destination.clone();
+        item.received = size;
+        item.total = Some(size);
+    });
+    diagnostic_log(
+        &app.state::<AppState>(),
+        "INFO",
+        "yt_dlp.output_committed",
+        &format!(
+            "task={id} bytes={size} extension={} destination={}",
+            source_extension.unwrap_or("none"),
+            destination.display()
+        ),
+    );
+    Ok(())
+}
+
 fn epoch_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1628,6 +1684,24 @@ async fn run_external_download(
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("download");
+    let media_work_directory = (kind == DownloadKind::MediaPage).then(|| {
+        app.state::<AppState>()
+            .queue_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("media-work")
+            .join(id.to_string())
+    });
+    if let Some(work_directory) = media_work_directory.as_ref() {
+        if let Err(error) = fs::create_dir_all(work_directory) {
+            update_task(&app, id, true, |item| {
+                item.state = DownloadState::Failed {
+                    message: error.to_string(),
+                }
+            });
+            return;
+        }
+    }
     let tools = app
         .state::<AppState>()
         .settings
@@ -1812,9 +1886,9 @@ async fn run_external_download(
             }
             command
                 .arg("-P")
-                .arg(directory)
+                .arg(media_work_directory.as_deref().unwrap_or(directory))
                 .arg("-o")
-                .arg(file_name)
+                .arg("apocalipse-media.%(ext)s")
                 .arg(&task.source);
             command
         }
@@ -2000,7 +2074,7 @@ async fn run_external_download(
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     command.kill_on_drop(true);
-    let result = match command.spawn() {
+    let mut result = match command.spawn() {
         Ok(mut child) => {
             let mut stdout = child.stdout.take();
             let mut stderr = child.stderr.take();
@@ -2047,6 +2121,13 @@ async fn run_external_download(
         }
         Err(error) => Err(format!("external_engine_unavailable: {error}")),
     };
+    if result.is_ok() {
+        if let Some(work_directory) = media_work_directory.as_deref() {
+            result = finalize_media_page_download(&app, id, &task.destination, work_directory);
+        }
+    } else if let Some(work_directory) = media_work_directory.as_deref() {
+        let _ = fs::remove_dir_all(work_directory);
+    }
     match result {
         Ok(()) => {
             diagnostic_log(
@@ -2529,6 +2610,11 @@ async fn read_process_tail(
                         }
                     } else if let Some(percent) = parse_external_progress(&text) {
                         update_task(app, *id, false, |task| {
+                            let percent = if *kind == DownloadKind::MediaPage {
+                                percent.min(90.0)
+                            } else {
+                                percent
+                            };
                             task.progress_percent =
                                 Some(task.progress_percent.unwrap_or(0.0).max(percent));
                         });

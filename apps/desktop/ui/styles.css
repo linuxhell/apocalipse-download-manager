@@ -594,7 +594,12 @@ dialog input:focus {
   background: var(--surface);
 }
 #tools-dialog #tool-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-#tools-dialog .tool-settings { min-height: 0; }
+#tools-dialog .tool-settings {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 10px;
+}
 #settings-dialog label { font-size: 14px; }
 #settings-dialog small { font-size: 13px; line-height: 1.45; }
 #settings-dialog .dialog-head small { font-size: 12px; }
