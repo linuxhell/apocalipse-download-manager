@@ -425,9 +425,16 @@ dialog form {
 }
 #add-dialog {
   width: min(980px, calc(100vw - 40px));
-  overflow: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
-#add-dialog form { display: grid; max-height: calc(100vh - 30px); }
+#add-dialog form {
+  display: grid;
+  box-sizing: border-box;
+  min-height: 100%;
+  max-height: none;
+}
 .add-dialog-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr);
@@ -437,7 +444,15 @@ dialog form {
 .add-dialog-analysis, .add-dialog-destination { min-width: 0; }
 .add-dialog-destination { padding-left: 18px; border-left: 1px solid var(--line); }
 #add-dialog .dialog-head h2 { margin-bottom: 14px; }
-#add-dialog .dialog-actions { margin-top: 14px; }
+#add-dialog .dialog-actions {
+  position: sticky;
+  z-index: 3;
+  bottom: -22px;
+  margin: 14px -22px -22px;
+  padding: 14px 22px 22px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
 #add-dialog #destination-list { max-height: 118px; }
 #add-dialog #torrent-files { max-height: min(310px, calc(100vh - 330px)); }
 .dialog-head {
@@ -1001,7 +1016,7 @@ nav button:hover, nav button.active, .download-icon { color: var(--accent); }
 }
 @media (max-width: 760px) {
   #add-dialog { overflow-y: auto; }
-  #add-dialog form { display: block; max-height: none; }
+  #add-dialog form { display: block; }
   .add-dialog-grid { display: block; }
   .add-dialog-destination { margin-top: 14px; padding-left: 0; border-left: 0; }
   #settings-dialog, #tools-dialog { overflow-y: auto; }
@@ -1013,5 +1028,4 @@ nav button:hover, nav button.active, .download-icon { color: var(--accent); }
 }
 @media (max-height: 680px) {
   #add-dialog { overflow-y: auto; }
-  #add-dialog form { max-height: none; }
 }
