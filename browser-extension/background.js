@@ -5,6 +5,8 @@ let bypassHeld = false;
 let bypassUntil = 0;
 let bypassNextUntil = 0;
 let forceHeld = false;
+let lastShortcutMode = "normal";
+let diagnosticOutbox = [];
 let lastFormSubmission = null;
 let siteRules = [{ id: "uupdump", hosts: ["uupdump.net", "*.uupdump.net"], action: "uupdump_post", enabled: true }];
 const recentFileResponses = [];
@@ -62,6 +64,7 @@ chrome.runtime.onStartup.addListener(ensureHeartbeat);
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === HEARTBEAT_ALARM) {
     bridgeRequest("/v1/health")
+      .then(() => flushDiagnosticOutbox())
       .then(() => flushAssistedDownloads())
       .then(() => flushDirectDownloads())
       .catch(() => {});
@@ -572,7 +575,7 @@ async function diagnostic(event, state = {}, extra = {}) {
     `extension_version=${chrome.runtime.getManifest().version}`,
     extra.error ? `error=${String(extra.error).slice(0, 1200).replace(/[\r\n]+/g, " ")}` : "",
   ].filter(Boolean).join(" ");
-  await bridgePost("/v1/diagnostic", {
+  const payload = {
     event,
     level: extra.level || (extra.error ? "ERROR" : "INFO"),
     traceId: state.traceId || null,
@@ -582,7 +585,34 @@ async function diagnostic(event, state = {}, extra = {}) {
     bytes: Number.isFinite(extra.bytes) ? extra.bytes : (Number.isFinite(state.bytes) ? state.bytes : null),
     durationMs: state.startedAt ? Math.max(0, Date.now() - state.startedAt) : null,
     detail: detail || null,
-  }).catch(() => {});
+    clientTimestamp: new Date().toISOString(),
+  };
+  try {
+    await bridgePost("/v1/diagnostic", payload);
+  } catch {
+    diagnosticOutbox.push(payload);
+    diagnosticOutbox = diagnosticOutbox.slice(-500);
+    await chrome.storage.local.set({ diagnosticOutbox }).catch(() => {});
+  }
+}
+
+async function flushDiagnosticOutbox() {
+  if (!diagnosticOutbox.length) {
+    const stored = await chrome.storage.local.get({ diagnosticOutbox: [] }).catch(() => ({ diagnosticOutbox: [] }));
+    diagnosticOutbox = Array.isArray(stored.diagnosticOutbox) ? stored.diagnosticOutbox.slice(-500) : [];
+  }
+  if (!diagnosticOutbox.length) return;
+  const pending = diagnosticOutbox;
+  diagnosticOutbox = [];
+  for (let index = 0; index < pending.length; index += 1) {
+    try { await bridgePost("/v1/diagnostic", { ...pending[index], delayed: true }); }
+    catch {
+      diagnosticOutbox = pending.slice(index).concat(diagnosticOutbox).slice(-500);
+      await chrome.storage.local.set({ diagnosticOutbox }).catch(() => {});
+      return;
+    }
+  }
+  await chrome.storage.local.set({ diagnosticOutbox: [] }).catch(() => {});
 }
 
 function claim(url, source) {
@@ -692,16 +722,24 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     forceHeld = Boolean(message.forcePressed) && !bypassHeld;
     if (bypassHeld) armBypass(shortcutTabId, 4000);
     else if (forceHeld) armForce(shortcutTabId, 20000);
-    reply({ ok: true, mode: bypassHeld ? "bypass" : (forceHeld ? "force" : "normal") });
+    const mode = bypassHeld ? "bypass" : (forceHeld ? "force" : "normal");
+    if (mode !== lastShortcutMode) {
+      const state = { traceId: crypto.randomUUID(), pageUrl: sender.tab?.url || null, startedAt: Date.now() };
+      void diagnostic("shortcut.state", state, { detail: `mode=${mode} previous=${lastShortcutMode} tab=${shortcutTabId ?? "none"} frame=${sender.frameId ?? 0}` });
+      lastShortcutMode = mode;
+    }
+    reply({ ok: true, mode });
     return;
   }
   if (message?.type === "APOCALIPSE_BYPASS_NEXT") {
     armBypass(shortcutTabId, message.ttlMs);
+    void diagnostic("shortcut.bypass_armed", { traceId: crypto.randomUUID(), pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { detail: `tab=${shortcutTabId ?? "none"} ttl_ms=${message.ttlMs || 0}` });
     reply({ ok: true, mode: "bypass" });
     return;
   }
   if (message?.type === "APOCALIPSE_FORCE_NEXT") {
     armForce(shortcutTabId, message.ttlMs);
+    void diagnostic("shortcut.force_armed", { traceId: crypto.randomUUID(), pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { detail: `tab=${shortcutTabId ?? "none"} ttl_ms=${message.ttlMs || 0}` });
     reply({ ok: true, mode: "force" });
     return;
   }
@@ -714,6 +752,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
   if (message?.type !== "APOCALIPSE_PRE_DOWNLOAD_URL") return;
   if (bypassIsActive(shortcutTabId)) {
+    void diagnostic("capture.bypassed_to_browser", { traceId: crypto.randomUUID(), url: message.url, pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { detail: `tab=${shortcutTabId ?? "none"} source=${message.source || "main-world"}` });
     reply({ ok: false, bypass: true });
     return;
   }
@@ -724,6 +763,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     source: message.source || "main-world",
     force: Boolean(message.force) || forceIsActive(shortcutTabId),
   };
+  void diagnostic("capture.decision", { traceId: crypto.randomUUID(), url: request.url, pageUrl: request.pageUrl, startedAt: Date.now() }, { detail: `mode=${request.force ? "force" : "auto"} tab=${shortcutTabId ?? "none"} source=${request.source}` });
   streamCapturedUrl(request)
     .then(reply)
     .catch((error) => {

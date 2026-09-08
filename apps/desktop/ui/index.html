@@ -26,7 +26,7 @@
           <span>◉</span><b data-i18n="torrents">Torrents</b>
         </button>
         <button data-page="link"><span>↔</span><b>Apocalipse Link</b></button>
-        <button data-page="matrix"><span>◆</span><b>Matrix Ultimate v2 AI</b><i id="matrix-alert" class="matrix-alert" hidden>0</i></button>
+        <button data-page="logs"><span>▤</span><b data-i18n="logs">Logs</b></button>
         <button data-page="tools">
           <span>⌁</span><b data-i18n="tools">Tools</b>
         </button>
@@ -36,7 +36,6 @@
         <button id="donate-paypal" type="button">
           <span>♥</span><b data-i18n="donatePaypal">Donate via PayPal</b>
         </button>
-        <small class="matrix-powered" data-i18n="matrixPowered">Powered by Matrix Ultimate v2 AI</small>
       </nav>
       <div class="engine">
         <i></i
@@ -95,10 +94,11 @@
         <div class="link-files"><header><b data-i18n="linkThisComputer">This computer</b><span><button id="link-upload-local" type="button" data-i18n="linkSend" disabled>Send →</button> <button id="link-local-up" type="button">↑</button></span></header><small id="link-local-path">/</small><div id="link-local-files"></div></div>
         <div class="link-files"><header><b data-i18n="linkRemoteComputer">Remote computer</b><span><button id="link-download-remote" type="button" data-i18n="linkDownload" disabled>← Download</button> <button id="link-remote-up" type="button">↑</button></span></header><small id="link-remote-path">/</small><div id="link-remote-files"></div></div>
       </section>
-      <section id="matrix-panel" class="matrix-panel" hidden>
-        <header><div><b>Matrix Ultimate v2 AI</b><small id="matrix-summary"></small></div><span class="matrix-actions"><button id="matrix-import" type="button" data-i18n="matrixImport">Import</button><button id="matrix-export" type="button" data-i18n="matrixExport">Export</button><button id="matrix-scan" class="primary" type="button" data-i18n="matrixAnalyze">Analyze failures</button></span></header>
-        <p data-i18n="matrixDescription">Matrix analyzes local failures and proposes safe rules. No rule executes website code.</p>
-        <div id="matrix-proposals"></div>
+      <section id="logs-panel" class="logs-panel" hidden>
+        <header><div><b data-i18n="logs">Logs</b><small data-i18n="logsDescription">End-to-end diagnostics for extension, shortcuts, bridge and downloads.</small></div><span class="log-actions"><button id="export-logs" class="primary" type="button" data-i18n="exportLog">Export log</button><button id="clear-logs" type="button" data-i18n="clearLog">Clear log</button></span></header>
+        <div class="log-toolbar"><input id="log-search" type="search" data-i18n-placeholder="searchLogs" placeholder="Search events…" /><select id="log-level"><option value="" data-i18n="allLevels">All levels</option><option>ERROR</option><option>WARN</option><option>INFO</option><option>DEBUG</option></select></div>
+        <div id="log-event-list" class="log-event-list"></div>
+        <p id="log-empty" data-i18n="emptyLog">No diagnostic events recorded yet.</p>
       </section>
       <section class="panel">
         <div class="toolbar">
@@ -154,7 +154,7 @@
         <span class="bridge-waiting"
           ><i></i
           ><b data-i18n="bridgeStatus">Extension bridge not configured</b></span
-        ><span>v0.4.5</span>
+        ><span>v0.4.6</span>
       </footer>
     </main>
     <dialog id="add-dialog">
@@ -220,6 +220,11 @@
           <label for="download-bandwidth-limit" data-i18n="downloadBandwidthLimit">This download limit</label>
           <div class="bandwidth-input"><input id="download-bandwidth-limit" type="number" min="0" max="10240" step="0.1" value="0" /><span data-i18n="megabytesPerSecond">MB/s</span><small data-i18n="unlimited">Unlimited</small></div>
         </details>
+        <section class="task-connections">
+          <label for="task-connections"><span><b data-i18n="taskConnections">Threads for this download</b><small data-i18n="taskConnectionsHint">Only changes this task. Use 1 on sites that reject segmented downloads.</small></span><output id="task-connections-value">8</output></label>
+          <input id="task-connections" type="range" min="1" max="32" value="8" />
+          <div class="range-scale"><span>1</span><span>8</span><span>16</span><span>32</span></div>
+        </section>
         </section>
         </div>
         <div class="dialog-actions">
@@ -311,7 +316,6 @@
             <option value="emeraldgold">Emerald &amp; Gold</option>
             <option value="scarletice">Scarlet Ice</option>
             <option value="coppernavy">Copper Navy</option>
-            <option value="matrixcode">Matrix Code</option>
             <option value="solarizednight">Solarized Night</option>
           </select>
           <small data-i18n="themeHint">Colors and text contrast are adjusted together for readability.</small>

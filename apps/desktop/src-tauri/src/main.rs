@@ -827,6 +827,22 @@ struct BridgeDownloadStatus {
     task_id: DownloadId,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtensionDiagnostic {
+    event: String,
+    level: Option<String>,
+    trace_id: Option<String>,
+    source: Option<String>,
+    url: Option<String>,
+    status: Option<u16>,
+    bytes: Option<u64>,
+    duration_ms: Option<u64>,
+    detail: Option<String>,
+    client_timestamp: Option<String>,
+    delayed: Option<bool>,
+}
+
 struct BlobUpload {
     task_id: DownloadId,
     partial: PathBuf,
@@ -1460,19 +1476,20 @@ fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
         let _ = fs::remove_file(&rotated);
         let _ = fs::rename(&state.log_path, rotated);
     }
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |value| value.as_secs());
+    let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&state.log_path)
     {
-        let _ = writeln!(
-            file,
-            "[{timestamp}] {level} {event} {}",
-            sanitize_log_detail(detail)
-        );
+        let record = serde_json::json!({
+            "timestamp": timestamp,
+            "level": level,
+            "event": event,
+            "source": "desktop",
+            "detail": sanitize_log_detail(detail),
+        });
+        let _ = writeln!(file, "{record}");
     }
 }
 
@@ -1745,6 +1762,20 @@ async fn run_external_download(
                 Vec::new(),
             )
         });
+    let task_connections = task.connections_override.unwrap_or(tools.4).clamp(1, 32);
+    diagnostic_log(
+        &app.state::<AppState>(),
+        "INFO",
+        "external.configuration",
+        &format!(
+            "task={id} engine={kind:?} threads={} override={} proxy={} dns_servers={} selected_files={}",
+            task_connections,
+            task.connections_override.is_some(),
+            tools.5.is_some(),
+            tools.8.len(),
+            task.torrent_selection.len(),
+        ),
+    );
     let identity = app
         .state::<AppState>()
         .request_identities
@@ -1803,7 +1834,7 @@ async fn run_external_download(
             }
             command
                 .arg("--concurrent-fragments")
-                .arg(tools.4.to_string());
+                .arg(task_connections.to_string());
             let quickjs_name = if cfg!(windows) { "qjs.exe" } else { "qjs" };
             let adjacent_quickjs = tools
                 .1
@@ -1921,7 +1952,7 @@ async fn run_external_download(
                         "30",
                     ])
                     .arg("--thread-count")
-                    .arg(tools.4.to_string())
+                    .arg(task_connections.to_string())
                     .arg("--ffmpeg-binary-path")
                     .arg(&tools.0);
                 if bandwidth_limit > 0 {
@@ -2203,6 +2234,188 @@ fn clear_general_log(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+fn write_diagnostic_zip(path: &Path, entries: Vec<(String, Vec<u8>)>) -> Result<(), String> {
+    let mut output = Vec::new();
+    let mut central = Vec::new();
+    for (name, data) in &entries {
+        let name = name.as_bytes();
+        let offset = u32::try_from(output.len()).map_err(|_| "diagnostic_too_large")?;
+        let size = u32::try_from(data.len()).map_err(|_| "diagnostic_too_large")?;
+        let crc = crc32fast::hash(data);
+        output.extend_from_slice(&0x04034b50_u32.to_le_bytes());
+        output.extend_from_slice(&20_u16.to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        output.extend_from_slice(&crc.to_le_bytes());
+        output.extend_from_slice(&size.to_le_bytes());
+        output.extend_from_slice(&size.to_le_bytes());
+        output.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        output.extend_from_slice(name);
+        output.extend_from_slice(data);
+        central.push((name.to_vec(), crc, size, offset));
+    }
+    let central_offset = u32::try_from(output.len()).map_err(|_| "diagnostic_too_large")?;
+    for (name, crc, size, offset) in &central {
+        output.extend_from_slice(&0x02014b50_u32.to_le_bytes());
+        output.extend_from_slice(&20_u16.to_le_bytes());
+        output.extend_from_slice(&20_u16.to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        output.extend_from_slice(&crc.to_le_bytes());
+        output.extend_from_slice(&size.to_le_bytes());
+        output.extend_from_slice(&size.to_le_bytes());
+        output.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        output.extend_from_slice(&0_u16.to_le_bytes());
+        output.extend_from_slice(&0_u32.to_le_bytes());
+        output.extend_from_slice(&offset.to_le_bytes());
+        output.extend_from_slice(name);
+    }
+    let central_size = u32::try_from(output.len()).map_err(|_| "diagnostic_too_large")? - central_offset;
+    let count = u16::try_from(central.len()).map_err(|_| "diagnostic_too_large")?;
+    output.extend_from_slice(&0x06054b50_u32.to_le_bytes());
+    output.extend_from_slice(&0_u16.to_le_bytes());
+    output.extend_from_slice(&0_u16.to_le_bytes());
+    output.extend_from_slice(&count.to_le_bytes());
+    output.extend_from_slice(&count.to_le_bytes());
+    output.extend_from_slice(&central_size.to_le_bytes());
+    output.extend_from_slice(&central_offset.to_le_bytes());
+    output.extend_from_slice(&0_u16.to_le_bytes());
+    fs::write(path, output).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let now = chrono::Local::now();
+    let file_name = format!("Apocalipse-Diagnostico-{}.zip", now.format("%Y-%m-%d_%H-%M-%S"));
+    let Some(path) = rfd::FileDialog::new()
+        .set_file_name(&file_name)
+        .add_filter("Apocalipse diagnostic", &["zip"])
+        .save_file()
+    else { return Ok(None); };
+
+    diagnostic_log(&state, "INFO", "log.export_started", "diagnostic bundle requested");
+    let settings = state.settings.lock().map_err(|error| error.to_string())?.clone();
+    let queue = state.queue.lock().map_err(|error| error.to_string())?.clone();
+    let rules = state.site_rules.lock().map_err(|error| error.to_string())?.clone();
+    let settings_snapshot = serde_json::json!({
+        "maxActiveDownloads": settings.max_active_downloads,
+        "connectionsPerDownload": settings.connections_per_download,
+        "adaptiveEfficiency": settings.adaptive_efficiency,
+        "globalBandwidthLimit": settings.global_bandwidth_limit,
+        "captureClipboard": settings.capture_clipboard,
+        "proxyEnabled": settings.proxy_enabled,
+        "proxyConfigured": settings.proxy_url.is_some(),
+        "customDnsEnabled": settings.dns_enabled,
+        "dnsServers": settings.dns_servers,
+        "associations": settings.associations,
+        "tools": {
+            "ffmpeg": settings.ffmpeg_path.as_ref().is_some_and(|path| path.is_file()),
+            "ytDlp": settings.yt_dlp_path.as_ref().is_some_and(|path| path.is_file()),
+            "nM3u8DlRe": settings.n_m3u8dl_re_path.as_ref().is_some_and(|path| path.is_file()),
+            "aria2": settings.aria2_path.as_ref().is_some_and(|path| path.is_file()),
+            "mediaPlayer": settings.media_player_path.as_ref().is_some_and(|path| path.is_file()),
+        },
+        "pairingTokenPresent": !settings.bridge_token.is_empty(),
+    });
+    let queue_snapshot = queue.iter().map(|task| serde_json::json!({
+        "id": task.id,
+        "source": redact_url(&task.source),
+        "file": task.destination.file_name().map(|name| name.to_string_lossy()),
+        "state": task.state,
+        "received": task.received,
+        "total": task.total,
+        "downloadSpeed": task.download_speed,
+        "uploadSpeed": task.upload_speed,
+        "connectionsOverride": task.connections_override,
+        "createdAt": task.created_at,
+        "completedAt": task.completed_at,
+    })).collect::<Vec<_>>();
+    let bridge_connected = state.bridge_last_seen.lock().ok().and_then(|seen| *seen)
+        .is_some_and(|seen| seen.elapsed() < Duration::from_secs(90));
+    let manifest = serde_json::json!({
+        "format": "apocalipse-diagnostic-bundle",
+        "formatVersion": 2,
+        "createdAt": now.to_rfc3339(),
+        "applicationVersion": env!("CARGO_PKG_VERSION"),
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "bridgePort": BRIDGE_PORT,
+        "bridgeConnected": bridge_connected,
+        "privacy": "Secrets, credentials, cookies, authorization headers and URL parameter values are excluded or redacted."
+    });
+
+    let mut entries = vec![
+        ("manifest.json".to_owned(), serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?),
+        ("config/settings-safe.json".to_owned(), serde_json::to_vec_pretty(&settings_snapshot).map_err(|e| e.to_string())?),
+        ("state/queue-safe.json".to_owned(), serde_json::to_vec_pretty(&queue_snapshot).map_err(|e| e.to_string())?),
+        ("config/site-rules.json".to_owned(), serde_json::to_vec_pretty(&rules).map_err(|e| e.to_string())?),
+    ];
+    let mut all_events = String::new();
+    for (source, name) in [
+        (state.log_path.clone(), "logs/events.jsonl"),
+        (state.log_path.with_extension("log.1"), "logs/events-previous.jsonl"),
+    ] {
+        if let Ok(contents) = fs::read(source) {
+            all_events.push_str(&String::from_utf8_lossy(&contents));
+            entries.push((name.to_owned(), contents));
+        }
+    }
+    let mut buckets = HashMap::<&str, String>::new();
+    let mut levels = HashMap::<String, usize>::new();
+    let mut event_counts = HashMap::<String, usize>::new();
+    for line in all_events.lines().filter(|line| !line.trim().is_empty()) {
+        let parsed = serde_json::from_str::<serde_json::Value>(line).ok();
+        let event = parsed.as_ref().and_then(|item| item.get("event")).and_then(|item| item.as_str()).unwrap_or("legacy");
+        let level = parsed.as_ref().and_then(|item| item.get("level")).and_then(|item| item.as_str()).unwrap_or("INFO");
+        *levels.entry(level.to_owned()).or_default() += 1;
+        *event_counts.entry(event.to_owned()).or_default() += 1;
+        let bucket = if event.starts_with("extension.") { "extension-shortcuts-overlays" }
+            else if event.starts_with("ui.") { "interface" }
+            else if event.starts_with("bridge.") { "bridge" }
+            else if event.starts_with("http.") { "http" }
+            else if event.starts_with("blob.") || event.contains("recording") { "recordings" }
+            else if event.starts_with("external.") || event.starts_with("yt_dlp.") { "media-torrent-hls" }
+            else { "application" };
+        let target = buckets.entry(bucket).or_default();
+        target.push_str(line);
+        target.push('\n');
+    }
+    for (bucket, contents) in buckets {
+        entries.push((format!("logs/by-component/{bucket}.jsonl"), contents.into_bytes()));
+    }
+    let summary = serde_json::json!({
+        "totalEvents": levels.values().sum::<usize>(),
+        "levels": levels,
+        "events": event_counts,
+        "hint": "Start with ERROR/WARN events, then correlate matching task, trace and timestamp in logs/events.jsonl."
+    });
+    entries.push(("summary.json".to_owned(), serde_json::to_vec_pretty(&summary).map_err(|e| e.to_string())?));
+    let guide = b"Apocalipse diagnostic bundle v2\nUse manifest.json first, then correlate logs/events.jsonl by trace, task and timestamp. Sensitive values are redacted.\n";
+    entries.push(("README.txt".to_owned(), guide.to_vec()));
+    write_diagnostic_zip(&path, entries)?;
+    diagnostic_log(&state, "INFO", "log.export_completed", &format!("file={}", path.display()));
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+fn record_ui_diagnostic(
+    state: State<'_, AppState>,
+    level: String,
+    event: String,
+    detail: String,
+) -> Result<(), String> {
+    diagnostic_log(&state, &level, &format!("ui.{event}"), &detail);
+    Ok(())
+}
+
 #[tauri::command]
 fn get_log_editor(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state
@@ -2310,292 +2523,6 @@ fn reset_site_rules(state: State<'_, AppState>) -> Result<String, String> {
     *state.site_rules.lock().map_err(|error| error.to_string())? = rules;
     diagnostic_log(&state, "INFO", "site_rules.reset", "defaults_restored");
     get_site_rules(state)
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MatrixRuleProposal {
-    host: String,
-    failures: usize,
-    confidence: u8,
-    reason: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MatrixAppliedRule {
-    id: String,
-    name: String,
-    host: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MatrixStatus {
-    version: String,
-    active_rules: usize,
-    proposals: Vec<MatrixRuleProposal>,
-    applied_rules: Vec<MatrixAppliedRule>,
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MatrixRuleBundle {
-    format: String,
-    version: u8,
-    rules: Vec<SiteRule>,
-}
-
-#[tauri::command]
-fn export_matrix_rules(state: State<'_, AppState>) -> Result<usize, String> {
-    let rules = state
-        .site_rules
-        .lock()
-        .map_err(|error| error.to_string())?
-        .iter()
-        .filter(|rule| rule.action != SiteRuleAction::Standard)
-        .cloned()
-        .collect::<Vec<_>>();
-    let Some(path) = rfd::FileDialog::new()
-        .set_file_name("apocalipse-matrix-rules.json")
-        .add_filter("Apocalipse Matrix rules", &["json"])
-        .save_file()
-    else {
-        return Ok(0);
-    };
-    let bundle = MatrixRuleBundle {
-        format: "apocalipse-matrix-rules".to_owned(),
-        version: 1,
-        rules,
-    };
-    fs::write(
-        path,
-        serde_json::to_vec_pretty(&bundle).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
-    diagnostic_log(
-        &state,
-        "INFO",
-        "matrix.rules_exported",
-        &format!("count={}", bundle.rules.len()),
-    );
-    Ok(bundle.rules.len())
-}
-
-#[tauri::command]
-fn import_matrix_rules(state: State<'_, AppState>) -> Result<usize, String> {
-    let Some(path) = rfd::FileDialog::new()
-        .add_filter("Apocalipse Matrix rules", &["json"])
-        .pick_file()
-    else {
-        return Ok(0);
-    };
-    let bundle: MatrixRuleBundle =
-        serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
-            .map_err(|error| format!("invalid_matrix_rules_file: {error}"))?;
-    if bundle.format != "apocalipse-matrix-rules"
-        || bundle.version != 1
-        || bundle.rules.is_empty()
-        || bundle.rules.len() > 100
-        || bundle
-            .rules
-            .iter()
-            .any(|rule| rule.action == SiteRuleAction::Standard || !valid_site_rule(rule))
-    {
-        return Err("invalid_matrix_rules_file".to_owned());
-    }
-    let mut rules = state
-        .site_rules
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    let imported = bundle.rules.len();
-    for incoming in bundle.rules {
-        rules.retain(|existing| {
-            existing.id != incoming.id
-                && !existing.hosts.iter().any(|host| {
-                    incoming
-                        .hosts
-                        .iter()
-                        .any(|candidate| host.eq_ignore_ascii_case(candidate))
-                })
-        });
-        rules.push(incoming);
-    }
-    if rules.len() > 100 || !rules.iter().all(valid_site_rule) {
-        return Err("invalid_matrix_rules_file".to_owned());
-    }
-    save_site_rules(&state, &rules)?;
-    *state.site_rules.lock().map_err(|error| error.to_string())? = rules;
-    diagnostic_log(
-        &state,
-        "INFO",
-        "matrix.rules_imported",
-        &format!("count={imported}"),
-    );
-    Ok(imported)
-}
-
-#[tauri::command]
-fn matrix_analyze(state: State<'_, AppState>) -> Result<MatrixStatus, String> {
-    let queue = state.queue.lock().map_err(|error| error.to_string())?;
-    let rules = state.site_rules.lock().map_err(|error| error.to_string())?;
-    let mut failures = HashMap::<String, HashSet<String>>::new();
-    for task in queue
-        .iter()
-        .filter(|task| matches!(&task.state, DownloadState::Failed { .. }))
-    {
-        if let Ok(url) = url::Url::parse(&task.source) {
-            if let Some(host) = url.host_str() {
-                failures
-                    .entry(host.to_ascii_lowercase())
-                    .or_default()
-                    .insert(task.id.to_string());
-            }
-        }
-    }
-
-    let mut log = fs::read_to_string(state.log_path.with_extension("log.1")).unwrap_or_default();
-    log.push_str(&fs::read_to_string(&state.log_path).unwrap_or_default());
-    let mut task_hosts = HashMap::<String, String>::new();
-    for line in log.lines() {
-        if !line.contains("task.enqueued") {
-            continue;
-        }
-        let task = line
-            .split_whitespace()
-            .find_map(|field| field.strip_prefix("task="));
-        let source = line
-            .split_whitespace()
-            .find_map(|field| field.strip_prefix("url="));
-        let identified = task
-            .zip(source)
-            .and_then(|(task, source)| host_from_url(source).map(|host| (task, host)));
-        if let Some((task, host)) = identified {
-            task_hosts.insert(task.to_owned(), host);
-        }
-    }
-    for line in log.lines().filter(|line| line.contains("http.failed")) {
-        let task = line
-            .split_whitespace()
-            .find_map(|field| field.strip_prefix("task="));
-        let identified = task.and_then(|task| task_hosts.get(task).map(|host| (task, host)));
-        if let Some((task, host)) = identified {
-            failures
-                .entry(host.clone())
-                .or_default()
-                .insert(task.to_owned());
-        }
-    }
-
-    let mut proposals = failures
-        .into_iter()
-        .filter(|(host, _)| matching_site_rule(&format!("https://{host}/"), &rules).is_none())
-        .map(|(host, task_ids)| {
-            let count = task_ids.len();
-            MatrixRuleProposal {
-                confidence: (55 + count.saturating_sub(1).min(4) * 10) as u8,
-                reason: format!(
-                    "{count} failed download(s); retry with one conservative connection"
-                ),
-                host,
-                failures: count,
-            }
-        })
-        .collect::<Vec<_>>();
-    proposals.sort_by(|left, right| {
-        right
-            .failures
-            .cmp(&left.failures)
-            .then_with(|| left.host.cmp(&right.host))
-    });
-    let applied_rules = rules
-        .iter()
-        .filter(|rule| rule.enabled && rule.action != SiteRuleAction::Standard)
-        .map(|rule| MatrixAppliedRule {
-            id: rule.id.clone(),
-            name: rule.name.clone(),
-            host: rule.hosts.first().cloned().unwrap_or_default(),
-        })
-        .collect::<Vec<_>>();
-    Ok(MatrixStatus {
-        version: "Matrix Ultimate v2 AI".to_owned(),
-        active_rules: applied_rules.len(),
-        proposals,
-        applied_rules,
-    })
-}
-
-#[tauri::command]
-fn matrix_apply_rule(state: State<'_, AppState>, host: String) -> Result<String, String> {
-    let host = host.trim().to_ascii_lowercase();
-    if host.is_empty()
-        || host.len() > 253
-        || !host
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '-'))
-    {
-        return Err("invalid_matrix_host".to_owned());
-    }
-    let mut rules = state
-        .site_rules
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    if let Some(rule) = rules.iter_mut().find(|rule| {
-        rule.hosts
-            .iter()
-            .any(|candidate| host_matches_pattern(&host, candidate))
-    }) {
-        rule.enabled = true;
-        rule.action = SiteRuleAction::SingleConnection;
-        rule.connections = 1;
-    } else {
-        let id_host = host.replace('.', "-");
-        rules.push(SiteRule {
-            id: format!("matrix-{id_host}"),
-            name: format!("Matrix: {host}"),
-            hosts: vec![host.clone(), format!("*.{host}")],
-            action: SiteRuleAction::SingleConnection,
-            enabled: true,
-            connections: 1,
-        });
-    }
-    if rules.len() > 100 || !rules.iter().all(valid_site_rule) {
-        return Err("invalid_site_rules".to_owned());
-    }
-    save_site_rules(&state, &rules)?;
-    *state.site_rules.lock().map_err(|error| error.to_string())? = rules;
-    diagnostic_log(
-        &state,
-        "INFO",
-        "matrix.rule_applied",
-        &format!("host={host} action=single_connection"),
-    );
-    Ok(host)
-}
-
-#[tauri::command]
-fn matrix_rollback_rule(state: State<'_, AppState>, id: String) -> Result<String, String> {
-    let mut rules = state
-        .site_rules
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone();
-    let rule = rules
-        .iter_mut()
-        .find(|rule| rule.id == id && rule.action != SiteRuleAction::Standard)
-        .ok_or_else(|| "matrix_rule_not_found".to_owned())?;
-    rule.enabled = false;
-    save_site_rules(&state, &rules)?;
-    *state.site_rules.lock().map_err(|error| error.to_string())? = rules;
-    diagnostic_log(
-        &state,
-        "INFO",
-        "matrix.rule_rolled_back",
-        &format!("id={id}"),
-    );
-    Ok(id)
 }
 
 async fn read_process_tail(
@@ -3427,6 +3354,7 @@ fn enqueue_download_impl(
     mirrors: Option<Vec<String>>,
     priority: Option<i8>,
     bandwidth_limit: Option<u64>,
+    connections_override: Option<usize>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
     if let Some(existing) = state
@@ -3483,6 +3411,7 @@ fn enqueue_download_impl(
         .collect();
     task.priority = priority.unwrap_or_default().clamp(-10, 10);
     task.bandwidth_limit = bandwidth_limit.filter(|limit| *limit > 0);
+    task.connections_override = connections_override.map(|value| value.clamp(1, 32));
     if let Some(context) = context {
         task.referer = context
             .referer
@@ -3556,9 +3485,10 @@ fn enqueue_download_impl(
         "INFO",
         "task.enqueued",
         &format!(
-            "task={} engine={kind:?} rule={} url={} file={}",
+            "task={} engine={kind:?} rule={} threads_override={} url={} file={}",
             task.id,
             site_rule.as_ref().map_or("none", |rule| rule.id.as_str()),
+            task.connections_override.map_or_else(|| "global".to_owned(), |value| value.to_string()),
             redact_url(&task.source),
             task.destination.display()
         ),
@@ -3580,6 +3510,7 @@ fn enqueue_download(
     mirrors: Option<Vec<String>>,
     priority: Option<i8>,
     bandwidth_limit: Option<u64>,
+    connections_override: Option<usize>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
     enqueue_download_impl(
@@ -3593,6 +3524,7 @@ fn enqueue_download(
         mirrors,
         priority,
         bandwidth_limit,
+        connections_override,
         context,
     )
 }
@@ -3649,18 +3581,19 @@ fn start_download(
             } else {
                 limits.connections_per_download
             };
-        let connections = rule
-            .as_ref()
-            .filter(|rule| {
-                matches!(
-                    rule.action,
-                    SiteRuleAction::SingleConnection | SiteRuleAction::UupdumpPost
+        let connections = task.connections_override.unwrap_or_else(|| {
+            rule.as_ref()
+                .filter(|rule| {
+                    matches!(
+                        rule.action,
+                        SiteRuleAction::SingleConnection | SiteRuleAction::UupdumpPost
+                    )
+                })
+                .map_or_else(
+                    || configured_connections.clamp(1, 32),
+                    |rule| rule.connections,
                 )
-            })
-            .map_or_else(
-                || configured_connections.clamp(1, 32),
-                |rule| rule.connections,
-            );
+        });
         let mut headers = Vec::new();
         if let Some(referer) = task.referer.as_ref() {
             headers.push(("Referer".to_owned(), referer.clone()));
@@ -4525,6 +4458,7 @@ fn queue_from_bridge(
             None,
             Some(10),
             None,
+            None,
             Some(context),
         )?;
         show_main_window(app);
@@ -4882,14 +4816,59 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         Err(_) => return,
     };
     if !bridge_authorized(headers, &token) {
+        diagnostic_log(
+            &state,
+            "WARN",
+            "bridge.authentication_failed",
+            &format!("request={} origin={}", first.split_whitespace().take(2).collect::<Vec<_>>().join(" "), origin.unwrap_or("none")),
+        );
         bridge_response(&mut stream, "401 Unauthorized", origin, "{\"ok\":false}");
         return;
     }
     if let Ok(mut seen) = state.bridge_last_seen.lock() {
         *seen = Some(Instant::now());
     }
+    diagnostic_log(
+        &state,
+        "DEBUG",
+        "bridge.request",
+        &format!("request={} origin={}", first.split_whitespace().take(2).collect::<Vec<_>>().join(" "), origin.unwrap_or("none")),
+    );
     if first.starts_with("GET /v1/health ") {
+        diagnostic_log(&state, "DEBUG", "bridge.health", "extension heartbeat authenticated");
         bridge_response(&mut stream, "200 OK", origin, "{\"ok\":true}");
+    } else if first.starts_with("GET /v1/activate ") {
+        diagnostic_log(&state, "INFO", "application.second_instance", "existing instance activated");
+        show_main_window(app);
+        bridge_response(&mut stream, "200 OK", origin, "{\"ok\":true}");
+    } else if first.starts_with("POST /v1/diagnostic ") {
+        match serde_json::from_str::<ExtensionDiagnostic>(body) {
+            Ok(item) => {
+                let detail = format!(
+                    "source={} trace={} url={} status={} bytes={} duration_ms={} delayed={} client_time={} {}",
+                    item.source.as_deref().unwrap_or("browser-extension"),
+                    item.trace_id.as_deref().unwrap_or("none"),
+                    item.url.as_deref().map(redact_url).unwrap_or_else(|| "none".to_owned()),
+                    item.status.map_or_else(|| "none".to_owned(), |v| v.to_string()),
+                    item.bytes.map_or_else(|| "none".to_owned(), |v| v.to_string()),
+                    item.duration_ms.map_or_else(|| "none".to_owned(), |v| v.to_string()),
+                    item.delayed.unwrap_or(false),
+                    item.client_timestamp.as_deref().unwrap_or("none"),
+                    item.detail.as_deref().unwrap_or(""),
+                );
+                diagnostic_log(
+                    &state,
+                    item.level.as_deref().unwrap_or("INFO"),
+                    &format!("extension.{}", item.event),
+                    &detail,
+                );
+                bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}");
+            }
+            Err(error) => {
+                diagnostic_log(&state, "WARN", "bridge.diagnostic_invalid", &error.to_string());
+                bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}");
+            }
+        }
     } else if first.starts_with("GET /v1/site-rules ") {
         let body = state
             .site_rules
@@ -5000,6 +4979,14 @@ fn run_extension_bridge(app: tauri::AppHandle, listener: TcpListener) {
     for stream in listener.incoming().flatten() {
         handle_bridge_connection(&app, stream);
     }
+}
+
+fn activate_running_instance(token: &str) -> bool {
+    let Ok(mut stream) = TcpStream::connect(("127.0.0.1", BRIDGE_PORT)) else { return false; };
+    let request = format!(
+        "GET /v1/activate HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).is_ok()
 }
 
 fn forward_to_running_instance(source: &str, token: &str) -> bool {
@@ -5667,13 +5654,13 @@ fn main() {
             let bridge_listener = match TcpListener::bind(("127.0.0.1", BRIDGE_PORT)) {
                 Ok(listener) => Some(listener),
                 Err(_) => {
-                    if associated_source.as_deref().is_some_and(|source| {
-                        forward_to_running_instance(source, &initial_settings.bridge_token)
-                    }) {
-                        app.handle().exit(0);
-                        return Ok(());
+                    if let Some(source) = associated_source.as_deref() {
+                        let _ = forward_to_running_instance(source, &initial_settings.bridge_token);
+                    } else {
+                        let _ = activate_running_instance(&initial_settings.bridge_token);
                     }
-                    None
+                    app.handle().exit(0);
+                    return Ok(());
                 }
             };
             let global_bandwidth_limiter = Arc::new(BandwidthLimiter::new(
@@ -5788,17 +5775,14 @@ fn main() {
             remove_downloads,
             read_general_log,
             clear_general_log,
+            export_diagnostic_bundle,
+            record_ui_diagnostic,
             get_log_editor,
             set_log_editor,
             open_log_external,
             get_site_rules,
             set_site_rules,
             reset_site_rules,
-            matrix_analyze,
-            matrix_apply_rule,
-            matrix_rollback_rule,
-            import_matrix_rules,
-            export_matrix_rules,
             stop_recording,
             pause_download,
             resume_download,
