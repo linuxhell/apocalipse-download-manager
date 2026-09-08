@@ -4463,6 +4463,22 @@ fn queue_from_bridge(
     mut request: BridgeDownload,
 ) -> Result<Option<DownloadId>, String> {
     let state = app.state::<AppState>();
+    let partial_video_candidate = request
+        .media_kind
+        .as_deref()
+        .is_some_and(|kind| kind.eq_ignore_ascii_case("video"))
+        && url::Url::parse(&request.url).ok().is_some_and(|url| {
+            let mut has_byte_start = false;
+            let mut has_byte_end = false;
+            for (name, _) in url.query_pairs() {
+                if name.eq_ignore_ascii_case("bytestart") {
+                    has_byte_start = true;
+                } else if name.eq_ignore_ascii_case("byteend") {
+                    has_byte_end = true;
+                }
+            }
+            has_byte_start && has_byte_end
+        });
     let image_mislabeled_as_video = request
         .media_kind
         .as_deref()
@@ -4481,14 +4497,19 @@ fn queue_from_bridge(
                     "avif" | "bmp" | "gif" | "ico" | "jpg" | "jpeg" | "png" | "svg" | "webp"
                 )
             });
-    if image_mislabeled_as_video {
+    if partial_video_candidate || image_mislabeled_as_video {
         if let Some(page_url) = request.page_url.clone().filter(|url| {
             matches!(classify_url(url), Some(DownloadKind::MediaPage))
         }) {
+            let event = if partial_video_candidate {
+                "bridge.partial_media_candidate_rejected"
+            } else {
+                "bridge.video_image_candidate_rejected"
+            };
             diagnostic_log(
                 &state,
                 "WARN",
-                "bridge.video_image_candidate_rejected",
+                event,
                 &format!(
                     "candidate={} fallback={}",
                     redact_url(&request.url),
