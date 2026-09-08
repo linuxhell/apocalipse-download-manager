@@ -41,6 +41,7 @@ jobs:
           python .github/scripts/apply_round_0_3_58.py
           python .github/scripts/apply_round_0_3_59.py
           python .github/scripts/apply_round_0_3_60.py
+          python .github/scripts/apply_round_0_3_61.py
       - name: Validate extension JavaScript
         run: |
           node --check browser-extension/content.js
@@ -60,7 +61,7 @@ jobs:
           if (Select-String -Path apps/desktop/src-tauri/src/main.rs -Pattern 'start_file\("matrix-rules\.json"' -Quiet) { throw 'legacy matrix-rules.json still exported in diagnostics' }
           if (-not (Select-String -Path apps/desktop/ui/index.html -Pattern 'id="download-connections"' -Quiet)) { throw 'per-download thread slider missing' }
           if (-not (Select-String -Path apps/desktop/ui/app.js -Pattern 'connectionsOverride' -Quiet)) { throw 'per-download thread override not wired' }
-          if (Select-String -Path apps/desktop/ui/app.js -Pattern 'document\.querySelector\("#manage-site-rules"\)\.onclick|document\.querySelector\("#pick-log-editor"\)\.onclick|document\.querySelector\("#open-log"\)\.onclick' -Quiet) { throw 'removed controls still have direct event handlers' }
+          if (Select-String -Path apps/desktop/ui/app.js -Pattern 'refreshMatrix|matrix_analyze|matrix_apply_rule|matrix_rollback_rule|import_matrix_rules|export_matrix_rules|#matrix-scan|#matrix-import|#matrix-export|#log-editor|#remove-log-editor|#open-log-external' -Quiet) { throw 'legacy Matrix/log-editor UI code still present' }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build desktop
