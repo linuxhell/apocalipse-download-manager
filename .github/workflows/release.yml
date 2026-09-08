@@ -3,6 +3,8 @@ name: Release builds
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
@@ -116,8 +118,12 @@ jobs:
           (cd "$stage/chromium" && zip -qr "$GITHUB_WORKSPACE/dist/apocalipse-chrome-${version}.zip" .)
           cp "$GITHUB_WORKSPACE/dist/apocalipse-chrome-${version}.zip" "$GITHUB_WORKSPACE/dist/apocalipse-edge-${version}.zip"
 
-          cp -R browser-extension "$stage/firefox"
-          python3 - "$stage/firefox/manifest.json" <<'PY'
+          signed="packaging/firefox/apocalipse-firefox-${version}.xpi"
+          if [[ -f "$signed" ]]; then
+            cp "$signed" "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
+          else
+            cp -R browser-extension "$stage/firefox"
+            python3 - "$stage/firefox/manifest.json" <<'PY'
           import json
           import sys
 
@@ -145,7 +151,8 @@ jobs:
               json.dump(manifest, stream, ensure_ascii=False, indent=2)
               stream.write("\n")
           PY
-          (cd "$stage/firefox" && zip -qr "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}-unsigned.xpi" .)
+            (cd "$stage/firefox" && zip -qr "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}-unsigned.xpi" .)
+          fi
 
       - name: Publish only current files
         env:
