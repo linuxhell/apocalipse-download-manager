@@ -199,10 +199,37 @@
     }
   };
   const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
+  const pageThumbnail = (element) => {
+    const candidates = [
+      element?.poster,
+      element?.getAttribute?.("poster"),
+      document.querySelector('meta[property="og:image:secure_url"]')?.content,
+      document.querySelector('meta[property="og:image"]')?.content,
+      document.querySelector('meta[name="twitter:image"]')?.content,
+      document.querySelector('meta[name="twitter:image:src"]')?.content,
+      document.querySelector('link[rel="image_src"]')?.href,
+      element?.closest?.("figure,article,[class*=player],[class*=video]")?.querySelector?.("img")?.currentSrc,
+    ];
+    for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+      try {
+        const data = JSON.parse(script.textContent || "null");
+        const nodes = Array.isArray(data) ? data : [data];
+        for (const node of nodes) {
+          const value = Array.isArray(node?.thumbnailUrl) ? node.thumbnailUrl[0] : node?.thumbnailUrl;
+          if (value) candidates.push(value);
+        }
+      } catch {}
+    }
+    for (const candidate of candidates) {
+      const url = absolute(candidate);
+      if (url && /^https?:/i.test(url)) return url;
+    }
+    return "";
+  };
   const thumbnailFor = (element, kind) => {
     if (kind === "audio") return "";
     if (element?.tagName === "IMG") return element.currentSrc || element.src || "";
-    return element?.poster || document.querySelector('meta[property="og:image"]')?.content || element?.closest?.("figure,article")?.querySelector?.("img")?.currentSrc || "";
+    return pageThumbnail(element);
   };
   const isFacebookMediaUrl = (url) => {
     try {
@@ -400,7 +427,7 @@
     });
     document.querySelectorAll("img").forEach((element) => add(element.currentSrc || element.src, "image", element));
     performance.getEntriesByType("resource").forEach((entry) => {
-      if (/\.m3u8(?:$|[?#])/i.test(entry.name)) add(entry.name, "video", document.querySelector("video"), document.querySelector("video")?.poster || "");
+      if (/\.m3u8(?:$|[?#])/i.test(entry.name)) add(entry.name, "video", document.querySelector("video"));
     });
     return [...items.values()];
   };
