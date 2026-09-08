@@ -3221,11 +3221,42 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
     let executable = {
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
         match id.as_str() {
-            "yt-dlp" => configured_tool(&settings.yt_dlp_path, if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" }),
-            "qjs" => configured_tool(&settings.qjs_path, if cfg!(windows) { "qjs.exe" } else { "qjs" }),
-            "aria2" => configured_tool(&settings.aria2_path, if cfg!(windows) { "aria2c.exe" } else { "aria2c" }),
-            "n-m3u8dl-re" => configured_tool(&settings.n_m3u8dl_re_path, if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" }),
-            "ffmpeg" => configured_tool(&settings.ffmpeg_path, if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" }),
+            "yt-dlp" => configured_tool(
+                &settings.yt_dlp_path,
+                if cfg!(windows) {
+                    "yt-dlp.exe"
+                } else {
+                    "yt-dlp"
+                },
+            ),
+            "qjs" => configured_tool(
+                &settings.qjs_path,
+                if cfg!(windows) { "qjs.exe" } else { "qjs" },
+            ),
+            "aria2" => configured_tool(
+                &settings.aria2_path,
+                if cfg!(windows) {
+                    "aria2c.exe"
+                } else {
+                    "aria2c"
+                },
+            ),
+            "n-m3u8dl-re" => configured_tool(
+                &settings.n_m3u8dl_re_path,
+                if cfg!(windows) {
+                    "N_m3u8DL-RE.exe"
+                } else {
+                    "N_m3u8DL-RE"
+                },
+            ),
+            "ffmpeg" => configured_tool(
+                &settings.ffmpeg_path,
+                if cfg!(windows) {
+                    "ffmpeg.exe"
+                } else {
+                    "ffmpeg"
+                },
+            ),
             _ => return Err("unknown_tool".to_owned()),
         }
     };
@@ -3234,7 +3265,8 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
     }
 
     if id == "yt-dlp" {
-        let before = version_line(&executable, &["--version"]).ok_or_else(|| "yt_dlp_not_found".to_owned())?;
+        let before = version_line(&executable, &["--version"])
+            .ok_or_else(|| "yt_dlp_not_found".to_owned())?;
         let mut command = Command::new(&executable);
         command.arg("-U");
         #[cfg(target_os = "windows")]
@@ -3245,7 +3277,11 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         let output = command.output().map_err(|error| error.to_string())?;
         if !output.status.success() {
             let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-            return Err(if message.is_empty() { "yt_dlp_update_failed".to_owned() } else { message });
+            return Err(if message.is_empty() {
+                "yt_dlp_update_failed".to_owned()
+            } else {
+                message
+            });
         }
         let after = version_line(&executable, &["--version"]).unwrap_or_else(|| before.clone());
         return Ok(if before == after {
@@ -3260,45 +3296,126 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
 
     #[cfg(target_os = "windows")]
     {
-        let (repository, executable_name, asset_markers, version_args): (&str, &str, &[&str], &[&str]) = match id.as_str() {
-            "qjs" => ("quickjs-ng/quickjs", "qjs.exe", &["windows", "x86_64", ".zip"], &["--version"]),
-            "aria2" => ("aria2/aria2", "aria2c.exe", &["win", "64bit", ".zip"], &["--version"]),
-            "n-m3u8dl-re" => ("nilaoda/N_m3u8DL-RE", "N_m3u8DL-RE.exe", &["win-x64", ".zip"], &["--version"]),
-            "ffmpeg" => ("BtbN/FFmpeg-Builds", "ffmpeg.exe", &["win64", "gpl", ".zip"], &["-version"]),
+        let (repository, executable_name, asset_markers, version_args): (
+            &str,
+            &str,
+            &[&str],
+            &[&str],
+        ) = match id.as_str() {
+            "qjs" => (
+                "quickjs-ng/quickjs",
+                "qjs.exe",
+                &["windows", "x86_64", ".zip"],
+                &["--version"],
+            ),
+            "aria2" => (
+                "aria2/aria2",
+                "aria2c.exe",
+                &["win", "64bit", ".zip"],
+                &["--version"],
+            ),
+            "n-m3u8dl-re" => (
+                "nilaoda/N_m3u8DL-RE",
+                "N_m3u8DL-RE.exe",
+                &["win-x64", ".zip"],
+                &["--version"],
+            ),
+            "ffmpeg" => (
+                "BtbN/FFmpeg-Builds",
+                "ffmpeg.exe",
+                &["win64", "gpl", ".zip"],
+                &["-version"],
+            ),
             _ => return Err("unknown_tool".to_owned()),
         };
-        let before = version_line(&executable, version_args).unwrap_or_else(|| "unknown".to_owned());
+        let before =
+            version_line(&executable, version_args).unwrap_or_else(|| "unknown".to_owned());
         let api = format!("https://api.github.com/repos/{repository}/releases/latest");
-        let client = reqwest::Client::builder().user_agent("Apocalipse-Download-Manager").build().map_err(|error| error.to_string())?;
-        let release: serde_json::Value = client.get(api).send().await.map_err(|error| error.to_string())?.error_for_status().map_err(|error| error.to_string())?.json().await.map_err(|error| error.to_string())?;
-        let tag = release.get("tag_name").and_then(|value| value.as_str()).unwrap_or("latest");
-        let assets = release.get("assets").and_then(|value| value.as_array()).ok_or_else(|| "release_has_no_assets".to_owned())?;
-        let asset = assets.iter().find(|asset| {
-            let name = asset.get("name").and_then(|value| value.as_str()).unwrap_or("").to_ascii_lowercase();
-            asset_markers.iter().all(|marker| name.contains(&marker.to_ascii_lowercase()))
-        }).ok_or_else(|| format!("compatible_release_asset_not_found:{repository}:{tag}"))?;
-        let asset_name = asset.get("name").and_then(|value| value.as_str()).unwrap_or("release.zip");
-        let asset_url = asset.get("browser_download_url").and_then(|value| value.as_str()).ok_or_else(|| "release_asset_url_missing".to_owned())?;
-        let bytes = client.get(asset_url).send().await.map_err(|error| error.to_string())?.error_for_status().map_err(|error| error.to_string())?.bytes().await.map_err(|error| error.to_string())?;
+        let client = reqwest::Client::builder()
+            .user_agent("Apocalipse-Download-Manager")
+            .build()
+            .map_err(|error| error.to_string())?;
+        let release: serde_json::Value = client
+            .get(api)
+            .send()
+            .await
+            .map_err(|error| error.to_string())?
+            .error_for_status()
+            .map_err(|error| error.to_string())?
+            .json()
+            .await
+            .map_err(|error| error.to_string())?;
+        let tag = release
+            .get("tag_name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("latest");
+        let assets = release
+            .get("assets")
+            .and_then(|value| value.as_array())
+            .ok_or_else(|| "release_has_no_assets".to_owned())?;
+        let asset = assets
+            .iter()
+            .find(|asset| {
+                let name = asset
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                asset_markers
+                    .iter()
+                    .all(|marker| name.contains(&marker.to_ascii_lowercase()))
+            })
+            .ok_or_else(|| format!("compatible_release_asset_not_found:{repository}:{tag}"))?;
+        let asset_name = asset
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("release.zip");
+        let asset_url = asset
+            .get("browser_download_url")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| "release_asset_url_missing".to_owned())?;
+        let bytes = client
+            .get(asset_url)
+            .send()
+            .await
+            .map_err(|error| error.to_string())?
+            .error_for_status()
+            .map_err(|error| error.to_string())?
+            .bytes()
+            .await
+            .map_err(|error| error.to_string())?;
         let sha256 = format!("{:x}", Sha256::digest(&bytes));
-        let temporary = std::env::temp_dir().join(format!("apocalipse-tool-update-{}", uuid::Uuid::new_v4()));
+        let temporary =
+            std::env::temp_dir().join(format!("apocalipse-tool-update-{}", uuid::Uuid::new_v4()));
         let archive_path = temporary.join("release.zip");
         let extracted = temporary.join("extracted");
         fs::create_dir_all(&extracted).map_err(|error| error.to_string())?;
         fs::write(&archive_path, &bytes).map_err(|error| error.to_string())?;
         let mut extractor = Command::new("tar.exe");
-        extractor.arg("-xf").arg(&archive_path).arg("-C").arg(&extracted);
+        extractor
+            .arg("-xf")
+            .arg(&archive_path)
+            .arg("-C")
+            .arg(&extracted);
         use std::os::windows::process::CommandExt;
         extractor.creation_flags(0x08000000);
         let extraction = extractor.output().map_err(|error| error.to_string())?;
         if !extraction.status.success() {
             let _ = fs::remove_dir_all(&temporary);
-            return Err(format!("release_extraction_failed:{}", String::from_utf8_lossy(&extraction.stderr).trim()));
+            return Err(format!(
+                "release_extraction_failed:{}",
+                String::from_utf8_lossy(&extraction.stderr).trim()
+            ));
         }
-        let replacement_path = find_named_file(&extracted, executable_name, 0).ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
+        let replacement_path = find_named_file(&extracted, executable_name, 0)
+            .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
         let replacement = fs::read(replacement_path).map_err(|error| error.to_string())?;
         let ffprobe_replacement = if id == "ffmpeg" {
-            fs::read(find_named_file(&extracted, "ffprobe.exe", 0).ok_or_else(|| "ffprobe_missing_from_release".to_owned())?).map_err(|error| error.to_string())?
+            fs::read(
+                find_named_file(&extracted, "ffprobe.exe", 0)
+                    .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?,
+            )
+            .map_err(|error| error.to_string())?
         } else {
             Vec::new()
         };
@@ -3306,7 +3423,9 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         if replacement.len() < 32_768 || (id == "ffmpeg" && ffprobe_replacement.len() < 32_768) {
             return Err(format!("replacement_executable_invalid:{asset_name}"));
         }
-        let parent = executable.parent().ok_or_else(|| "tool_target_has_no_directory".to_owned())?;
+        let parent = executable
+            .parent()
+            .ok_or_else(|| "tool_target_has_no_directory".to_owned())?;
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         let staged = parent.join(format!(".{executable_name}.apocalipse-new"));
         let backup = parent.join(format!(".{executable_name}.apocalipse-backup"));
@@ -3314,21 +3433,39 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         let ffprobe_staged = parent.join(".ffprobe.exe.apocalipse-new");
         let ffprobe_backup = parent.join(".ffprobe.exe.apocalipse-backup");
         fs::write(&staged, &replacement).map_err(|error| error.to_string())?;
-        if id == "ffmpeg" { fs::write(&ffprobe_staged, &ffprobe_replacement).map_err(|error| error.to_string())?; }
-        if backup.exists() { fs::remove_file(&backup).map_err(|error| error.to_string())?; }
-        if ffprobe_backup.exists() { fs::remove_file(&ffprobe_backup).map_err(|error| error.to_string())?; }
-        if executable.exists() { fs::rename(&executable, &backup).map_err(|error| error.to_string())?; }
-        if id == "ffmpeg" && ffprobe.exists() { fs::rename(&ffprobe, &ffprobe_backup).map_err(|error| error.to_string())?; }
+        if id == "ffmpeg" {
+            fs::write(&ffprobe_staged, &ffprobe_replacement).map_err(|error| error.to_string())?;
+        }
+        if backup.exists() {
+            fs::remove_file(&backup).map_err(|error| error.to_string())?;
+        }
+        if ffprobe_backup.exists() {
+            fs::remove_file(&ffprobe_backup).map_err(|error| error.to_string())?;
+        }
+        if executable.exists() {
+            fs::rename(&executable, &backup).map_err(|error| error.to_string())?;
+        }
+        if id == "ffmpeg" && ffprobe.exists() {
+            fs::rename(&ffprobe, &ffprobe_backup).map_err(|error| error.to_string())?;
+        }
         if let Err(error) = fs::rename(&staged, &executable) {
-            if backup.exists() { let _ = fs::rename(&backup, &executable); }
-            if ffprobe_backup.exists() { let _ = fs::rename(&ffprobe_backup, &ffprobe); }
+            if backup.exists() {
+                let _ = fs::rename(&backup, &executable);
+            }
+            if ffprobe_backup.exists() {
+                let _ = fs::rename(&ffprobe_backup, &ffprobe);
+            }
             return Err(error.to_string());
         }
         if id == "ffmpeg" {
             if let Err(error) = fs::rename(&ffprobe_staged, &ffprobe) {
                 let _ = fs::remove_file(&executable);
-                if backup.exists() { let _ = fs::rename(&backup, &executable); }
-                if ffprobe_backup.exists() { let _ = fs::rename(&ffprobe_backup, &ffprobe); }
+                if backup.exists() {
+                    let _ = fs::rename(&backup, &executable);
+                }
+                if ffprobe_backup.exists() {
+                    let _ = fs::rename(&ffprobe_backup, &ffprobe);
+                }
                 return Err(error.to_string());
             }
         }
@@ -3336,13 +3473,23 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         let ffprobe_valid = id != "ffmpeg" || version_line(&ffprobe, &["-version"]).is_some();
         if after.is_none() || !ffprobe_valid {
             let _ = fs::remove_file(&executable);
-            if id == "ffmpeg" { let _ = fs::remove_file(&ffprobe); }
-            if backup.exists() { let _ = fs::rename(&backup, &executable); }
-            if ffprobe_backup.exists() { let _ = fs::rename(&ffprobe_backup, &ffprobe); }
+            if id == "ffmpeg" {
+                let _ = fs::remove_file(&ffprobe);
+            }
+            if backup.exists() {
+                let _ = fs::rename(&backup, &executable);
+            }
+            if ffprobe_backup.exists() {
+                let _ = fs::rename(&ffprobe_backup, &ffprobe);
+            }
             return Err("updated_tool_validation_failed_original_restored".to_owned());
         }
-        if backup.exists() { fs::remove_file(&backup).map_err(|error| error.to_string())?; }
-        if ffprobe_backup.exists() { fs::remove_file(&ffprobe_backup).map_err(|error| error.to_string())?; }
+        if backup.exists() {
+            fs::remove_file(&backup).map_err(|error| error.to_string())?;
+        }
+        if ffprobe_backup.exists() {
+            fs::remove_file(&ffprobe_backup).map_err(|error| error.to_string())?;
+        }
         let after = after.unwrap_or_else(|| tag.to_owned());
         diagnostic_log(&state, "INFO", "tool.updated", &format!("tool={id} repository={repository} tag={tag} asset={asset_name} sha256={sha256} before={before} after={after} target={}", executable.display()));
         Ok(format!("{id} updated: {before} → {after}"))
@@ -4498,9 +4645,11 @@ fn queue_from_bridge(
                 )
             });
     if partial_video_candidate || image_mislabeled_as_video {
-        if let Some(page_url) = request.page_url.clone().filter(|url| {
-            matches!(classify_url(url), Some(DownloadKind::MediaPage))
-        }) {
+        if let Some(page_url) = request
+            .page_url
+            .clone()
+            .filter(|url| matches!(classify_url(url), Some(DownloadKind::MediaPage)))
+        {
             let event = if partial_video_candidate {
                 "bridge.partial_media_candidate_rejected"
             } else {
