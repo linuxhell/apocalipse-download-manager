@@ -10,11 +10,14 @@ p = Path('apps/desktop/src-tauri/src/main.rs')
 s = p.read_text(encoding='utf-8')
 
 # Allow Chrome private/local-network preflights to opt in explicitly.
-old = 'Access-Control-Allow-Headers: Authorization, Content-Type\\r\\\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\\r\\\nContent-Length: {}'
-new = 'Access-Control-Allow-Headers: Authorization, Content-Type\\r\\\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\\r\\\nAccess-Control-Allow-Private-Network: true\\r\\\nContent-Length: {}'
-if old not in s:
-    raise SystemExit('bridge response header block not found')
-s = s.replace(old, new, 1)
+needle_header = 'Access-Control-Allow-Methods: GET, POST, OPTIONS\\r\\\n'
+if needle_header not in s:
+    raise SystemExit('bridge allow-methods header not found')
+s = s.replace(
+    needle_header,
+    needle_header + 'Access-Control-Allow-Private-Network: true\\r\\\n',
+    1,
+)
 
 # Add logging immediately after parsing the HTTP request and before origin/auth.
 needle = '''    let origin = bridge_origin(headers);\n    let has_origin = headers.lines().any(|line| {\n'''
@@ -24,12 +27,30 @@ if needle not in s:
 s = s.replace(needle, replacement, 1)
 
 # The function previously declared first/state later. Remove those duplicate declarations.
-s = s.replace('''    let first = headers.lines().next().unwrap_or_default();\n    if first.starts_with("OPTIONS ") {\n        bridge_response(&mut stream, "204 No Content", origin, "");\n        return;\n    }\n    let state = app.state::<AppState>();\n''', '''    if first.starts_with("OPTIONS ") {\n        diagnostic_log(&state, "INFO", "bridge.preflight.accepted", if has_pna_preflight { "private_network=true" } else { "private_network=false" });\n        bridge_response(&mut stream, "204 No Content", origin, "");\n        return;\n    }\n''', 1)
+old_late = '''    let first = headers.lines().next().unwrap_or_default();\n    if first.starts_with("OPTIONS ") {\n        bridge_response(&mut stream, "204 No Content", origin, "");\n        return;\n    }\n    let state = app.state::<AppState>();\n'''
+new_late = '''    if first.starts_with("OPTIONS ") {\n        diagnostic_log(&state, "INFO", "bridge.preflight.accepted", if has_pna_preflight { "private_network=true" } else { "private_network=false" });\n        bridge_response(&mut stream, "204 No Content", origin, "");\n        return;\n    }\n'''
+if old_late not in s:
+    raise SystemExit('late first/state bridge block not found')
+s = s.replace(old_late, new_late, 1)
 
 # Log origin rejection, auth failure and successful health explicitly.
-s = s.replace('''    if has_origin && origin.is_none() {\n        bridge_response(&mut stream, "403 Forbidden", None, "{\\"ok\\":false}");\n        return;\n    }\n''', '''    if has_origin && origin.is_none() {\n        diagnostic_log(&state, "WARN", "bridge.origin.rejected", "unsupported_origin");\n        bridge_response(&mut stream, "403 Forbidden", None, "{\\"ok\\":false}");\n        return;\n    }\n''', 1)
-s = s.replace('''    if !bridge_authorized(headers, &token) {\n        bridge_response(&mut stream, "401 Unauthorized", origin, "{\\"ok\\":false}");\n        return;\n    }\n''', '''    if !bridge_authorized(headers, &token) {\n        diagnostic_log(&state, "WARN", "bridge.auth.failed", "invalid_or_missing_token");\n        bridge_response(&mut stream, "401 Unauthorized", origin, "{\\"ok\\":false}");\n        return;\n    }\n''', 1)
-s = s.replace('''    if first.starts_with("GET /v1/health ") {\n        bridge_response(&mut stream, "200 OK", origin, "{\\"ok\\":true}");\n''', '''    if first.starts_with("GET /v1/health ") {\n        diagnostic_log(&state, "INFO", "bridge.health.ok", "extension_health_check");\n        bridge_response(&mut stream, "200 OK", origin, "{\\"ok\\":true}");\n''', 1)
+old_origin = '''    if has_origin && origin.is_none() {\n        bridge_response(&mut stream, "403 Forbidden", None, "{\\"ok\\":false}");\n        return;\n    }\n'''
+new_origin = '''    if has_origin && origin.is_none() {\n        diagnostic_log(&state, "WARN", "bridge.origin.rejected", "unsupported_origin");\n        bridge_response(&mut stream, "403 Forbidden", None, "{\\"ok\\":false}");\n        return;\n    }\n'''
+if old_origin not in s:
+    raise SystemExit('origin reject block not found')
+s = s.replace(old_origin, new_origin, 1)
+
+old_auth = '''    if !bridge_authorized(headers, &token) {\n        bridge_response(&mut stream, "401 Unauthorized", origin, "{\\"ok\\":false}");\n        return;\n    }\n'''
+new_auth = '''    if !bridge_authorized(headers, &token) {\n        diagnostic_log(&state, "WARN", "bridge.auth.failed", "invalid_or_missing_token");\n        bridge_response(&mut stream, "401 Unauthorized", origin, "{\\"ok\\":false}");\n        return;\n    }\n'''
+if old_auth not in s:
+    raise SystemExit('auth reject block not found')
+s = s.replace(old_auth, new_auth, 1)
+
+old_health = '''    if first.starts_with("GET /v1/health ") {\n        bridge_response(&mut stream, "200 OK", origin, "{\\"ok\\":true}");\n'''
+new_health = '''    if first.starts_with("GET /v1/health ") {\n        diagnostic_log(&state, "INFO", "bridge.health.ok", "extension_health_check");\n        bridge_response(&mut stream, "200 OK", origin, "{\\"ok\\":true}");\n'''
+if old_health not in s:
+    raise SystemExit('health route block not found')
+s = s.replace(old_health, new_health, 1)
 
 p.write_text(s, encoding='utf-8')
 
