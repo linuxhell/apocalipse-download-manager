@@ -209,9 +209,27 @@ impl DownloadEngine {
                     if let Some(total) = range_total {
                         let useful_connections = requested.min(total.div_ceil(4_194_304) as usize);
                         if useful_connections > 1 {
-                            return self
+                            let segmented = self
                                 .download_segmented(request, events, total, useful_connections)
                                 .await;
+                            return match segmented {
+                                Ok(()) => Ok(()),
+                                Err(error)
+                                    if error.chain().any(|cause| {
+                                        cause
+                                            .to_string()
+                                            .contains("server stopped supporting byte ranges")
+                                    }) =>
+                                {
+                                    // Some CDNs advertise ranges during the probe but stop
+                                    // honoring them once parallel workers begin. Discard only
+                                    // this task's isolated chunks and retry as a single stream.
+                                    let destination = request.destination.clone();
+                                    cleanup_chunk_artifacts(&destination).await?;
+                                    self.download_single(request, events).await
+                                }
+                                Err(error) => Err(error),
+                            };
                         }
                     }
                 }
