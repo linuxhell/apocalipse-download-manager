@@ -102,6 +102,7 @@
       for (let i = entries.length - 1; i >= 0; i -= 1) {
         const name = String(entries[i]?.name || "");
         if (!/^https?:/i.test(name)) continue;
+        if (/\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp)(?:[?#]|$)/i.test(name)) continue;
         // Host names and words such as "video" are not proof that a response is
         // media. DVIDS, for example, also exposes analytics and JSON APIs on
         // similarly named hosts. Passing one of those to the desktop incorrectly
@@ -675,7 +676,8 @@
         const facebookPlayableUrl = isFacebookVideo && currentUrl && (
           isFacebookMediaUrl(currentUrl)
           || /\.(?:mp4|webm|m3u8|mpd)(?:[?#]|$)/i.test(currentUrl)
-          || /(?:fbcdn|fbsbx|video)/i.test(currentUrl)
+          || (/(?:fbcdn|fbsbx|video)/i.test(currentUrl)
+            && !/\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp)(?:[?#]|$)/i.test(currentUrl))
         );
         if (!currentUrl || (isFacebookVideo && !facebookPlayableUrl)) {
           trace("overlay_download_unresolved", "download", { liveBlob: Boolean(liveBlobUrl), liveHttp: Boolean(liveHttpUrl), networkMedia: Boolean(networkMediaUrl), facebook: isFacebookVideo });
