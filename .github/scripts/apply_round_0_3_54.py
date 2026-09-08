@@ -9,15 +9,19 @@ import json
 p = Path('apps/desktop/src-tauri/src/main.rs')
 s = p.read_text(encoding='utf-8')
 
-# Allow Chrome private/local-network preflights to opt in explicitly.
-needle_header = 'Access-Control-Allow-Methods: GET, POST, OPTIONS\\r\\\n'
-if needle_header not in s:
-    raise SystemExit('bridge allow-methods header not found')
-s = s.replace(
-    needle_header,
-    needle_header + 'Access-Control-Allow-Private-Network: true\\r\\\n',
-    1,
-)
+# The Rust response string is written with source-level line continuation, so
+# patch the matching source line instead of depending on escape formatting.
+lines = s.splitlines(keepends=True)
+inserted = False
+for index, line in enumerate(lines):
+    if 'Access-Control-Allow-Methods: GET, POST, OPTIONS' in line:
+        newline = '\r\n' if line.endswith('\r\n') else '\n'
+        lines.insert(index + 1, 'Access-Control-Allow-Private-Network: true\\r\\' + newline)
+        inserted = True
+        break
+if not inserted:
+    raise SystemExit('bridge allow-methods source line not found')
+s = ''.join(lines)
 
 # Add logging immediately after parsing the HTTP request and before origin/auth.
 needle = '''    let origin = bridge_origin(headers);\n    let has_origin = headers.lines().any(|line| {\n'''
@@ -26,14 +30,12 @@ if needle not in s:
     raise SystemExit('bridge origin block not found')
 s = s.replace(needle, replacement, 1)
 
-# The function previously declared first/state later. Remove those duplicate declarations.
 old_late = '''    let first = headers.lines().next().unwrap_or_default();\n    if first.starts_with("OPTIONS ") {\n        bridge_response(&mut stream, "204 No Content", origin, "");\n        return;\n    }\n    let state = app.state::<AppState>();\n'''
 new_late = '''    if first.starts_with("OPTIONS ") {\n        diagnostic_log(&state, "INFO", "bridge.preflight.accepted", if has_pna_preflight { "private_network=true" } else { "private_network=false" });\n        bridge_response(&mut stream, "204 No Content", origin, "");\n        return;\n    }\n'''
 if old_late not in s:
     raise SystemExit('late first/state bridge block not found')
 s = s.replace(old_late, new_late, 1)
 
-# Log origin rejection, auth failure and successful health explicitly.
 old_origin = '''    if has_origin && origin.is_none() {\n        bridge_response(&mut stream, "403 Forbidden", None, "{\\"ok\\":false}");\n        return;\n    }\n'''
 new_origin = '''    if has_origin && origin.is_none() {\n        diagnostic_log(&state, "WARN", "bridge.origin.rejected", "unsupported_origin");\n        bridge_response(&mut stream, "403 Forbidden", None, "{\\"ok\\":false}");\n        return;\n    }\n'''
 if old_origin not in s:
@@ -54,20 +56,17 @@ s = s.replace(old_health, new_health, 1)
 
 p.write_text(s, encoding='utf-8')
 
-# Make popup display the exact bridge error returned by the service worker.
 p = Path('browser-extension/popup.js')
 popup = p.read_text(encoding='utf-8')
 popup = popup.replace('''  chrome.runtime.sendMessage({ type: "APOCALIPSE_BRIDGE_STATUS" }, (status) => setBridgeStatus(Boolean(status?.connected)));''', '''  chrome.runtime.sendMessage({ type: "APOCALIPSE_BRIDGE_STATUS" }, (status) => {\n    const connected = Boolean(status?.connected);\n    setBridgeStatus(connected);\n    if (!connected && status?.error) showBridgeError(status.error);\n  });''', 1)
 popup = popup.replace('''    setBridgeStatus(Boolean(status?.connected));\n  });\n}, 5000);''', '''    const connected = Boolean(status?.connected);\n    setBridgeStatus(connected);\n    if (!connected && status?.error) showBridgeError(status.error);\n  });\n}, 5000);''', 1)
 p.write_text(popup, encoding='utf-8')
 
-# Bump packaged extension version.
 p = Path('browser-extension/manifest.json')
 manifest = json.loads(p.read_text(encoding='utf-8'))
 manifest['version'] = '0.3.54'
 p.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
-# Assertions: this round is specifically about visibility and preflight support.
 assert 'Access-Control-Allow-Private-Network: true' in s
 assert 'bridge.preflight.accepted' in s
 assert 'bridge.request.received' in s
