@@ -1405,7 +1405,7 @@ fn save_queue(state: &AppState, queue: &[DownloadTask]) -> Result<(), String> {
 }
 
 fn load_settings(path: &Path) -> UserSettings {
-    let mut settings: UserSettings = fs::read(path)
+    let settings: UserSettings = fs::read(path)
         .ok()
         .and_then(|data| serde_json::from_slice(&data).ok())
         .unwrap_or_default();
@@ -3352,7 +3352,7 @@ fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
         ),
     );
     let mut command = Command::new(&player);
-    command.arg(video);
+    command.arg(&video);
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
