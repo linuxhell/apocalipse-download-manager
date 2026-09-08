@@ -347,6 +347,24 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     reply({ ok: true, version: chrome.runtime.getManifest().version });
     return;
   }
+  if (message?.type === "APOCALIPSE_FETCH_THUMBNAIL") {
+    (async () => {
+      const url = String(message.url || "");
+      if (!/^https?:/i.test(url)) throw new Error("invalid_thumbnail_url");
+      const response = await fetch(url, { credentials: "include", cache: "force-cache" });
+      if (!response.ok) throw new Error(`thumbnail_http_${response.status}`);
+      const blob = await response.blob();
+      if (!/^image\//i.test(blob.type)) throw new Error("thumbnail_not_image");
+      if (blob.size > 3 * 1024 * 1024) throw new Error("thumbnail_too_large");
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let binary = "";
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+      }
+      reply({ dataUrl: `data:${blob.type};base64,${btoa(binary)}` });
+    })().catch((error) => reply({ error: String(error) }));
+    return true;
+  }
   if (message?.type === "APOCALIPSE_DOWNLOAD") {
     const item = message.item || {};
     const traceId = crypto.randomUUID();
