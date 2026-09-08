@@ -61,11 +61,21 @@
       || "";
   };
 
+  const playableUrlFor = (video) => {
+    for (const value of [video?.currentSrc, video?.src, ...[...(video?.querySelectorAll?.("source") || [])].map((source) => source.src)]) {
+      try {
+        const url = new URL(value, location.href);
+        if (/^https?:$/i.test(url.protocol)) return url.href;
+      } catch {}
+    }
+    return null;
+  };
+
   document.addEventListener("click", (event) => {
     const button = event.target?.closest?.(".apocalipse-media-download:not(.apocalipse-media-record)");
     if (!button) return;
     const video = videoForButton(button);
-    const url = permalinkFor(video);
+    const url = playableUrlFor(video) || permalinkFor(video);
     if (!video || !url) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -83,7 +93,7 @@
         thumbnail: thumbnailFor(video),
       },
     }, (result) => {
-      const failed = chrome.runtime.lastError || result?.target !== "apocalipse";
+      const failed = chrome.runtime.lastError || !result?.ok;
       button.textContent = failed ? "⚠" : "✓";
       button.title = failed
         ? result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable"
