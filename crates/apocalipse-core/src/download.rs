@@ -210,7 +210,12 @@ impl DownloadEngine {
                         let useful_connections = requested.min(total.div_ceil(4_194_304) as usize);
                         if useful_connections > 1 {
                             let segmented = self
-                                .download_segmented(request, events, total, useful_connections)
+                                .download_segmented(
+                                    request.clone(),
+                                    events.clone(),
+                                    total,
+                                    useful_connections,
+                                )
                                 .await;
                             return match segmented {
                                 Ok(()) => Ok(()),
