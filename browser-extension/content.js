@@ -134,8 +134,11 @@
       for (let i = entries.length - 1; i >= 0; i -= 1) {
         const name = String(entries[i]?.name || "");
         if (!/^https?:/i.test(name)) continue;
-        if (/\.(?:mp4|webm|m3u8|mpd)(?:[?#]|$)/i.test(name)
-            || /(?:video|manifest|playlist|master|DVIDS|dvidshub)/i.test(name)) return name;
+        // Host names and words such as "video" are not proof that a response is
+        // media. DVIDS, for example, also exposes analytics and JSON APIs on
+        // similarly named hosts. Passing one of those to the desktop incorrectly
+        // selects NativeHttp/direct_http instead of the HLS pipeline.
+        if (/\.(?:mp4|webm|m3u8|mpd)(?:[?#]|$)/i.test(name)) return name;
       }
     } catch {}
     return null;
@@ -196,10 +199,37 @@
     }
   };
   const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
+  const pageThumbnail = (element) => {
+    const candidates = [
+      element?.poster,
+      element?.getAttribute?.("poster"),
+      document.querySelector('meta[property="og:image:secure_url"]')?.content,
+      document.querySelector('meta[property="og:image"]')?.content,
+      document.querySelector('meta[name="twitter:image"]')?.content,
+      document.querySelector('meta[name="twitter:image:src"]')?.content,
+      document.querySelector('link[rel="image_src"]')?.href,
+      element?.closest?.("figure,article,[class*=player],[class*=video]")?.querySelector?.("img")?.currentSrc,
+    ];
+    for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+      try {
+        const data = JSON.parse(script.textContent || "null");
+        const nodes = Array.isArray(data) ? data : [data];
+        for (const node of nodes) {
+          const value = Array.isArray(node?.thumbnailUrl) ? node.thumbnailUrl[0] : node?.thumbnailUrl;
+          if (value) candidates.push(value);
+        }
+      } catch {}
+    }
+    for (const candidate of candidates) {
+      const url = absolute(candidate);
+      if (url && /^https?:/i.test(url)) return url;
+    }
+    return "";
+  };
   const thumbnailFor = (element, kind) => {
     if (kind === "audio") return "";
     if (element?.tagName === "IMG") return element.currentSrc || element.src || "";
-    return element?.poster || document.querySelector('meta[property="og:image"]')?.content || element?.closest?.("figure,article")?.querySelector?.("img")?.currentSrc || "";
+    return pageThumbnail(element);
   };
   const isFacebookMediaUrl = (url) => {
     try {
@@ -397,7 +427,7 @@
     });
     document.querySelectorAll("img").forEach((element) => add(element.currentSrc || element.src, "image", element));
     performance.getEntriesByType("resource").forEach((entry) => {
-      if (/\.m3u8(?:$|[?#])/i.test(entry.name)) add(entry.name, "video", document.querySelector("video"), document.querySelector("video")?.poster || "");
+      if (/\.m3u8(?:$|[?#])/i.test(entry.name)) add(entry.name, "video", document.querySelector("video"));
     });
     return [...items.values()];
   };
@@ -443,6 +473,61 @@
     const value = new URL(url).pathname.split("/").pop() || "download";
     try { return decodeURIComponent(value); } catch { return value; }
   };
+  const looksLikeDownloadControl = (event) => {
+    for (const node of event.composedPath?.() || []) {
+      const label = `${node?.getAttribute?.("aria-label") || ""} ${node?.getAttribute?.("data-title") || ""} ${node?.title || ""} ${node?.textContent || ""}`
+        .replace(/\s+/g, " ").trim().slice(0, 240);
+      if (/(?:download|baixar|descargar|télécharger|下载)/i.test(label)) return { node, label };
+      if (node?.hasAttribute?.("download")) return { node, label };
+    }
+    return null;
+  };
+  const forceKnownHlsDownload = (event) => {
+    if (/^(?:www\.)?youtube\.com$/i.test(location.hostname) && location.pathname === "/watch") return false;
+    const control = looksLikeDownloadControl(event);
+    const video = document.querySelector("video");
+    const hls = hlsForPage();
+    if (!control || !video || !hls.candidates.length) return false;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    trace("native_force_hls_candidate", "force", {
+      control: control.label,
+      candidates: hls.candidates.length,
+      expectedDuration: Number.isFinite(video.duration) ? video.duration : null,
+    });
+    void (async () => {
+      try {
+        const selected = await chrome.runtime.sendMessage({
+          type: "APOCALIPSE_SELECT_HLS",
+          urls: hls.candidates,
+          expectedDuration: Number.isFinite(video.duration) ? video.duration : null,
+        });
+        const url = selected?.url || hls.fallback;
+        const requestUrls = [...new Set(selected?.requestUrls?.length ? selected.requestUrls : hls.candidates)];
+        const result = await chrome.runtime.sendMessage({
+          type: "APOCALIPSE_DOWNLOAD",
+          item: {
+            url,
+            duration: selected?.duration || null,
+            requestUrls,
+            userAgent: navigator.userAgent,
+            kind: "video",
+            title: document.title,
+            thumbnail: thumbnailFor(video, "video"),
+          },
+        });
+        trace(result?.target === "apocalipse" ? "native_force_hls_handed_off" : "native_force_hls_failed", "force", {
+          target: result?.target || "none",
+          error: result?.error || "none",
+          candidates: requestUrls.length,
+        });
+      } catch (error) {
+        trace("native_force_hls_failed", "force", { error: String(error), candidates: hls.candidates.length });
+      }
+    })();
+    return true;
+  };
   document.addEventListener("click", (event) => {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey) return;
     const bypass = modifierPressed(event, shortcutKeys.bypass);
@@ -452,6 +537,7 @@
       return;
     }
     if (force) {
+      if (forceKnownHlsDownload(event)) return;
       // Force is a transaction, not an instruction to steal the visible href.
       // Let the page run and observe the real downstream file request/download.
       chrome.runtime.sendMessage({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 }).catch(() => {});
@@ -496,7 +582,7 @@
     const urls = [...new Set(performance.getEntriesByType("resource").map((entry) => entry.name)
       .filter((url) => /\.m3u8(?:$|[?#])/i.test(url)))];
     const masters = urls.filter((url) => /(?:\/master\/|master\.m3u8)/i.test(url));
-    return { candidates: urls, fallback: urls.at(-1) || masters.at(-1) || null };
+    return { candidates: urls, fallback: masters.at(-1) || urls.at(-1) || null };
   };
   const downloadUrlFor = (element) => {
     if (element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch") return location.href;
@@ -515,16 +601,20 @@
   };
   const resolveDownloadUrl = async (element) => {
     const immediate = downloadUrlFor(element);
-    if (element.tagName !== "VIDEO" || !immediate || !/\.m3u8(?:$|[?#])/i.test(immediate)) return immediate;
+    if (element.tagName !== "VIDEO") return immediate;
+    // YouTube has its own format-selection pipeline (video + audio merging).
+    // Keep both regular videos and live streams out of the generic HLS route.
+    if (/^(?:www\.)?youtube\.com$/i.test(location.hostname) && location.pathname === "/watch") return immediate;
     const hls = hlsForPage();
+    if (!hls.candidates.length) return immediate;
     try {
       const selected = await chrome.runtime.sendMessage({
         type: "APOCALIPSE_SELECT_HLS",
         urls: hls.candidates,
         expectedDuration: Number.isFinite(element.duration) ? element.duration : null,
       });
-      return selected || { url: immediate, duration: null };
-    } catch { return { url: immediate, duration: null }; }
+      return selected || { url: hls.fallback || immediate, duration: null, requestUrls: hls.candidates };
+    } catch { return { url: hls.fallback || immediate, duration: null, requestUrls: hls.candidates }; }
   };
   let overlayTimer;
   const activeOverlays = new Map();
@@ -608,7 +698,9 @@
           }
         }
 
-        let currentUrl = liveHttpUrl || networkMediaUrl || resolved?.url || resolved || (isYouTubeVideo ? location.href : null);
+        // A resolved HLS manifest is more authoritative than incidental network
+        // traffic or a generic HTTP source exposed by the player.
+        let currentUrl = resolved?.url || resolved || liveHttpUrl || networkMediaUrl || (isYouTubeVideo ? location.href : null);
         const facebookPlayableUrl = isFacebookVideo && currentUrl && (
           isFacebookMediaUrl(currentUrl)
           || /\.(?:mp4|webm|m3u8|mpd)(?:[?#]|$)/i.test(currentUrl)
@@ -635,7 +727,7 @@
         const copiedToClipboard = isFacebookVideo ? copyTextNow(currentUrl) : false;
         const directFacebookMedia = isFacebookVideo ? absolute(element.currentSrc || element.src) : null;
         const requestUrls = [...new Set([
-          ...(resolved?.requestUrls || []),
+          ...(resolved?.requestUrls?.length ? resolved.requestUrls : (/\.m3u8(?:$|[?#])/i.test(String(currentUrl)) ? hlsForPage().candidates : [])),
           ...(directFacebookMedia && /^https?:/i.test(directFacebookMedia) ? [directFacebookMedia] : []),
         ])];
         chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls, userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
