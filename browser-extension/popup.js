@@ -102,6 +102,21 @@ const showBridgeError = (error) => {
   else if (locale === "zh_CN") label.textContent = invalid ? "配对令牌无效。" : "无法连接 Apocalipse。请保持桌面程序运行。";
   else label.textContent = invalid ? "Invalid pairing token." : "Apocalipse is not reachable. Keep the desktop app open.";
 };
+const loadThumbnail = (image, item) => {
+  const fallback = chrome.runtime.getURL("icons/alien-48.png");
+  const source = item.thumbnail || (item.kind === "image" ? item.url : "");
+  if (!source) {
+    image.src = fallback;
+    return;
+  }
+  image.src = source;
+  image.onerror = () => {
+    image.onerror = null;
+    chrome.runtime.sendMessage({ type: "APOCALIPSE_FETCH_THUMBNAIL", url: source }, (result) => {
+      image.src = !chrome.runtime.lastError && result?.dataUrl ? result.dataUrl : fallback;
+    });
+  };
+};
 const render = () => {
   const root = document.querySelector("#items");
   root.textContent = "";
@@ -121,11 +136,7 @@ const render = () => {
       image.hidden = true;
       audio.hidden = false;
     } else {
-      image.src = item.thumbnail || (selected === "image" ? item.url : chrome.runtime.getURL("icons/alien-48.png"));
-      image.onerror = () => {
-        image.onerror = null;
-        image.src = chrome.runtime.getURL("icons/alien-48.png");
-      };
+      loadThumbnail(image, item);
     }
     let parsed;
     try { parsed = new URL(item.url); } catch { parsed = null; }
