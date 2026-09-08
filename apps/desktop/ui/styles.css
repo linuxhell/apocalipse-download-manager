@@ -46,6 +46,7 @@ html { background: transparent; }
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: hidden;
   display: grid;
   grid-template-columns: 240px 1fr;
   background:
@@ -243,18 +244,22 @@ h1 {
 }
 .panel {
   flex: 1;
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: rgba(13, 20, 27, 0.88);
   min-height: 390px;
 }
 .toolbar {
-  height: 58px;
+  min-height: 58px;
+  height: auto;
   border-bottom: 1px solid var(--line);
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   justify-content: space-between;
   align-items: center;
-  padding: 0 14px;
+  padding: 10px 14px;
 }
 .list-actions,
 .list-actions label {
@@ -262,6 +267,14 @@ h1 {
   align-items: center;
   gap: 10px;
 }
+.list-actions {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 520px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.list-actions > button { white-space: nowrap; }
 .list-actions label {
   color: var(--muted);
   font-size: 12px;
@@ -843,7 +856,7 @@ footer .bridge-connected i {
   color: #e5fbff;
   background: #1d3c48;
 }
-.history-search { min-width: 180px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--input); color: var(--text); }
+.history-search { min-width: 150px; max-width: 240px; flex: 1 1 180px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--input); color: var(--text); }
 .advanced-download { margin: 12px 0; padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 .advanced-download summary { cursor: pointer; color: var(--accent); font-weight: 700; margin-bottom: 10px; }
 .advanced-download textarea { width: 100%; resize: vertical; background: var(--input); border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 9px; }
@@ -966,6 +979,10 @@ nav button:hover, nav button.active, .download-icon { color: var(--accent); }
     grid-template-columns: repeat(2, 1fr);
   }
   .appearance-page { grid-template-columns:1fr; }
+  .toolbar { align-items: stretch; }
+  .tabs { width: 100%; }
+  .list-actions { flex-basis: 100%; justify-content: flex-start; }
+  .history-search { max-width: none; }
 }
 @media (max-width: 760px) {
   #add-dialog { overflow-y: auto; }
