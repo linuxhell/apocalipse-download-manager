@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.78",
+  "version": "0.3.79",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -48,6 +48,17 @@
     },
     {
       "matches": [
+        "https://facebook.com/*",
+        "https://*.facebook.com/*"
+      ],
+      "js": [
+        "facebook-media-fix.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": [
         "https://instagram.com/*",
         "https://*.instagram.com/*"
       ],
@@ -67,6 +78,18 @@
       ],
       "run_at": "document_start",
       "all_frames": false
+    },
+    {
+      "matches": [
+        "https://uupdump.net/*",
+        "https://*.uupdump.net/*"
+      ],
+      "js": [
+        "uupdump-post-fix.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false,
+      "world": "MAIN"
     }
   ],
   "icons": {

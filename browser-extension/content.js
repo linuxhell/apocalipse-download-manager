@@ -768,7 +768,7 @@
           candidate: currentUrl,
         });
         chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls, userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: isFacebookVideo ? facebookDownloadTitle(visibleFacebookUrl || location.href) : document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
-          const failed = chrome.runtime.lastError || result?.target !== "apocalipse";
+          const failed = chrome.runtime.lastError || !result?.ok;
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";
           if (failed) button.title = result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable";
@@ -996,6 +996,9 @@
       fileName: data.fileName || "",
       source: data.kind || "main-world",
       force: Boolean(data.force),
+      method: data.method || "GET",
+      body: data.body || null,
+      contentType: data.contentType || null,
     }).then((result) => {
       window.postMessage({
         source: "apocalipse-extension",

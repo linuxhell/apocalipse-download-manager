@@ -67,6 +67,46 @@
     return null;
   };
 
+  const urlInPageJson = (video) => {
+    let context = "";
+    let container = video;
+    for (let depth = 0; container && depth < 10; depth += 1, container = container.parentElement) {
+      const text = String(container.innerText || "").trim();
+      if (text.length >= 12 && text.length <= 4000) context = text.toLowerCase();
+    }
+    const queue = [];
+    const candidates = [];
+    for (const script of document.querySelectorAll('script[type="application/json"],script[id*="DATA"],script[id*="STATE"]')) {
+      const text = script.textContent || "";
+      if (!text.includes("video") || text.length > 15_000_000) continue;
+      try { queue.push(JSON.parse(text)); } catch {}
+    }
+    const visited = new WeakSet();
+    let inspected = 0;
+    while (queue.length && inspected < 25000) {
+      const value = queue.shift();
+      inspected += 1;
+      if (!value || typeof value !== "object" || visited.has(value)) continue;
+      visited.add(value);
+      const id = String(value.id || value.itemId || value.aweme_id || "");
+      const author = value.author?.uniqueId || value.author?.unique_id || value.authorName || value.uniqueId;
+      if (/^\d{15,}$/.test(id) && author) {
+        const url = validUrl(`https://www.tiktok.com/@${author}/video/${id}`);
+        const description = String(value.desc || value.description || value.title || "").trim().toLowerCase();
+        const authorText = String(author).trim().toLowerCase();
+        const score = (description && context.includes(description.slice(0, Math.min(48, description.length))) ? 4 : 0)
+          + (authorText && context.includes(authorText) ? 2 : 0);
+        if (url) candidates.push({ url, score });
+      }
+      for (const child of Object.values(value)) {
+        if (child && typeof child === "object") queue.push(child);
+      }
+    }
+    candidates.sort((left, right) => right.score - left.score);
+    if (candidates[0]?.score > 0) return candidates[0].url;
+    return candidates.length === 1 ? candidates[0].url : null;
+  };
+
   const permalinkFor = (video) => {
     if (validUrl(location.href)) return location.href;
     let container = video;
@@ -74,7 +114,7 @@
       const url = urlInside(container);
       if (url) return url;
     }
-    return urlInState(video);
+    return urlInState(video) || urlInPageJson(video);
   };
 
   document.addEventListener("click", (event) => {
@@ -99,7 +139,7 @@
         thumbnail: video.poster || "",
       },
     }, (result) => {
-      const failed = chrome.runtime.lastError || result?.target !== "apocalipse";
+      const failed = chrome.runtime.lastError || !result?.ok;
       button.textContent = failed ? "⚠" : "✓";
       button.title = failed
         ? result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable"

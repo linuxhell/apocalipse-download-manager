@@ -2,10 +2,11 @@
   const mediaUrl = (value) => {
     try {
       const url = new URL(value, location.href);
-      return /(^|\.)instagram\.com$/i.test(url.hostname)
-        && /\/(?:reel|reels|p)\/[^/?#]+/i.test(url.pathname)
-        ? url.href
-        : null;
+      if (!/(^|\.)facebook\.com$/i.test(url.hostname)) return null;
+      return /\/(?:reel|reels|videos|posts)\/[A-Za-z0-9._-]+/i.test(url.pathname)
+        || /\/(?:watch|permalink|story)\.php/i.test(url.pathname)
+        || /[?&](?:v|fbid|story_fbid)=/i.test(url.href)
+        ? url.href : null;
     } catch { return null; }
   };
 
@@ -26,61 +27,42 @@
   };
 
   const permalinkFor = (video) => {
-    if (mediaUrl(location.href)) return location.href;
-    const selectors = 'a[href*="/reel/"],a[href*="/reels/"],a[href*="/p/"]';
+    const page = mediaUrl(location.href);
+    if (page) return page;
+    const selectors = [
+      'a[href*="/reel/"]', 'a[href*="/reels/"]', 'a[href*="/videos/"]',
+      'a[href*="/posts/"]', 'a[href*="watch.php"]', 'a[href*="permalink.php"]',
+      'a[href*="story.php"]',
+    ].join(",");
     let container = video;
-    for (let depth = 0; container && depth < 24; depth += 1, container = container.parentElement) {
+    for (let depth = 0; container && depth < 20; depth += 1, container = container.parentElement) {
       for (const anchor of container.querySelectorAll?.(selectors) || []) {
         const url = mediaUrl(anchor.href);
         if (url) return url;
       }
-    }
-    const rect = video?.getBoundingClientRect?.();
-    if (!rect) return null;
-    return [...document.querySelectorAll(selectors)]
-      .map((anchor) => ({ url: mediaUrl(anchor.href), rect: anchor.getBoundingClientRect() }))
-      .filter((item) => item.url && item.rect.width > 0 && item.rect.height > 0
-        && item.rect.bottom >= rect.top && item.rect.top <= rect.bottom)
-      .sort((left, right) => {
-        const center = (rect.top + rect.bottom) / 2;
-        return Math.abs((left.rect.top + left.rect.bottom) / 2 - center)
-          - Math.abs((right.rect.top + right.rect.bottom) / 2 - center);
-      })[0]?.url || null;
-  };
-
-  const thumbnailFor = (video) => {
-    if (video?.poster) return video.poster;
-    const rect = video?.getBoundingClientRect?.();
-    if (!rect) return document.querySelector('meta[property="og:image"]')?.content || "";
-    return [...document.images]
-      .map((image) => ({ url: image.currentSrc || image.src, rect: image.getBoundingClientRect() }))
-      .filter((item) => item.url && item.rect.width >= 120 && item.rect.height >= 120
-        && item.rect.bottom >= rect.top && item.rect.top <= rect.bottom)
-      .sort((left, right) => right.rect.width * right.rect.height - left.rect.width * left.rect.height)[0]?.url
-      || document.querySelector('meta[property="og:image"]')?.content
-      || "";
-  };
-
-  const playableUrlFor = (video) => {
-    for (const value of [video?.currentSrc, video?.src, ...[...(video?.querySelectorAll?.("source") || [])].map((source) => source.src)]) {
-      try {
-        const url = new URL(value, location.href);
-        if (/^https?:$/i.test(url.protocol)) return url.href;
-      } catch {}
+      const path = String(container.innerHTML || "").replaceAll("\\/", "/")
+        .match(/\/(?:reel|reels|videos|posts)\/[A-Za-z0-9._-]+/i)?.[0];
+      if (path) return mediaUrl(path);
     }
     return null;
   };
+
+  const thumbnailFor = (video) => video?.poster
+    || document.querySelector('meta[property="og:image"]')?.content
+    || "";
 
   document.addEventListener("click", (event) => {
     const button = event.target?.closest?.(".apocalipse-media-download:not(.apocalipse-media-record)");
     if (!button) return;
     const video = videoForButton(button);
-    const url = playableUrlFor(video) || permalinkFor(video);
+    const url = permalinkFor(video);
     if (!video || !url) return;
+
     event.preventDefault();
     event.stopImmediatePropagation();
     const original = button.textContent;
     button.textContent = "…";
+    const id = new URL(url).pathname.match(/\/(?:reel|reels|videos|posts)\/([^/?#]+)/i)?.[1] || "video";
     chrome.runtime.sendMessage({
       type: "APOCALIPSE_DOWNLOAD",
       item: {
@@ -89,7 +71,7 @@
         requestUrls: [],
         userAgent: navigator.userAgent,
         kind: "video",
-        title: document.title,
+        title: `Facebook-${id}`,
         thumbnail: thumbnailFor(video),
       },
     }, (result) => {
