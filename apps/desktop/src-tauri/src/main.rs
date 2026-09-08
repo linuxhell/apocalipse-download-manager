@@ -240,7 +240,9 @@ struct UserSettings {
     language: String,
 }
 
-fn default_language() -> String { "en".to_owned() }
+fn default_language() -> String {
+    "en".to_owned()
+}
 
 fn tray_labels(language: &str) -> (&'static str, &'static str) {
     match language {
@@ -2304,7 +2306,8 @@ fn write_diagnostic_zip(path: &Path, entries: Vec<(String, Vec<u8>)>) -> Result<
         output.extend_from_slice(&offset.to_le_bytes());
         output.extend_from_slice(name);
     }
-    let central_size = u32::try_from(output.len()).map_err(|_| "diagnostic_too_large")? - central_offset;
+    let central_size =
+        u32::try_from(output.len()).map_err(|_| "diagnostic_too_large")? - central_offset;
     let count = u16::try_from(central.len()).map_err(|_| "diagnostic_too_large")?;
     output.extend_from_slice(&0x06054b50_u32.to_le_bytes());
     output.extend_from_slice(&0_u16.to_le_bytes());
@@ -2320,17 +2323,39 @@ fn write_diagnostic_zip(path: &Path, entries: Vec<(String, Vec<u8>)>) -> Result<
 #[tauri::command]
 fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>, String> {
     let now = chrono::Local::now();
-    let file_name = format!("Apocalipse-Diagnostico-{}.zip", now.format("%Y-%m-%d_%H-%M-%S"));
+    let file_name = format!(
+        "Apocalipse-Diagnostico-{}.zip",
+        now.format("%Y-%m-%d_%H-%M-%S")
+    );
     let Some(path) = rfd::FileDialog::new()
         .set_file_name(&file_name)
         .add_filter("Apocalipse diagnostic", &["zip"])
         .save_file()
-    else { return Ok(None); };
+    else {
+        return Ok(None);
+    };
 
-    diagnostic_log(&state, "INFO", "log.export_started", "diagnostic bundle requested");
-    let settings = state.settings.lock().map_err(|error| error.to_string())?.clone();
-    let queue = state.queue.lock().map_err(|error| error.to_string())?.clone();
-    let rules = state.site_rules.lock().map_err(|error| error.to_string())?.clone();
+    diagnostic_log(
+        &state,
+        "INFO",
+        "log.export_started",
+        "diagnostic bundle requested",
+    );
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let queue = state
+        .queue
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let rules = state
+        .site_rules
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
     let settings_snapshot = serde_json::json!({
         "maxActiveDownloads": settings.max_active_downloads,
         "connectionsPerDownload": settings.connections_per_download,
@@ -2351,20 +2376,29 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         },
         "pairingTokenPresent": !settings.bridge_token.is_empty(),
     });
-    let queue_snapshot = queue.iter().map(|task| serde_json::json!({
-        "id": task.id,
-        "source": redact_url(&task.source),
-        "file": task.destination.file_name().map(|name| name.to_string_lossy()),
-        "state": task.state,
-        "received": task.received,
-        "total": task.total,
-        "downloadSpeed": task.download_speed,
-        "uploadSpeed": task.upload_speed,
-        "connectionsOverride": task.connections_override,
-        "createdAt": task.created_at,
-        "completedAt": task.completed_at,
-    })).collect::<Vec<_>>();
-    let bridge_connected = state.bridge_last_seen.lock().ok().and_then(|seen| *seen)
+    let queue_snapshot = queue
+        .iter()
+        .map(|task| {
+            serde_json::json!({
+                "id": task.id,
+                "source": redact_url(&task.source),
+                "file": task.destination.file_name().map(|name| name.to_string_lossy()),
+                "state": task.state,
+                "received": task.received,
+                "total": task.total,
+                "downloadSpeed": task.download_speed,
+                "uploadSpeed": task.upload_speed,
+                "connectionsOverride": task.connections_override,
+                "createdAt": task.created_at,
+                "completedAt": task.completed_at,
+            })
+        })
+        .collect::<Vec<_>>();
+    let bridge_connected = state
+        .bridge_last_seen
+        .lock()
+        .ok()
+        .and_then(|seen| *seen)
         .is_some_and(|seen| seen.elapsed() < Duration::from_secs(90));
     let manifest = serde_json::json!({
         "format": "apocalipse-diagnostic-bundle",
@@ -2379,15 +2413,30 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
     });
 
     let mut entries = vec![
-        ("manifest.json".to_owned(), serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?),
-        ("config/settings-safe.json".to_owned(), serde_json::to_vec_pretty(&settings_snapshot).map_err(|e| e.to_string())?),
-        ("state/queue-safe.json".to_owned(), serde_json::to_vec_pretty(&queue_snapshot).map_err(|e| e.to_string())?),
-        ("config/site-rules.json".to_owned(), serde_json::to_vec_pretty(&rules).map_err(|e| e.to_string())?),
+        (
+            "manifest.json".to_owned(),
+            serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?,
+        ),
+        (
+            "config/settings-safe.json".to_owned(),
+            serde_json::to_vec_pretty(&settings_snapshot).map_err(|e| e.to_string())?,
+        ),
+        (
+            "state/queue-safe.json".to_owned(),
+            serde_json::to_vec_pretty(&queue_snapshot).map_err(|e| e.to_string())?,
+        ),
+        (
+            "config/site-rules.json".to_owned(),
+            serde_json::to_vec_pretty(&rules).map_err(|e| e.to_string())?,
+        ),
     ];
     let mut all_events = String::new();
     for (source, name) in [
         (state.log_path.clone(), "logs/events.jsonl"),
-        (state.log_path.with_extension("log.1"), "logs/events-previous.jsonl"),
+        (
+            state.log_path.with_extension("log.1"),
+            "logs/events-previous.jsonl",
+        ),
     ] {
         if let Ok(contents) = fs::read(source) {
             all_events.push_str(&String::from_utf8_lossy(&contents));
@@ -2399,23 +2448,42 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
     let mut event_counts = HashMap::<String, usize>::new();
     for line in all_events.lines().filter(|line| !line.trim().is_empty()) {
         let parsed = serde_json::from_str::<serde_json::Value>(line).ok();
-        let event = parsed.as_ref().and_then(|item| item.get("event")).and_then(|item| item.as_str()).unwrap_or("legacy");
-        let level = parsed.as_ref().and_then(|item| item.get("level")).and_then(|item| item.as_str()).unwrap_or("INFO");
+        let event = parsed
+            .as_ref()
+            .and_then(|item| item.get("event"))
+            .and_then(|item| item.as_str())
+            .unwrap_or("legacy");
+        let level = parsed
+            .as_ref()
+            .and_then(|item| item.get("level"))
+            .and_then(|item| item.as_str())
+            .unwrap_or("INFO");
         *levels.entry(level.to_owned()).or_default() += 1;
         *event_counts.entry(event.to_owned()).or_default() += 1;
-        let bucket = if event.starts_with("extension.") { "extension-shortcuts-overlays" }
-            else if event.starts_with("ui.") { "interface" }
-            else if event.starts_with("bridge.") { "bridge" }
-            else if event.starts_with("http.") { "http" }
-            else if event.starts_with("blob.") || event.contains("recording") { "recordings" }
-            else if event.starts_with("external.") || event.starts_with("yt_dlp.") { "media-torrent-hls" }
-            else { "application" };
+        let bucket = if event.starts_with("extension.") {
+            "extension-shortcuts-overlays"
+        } else if event.starts_with("ui.") {
+            "interface"
+        } else if event.starts_with("bridge.") {
+            "bridge"
+        } else if event.starts_with("http.") {
+            "http"
+        } else if event.starts_with("blob.") || event.contains("recording") {
+            "recordings"
+        } else if event.starts_with("external.") || event.starts_with("yt_dlp.") {
+            "media-torrent-hls"
+        } else {
+            "application"
+        };
         let target = buckets.entry(bucket).or_default();
         target.push_str(line);
         target.push('\n');
     }
     for (bucket, contents) in buckets {
-        entries.push((format!("logs/by-component/{bucket}.jsonl"), contents.into_bytes()));
+        entries.push((
+            format!("logs/by-component/{bucket}.jsonl"),
+            contents.into_bytes(),
+        ));
     }
     let summary = serde_json::json!({
         "totalEvents": levels.values().sum::<usize>(),
@@ -2423,11 +2491,19 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         "events": event_counts,
         "hint": "Start with ERROR/WARN events, then correlate matching task, trace and timestamp in logs/events.jsonl."
     });
-    entries.push(("summary.json".to_owned(), serde_json::to_vec_pretty(&summary).map_err(|e| e.to_string())?));
+    entries.push((
+        "summary.json".to_owned(),
+        serde_json::to_vec_pretty(&summary).map_err(|e| e.to_string())?,
+    ));
     let guide = b"Apocalipse diagnostic bundle v2\nUse manifest.json first, then correlate logs/events.jsonl by trace, task and timestamp. Sensitive values are redacted.\n";
     entries.push(("README.txt".to_owned(), guide.to_vec()));
     write_diagnostic_zip(&path, entries)?;
-    diagnostic_log(&state, "INFO", "log.export_completed", &format!("file={}", path.display()));
+    diagnostic_log(
+        &state,
+        "INFO",
+        "log.export_completed",
+        &format!("file={}", path.display()),
+    );
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
@@ -2444,15 +2520,28 @@ fn record_ui_diagnostic(
 
 #[tauri::command]
 fn set_application_language(state: State<'_, AppState>, language: String) -> Result<(), String> {
-    if !matches!(language.as_str(), "en" | "pt-BR" | "zh-CN") { return Err("unsupported_language".to_owned()); }
+    if !matches!(language.as_str(), "en" | "pt-BR" | "zh-CN") {
+        return Err("unsupported_language".to_owned());
+    }
     let (show, quit) = tray_labels(&language);
-    state.tray_show.set_text(show).map_err(|error| error.to_string())?;
-    state.tray_quit.set_text(quit).map_err(|error| error.to_string())?;
+    state
+        .tray_show
+        .set_text(show)
+        .map_err(|error| error.to_string())?;
+    state
+        .tray_quit
+        .set_text(quit)
+        .map_err(|error| error.to_string())?;
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.language = language.clone();
     save_settings(&state, &settings)?;
     drop(settings);
-    diagnostic_log(&state, "INFO", "application.language_changed", &format!("language={language}"));
+    diagnostic_log(
+        &state,
+        "INFO",
+        "application.language_changed",
+        &format!("language={language}"),
+    );
     Ok(())
 }
 
@@ -3250,12 +3339,17 @@ fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
         active_torrent_video(root.parent().unwrap_or(Path::new(".")))
             .ok_or_else(|| "torrent_video_not_available".to_owned())?
     };
-    let player = player.unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "vlc.exe" } else { "vlc" }));
+    let player =
+        player.unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "vlc.exe" } else { "vlc" }));
     diagnostic_log(
         &state,
         "INFO",
         "torrent.preview_requested",
-        &format!("task={id} file={} player={}", video.display(), player.display()),
+        &format!(
+            "task={id} file={} player={}",
+            video.display(),
+            player.display()
+        ),
     );
     let mut command = Command::new(&player);
     command.arg(video);
@@ -3266,11 +3360,21 @@ fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
     }
     match command.spawn() {
         Ok(_) => {
-            diagnostic_log(&state, "INFO", "torrent.preview_opened", &format!("task={id} file={}", video.display()));
+            diagnostic_log(
+                &state,
+                "INFO",
+                "torrent.preview_opened",
+                &format!("task={id} file={}", video.display()),
+            );
             Ok(())
         }
         Err(error) => {
-            diagnostic_log(&state, "ERROR", "torrent.preview_failed", &format!("task={id} player={} error={error}", player.display()));
+            diagnostic_log(
+                &state,
+                "ERROR",
+                "torrent.preview_failed",
+                &format!("task={id} player={} error={error}", player.display()),
+            );
             Err(error.to_string())
         }
     }
@@ -3539,7 +3643,8 @@ fn enqueue_download_impl(
             "task={} engine={kind:?} rule={} threads_override={} url={} file={}",
             task.id,
             site_rule.as_ref().map_or("none", |rule| rule.id.as_str()),
-            task.connections_override.map_or_else(|| "global".to_owned(), |value| value.to_string()),
+            task.connections_override
+                .map_or_else(|| "global".to_owned(), |value| value.to_string()),
             redact_url(&task.source),
             task.destination.display()
         ),
@@ -4488,9 +4593,9 @@ fn queue_from_bridge(
                 .filter(|name| {
                     !name.is_empty()
                         && name.len() <= 80
-                        && name
-                            .chars()
-                            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+                        && name.chars().all(|character| {
+                            character.is_ascii_alphanumeric() || matches!(character, '_' | '-')
+                        })
                 })
                 .take(24)
                 .collect::<Vec<_>>()
@@ -4902,7 +5007,15 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             &state,
             "WARN",
             "bridge.authentication_failed",
-            &format!("request={} origin={}", first.split_whitespace().take(2).collect::<Vec<_>>().join(" "), origin.unwrap_or("none")),
+            &format!(
+                "request={} origin={}",
+                first
+                    .split_whitespace()
+                    .take(2)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                origin.unwrap_or("none")
+            ),
         );
         bridge_response(&mut stream, "401 Unauthorized", origin, "{\"ok\":false}");
         return;
@@ -4914,13 +5027,31 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         &state,
         "DEBUG",
         "bridge.request",
-        &format!("request={} origin={}", first.split_whitespace().take(2).collect::<Vec<_>>().join(" "), origin.unwrap_or("none")),
+        &format!(
+            "request={} origin={}",
+            first
+                .split_whitespace()
+                .take(2)
+                .collect::<Vec<_>>()
+                .join(" "),
+            origin.unwrap_or("none")
+        ),
     );
     if first.starts_with("GET /v1/health ") {
-        diagnostic_log(&state, "DEBUG", "bridge.health", "extension heartbeat authenticated");
+        diagnostic_log(
+            &state,
+            "DEBUG",
+            "bridge.health",
+            "extension heartbeat authenticated",
+        );
         bridge_response(&mut stream, "200 OK", origin, "{\"ok\":true}");
     } else if first.starts_with("GET /v1/activate ") {
-        diagnostic_log(&state, "INFO", "application.second_instance", "existing instance activated");
+        diagnostic_log(
+            &state,
+            "INFO",
+            "application.second_instance",
+            "existing instance activated",
+        );
         show_main_window(app);
         bridge_response(&mut stream, "200 OK", origin, "{\"ok\":true}");
     } else if first.starts_with("POST /v1/diagnostic ") {
@@ -4947,7 +5078,12 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                 bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}");
             }
             Err(error) => {
-                diagnostic_log(&state, "WARN", "bridge.diagnostic_invalid", &error.to_string());
+                diagnostic_log(
+                    &state,
+                    "WARN",
+                    "bridge.diagnostic_invalid",
+                    &error.to_string(),
+                );
                 bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}");
             }
         }
@@ -5064,7 +5200,9 @@ fn run_extension_bridge(app: tauri::AppHandle, listener: TcpListener) {
 }
 
 fn activate_running_instance(token: &str) -> bool {
-    let Ok(mut stream) = TcpStream::connect(("127.0.0.1", BRIDGE_PORT)) else { return false; };
+    let Ok(mut stream) = TcpStream::connect(("127.0.0.1", BRIDGE_PORT)) else {
+        return false;
+    };
     let request = format!(
         "GET /v1/activate HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
     );
