@@ -47,6 +47,7 @@ const catalogs = {
     sourceUrl: "Source URL",
     cancel: "Cancel",
     analyze: "Analyze",
+    torrentMetadataSeeking: "Finding peers and receiving torrent metadata",
     saveTo: "Save to",
     fileName: "File name",
     queued: "Queued",
@@ -56,6 +57,10 @@ const catalogs = {
     failed: "Failed",
     pause: "Pause",
     resume: "Resume",
+    resumeCapability: "Resume capability:",
+    resumeYes: "Yes",
+    resumeNo: "No",
+    resumeChecking: "Checking…",
     retry: "Retry",
     openFolder: "Open folder",
     preview: "Preview",
@@ -214,6 +219,7 @@ const catalogs = {
     sourceUrl: "URL de origem",
     cancel: "Cancelar",
     analyze: "Analisar",
+    torrentMetadataSeeking: "Procurando pares e recebendo metadados do torrent",
     saveTo: "Salvar em",
     fileName: "Nome do arquivo",
     queued: "Na fila",
@@ -223,6 +229,10 @@ const catalogs = {
     failed: "Falhou",
     pause: "Pausar",
     resume: "Continuar",
+    resumeCapability: "Capacidade de continuar:",
+    resumeYes: "Sim",
+    resumeNo: "Não",
+    resumeChecking: "Verificando…",
     retry: "Tentar novamente",
     openFolder: "Abrir pasta",
     preview: "Pré-visualizar",
@@ -389,6 +399,10 @@ const catalogs = {
     failed: "失败",
     pause: "暂停",
     resume: "继续",
+    resumeCapability: "续传能力：",
+    resumeYes: "是",
+    resumeNo: "否",
+    resumeChecking: "检查中…",
     retry: "重试",
     openFolder: "打开文件夹",
     preview: "预览",
@@ -698,6 +712,16 @@ function renderDownloads() {
         : `${progressText}${torrentStats}`;
     progress.append(bar);
     info.append(progress, details);
+    const resumeCapability = document.createElement("strong");
+    resumeCapability.className = "resume-capability";
+    const resumeValue = task.resume_supported === true
+      ? t("resumeYes")
+      : task.resume_supported === false
+        ? t("resumeNo")
+        : t("resumeChecking");
+    resumeCapability.textContent = `${t("resumeCapability")} ${resumeValue}`;
+    resumeCapability.dataset.supported = task.resume_supported === true ? "true" : task.resume_supported === false ? "false" : "unknown";
+    info.append(resumeCapability);
     const state = Object.assign(document.createElement("span"), {
       className: "download-state",
       textContent: /\.recording\.webm$/i.test(task.destination) && stateKey(task.state) === "downloading" ? t("recordingActive") : stateName(task.state),
@@ -1559,6 +1583,7 @@ document.querySelector("#save-tools").onclick = async (event) => {
     await invoke("set_tool_paths", {
       ffmpeg: document.querySelector("#tool-ffmpeg").value,
       ytDlp: document.querySelector("#tool-yt-dlp").value,
+      qjs: document.querySelector("#tool-qjs").value,
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
       aria2: document.querySelector("#tool-aria2").value,
     });
@@ -1748,9 +1773,13 @@ document.querySelector("#task-connections").oninput = (event) => {
 document.querySelector("#analyze").onclick = async () => {
   const url = document.querySelector("#url");
   if (!url.reportValidity()) return;
+  const analyzeButton = document.querySelector("#analyze");
+  if (analyzeButton.disabled) return;
+  analyzeButton.disabled = true;
   const box = document.querySelector("#analysis");
   box.hidden = false;
   box.textContent = "…";
+  let metadataTimer = null;
   try {
     const plan = await invoke("inspect_url", { url: url.value });
     const fileName = document.querySelector("#file-name");
@@ -1763,7 +1792,19 @@ document.querySelector("#analyze").onclick = async () => {
     }
     box.textContent = `${plan.primary} · ${plan.reason}`;
     if (plan.primary === "YtDlp") await showMediaInspection(url.value);
-    else if (plan.primary === "Aria2Rpc" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) await showTorrentInspection(url.value);
+    else if (plan.primary === "Aria2Rpc" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) {
+      const startedAt = Date.now();
+      const updateMetadataStatus = () => {
+        const seconds = Math.floor((Date.now() - startedAt) / 1000);
+        box.textContent = `${t("torrentMetadataSeeking")} · ${seconds}s`;
+      };
+      updateMetadataStatus();
+      metadataTimer = window.setInterval(updateMetadataStatus, 1000);
+      await showTorrentInspection(url.value);
+      window.clearInterval(metadataTimer);
+      metadataTimer = null;
+      box.textContent = `${plan.primary} · ${plan.reason}`;
+    }
     else if (plan.primary === "NM3u8DlRe") {
       const select = document.querySelector("#media-format");
       select.replaceChildren();
@@ -1778,6 +1819,9 @@ document.querySelector("#analyze").onclick = async () => {
     document.querySelector("#enqueue").hidden = false;
   } catch (error) {
     box.textContent = String(error);
+  } finally {
+    if (metadataTimer) window.clearInterval(metadataTimer);
+    analyzeButton.disabled = false;
   }
 };
 document.querySelector("#enqueue").onclick = async () => {

@@ -86,6 +86,8 @@ struct UserSettings {
     #[serde(default)]
     yt_dlp_path: Option<PathBuf>,
     #[serde(default)]
+    qjs_path: Option<PathBuf>,
+    #[serde(default)]
     n_m3u8dl_re_path: Option<PathBuf>,
     #[serde(default)]
     aria2_path: Option<PathBuf>,
@@ -158,6 +160,7 @@ impl Default for UserSettings {
             recent_download_directories: Vec::new(),
             ffmpeg_path: None,
             yt_dlp_path: None,
+            qjs_path: None,
             n_m3u8dl_re_path: None,
             aria2_path: None,
             media_player_path: None,
@@ -1099,10 +1102,14 @@ async fn inspect_media_formats(
     state: State<'_, AppState>,
     url: String,
 ) -> Result<MediaInspection, String> {
-    let (executable, credential) = {
+    let (executable, quickjs, credential) = {
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
         (
             configured_tool(&settings.yt_dlp_path, "yt-dlp"),
+            configured_tool(
+                &settings.qjs_path,
+                if cfg!(windows) { "qjs.exe" } else { "qjs" },
+            ),
             website_credential_for_url(&settings, &url).cloned(),
         )
     };
@@ -1114,6 +1121,8 @@ async fn inspect_media_formats(
             "--skip-download",
             "--no-warnings",
         ])
+        .arg("--js-runtimes")
+        .arg(format!("quickjs:{}", quickjs.display()))
         .arg(&url);
     if let Some(credential) = credential {
         command
@@ -1744,12 +1753,22 @@ async fn run_external_download(
                 .arg("--concurrent-fragments")
                 .arg(task_connections.to_string());
             let quickjs_name = if cfg!(windows) { "qjs.exe" } else { "qjs" };
-            let adjacent_quickjs = tools
-                .1
-                .parent()
-                .map(|directory| directory.join(quickjs_name))
-                .filter(|path| path.is_file());
-            if let Some(quickjs) = adjacent_quickjs {
+            let configured_quickjs = app
+                .state::<AppState>()
+                .settings
+                .lock()
+                .ok()
+                .map(|settings| configured_tool(&settings.qjs_path, quickjs_name));
+            let quickjs = configured_quickjs
+                .filter(|path| path.is_file())
+                .or_else(|| {
+                    tools
+                        .1
+                        .parent()
+                        .map(|directory| directory.join(quickjs_name))
+                        .filter(|path| path.is_file())
+                });
+            if let Some(quickjs) = quickjs {
                 command
                     .arg("--js-runtimes")
                     .arg(format!("quickjs:{}", quickjs.display()));
@@ -2245,6 +2264,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         "tools": {
             "ffmpeg": settings.ffmpeg_path.as_ref().is_some_and(|path| path.is_file()),
             "ytDlp": settings.yt_dlp_path.as_ref().is_some_and(|path| path.is_file()),
+            "qjs": settings.qjs_path.as_ref().is_some_and(|path| path.is_file()),
             "nM3u8DlRe": settings.n_m3u8dl_re_path.as_ref().is_some_and(|path| path.is_file()),
             "aria2": settings.aria2_path.as_ref().is_some_and(|path| path.is_file()),
             "mediaPlayer": settings.media_player_path.as_ref().is_some_and(|path| path.is_file()),
@@ -2936,6 +2956,14 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
             ["--version"].as_slice(),
         ),
         (
+            "qjs",
+            configured_tool(
+                &settings.qjs_path,
+                if cfg!(windows) { "qjs.exe" } else { "qjs" },
+            ),
+            ["--version"].as_slice(),
+        ),
+        (
             "n-m3u8dl-re",
             configured_tool(
                 &settings.n_m3u8dl_re_path,
@@ -2995,12 +3023,14 @@ fn set_tool_paths(
     state: State<'_, AppState>,
     ffmpeg: String,
     yt_dlp: String,
+    qjs: String,
     n_m3u8dl_re: String,
     aria2: String,
 ) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.ffmpeg_path = optional_path(ffmpeg);
     settings.yt_dlp_path = optional_path(yt_dlp);
+    settings.qjs_path = optional_path(qjs);
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
     settings.aria2_path = optional_path(aria2);
     save_settings(&state, &settings)
@@ -3060,6 +3090,27 @@ fn find_video_file(root: &Path, depth: usize) -> Option<PathBuf> {
         }
     }
     best.map(|(_, path)| path)
+}
+
+fn find_named_file(root: &Path, expected_name: &str, depth: usize) -> Option<PathBuf> {
+    if depth > 8 {
+        return None;
+    }
+    for entry in fs::read_dir(root).ok()?.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_named_file(&path, expected_name, depth + 1) {
+                return Some(found);
+            }
+        } else if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case(expected_name))
+        {
+            return Some(path);
+        }
+    }
+    None
 }
 
 fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
@@ -3166,48 +3217,136 @@ fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
 }
 
 #[tauri::command]
-fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, String> {
-    if id != "yt-dlp" {
-        return Err("manual_update_required: this engine has no safe in-place updater".to_owned());
-    }
+async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, String> {
     let executable = {
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
-        configured_tool(
-            &settings.yt_dlp_path,
-            if cfg!(windows) {
-                "yt-dlp.exe"
-            } else {
-                "yt-dlp"
-            },
-        )
+        match id.as_str() {
+            "yt-dlp" => configured_tool(&settings.yt_dlp_path, if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" }),
+            "qjs" => configured_tool(&settings.qjs_path, if cfg!(windows) { "qjs.exe" } else { "qjs" }),
+            "aria2" => configured_tool(&settings.aria2_path, if cfg!(windows) { "aria2c.exe" } else { "aria2c" }),
+            "n-m3u8dl-re" => configured_tool(&settings.n_m3u8dl_re_path, if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" }),
+            "ffmpeg" => configured_tool(&settings.ffmpeg_path, if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" }),
+            _ => return Err("unknown_tool".to_owned()),
+        }
     };
     if executable.is_dir() {
         return Err("tool_target_must_be_a_file".to_owned());
     }
-    let before =
-        version_line(&executable, &["--version"]).ok_or_else(|| "yt_dlp_not_found".to_owned())?;
-    let mut command = Command::new(&executable);
-    command.args(["--update-to", "stable"]);
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
-    let output = command.output().map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        return Err(if message.is_empty() {
-            "yt_dlp_update_failed".to_owned()
+
+    if id == "yt-dlp" {
+        let before = version_line(&executable, &["--version"]).ok_or_else(|| "yt_dlp_not_found".to_owned())?;
+        let mut command = Command::new(&executable);
+        command.arg("-U");
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
+        let output = command.output().map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+            return Err(if message.is_empty() { "yt_dlp_update_failed".to_owned() } else { message });
+        }
+        let after = version_line(&executable, &["--version"]).unwrap_or_else(|| before.clone());
+        return Ok(if before == after {
+            format!("yt-dlp already current ({after})")
         } else {
-            message
+            format!("yt-dlp updated: {before} → {after}")
         });
     }
-    let after = version_line(&executable, &["--version"]).unwrap_or_else(|| before.clone());
-    Ok(if before == after {
-        format!("yt-dlp already current ({after})")
-    } else {
-        format!("yt-dlp updated: {before} → {after}")
-    })
+
+    #[cfg(not(target_os = "windows"))]
+    return Err("automatic_binary_update_not_available_for_this_platform".to_owned());
+
+    #[cfg(target_os = "windows")]
+    {
+        let (repository, executable_name, asset_markers, version_args): (&str, &str, &[&str], &[&str]) = match id.as_str() {
+            "qjs" => ("quickjs-ng/quickjs", "qjs.exe", &["windows", "x86_64", ".zip"], &["--version"]),
+            "aria2" => ("aria2/aria2", "aria2c.exe", &["win", "64bit", ".zip"], &["--version"]),
+            "n-m3u8dl-re" => ("nilaoda/N_m3u8DL-RE", "N_m3u8DL-RE.exe", &["win-x64", ".zip"], &["--version"]),
+            "ffmpeg" => ("BtbN/FFmpeg-Builds", "ffmpeg.exe", &["win64", "gpl", ".zip"], &["-version"]),
+            _ => return Err("unknown_tool".to_owned()),
+        };
+        let before = version_line(&executable, version_args).unwrap_or_else(|| "unknown".to_owned());
+        let api = format!("https://api.github.com/repos/{repository}/releases/latest");
+        let client = reqwest::Client::builder().user_agent("Apocalipse-Download-Manager").build().map_err(|error| error.to_string())?;
+        let release: serde_json::Value = client.get(api).send().await.map_err(|error| error.to_string())?.error_for_status().map_err(|error| error.to_string())?.json().await.map_err(|error| error.to_string())?;
+        let tag = release.get("tag_name").and_then(|value| value.as_str()).unwrap_or("latest");
+        let assets = release.get("assets").and_then(|value| value.as_array()).ok_or_else(|| "release_has_no_assets".to_owned())?;
+        let asset = assets.iter().find(|asset| {
+            let name = asset.get("name").and_then(|value| value.as_str()).unwrap_or("").to_ascii_lowercase();
+            asset_markers.iter().all(|marker| name.contains(&marker.to_ascii_lowercase()))
+        }).ok_or_else(|| format!("compatible_release_asset_not_found:{repository}:{tag}"))?;
+        let asset_name = asset.get("name").and_then(|value| value.as_str()).unwrap_or("release.zip");
+        let asset_url = asset.get("browser_download_url").and_then(|value| value.as_str()).ok_or_else(|| "release_asset_url_missing".to_owned())?;
+        let bytes = client.get(asset_url).send().await.map_err(|error| error.to_string())?.error_for_status().map_err(|error| error.to_string())?.bytes().await.map_err(|error| error.to_string())?;
+        let sha256 = format!("{:x}", Sha256::digest(&bytes));
+        let temporary = std::env::temp_dir().join(format!("apocalipse-tool-update-{}", uuid::Uuid::new_v4()));
+        let archive_path = temporary.join("release.zip");
+        let extracted = temporary.join("extracted");
+        fs::create_dir_all(&extracted).map_err(|error| error.to_string())?;
+        fs::write(&archive_path, &bytes).map_err(|error| error.to_string())?;
+        let mut extractor = Command::new("tar.exe");
+        extractor.arg("-xf").arg(&archive_path).arg("-C").arg(&extracted);
+        use std::os::windows::process::CommandExt;
+        extractor.creation_flags(0x08000000);
+        let extraction = extractor.output().map_err(|error| error.to_string())?;
+        if !extraction.status.success() {
+            let _ = fs::remove_dir_all(&temporary);
+            return Err(format!("release_extraction_failed:{}", String::from_utf8_lossy(&extraction.stderr).trim()));
+        }
+        let replacement_path = find_named_file(&extracted, executable_name, 0).ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
+        let replacement = fs::read(replacement_path).map_err(|error| error.to_string())?;
+        let ffprobe_replacement = if id == "ffmpeg" {
+            fs::read(find_named_file(&extracted, "ffprobe.exe", 0).ok_or_else(|| "ffprobe_missing_from_release".to_owned())?).map_err(|error| error.to_string())?
+        } else {
+            Vec::new()
+        };
+        let _ = fs::remove_dir_all(&temporary);
+        if replacement.len() < 32_768 || (id == "ffmpeg" && ffprobe_replacement.len() < 32_768) {
+            return Err(format!("replacement_executable_invalid:{asset_name}"));
+        }
+        let parent = executable.parent().ok_or_else(|| "tool_target_has_no_directory".to_owned())?;
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        let staged = parent.join(format!(".{executable_name}.apocalipse-new"));
+        let backup = parent.join(format!(".{executable_name}.apocalipse-backup"));
+        let ffprobe = parent.join("ffprobe.exe");
+        let ffprobe_staged = parent.join(".ffprobe.exe.apocalipse-new");
+        let ffprobe_backup = parent.join(".ffprobe.exe.apocalipse-backup");
+        fs::write(&staged, &replacement).map_err(|error| error.to_string())?;
+        if id == "ffmpeg" { fs::write(&ffprobe_staged, &ffprobe_replacement).map_err(|error| error.to_string())?; }
+        if backup.exists() { fs::remove_file(&backup).map_err(|error| error.to_string())?; }
+        if ffprobe_backup.exists() { fs::remove_file(&ffprobe_backup).map_err(|error| error.to_string())?; }
+        if executable.exists() { fs::rename(&executable, &backup).map_err(|error| error.to_string())?; }
+        if id == "ffmpeg" && ffprobe.exists() { fs::rename(&ffprobe, &ffprobe_backup).map_err(|error| error.to_string())?; }
+        if let Err(error) = fs::rename(&staged, &executable) {
+            if backup.exists() { let _ = fs::rename(&backup, &executable); }
+            if ffprobe_backup.exists() { let _ = fs::rename(&ffprobe_backup, &ffprobe); }
+            return Err(error.to_string());
+        }
+        if id == "ffmpeg" {
+            if let Err(error) = fs::rename(&ffprobe_staged, &ffprobe) {
+                let _ = fs::remove_file(&executable);
+                if backup.exists() { let _ = fs::rename(&backup, &executable); }
+                if ffprobe_backup.exists() { let _ = fs::rename(&ffprobe_backup, &ffprobe); }
+                return Err(error.to_string());
+            }
+        }
+        let after = version_line(&executable, version_args);
+        let ffprobe_valid = id != "ffmpeg" || version_line(&ffprobe, &["-version"]).is_some();
+        if after.is_none() || !ffprobe_valid {
+            let _ = fs::remove_file(&executable);
+            if id == "ffmpeg" { let _ = fs::remove_file(&ffprobe); }
+            if backup.exists() { let _ = fs::rename(&backup, &executable); }
+            if ffprobe_backup.exists() { let _ = fs::rename(&ffprobe_backup, &ffprobe); }
+            return Err("updated_tool_validation_failed_original_restored".to_owned());
+        }
+        if backup.exists() { fs::remove_file(&backup).map_err(|error| error.to_string())?; }
+        if ffprobe_backup.exists() { fs::remove_file(&ffprobe_backup).map_err(|error| error.to_string())?; }
+        let after = after.unwrap_or_else(|| tag.to_owned());
+        diagnostic_log(&state, "INFO", "tool.updated", &format!("tool={id} repository={repository} tag={tag} asset={asset_name} sha256={sha256} before={before} after={after} target={}", executable.display()));
+        Ok(format!("{id} updated: {before} → {after}"))
+    }
 }
 
 #[tauri::command]
@@ -4321,9 +4460,65 @@ fn open_paypal_donation() -> Result<(), String> {
 
 fn queue_from_bridge(
     app: &tauri::AppHandle,
-    request: BridgeDownload,
+    mut request: BridgeDownload,
 ) -> Result<Option<DownloadId>, String> {
     let state = app.state::<AppState>();
+    let partial_video_candidate = request
+        .media_kind
+        .as_deref()
+        .is_some_and(|kind| kind.eq_ignore_ascii_case("video"))
+        && url::Url::parse(&request.url).ok().is_some_and(|url| {
+            let mut has_byte_start = false;
+            let mut has_byte_end = false;
+            for (name, _) in url.query_pairs() {
+                if name.eq_ignore_ascii_case("bytestart") {
+                    has_byte_start = true;
+                } else if name.eq_ignore_ascii_case("byteend") {
+                    has_byte_end = true;
+                }
+            }
+            has_byte_start && has_byte_end
+        });
+    let image_mislabeled_as_video = request
+        .media_kind
+        .as_deref()
+        .is_some_and(|kind| kind.eq_ignore_ascii_case("video"))
+        && url::Url::parse(&request.url)
+            .ok()
+            .and_then(|url| {
+                Path::new(url.path())
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .map(str::to_ascii_lowercase)
+            })
+            .is_some_and(|extension| {
+                matches!(
+                    extension.as_str(),
+                    "avif" | "bmp" | "gif" | "ico" | "jpg" | "jpeg" | "png" | "svg" | "webp"
+                )
+            });
+    if partial_video_candidate || image_mislabeled_as_video {
+        if let Some(page_url) = request.page_url.clone().filter(|url| {
+            matches!(classify_url(url), Some(DownloadKind::MediaPage))
+        }) {
+            let event = if partial_video_candidate {
+                "bridge.partial_media_candidate_rejected"
+            } else {
+                "bridge.video_image_candidate_rejected"
+            };
+            diagnostic_log(
+                &state,
+                "WARN",
+                event,
+                &format!(
+                    "candidate={} fallback={}",
+                    redact_url(&request.url),
+                    redact_url(&page_url)
+                ),
+            );
+            request.url = page_url;
+        }
+    }
     classify_url(&request.url).ok_or_else(|| "unsupported_url".to_owned())?;
     let cookie_names = request
         .cookie_header
