@@ -24,7 +24,7 @@ Apocalipse combines fast resumable downloads, media discovery, streaming capture
 - Local-time scheduler and adaptive connection allocation
 - Authenticated mobile dashboard at `http://YOUR-PC-IP:17655/mobile`
 - Progressive browser recording with later format/codec export
-- Explainable Matrix v2 site rules with isolated rollback
+- Versioned, reviewable per-site compatibility rules
 
 ## Planned capabilities
 
