@@ -49,6 +49,12 @@ pub struct DownloadTask {
     pub referer: Option<String>,
     #[serde(default)]
     pub known_duration: Option<f64>,
+    /// Human-readable media title supplied by inspection or the browser bridge.
+    #[serde(default)]
+    pub display_title: Option<String>,
+    /// Preview image for this task. Older queue files simply deserialize it as absent.
+    #[serde(default)]
+    pub thumbnail: Option<String>,
     #[serde(default)]
     pub mirrors: Vec<String>,
     #[serde(default)]
@@ -89,6 +95,8 @@ impl DownloadTask {
             format_selection: None,
             referer: None,
             known_duration: None,
+            display_title: None,
+            thumbnail: None,
             mirrors: Vec::new(),
             priority: 0,
             bandwidth_limit: None,
