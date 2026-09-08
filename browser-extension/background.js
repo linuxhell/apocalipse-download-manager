@@ -8,7 +8,6 @@ let forceHeld = false;
 let lastShortcutMode = "normal";
 let diagnosticOutbox = [];
 let lastFormSubmission = null;
-let siteRules = [{ id: "uupdump", hosts: ["uupdump.net", "*.uupdump.net"], action: "uupdump_post", enabled: true }];
 const recentFileResponses = [];
 const ASSISTED_PREFIX = "assisted-download:";
 const DIRECT_PREFIX = "direct-download:";
@@ -61,15 +60,10 @@ function ensureHeartbeat() {
 ensureHeartbeat();
 chrome.runtime.onInstalled.addListener(ensureHeartbeat);
 chrome.runtime.onStartup.addListener(ensureHeartbeat);
-async function refreshSiteRules() {
-  const rules = await bridgeRequest("/v1/site-rules");
-  if (Array.isArray(rules) && rules.length) siteRules = rules;
-}
-void bridgeRequest("/v1/health").then(() => refreshSiteRules()).catch(() => {});
+void bridgeRequest("/v1/health").catch(() => {});
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === HEARTBEAT_ALARM) {
     bridgeRequest("/v1/health")
-      .then(() => refreshSiteRules())
       .then(() => flushDiagnosticOutbox())
       .then(() => flushAssistedDownloads())
       .then(() => flushDirectDownloads())
@@ -135,40 +129,6 @@ async function handOffTelegramBlob(item) {
     } catch {}
   }
   return false;
-}
-
-function uupDumpPost(url) {
-  try {
-    const parsed = new URL(url);
-    const host = parsed.hostname.toLowerCase();
-    const rule = siteRules.find((item) => item.enabled && item.action === "uupdump_post"
-      && item.hosts?.some((pattern) => pattern.startsWith("*.")
-        ? host === pattern.slice(2) || host.endsWith(`.${pattern.slice(2)}`)
-        : host === pattern));
-    if (!rule) return null;
-    if (!["/download.php", "/get.php"].includes(parsed.pathname.toLowerCase())) return null;
-    return {
-      url: `https://uupdump.net/get.php${parsed.search}`,
-      pageUrl: `https://uupdump.net/download.php${parsed.search}`,
-      method: "POST",
-      body: "autodl=2&updates=1",
-      contentType: "application/x-www-form-urlencoded",
-    };
-  } catch {
-    return null;
-  }
-}
-
-function matchingRule(url, action) {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    return siteRules.find((rule) => rule.enabled && rule.action === action
-      && rule.hosts?.some((pattern) => pattern.startsWith("*.")
-        ? host === pattern.slice(2) || host.endsWith(`.${pattern.slice(2)}`)
-        : host === pattern));
-  } catch {
-    return null;
-  }
 }
 
 const assistedKey = (id) => `${ASSISTED_PREFIX}${id}`;
@@ -251,11 +211,11 @@ function isChatGPTLibraryDownload(value) {
   }
 }
 
-function isRapidgatorFinalDownload(value) {
+function isDisposableDownloadUrl(value) {
   try {
     const url = new URL(value);
-    return /^s\d+\.rapidgator\.net$/i.test(url.hostname)
-      && /^\/download\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(url.pathname);
+    const token = url.pathname.split("/").filter(Boolean).at(-1) || "";
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token);
   } catch {
     return false;
   }
@@ -266,9 +226,9 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
   if (!item.id) return false;
   const modifierTabId = Number.isInteger(item.tabId) ? item.tabId : null;
   const state = { traceId: crypto.randomUUID(), url, pageUrl: item.referrer || null, startedAt: Date.now(), bytes: 0 };
-  const rapidgator = isRapidgatorFinalDownload(url);
+  const disposable = isDisposableDownloadUrl(url);
   if (bypassIsActive(modifierTabId)) {
-    void diagnostic("browser_download.bypassed", state, { detail: `tab=${modifierTabId ?? "none"} rapidgator=${rapidgator}` });
+    void diagnostic("browser_download.bypassed", state, { detail: `tab=${modifierTabId ?? "none"} disposable=${disposable}` });
     return false;
   }
   if (/^blob:https:\/\/web\.telegram\.org\//i.test(url)) {
@@ -304,41 +264,25 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     const index = recentFileResponses.indexOf(recentResponse);
     if (index >= 0) recentFileResponses.splice(index, 1);
   }
-  const pendingPost = lastFormSubmission && Date.now() - lastFormSubmission.capturedAt < 30000
-    ? lastFormSubmission
-    : null;
   let formRequest = null;
-  if (pendingPost) {
-    let sameRequest = pageUrl === pendingPost.pageUrl;
-    try {
-      sameRequest ||= new URL(url).origin === new URL(pendingPost.url).origin;
-    } catch {}
-    if (sameRequest) {
-      lastFormSubmission = null;
-      const uupRequest = uupDumpPost(url);
-      if (!uupRequest) return false;
-      url = uupRequest.url;
-      formRequest = uupRequest;
-    }
-  }
   if (bypassIsActive(modifierTabId)) return false;
   if (!bridgeConnected) {
-    void diagnostic("browser_download.bridge_unavailable", state, { level: "WARN", detail: `rapidgator=${rapidgator} file=${fileNameFromPath(item.filename) || "unknown"}` });
+    void diagnostic("browser_download.bridge_unavailable", state, { level: "WARN", detail: `disposable=${disposable} file=${fileNameFromPath(item.filename) || "unknown"}` });
     return false;
   }
-  const browserAssisted = Boolean(matchingRule(url, "browser_assisted"));
-  void diagnostic("browser_download.detected", state, { detail: `rapidgator=${rapidgator} assisted=${browserAssisted} force=${forceIsActive(modifierTabId)} file=${fileNameFromPath(item.filename) || "unknown"}` });
+  const browserAssisted = disposable;
+  void diagnostic("browser_download.detected", state, { detail: `disposable=${disposable} assisted=${browserAssisted} force=${forceIsActive(modifierTabId)} file=${fileNameFromPath(item.filename) || "unknown"}` });
 
   // Disposable links are consumed by their first request. At this point Chrome
   // already owns that original response; cancelling it and asking the desktop to
-  // GET the same URL again produces a 404 on Rapidgator and equivalent hosts.
+  // Repeating a consumed, one-use response URL commonly produces a 404.
   // Let the browser finish the one valid response, then register the completed
   // file in Apocalipse through browser-download-complete. This applies to every
-  // site using the generic browser_assisted rule, not to a hard-coded host.
+  // equivalent disposable-download pattern, not to a hard-coded host.
   if (browserAssisted) {
     await markAssistedDownload(item, url);
     void diagnostic("browser_download.assisted_original_response", state, {
-      detail: `rapidgator=${rapidgator} force=${forceIsActive(modifierTabId)} download_id=${item.id}`,
+      detail: `disposable=${disposable} force=${forceIsActive(modifierTabId)} download_id=${item.id}`,
     });
     return false;
   }
@@ -377,7 +321,7 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     });
     return true;
   } catch (error) {
-    void diagnostic("browser_download.takeover_failed", state, { level: "ERROR", error: String(error), detail: `rapidgator=${rapidgator} cancelled=${cancelled}` });
+    void diagnostic("browser_download.takeover_failed", state, { level: "ERROR", error: String(error), detail: `disposable=${disposable} cancelled=${cancelled}` });
     if (cancelled) {
       bypassUntil = Date.now() + 2000;
       chrome.downloads.download({ url, saveAs: false }, () => void chrome.runtime.lastError);
@@ -456,7 +400,6 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         await chrome.storage.local.set({ pairingToken: token });
         bridgeConnected = true;
         ensureHeartbeat();
-        await refreshSiteRules();
         reply({ connected: true });
       })
       .catch((error) => {
@@ -580,15 +523,6 @@ const chatgptLibraryUrl = (value) => {
   } catch { return null; }
 };
 
-const rapidgatorFinalUrl = (value) => {
-  try {
-    const url = new URL(value);
-    if (!/^s\d+\.rapidgator\.net$/i.test(url.hostname)) return null;
-    if (!/^\/download\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(url.pathname)) return null;
-    return url.href;
-  } catch { return null; }
-};
-
 const genericHttpDownload = (value) => {
   try {
     const url = new URL(value);
@@ -599,8 +533,6 @@ const genericHttpDownload = (value) => {
 const recognizedDownload = (value) => {
   const library = chatgptLibraryUrl(value);
   if (library) return { url: library, kind: "chatgpt-library" };
-  const rapidgator = rapidgatorFinalUrl(value);
-  if (rapidgator) return { url: rapidgator, kind: "rapidgator" };
   return null;
 };
 
