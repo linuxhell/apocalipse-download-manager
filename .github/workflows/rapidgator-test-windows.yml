@@ -43,6 +43,7 @@ jobs:
           python .github/scripts/apply_round_0_3_60.py
           python .github/scripts/apply_round_0_3_61.py
           python .github/scripts/apply_round_0_3_62.py
+          python .github/scripts/apply_round_0_3_63.py
       - name: Validate extension JavaScript
         run: |
           node --check browser-extension/content.js
@@ -53,11 +54,13 @@ jobs:
           node --check apps/desktop/ui/app.js
           if (Select-String -Path browser-extension/manifest.json -Pattern '"debugger"' -Quiet) { throw 'debugger permission still present' }
           if (Select-String -Path browser-extension/*.js -Pattern 'chrome\.debugger|Fetch\.enable|Fetch\.requestPaused|Fetch\.takeResponseBodyAsStream|IO\.read|Page\.setDownloadBehavior|Browser\.setDownloadBehavior' -Quiet) { throw 'CDP code still present in shipped extension' }
+          if (Select-String -Path browser-extension/background.js -Pattern 'importScripts\(' -Quiet) { throw 'runtime importScripts bootstrap boundary still present' }
+          if (-not (Select-String -Path browser-extension/background.js -Pattern 'background\.self_contained\.ready' -Quiet)) { throw 'self-contained worker ready marker missing' }
+          $worker = Get-Content browser-extension/background.js -Raw
+          if (($worker.Split('APOCALIPSE_WORKER_DIAGNOSTICS').Count - 1) -ne 1) { throw 'worker diagnostics listener is not unique' }
           if (Select-String -Path browser-extension/service-worker.js -Pattern '/v1/site-rules' -Quiet) { throw 'stale site-rules bridge request still present' }
           if (-not (Select-String -Path apps/desktop/src-tauri/src/main.rs -Pattern 'Access-Control-Allow-Private-Network: true' -Quiet)) { throw 'local/private network preflight header missing' }
           if (-not (Select-String -Path browser-extension/popup.js -Pattern 'directBridgeHealth' -Quiet)) { throw 'direct popup pairing missing' }
-          if (-not (Select-String -Path browser-extension/background.js -Pattern 'background\.importScripts\.error' -Quiet)) { throw 'worker bootstrap error instrumentation missing' }
-          if (-not (Select-String -Path browser-extension/background.js -Pattern 'APOCALIPSE_WORKER_DIAGNOSTICS' -Quiet)) { throw 'worker diagnostics probe missing' }
           if (-not (Select-String -Path browser-extension/popup.js -Pattern 'workerSelfTest' -Quiet)) { throw 'popup worker self-test missing' }
           if (Select-String -Path apps/desktop/src-tauri/src/main.rs -Pattern 'start_file\("matrix-rules\.json"' -Quiet) { throw 'legacy matrix-rules.json still exported in diagnostics' }
           if (-not (Select-String -Path apps/desktop/ui/index.html -Pattern 'id="download-connections"' -Quiet)) { throw 'per-download thread slider missing' }
