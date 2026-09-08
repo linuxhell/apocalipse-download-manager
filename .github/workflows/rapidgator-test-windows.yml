@@ -42,6 +42,7 @@ jobs:
           python .github/scripts/apply_round_0_3_59.py
           python .github/scripts/apply_round_0_3_60.py
           python .github/scripts/apply_round_0_3_61.py
+          python .github/scripts/apply_round_0_3_62.py
       - name: Validate extension JavaScript
         run: |
           node --check browser-extension/content.js
@@ -62,6 +63,9 @@ jobs:
           if (-not (Select-String -Path apps/desktop/ui/index.html -Pattern 'id="download-connections"' -Quiet)) { throw 'per-download thread slider missing' }
           if (-not (Select-String -Path apps/desktop/ui/app.js -Pattern 'connectionsOverride' -Quiet)) { throw 'per-download thread override not wired' }
           if (Select-String -Path apps/desktop/ui/app.js -Pattern 'refreshMatrix|matrix_analyze|matrix_apply_rule|matrix_rollback_rule|import_matrix_rules|export_matrix_rules|#matrix-scan|#matrix-import|#matrix-export|#log-editor|#remove-log-editor|#open-log-external' -Quiet) { throw 'legacy Matrix/log-editor UI code still present' }
+          $app = Get-Content apps/desktop/ui/app.js -Raw
+          if (($app.Split('const exportDiagnosticsButton = document.querySelector("#export-diagnostics");').Count - 1) -ne 1) { throw 'export diagnostics handler is not unique' }
+          if (($app.Split('const clearInternalLogsButton = document.querySelector("#clear-internal-logs");').Count - 1) -ne 1) { throw 'clear logs handler is not unique' }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build desktop
