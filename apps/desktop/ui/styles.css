@@ -306,9 +306,6 @@ h1 {
   font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
   user-select: text;
 }
-.rules-editor {
-  width: min(900px, 82vw);
-}
 .credential-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
