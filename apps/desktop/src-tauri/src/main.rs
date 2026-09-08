@@ -4460,9 +4460,44 @@ fn open_paypal_donation() -> Result<(), String> {
 
 fn queue_from_bridge(
     app: &tauri::AppHandle,
-    request: BridgeDownload,
+    mut request: BridgeDownload,
 ) -> Result<Option<DownloadId>, String> {
     let state = app.state::<AppState>();
+    let image_mislabeled_as_video = request
+        .media_kind
+        .as_deref()
+        .is_some_and(|kind| kind.eq_ignore_ascii_case("video"))
+        && url::Url::parse(&request.url)
+            .ok()
+            .and_then(|url| {
+                Path::new(url.path())
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .map(str::to_ascii_lowercase)
+            })
+            .is_some_and(|extension| {
+                matches!(
+                    extension.as_str(),
+                    "avif" | "bmp" | "gif" | "ico" | "jpg" | "jpeg" | "png" | "svg" | "webp"
+                )
+            });
+    if image_mislabeled_as_video {
+        if let Some(page_url) = request.page_url.clone().filter(|url| {
+            matches!(classify_url(url), Some(DownloadKind::MediaPage))
+        }) {
+            diagnostic_log(
+                &state,
+                "WARN",
+                "bridge.video_image_candidate_rejected",
+                &format!(
+                    "candidate={} fallback={}",
+                    redact_url(&request.url),
+                    redact_url(&page_url)
+                ),
+            );
+            request.url = page_url;
+        }
+    }
     classify_url(&request.url).ok_or_else(|| "unsupported_url".to_owned())?;
     let cookie_names = request
         .cookie_header
