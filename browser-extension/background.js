@@ -268,8 +268,9 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
     void diagnostic("browser_download.bridge_unavailable", state, { level: "WARN", detail: `disposable=${disposable} file=${fileNameFromPath(item.filename) || "unknown"}` });
     return false;
   }
-  const browserAssisted = disposable;
-  void diagnostic("browser_download.detected", state, { detail: `disposable=${disposable} assisted=${browserAssisted} force=${forceIsActive(modifierTabId)} file=${fileNameFromPath(item.filename) || "unknown"}` });
+  const forced = forceIsActive(modifierTabId);
+  const browserAssisted = disposable && !forced;
+  void diagnostic("browser_download.detected", state, { detail: `disposable=${disposable} assisted=${browserAssisted} force=${forced} initial_url=${item.url === url} final_url=${Boolean(item.finalUrl)} tab=${modifierTabId ?? "none"} file=${fileNameFromPath(item.filename) || "unknown"}` });
 
   // Disposable links are consumed by their first request. At this point Chrome
   // already owns that original response; repeating it on the desktop commonly
@@ -286,9 +287,9 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
   }
   let cancelled = false;
   try {
-    await cancelBrowserDownload(item.id);
-    cancelled = true;
-    if (eraseFromHistory) await eraseBrowserDownload(item.id);
+    // The desktop must acknowledge the handoff before Chrome is cancelled.
+    // If the bridge is unavailable or rejects the request, the original
+    // browser response remains alive and continues normally.
     const handoff = await bridgeRequest("/v1/download", {
       method: "POST",
       body: JSON.stringify({
@@ -303,13 +304,15 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
         requestContentType: null,
         startImmediately: false,
       }),
-    }).catch(async (error) => {
-      if (error.message.includes("bridge_http_404") || error.message.includes("not found")) {
-        bypassNextUntil = Date.now() + 30000;
-        chrome.downloads.download({ url, saveAs: false }, () => void chrome.runtime.lastError);
-        return true;
-      }
-      throw error;
+    });
+    void diagnostic("browser_download.handoff_acknowledged", state, {
+      detail: `disposable=${disposable} force=${forced} download_id=${item.id} task=${handoff?.taskId || "prompt"}`,
+    });
+    await cancelBrowserDownload(item.id);
+    cancelled = true;
+    if (eraseFromHistory) await eraseBrowserDownload(item.id);
+    void diagnostic("browser_download.chrome_cancelled", state, {
+      detail: `disposable=${disposable} force=${forced} download_id=${item.id}`,
     });
     return true;
   } catch (error) {
@@ -325,9 +328,7 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
 
 if (chrome.downloads.onDeterminingFilename?.addListener) {
   chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-    void takeBrowserDownload(item).then((intercepted) => {
-      if (!intercepted) suggest();
-    }).catch(() => suggest());
+    void takeBrowserDownload(item).then(() => suggest()).catch(() => suggest());
     return true;
   });
 } else {
