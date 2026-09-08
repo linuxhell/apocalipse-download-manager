@@ -673,11 +673,25 @@ function renderDownloads() {
       className: "download-icon",
       textContent: "⇩",
     });
+    if (task.thumbnail) {
+      const thumbnail = document.createElement("img");
+      thumbnail.className = "download-thumbnail";
+      thumbnail.alt = "";
+      thumbnail.referrerPolicy = "no-referrer";
+      thumbnail.src = task.thumbnail;
+      thumbnail.onerror = () => {
+        icon.classList.remove("has-thumbnail");
+        icon.replaceChildren(document.createTextNode("⇩"));
+      };
+      icon.replaceChildren(thumbnail);
+      icon.classList.add("has-thumbnail");
+    }
     const info = Object.assign(document.createElement("div"), {
       className: "download-info",
     });
     const name = document.createElement("strong");
-    name.textContent = task.destination.split(/[\\/]/).pop();
+    name.textContent = task.display_title || task.destination.split(/[\\/]/).pop();
+    name.title = task.display_title || "";
     const source = document.createElement("small");
     source.textContent = task.source;
     source.title = task.source;
@@ -1741,6 +1755,9 @@ async function showMediaInspection(url) {
     option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
   try {
     const media = await invoke("inspect_media_formats", { url });
+    pendingTitle = media.title || pendingTitle;
+    pendingThumbnail = media.thumbnail || pendingThumbnail;
+    pendingDuration = Number.isFinite(media.duration) ? media.duration : pendingDuration;
     document.querySelector("#media-title").textContent = media.title;
     document.querySelector("#media-duration").textContent = media.duration ? `${t("duration")}: ${secondsLabel(media.duration)}` : "";
     const thumbnail = document.querySelector("#media-thumbnail");
@@ -1846,6 +1863,8 @@ document.querySelector("#enqueue").onclick = async () => {
         context: {
           referer: pendingReferer,
           knownDuration: pendingDuration,
+          title: pendingTitle,
+          thumbnail: pendingThumbnail,
           cookieHeader: pendingCookieHeader,
           userAgent: pendingUserAgent,
           requestMethod: pendingRequestMethod,
@@ -1956,7 +1975,15 @@ async function consumeBridgeDownload() {
     pendingRequestBody = request.requestBody || null;
     pendingRequestContentType = request.requestContentType || null;
     document.querySelector("#url").value = request.url;
-    document.querySelector("#file-name").value = request.fileName || "";
+    const requestedName = request.fileName || "";
+    const genericMediaName = /^(?:watch|reel|video|download)(?:\.[a-z0-9]{1,10})?$/i.test(requestedName.trim());
+    const titleName = String(pendingTitle || "")
+      .replace(/[<>:\"/\\|?*\u0000-\u001f]/g, "_")
+      .replace(/[. ]+$/g, "")
+      .trim();
+    document.querySelector("#file-name").value = pendingMediaKind === "video" && titleName && (!requestedName || genericMediaName)
+      ? `${[...titleName].slice(0, 110).join("")}.mp4`
+      : requestedName;
     document.querySelector("#analysis").hidden = true;
     document.querySelector("#enqueue").hidden = true;
     document.querySelector("#analyze").hidden = false;
