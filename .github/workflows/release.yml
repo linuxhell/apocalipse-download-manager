@@ -3,8 +3,6 @@ name: Release builds
 on:
   workflow_dispatch:
   push:
-    branches:
-      - "main"
     tags:
       - "v*"
 
@@ -165,13 +163,15 @@ jobs:
           else
             version=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")
             tag="v${version}"
+            git tag --force "$tag" "${{ github.sha }}"
+            git push origin "refs/tags/$tag" --force
           fi
           prerelease=()
           if [[ "$tag" =~ (alpha|beta|rc) ]]; then
             prerelease=(--prerelease)
           fi
           gh release view "$tag" >/dev/null 2>&1 ||
-            gh release create "$tag" --target "0618fc7896a0348aac58c2ab0c80f78f89d34e56" --generate-notes "${prerelease[@]}"
+            gh release create "$tag" --target "${{ github.sha }}" --generate-notes "${prerelease[@]}"
           gh release view "$tag" --json assets --jq '.assets[].name' |
             while IFS= read -r asset; do
               [[ -n "$asset" ]] && gh release delete-asset "$tag" "$asset" --yes
