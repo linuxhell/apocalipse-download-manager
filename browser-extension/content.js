@@ -394,7 +394,7 @@
   };
   const collect = () => {
     const items = new Map();
-    const add = (url, kind, element, thumbnail) => {
+    const add = (url, kind, element, thumbnail, extra = {}) => {
       url = absolute(url);
       if (!url || !/^https?:/.test(url)) return;
       const resource = performance.getEntriesByName(url).at(-1);
@@ -407,18 +407,33 @@
         title: titleFor(element),
         size: measuredSize > 0 && !/\.m3u8(?:$|[?#])/i.test(url) ? measuredSize : null,
         duration: Number.isFinite(duration) && duration > 0 ? duration : null,
+        ...extra,
       });
     };
     document.querySelectorAll("video").forEach((element) => {
-      add(element.currentSrc || element.src, "video", element);
-      element.querySelectorAll("source").forEach((source) => add(source.src, "video", element));
       const facebookUrl = facebookUrlFor(element);
-      if (facebookUrl) add(facebookUrl, "video", element);
+      if (facebookUrl) {
+        add(facebookUrl, "video", element, undefined, {
+          pageExtractor: true,
+          previewUrl: absolute(element.currentSrc || element.src),
+          recommended: true,
+        });
+      } else {
+        add(element.currentSrc || element.src, "video", element);
+        element.querySelectorAll("source").forEach((source) => add(source.src, "video", element));
+      }
       const tikTokUrl = tikTokUrlFor(element);
       if (tikTokUrl) add(tikTokUrl, "video", element);
     });
     const facebookPageUrl = facebookUrlFor(document.querySelector("video"));
-    if (facebookPageUrl) add(facebookPageUrl, "video", document.querySelector("video"));
+    if (facebookPageUrl && !items.has(`video:${facebookPageUrl}`)) {
+      const video = document.querySelector("video");
+      add(facebookPageUrl, "video", video, undefined, {
+        pageExtractor: true,
+        previewUrl: absolute(video?.currentSrc || video?.src),
+        recommended: true,
+      });
+    }
     if (/^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch") {
       const videoId = new URL(location.href).searchParams.get("v");
       add(location.href, "video", document.querySelector("video"), document.querySelector('meta[property="og:image"]')?.content || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ""));
@@ -431,7 +446,13 @@
     performance.getEntriesByType("resource").forEach((entry) => {
       if (/\.m3u8(?:$|[?#])/i.test(entry.name)) add(entry.name, "video", document.querySelector("video"));
     });
-    return [...items.values()];
+    const collected = [...items.values()];
+    if (collected.some((item) => item.kind === "video" && item.pageExtractor
+      && /(^|\.)facebook\.com$/i.test(location.hostname))) {
+      return collected.filter((item) => item.kind !== "audio"
+        && (item.kind !== "video" || item.pageExtractor));
+    }
+    return collected;
   };
   const downloadLabel = () => {
     const value = (navigator.language || "en").toLowerCase();

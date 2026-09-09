@@ -19,5 +19,5 @@ pub use i18n::{Language, Translator};
 pub use media::{convert_ts_to_mp4, ConversionMode, TsToMp4Request};
 pub use model::{DownloadId, DownloadState, DownloadTask};
 pub use preview::{launch_player, PlayerConfig, PreviewReadiness, TorrentPreviewPolicy};
-pub use strategy::{plan_download, Capabilities, Engine, StrategyPlan};
+pub use strategy::{contextual_media_page, plan_download, Capabilities, Engine, StrategyPlan};
 pub use validation::{validate_payload, PayloadExpectation};

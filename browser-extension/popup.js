@@ -161,7 +161,7 @@ const render = () => {
     previewButton.hidden = item.kind === "image";
     previewButton.onclick = () => {
       previewButton.disabled = true;
-      chrome.runtime.sendMessage({ type: "APOCALIPSE_PREVIEW_MEDIA", url: item.url, pageUrl: activePageUrl, contentType: item.contentType || null, userAgent: item.userAgent || null }, (result) => {
+      chrome.runtime.sendMessage({ type: "APOCALIPSE_PREVIEW_MEDIA", url: item.previewUrl || item.url, pageUrl: activePageUrl, contentType: item.contentType || null, userAgent: item.userAgent || null }, (result) => {
         previewButton.disabled = false;
         const error = chrome.runtime.lastError?.message || result?.error;
         if (!result?.ok || error) {
@@ -238,7 +238,12 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
         };
       });
       const unique = new Map();
-      for (const item of [...scanned, ...network]) if (item?.url && !unique.has(item.url)) unique.set(item.url, item);
+      const hasFacebookPageItems = scanned.some((item) => item?.kind === "video" && item.pageExtractor
+        && /(^|\.)facebook\.com$/i.test(new URL(tab.url).hostname));
+      for (const item of [...scanned, ...network]) {
+        if (hasFacebookPageItems && item?.networkCaptured && (item.kind === "video" || item.kind === "audio")) continue;
+        if (item?.url && !unique.has(item.url)) unique.set(item.url, item);
+      }
       media = [...unique.values()];
       const picker = await chrome.runtime.sendMessage({ type: "APOCALIPSE_MEDIA_PICKER_CONTEXT", tabId: tab.id }).catch(() => null);
       const requested = document.querySelector("#requested-media");

@@ -79,6 +79,9 @@ const tracks = [
 test('Reel overlay uses the same page URL as popup scan, not a misleading CDN track', async () => {
   const p = page({ network: tracks });
   const popup = p.scan().find(item => item.url === p.location.href);
+  assert.ok(popup.pageExtractor);
+  assert.equal(popup.previewUrl, p.video.currentSrc);
+  assert.ok(!p.scan().some(item => item.url === p.video.currentSrc));
   await p.click();
   assert.equal(p.downloads().length, 1);
   const overlay = p.downloads()[0].item;

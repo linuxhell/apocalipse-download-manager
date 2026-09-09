@@ -3,9 +3,9 @@
 mod tiktok_preview;
 
 use apocalipse_core::{
-    classify_url, cleanup_chunk_artifacts, partial_path, plan_download, BandwidthLimiter,
-    Capabilities, DownloadEngine, DownloadEvent, DownloadId, DownloadKind, DownloadRequest,
-    DownloadState, DownloadTask,
+    classify_url, cleanup_chunk_artifacts, contextual_media_page, partial_path, plan_download,
+    BandwidthLimiter, Capabilities, DownloadEngine, DownloadEvent, DownloadId, DownloadKind,
+    DownloadRequest, DownloadState, DownloadTask,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use futures_util::StreamExt;
@@ -5414,6 +5414,28 @@ fn queue_from_bridge(
     mut request: BridgeDownload,
 ) -> Result<Option<DownloadId>, String> {
     let state = app.state::<AppState>();
+    if let Some(page_url) = contextual_media_page(
+        &request.url,
+        request.page_url.as_deref(),
+        request.media_kind.as_deref(),
+        request.audio_url.is_some(),
+        request.request_method.as_deref(),
+    ) {
+        let original = std::mem::replace(&mut request.url, page_url.to_owned());
+        request.request_method = None;
+        request.request_body = None;
+        request.request_content_type = None;
+        diagnostic_log(
+            &state,
+            "INFO",
+            "bridge.media_route_auto_selected",
+            &format!(
+                "from={} to={} engine=YtDlp reason=isolated_track_with_specific_page_context",
+                redact_url(&original),
+                redact_url(&request.url),
+            ),
+        );
+    }
     let partial_video_candidate = request
         .media_kind
         .as_deref()
