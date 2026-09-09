@@ -1,0 +1,56 @@
+name: Apply reviewed Facebook and player repairs
+
+on:
+  push:
+    branches: [fix/vlc-preview-local-relay]
+    paths: [.github/workflows/repair-facebook-players.yml]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: facebook-player-repair-workspace
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.repository == 'linuxhell/apocalipse-download-manager' && github.ref == 'refs/heads/fix/vlc-preview-local-relay'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply the source-SHA guarded repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .repair-facebook-players.py
+          cargo fmt --all
+          node --check browser-extension/content.js
+          node --check browser-extension/background.js
+          node --check browser-extension/popup.js
+          node --test tests/*.test.cjs
+          git rm .repair-facebook-players.py
+          git add browser-extension/content.js apps/desktop/src-tauri/src/tiktok_preview.rs apps/desktop/src-tauri/src/tiktok_preview/tests.rs crates/apocalipse-core/tests/facebook_page_strategy.rs
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: route Reel overlays through page extraction and retain handed-off player streams'
+          git push origin HEAD:refs/heads/fix/vlc-preview-local-relay
+      - name: Export exact repaired source
+        shell: bash
+        run: |
+          mkdir -p /tmp/repaired-source
+          git archive --format=tar HEAD | gzip > /tmp/repaired-source/source.tar.gz
+          git rev-parse HEAD > /tmp/repaired-source/commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: facebook-player-repaired-source
+          path: /tmp/repaired-source/*
+          if-no-files-found: error
+          retention-days: 2
