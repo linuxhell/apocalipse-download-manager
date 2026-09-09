@@ -42,7 +42,7 @@ jobs:
 
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf ffmpeg
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -53,6 +53,9 @@ jobs:
           cargo fmt --all -- --check
           cargo test --workspace --locked
 
+      - name: Verify prepared media with FFmpeg and FFprobe
+        if: runner.os == 'Linux'
+        run: cargo test -p apocalipse-desktop --locked paired_preview_uses_real_mux_and_probe -- --ignored
       - name: Build desktop
         run: cargo build --release --locked -p apocalipse-desktop
 

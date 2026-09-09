@@ -548,6 +548,7 @@ let pendingRequestMethod = null;
 let pendingRequestBody = null;
 let pendingRequestContentType = null;
 let downloads = [];
+const downloadListState = createTaskListState();
 let activeFilter = "all";
 let activePage = "downloads";
 let overallSpeed = 0;
@@ -906,9 +907,12 @@ function translate() {
 
 async function refreshDownloads() {
   try {
+    const ticket = downloadListState.beginRead();
     const refreshed = await invoke("list_downloads");
     if (selectionPointerActive) return;
-    downloads = refreshed;
+    const accepted = downloadListState.acceptRead(ticket, refreshed);
+    if (!accepted) return;
+    downloads = accepted;
     const ids = new Set(downloads.map((task) => task.id));
     for (const id of selectedIds) if (!ids.has(id)) selectedIds.delete(id);
     updateSpeeds(downloads);
@@ -916,6 +920,11 @@ async function refreshDownloads() {
   } catch (error) {
     console.error(error);
   }
+}
+
+function acceptEnqueuedTask(task) {
+  downloadListState.invalidate();
+  downloads = downloadListState.visible([...downloads.filter((item) => item.id !== task.id), task]);
 }
 
 const dialog = document.querySelector("#add-dialog");
@@ -938,7 +947,7 @@ document.querySelector("#import-list").onclick = async (event) => {
     for (const url of urls) {
       try {
         const fileName = await invoke("suggest_download_name", { url });
-        downloads.push(await invoke("enqueue_download", { url, destinationDirectory, fileName, formatSelection: null, torrentSelection: null, mirrors: null, priority: 0, bandwidthLimit: null, connectionsOverride: 8, context: {} }));
+        acceptEnqueuedTask(await invoke("enqueue_download", { url, destinationDirectory, fileName, formatSelection: null, torrentSelection: null, mirrors: null, priority: 0, bandwidthLimit: null, connectionsOverride: 8, context: {} }));
       } catch (error) { console.warn("import", url, error); }
     }
     renderDownloads();
@@ -1324,18 +1333,29 @@ document
 document.querySelectorAll("[data-clear-mode]").forEach((button) => {
   button.onclick = async () => {
     button.disabled = true;
+    const ids = [...selectedIds];
+    downloadListState.beginRemoval(ids);
+    let removed = false;
     try {
       await invoke("remove_downloads", {
-        ids: [...selectedIds],
+        ids,
         deleteFiles: button.dataset.clearMode === "files",
       });
-      selectedIds.clear();
+      removed = true;
+      downloadListState.finishRemoval(ids, true);
+      downloads = downloadListState.visible(downloads);
+      for (const id of ids) selectedIds.delete(id);
+      renderDownloads(true);
       clearDialog.close();
       await refreshDownloads();
     } catch (error) {
       console.error(error);
       window.alert(`${t("removeFailed")}: ${error}`);
     } finally {
+      if (!removed) {
+        downloadListState.finishRemoval(ids, false);
+        await refreshDownloads();
+      }
       button.disabled = false;
     }
   };
@@ -1880,7 +1900,7 @@ document.querySelector("#enqueue").onclick = async () => {
     const torrentSelection = document.querySelector("#torrent-inspection").hidden
       ? null : [...document.querySelectorAll("[data-torrent-index]:checked")].map((input) => Number(input.dataset.torrentIndex));
     if (torrentSelection && !torrentSelection.length) throw new Error("Selecione pelo menos um arquivo do torrent.");
-    downloads.push(
+    acceptEnqueuedTask(
       await invoke("enqueue_download", {
         url: url.value,
         destinationDirectory: document.querySelector("#destination").value,

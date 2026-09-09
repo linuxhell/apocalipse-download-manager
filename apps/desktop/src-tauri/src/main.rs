@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod prepared_preview;
 mod tiktok_preview;
 
 use apocalipse_core::{
@@ -616,10 +617,18 @@ struct ToolStatus {
     version: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MediaPreviewRequest {
     url: String,
+    #[serde(default)]
+    audio_url: Option<String>,
+    #[serde(default)]
+    audio_cookie_header: Option<String>,
+    #[serde(default)]
+    media_kind: Option<String>,
+    #[serde(default)]
+    page_extractor: bool,
     user_agent: Option<String>,
     referer: Option<String>,
     cookie_header: Option<String>,
@@ -636,6 +645,10 @@ fn open_media_preview(
     state: &AppState,
     request: MediaPreviewRequest,
 ) -> Result<(), String> {
+    tiktok_preview::validate(&request)?;
+    if prepared_preview::is_candidate(&request) {
+        return prepared_preview::open(app, state, request);
+    }
     if tiktok_preview::is_candidate(&request) {
         return tiktok_preview::open(app, request);
     }
@@ -4498,12 +4511,24 @@ fn enqueue_download(
     )
 }
 
+fn queued_task_for_start(queue: &[DownloadTask], id: DownloadId) -> Option<DownloadTask> {
+    queue
+        .iter()
+        .find(|item| item.id == id && item.state == DownloadState::Queued)
+        .cloned()
+}
+
 fn start_download(
     app: &tauri::AppHandle,
     state: &AppState,
     task: DownloadTask,
     kind: DownloadKind,
 ) -> Result<(), String> {
+    // A scheduler snapshot may outlive removal. Register only a task still queued.
+    let queue = state.queue.lock().map_err(|error| error.to_string())?;
+    let Some(task) = queued_task_for_start(&queue, task.id) else {
+        return Ok(());
+    };
     let mut workers = state.workers.lock().map_err(|error| error.to_string())?;
     if workers.contains_key(&task.id) {
         return Err("download_already_running".to_owned());
@@ -4519,6 +4544,7 @@ fn start_download(
     let (cancel, cancelled) = oneshot::channel();
     workers.insert(task.id, cancel);
     drop(workers);
+    drop(queue);
     diagnostic_log(
         state,
         "INFO",
@@ -6085,9 +6111,16 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     } else if first.starts_with("POST /v1/preview-media ") {
         match serde_json::from_str::<MediaPreviewRequest>(body)
             .map_err(|error| error.to_string())
-            .and_then(|request| open_media_preview(app, &state, request))
-        {
-            Ok(()) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
+            .and_then(|request| {
+                let preparing = prepared_preview::is_candidate(&request);
+                open_media_preview(app, &state, request).map(|()| preparing)
+            }) {
+            Ok(preparing) => bridge_response(
+                &mut stream,
+                "202 Accepted",
+                origin,
+                &serde_json::json!({"ok": true, "preparing": preparing}).to_string(),
+            ),
             Err(error) => {
                 diagnostic_log(&state, "ERROR", "media.preview_rejected", &error);
                 bridge_response(
@@ -6718,6 +6751,17 @@ async fn remove_downloads(
     if ids.is_empty() {
         return Ok(0);
     }
+    // Stop queued entries before signalling workers, so completion of another
+    // task cannot redispatch an item during the asynchronous removal window.
+    {
+        let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+        for task in queue.iter_mut().filter(|task| ids.contains(&task.id)) {
+            if task.state == DownloadState::Queued {
+                task.state = DownloadState::Paused;
+            }
+        }
+        save_queue(&state, &queue)?;
+    }
     let mut cancelled_active = false;
     if let Ok(mut workers) = state.workers.lock() {
         for id in &ids {
@@ -6758,6 +6802,12 @@ async fn remove_downloads(
         identities.retain(|id, _| !ids.contains(id));
     }
     save_queue(&state, &queue)?;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "task.removed",
+        &format!("count={} delete_files={delete_files}", removed.len()),
+    );
     Ok(removed.len())
 }
 
@@ -7015,6 +7065,21 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stale_scheduler_snapshot_cannot_dispatch_a_removed_or_stopped_task() {
+        let task = DownloadTask::new("https://example.test/file.bin", PathBuf::from("file.bin"));
+        let mut queue = vec![task.clone()];
+        assert!(queued_task_for_start(&queue, task.id).is_some());
+        queue[0].state = DownloadState::Paused;
+        assert!(queued_task_for_start(&queue, task.id).is_none());
+        queue.clear();
+        queue.push(DownloadTask::new(
+            "https://example.test/new.bin",
+            PathBuf::from("new.bin"),
+        ));
+        assert!(queued_task_for_start(&queue, task.id).is_none());
+    }
+
     use super::*;
 
     struct HandoffTestDirectory(PathBuf);

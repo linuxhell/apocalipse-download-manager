@@ -9,6 +9,7 @@ fn request(url: &str) -> MediaPreviewRequest {
         referer: Some("https://www.tiktok.com/".into()),
         cookie_header: Some("session=synthetic-secret".into()),
         content_type: Some("video/mp4".into()),
+        ..MediaPreviewRequest::default()
     }
 }
 fn client() -> Client {
@@ -516,4 +517,73 @@ async fn successful_launcher_handoff_keeps_stream_alive_and_expires() {
         .unwrap()
         .unwrap();
     assert!(client().get(&target).send().await.is_err());
+}
+
+#[tokio::test]
+async fn prepared_tracks_keep_separate_cookie_scopes_and_complete_bytes() {
+    let video_origin = fixture(vec![response(
+        "200 OK",
+        "Content-Type: video/mp4\r\n",
+        "video-track",
+    )])
+    .await;
+    let audio_origin = fixture(vec![response(
+        "200 OK",
+        "Content-Type: audio/mp4\r\n",
+        "audio-track",
+    )])
+    .await;
+    let root = std::env::temp_dir().join(format!("adm-prepared-test-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let mut video = request(&video_origin.url);
+    video.cookie_header = Some("video=private".into());
+    let mut audio = request(&audio_origin.url);
+    audio.cookie_header = Some("audio=separate".into());
+    let video_path = root.join("video");
+    let audio_path = root.join("audio");
+    tokio::try_join!(
+        download_to(video, Client::builder().no_proxy(), &video_path, 1024),
+        download_to(audio, Client::builder().no_proxy(), &audio_path, 1024),
+    )
+    .unwrap();
+    assert_eq!(std::fs::read(&video_path).unwrap(), b"video-track");
+    assert_eq!(std::fs::read(&audio_path).unwrap(), b"audio-track");
+    let video_headers = video_origin.received.lock().unwrap()[0].clone();
+    let audio_headers = audio_origin.received.lock().unwrap()[0].clone();
+    assert!(video_headers.contains("cookie: video=private"));
+    assert!(!video_headers.contains("audio=separate"));
+    assert!(audio_headers.contains("cookie: audio=separate"));
+    assert!(!audio_headers.contains("video=private"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn prepared_tracks_reject_partial_http_and_size_limits_before_player_launch() {
+    for (reply, limit) in [
+        (
+            response(
+                "206 Partial Content",
+                "Content-Type: video/mp4\r\nContent-Range: bytes 2-5/8\r\n",
+                "cdef",
+            ),
+            1024,
+        ),
+        (
+            response("200 OK", "Content-Type: video/mp4\r\n", "too-large"),
+            2,
+        ),
+    ] {
+        let origin = fixture(vec![reply]).await;
+        let destination =
+            std::env::temp_dir().join(format!("adm-invalid-preview-{}", uuid::Uuid::new_v4()));
+        let result = download_to(
+            request(&origin.url),
+            Client::builder().no_proxy(),
+            &destination,
+            limit,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(!destination.exists());
+    }
 }

@@ -225,47 +225,7 @@
       return /(^|\.)tiktok\.com$/i.test(parsed.hostname) && /\/@[^/]+\/video\/\d+/i.test(parsed.pathname);
     } catch { return false; }
   };
-  const tikTokUrlFor = (element) => {
-    if (!/(^|\.)tiktok\.com$/i.test(location.hostname)) return null;
-    if (isTikTokVideoUrl(location.href)) return location.href;
-    const videoRect = element?.getBoundingClientRect?.();
-    const card = element?.closest?.([
-      "article",
-      '[data-e2e*="feed"]',
-      '[data-e2e*="recommend"]',
-      '[class*="DivItemContainer"]',
-      '[class*="DivVideoContainer"]',
-    ].join(","));
-    const cardAnchors = [...(card?.querySelectorAll?.('a[href*="/video/"]') || [])];
-    for (const anchor of cardAnchors) {
-      const url = absolute(anchor.href);
-      if (isTikTokVideoUrl(url)) return url;
-    }
-    let container = element;
-    for (let depth = 0; container && depth < 28; depth += 1, container = container.parentElement) {
-      const anchors = container.querySelectorAll?.('a[href*="/video/"]') || [];
-      for (const anchor of anchors) {
-        const url = absolute(anchor.href);
-        if (isTikTokVideoUrl(url)) return url;
-      }
-      const markup = (container.innerHTML || "").replaceAll("\\/", "/");
-      const path = markup.match(/\/@[^/"'<>\\s]+\/video\/\d+/i)?.[0];
-      if (path && isTikTokVideoUrl(path)) return absolute(path);
-    }
-    if (videoRect) {
-      const nearest = [...document.querySelectorAll('a[href*="/video/"]')]
-        .map((anchor) => ({ anchor, url: absolute(anchor.href), rect: anchor.getBoundingClientRect() }))
-        .filter(({ url, rect }) => isTikTokVideoUrl(url) && rect.width > 0 && rect.height > 0
-          && rect.bottom >= videoRect.top && rect.top <= videoRect.bottom)
-        .sort((left, right) => {
-          const videoCenter = (videoRect.top + videoRect.bottom) / 2;
-          return Math.abs((left.rect.top + left.rect.bottom) / 2 - videoCenter)
-            - Math.abs((right.rect.top + right.rect.bottom) / 2 - videoCenter);
-        })[0];
-      if (nearest) return nearest.url;
-    }
-    return null;
-  };
+  const tikTokUrlFor = (element) => globalThis.ApocalipseTikTokIdentity?.resolve(element) || null;
   const facebookUrlFor = (element) => {
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
     if (isFacebookMediaUrl(location.href)) return location.href;
@@ -730,6 +690,7 @@
       if (!canDownload && !canRecord) return;
       element.dataset.apocalipseButton = "1";
       const button = document.createElement("button");
+      globalThis.ApocalipseTikTokIdentity?.bind(button, element);
       button.type = "button";
       button.className = "apocalipse-media-download";
       button.textContent = `⇩ ${downloadLabel()}`;

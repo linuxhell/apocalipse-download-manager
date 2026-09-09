@@ -134,3 +134,28 @@ test('popup rejects a social CDN track explicitly marked incomplete', async () =
   assert.match(result.error, /incomplete_social_media_track/);
   assert.equal(downloads.length, 0);
 });
+
+test('companion audio receives only cookies selected for its own exact URL', async () => {
+  const { send, previews, lookups } = worker();
+  const audioUrl = 'https://a.tiktokcdn.com/audio.m4a?token=audio';
+  const result = await send({ type: 'APOCALIPSE_PREVIEW_MEDIA', url: signed, audioUrl, mediaKind: 'video' });
+  assert.equal(result.ok, true);
+  assert.equal(previews[0].audioUrl, audioUrl);
+  assert.equal(previews[0].cookieHeader, 'sid=v16-webapp-prime.tiktok.com');
+  assert.equal(previews[0].audioCookieHeader, 'sid=a.tiktokcdn.com');
+  assert.equal(lookups.length, 2);
+});
+test('invalid companion URLs are rejected before looking up credentials', async () => {
+  const { send, previews, lookups } = worker();
+  assert.equal((await send({ type: 'APOCALIPSE_PREVIEW_MEDIA', url: signed, audioUrl: 'file:///secret' })).ok, false);
+  assert.equal(previews.length, 0); assert.equal(lookups.length, 0);
+});
+test('Instagram popup preview and Download use the same page extraction identity', async () => {
+  const url = 'https://scontent.cdninstagram.com/clip.mp4?signature=test';
+  const pageUrl = 'https://www.instagram.com/reel/SyntheticId/';
+  const { send, previews, downloads } = worker(false, pageUrl);
+  await send({ type: 'APOCALIPSE_DOWNLOAD', item: { url, kind: 'video' } });
+  await send({ type: 'APOCALIPSE_PREVIEW_MEDIA', url, pageUrl, mediaKind: 'video', contentType: 'video/mp4' });
+  assert.equal(previews[0].url, downloads[0].url);
+  assert.equal(previews[0].pageExtractor, true); assert.equal(previews[0].contentType, null);
+});

@@ -79,6 +79,7 @@ function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.co
     },
   });
   context.window = context; context.top = context;
+  vm.runInContext(readFileSync(join(__dirname, '../browser-extension/tiktok-identity.js'), 'utf8'), context);
   vm.runInContext(content.replace(/\}\)\(\);\s*$/, 'globalThis.testHooks = { installOverlays, collect };\n})();'), context);
   if (shipped) vm.runInContext(tiktok, context);
   context.testHooks.installOverlays();
