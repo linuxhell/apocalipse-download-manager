@@ -1,21 +1,53 @@
-name: Review source snapshot
+name: Prepare regression patch
 on:
   pull_request:
     branches: [main]
-    paths: ['.github/workflows/review-source.yml']
+    paths: ['.review-pr57/**', '.github/workflows/review-source.yml']
 permissions:
-  contents: read
+  contents: write
 jobs:
-  source:
+  prepare:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/task-lifecycle-tiktok-preview-scroll'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false
-      - run: git archive --format=zip --output=review-source.zip HEAD
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply verified patch and format
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .review-pr57/patch.part* > /tmp/pr57.patch.xz
+          echo '2d80af1ea982adfa19bdf33a892abbf344d50738b71360f395cd4fa8d2f864fb  /tmp/pr57.patch.xz' | sha256sum --check
+          xz -dc /tmp/pr57.patch.xz > /tmp/pr57.patch
+          git apply --check /tmp/pr57.patch
+          git apply /tmp/pr57.patch
+          rm -r .review-pr57
+          rm .github/workflows/review-source.yml
+          cargo fmt --all
+          for script in browser-extension/*.js apps/desktop/ui/*.js; do node --check "$script"; done
+          node --test tests/*.test.cjs
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: prevent removed-task resurrection and bind previews to current media' -m 'ADM 0.4.28; extension 0.3.99. Includes current-card TikTok identity across extension worlds, prepared page/paired previews, persistent accessible Save scrollbar, and regression tests. Full native validation required before merge.'
+          git rev-parse HEAD > result-sha.txt
+          git archive --format=zip --output=validated-source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
-          name: review-source
-          path: review-source.zip
+          name: pr57-formatted-source
+          path: |
+            result-sha.txt
+            validated-source.zip
           retention-days: 1
           if-no-files-found: error
+      - name: Preserve formatted commit on review branch
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: git push origin "HEAD:refs/heads/review/pr57-formatted-$HEAD_SHA"
