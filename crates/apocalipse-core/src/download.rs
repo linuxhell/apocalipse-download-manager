@@ -142,6 +142,18 @@ impl DownloadEngine {
         password: Option<&str>,
         dns_servers: &[IpAddr],
     ) -> Result<Self> {
+        let client =
+            Self::network_client_builder(proxy_url, username, password, dns_servers)?.build()?;
+        Ok(Self { client })
+    }
+
+    /// Shared proxy/DNS settings with a caller-controlled redirect policy for preview.
+    pub fn network_client_builder(
+        proxy_url: Option<&str>,
+        username: Option<&str>,
+        password: Option<&str>,
+        dns_servers: &[IpAddr],
+    ) -> Result<reqwest::ClientBuilder> {
         let mut builder = Client::builder()
             .connect_timeout(Duration::from_secs(15))
             .read_timeout(Duration::from_secs(60))
@@ -167,8 +179,7 @@ impl DownloadEngine {
                     .build();
             builder = builder.dns_resolver(Arc::new(CustomDnsResolver { resolver }));
         }
-        let client = builder.build()?;
-        Ok(Self { client })
+        Ok(builder)
     }
 
     pub async fn download(

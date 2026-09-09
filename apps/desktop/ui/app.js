@@ -2036,6 +2036,11 @@ async function consumeBridgeDownload() {
 }
 setInterval(consumeBridgeDownload, 400);
 window.__TAURI__?.event?.listen?.("bridge-download-ready", consumeBridgeDownload).catch(console.error);
+window.__TAURI__?.event?.listen?.("media-preview-error", (event) => {
+  const prefix = locale === "pt-BR" ? "Falha na pr\u00e9-visualiza\u00e7\u00e3o. Consulte Logs para os detalhes."
+    : locale === "zh-CN" ? "\u9884\u89c8\u5931\u8d25\u3002\u8bf7\u67e5\u770b\u65e5\u5fd7\u3002" : "Preview failed. See Logs for details.";
+  window.alert(`${prefix}\n${String(event.payload || "preview_failed")}`);
+}).catch(console.error);
 window.__TAURI__?.event?.listen?.("recording-completed", async (event) => {
   try {
     await invoke("activate_main_window");

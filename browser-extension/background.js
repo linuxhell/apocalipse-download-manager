@@ -60,7 +60,10 @@ async function bridgeRequest(path, options = {}, suppliedToken = null) {
         ...(options.headers || {}),
       },
     });
-    if (!response.ok) throw new Error(`bridge_http_${response.status}`);
+    if (!response.ok) {
+      const body = path === "/v1/preview-media" ? await response.json().catch(() => ({})) : {};
+      throw new Error(typeof body.error === "string" ? body.error : `bridge_http_${response.status}`);
+    }
     bridgeConnected = true;
     return response.json();
   } catch (error) {
@@ -422,10 +425,34 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return true;
   }
   if (message?.type === "APOCALIPSE_PREVIEW_MEDIA") {
-    bridgeRequest("/v1/preview-media", {
-      method: "POST",
-      body: JSON.stringify({ url: message.url, userAgent: navigator.userAgent, referer: message.pageUrl || null }),
-    }).then(reply).catch((error) => reply({ ok: false, error: String(error) }));
+    // Snapshot the clicked resource before awaiting the exact-URL cookie lookup.
+    const url = message.url;
+    const referer = message.pageUrl || sender.tab?.url || null;
+    const contentType = message.contentType || null;
+    const userAgent = message.userAgent || navigator.userAgent;
+    const traceId = crypto.randomUUID();
+    (async () => {
+      let parsed;
+      try { parsed = new URL(url); } catch { throw new Error("invalid_preview_url"); }
+      if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password
+        || typeof url !== "string" || /[\u0000-\u001f\u007f]/.test(url)) throw new Error("invalid_preview_url");
+      const host = parsed.hostname.toLowerCase();
+      const tiktok = ["tiktok.com", "tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com", "tiktokv.com", "tiktokv.us", "byteoversea.com", "ibytedtos.com", "muscdn.com"]
+        .some(domain => host === domain || host.endsWith(`.${domain}`));
+      // Never merge page cookies into a different CDN's request.
+      const cookies = tiktok ? await chrome.cookies.getAll({ url }).catch(() => []) : [];
+      const cookieHeader = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join("; ") || null;
+      return bridgeRequest("/v1/preview-media", {
+        method: "POST",
+        body: JSON.stringify({ url, userAgent, referer, cookieHeader, contentType }),
+      });
+    })().then(result => {
+      void diagnostic("popup.preview_handed_off", { traceId, url, pageUrl: referer, startedAt: Date.now() }, {});
+      reply(result);
+    }).catch(error => {
+      void diagnostic("popup.preview_failed", { traceId, url, pageUrl: referer, startedAt: Date.now() }, { level: "ERROR", error: String(error) });
+      reply({ ok: false, error: String(error) });
+    });
     return true;
   }
   if (message?.type === "APOCALIPSE_MEDIA_PICKER_CONTEXT") {
