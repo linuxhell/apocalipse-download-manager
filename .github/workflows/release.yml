@@ -3,6 +3,8 @@ name: Release builds
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
@@ -10,8 +12,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-publication
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -34,6 +36,7 @@ jobs:
             output: apocalipse-download-manager-macos-portable.zip
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -82,6 +85,22 @@ jobs:
           cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
           chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
           cp packaging/macos/Info.plist "$app/Contents/Info.plist"
+          python3 - "$app/Contents/Info.plist" <<'PYMAC'
+          import plistlib
+          import sys
+          import tomllib
+
+          with open("Cargo.toml", "rb") as stream:
+              version = tomllib.load(stream)["workspace"]["package"]["version"]
+          version = version.split("-", 1)[0].split("+", 1)[0]
+          path = sys.argv[1]
+          with open(path, "rb") as stream:
+              info = plistlib.load(stream)
+          info["CFBundleShortVersionString"] = version
+          info["CFBundleVersion"] = version
+          with open(path, "wb") as stream:
+              plistlib.dump(info, stream, sort_keys=False)
+          PYMAC
           cp README.md LICENSE "$app/Contents/Resources/"
           ditto -c -k --sequesterRsrc --keepParent "$app" "dist/${{ matrix.output }}"
 
@@ -100,6 +119,16 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate extension handoffs before publication
+        run: |
+          node --check browser-extension/background.js
+          node --check browser-extension/popup.js
+          node --test tests/extension-handoff.test.cjs
 
       - uses: actions/download-artifact@v4
         with:
@@ -152,28 +181,50 @@ jobs:
             (cd "$stage/firefox" && zip -qr "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}-unsigned.xpi" .)
           fi
 
-      - name: Publish only current files
+      - name: Publish validated release without replacing another commit
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            tag="${{ github.ref_name }}"
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")
+          tag="v${version}"
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "$tag" ]]; then
+            echo "::error::Release tag must match Cargo version: $tag"
+            exit 1
+          fi
+
+          # Never move an existing version tag to a different commit.
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            git fetch --no-tags origin "refs/tags/$tag"
+            tagged_commit=$(git rev-parse 'FETCH_HEAD^{commit}')
+            if [[ "$tagged_commit" != "$GITHUB_SHA" ]]; then
+              echo "::error::$tag already belongs to another commit. Bump the application version before publishing new changes."
+              exit 1
+            fi
           else
-            version=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")
-            tag="v${version}"
-            git tag --force "$tag" "${{ github.sha }}"
-            git push origin "refs/tags/$tag" --force
+            status=$?
+            if [[ "$status" -ne 2 ]]; then
+              echo "::error::Could not check the remote release tag."
+              exit "$status"
+            fi
+            git tag "$tag" "$GITHUB_SHA"
+            git push origin "refs/tags/$tag"
           fi
-          prerelease=()
-          if [[ "$tag" =~ (alpha|beta|rc) ]]; then
-            prerelease=(--prerelease)
+
+          # Retries may finish an unpublished draft, but never erase a live release.
+          if is_draft=$(gh release view "$tag" --json isDraft --jq '.isDraft'); then
+            if [[ "$is_draft" != true ]]; then
+              echo "::notice::$tag is already published for this commit; leaving its assets unchanged."
+              exit 0
+            fi
+          else
+            prerelease=()
+            if [[ "$version" == *-* ]]; then
+              prerelease=(--prerelease)
+            fi
+            gh release create "$tag" --verify-tag --generate-notes --draft "${prerelease[@]}"
           fi
-          gh release view "$tag" >/dev/null 2>&1 ||
-            gh release create "$tag" --target "${{ github.sha }}" --generate-notes "${prerelease[@]}"
-          gh release view "$tag" --json assets --jq '.assets[].name' |
-            while IFS= read -r asset; do
-              [[ -n "$asset" ]] && gh release delete-asset "$tag" "$asset" --yes
-            done
+          (cd dist && sha256sum apocalipse-*) > dist/SHA256SUMS.txt
           gh release upload "$tag" dist/* --clobber
+          gh release edit "$tag" --draft=false
