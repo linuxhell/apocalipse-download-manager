@@ -207,6 +207,20 @@
     return mediaUrlInTree(pageRoots, targetId);
   };
 
+  const directMediaForPlayer = (video) => {
+    let element = video;
+    for (let depth = 0; element && depth < 8; depth += 1, element = element.parentElement) {
+      const keys = Object.getOwnPropertyNames(element)
+        .filter((key) => /^__(?:react|next|vue)/i.test(key))
+        .sort((left, right) => Number(/props/i.test(right)) - Number(/props/i.test(left)));
+      for (const key of keys) {
+        const url = mediaUrlInObject(element[key]);
+        if (url) return url;
+      }
+    }
+    return null;
+  };
+
   document.addEventListener("click", async (event) => {
     const button = event.target?.closest?.(".apocalipse-media-download:not(.apocalipse-media-record)");
     if (!button) return;
@@ -216,23 +230,8 @@
     event.stopImmediatePropagation();
     const original = button.textContent;
     const url = permalinkFor(video);
-    if (!url) {
-      chrome.runtime.sendMessage({
-        type: "APOCALIPSE_CAPTURE_TRACE",
-        eventName: "tiktok_video_identity_unresolved",
-        mode: "download",
-        traceId: crypto.randomUUID(),
-        pageUrl: location.href,
-        at: Date.now(),
-        detail: { fallbackBlocked: true, reason: "no_verified_permalink" },
-      }).catch(() => {});
-      button.textContent = "⚠";
-      button.title = "Abra o vídeo ou use Compartilhar e Copiar link";
-      setTimeout(() => { button.textContent = original; }, 2500);
-      return;
-    }
     button.textContent = "…";
-    const stateMediaUrl = directMediaFor(video, url);
+    const stateMediaUrl = url ? directMediaFor(video, url) : directMediaForPlayer(video);
     const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null);
     const capturedMedia = Array.isArray(captured?.media) ? captured.media : [];
     const freshVideoCandidates = capturedMedia.filter((item) =>
@@ -245,8 +244,22 @@
     const liveHttpUrl = directVideoUrl(video.currentSrc || video.src);
     const soleFreshCandidate = freshVideoCandidates.length === 1 ? freshVideoCandidates[0]?.url : null;
     const selectedUrl = stateMediaUrl || liveHttpUrl || soleFreshCandidate;
-    const selectedId = url.match(/\/video\/(\d+)/i)?.[1] || "none";
+    const selectedId = url?.match(/\/video\/(\d+)/i)?.[1] || "none";
     const newestCaptured = capturedMedia[0] || null;
+    if (!url) {
+      chrome.runtime.sendMessage({
+        type: "APOCALIPSE_CAPTURE_TRACE",
+        eventName: "tiktok_video_identity_unresolved",
+        mode: "download",
+        traceId: crypto.randomUUID(),
+        pageUrl: location.href,
+        at: Date.now(),
+        detail: {
+          fallbackBlocked: !selectedUrl,
+          reason: selectedUrl ? "player_media_without_permalink" : "no_verified_player_media",
+        },
+      }).catch(() => {});
+    }
     chrome.runtime.sendMessage({
       type: "APOCALIPSE_CAPTURE_TRACE",
       eventName: "tiktok_browser_media_selection",
@@ -279,7 +292,7 @@
       item: {
         url: selectedUrl,
         duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null,
-        requestUrls: [selectedUrl, url],
+        requestUrls: [selectedUrl, ...(url ? [url] : [])],
         userAgent: navigator.userAgent,
         kind: "video",
         title: document.title,
