@@ -434,15 +434,32 @@ dialog form {
 }
 #add-dialog form {
   display: grid;
-  height: min(760px, calc(100vh - 30px));
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: min(760px, calc(100vh - 32px));
+  max-height: calc(100vh - 32px);
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+#add-dialog > form > .dialog-head { padding: 18px 22px 0; }
+#add-dialog .add-dialog-scroll {
   min-height: 0;
   overflow-y: scroll;
-  scrollbar-color: var(--accent) var(--input);
-  scrollbar-width: thin;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  /* Standard non-auto values override Chromium's explicit scrollbar styles. */
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+  overscroll-behavior: contain;
+  padding: 8px 16px 18px 22px;
 }
-#add-dialog form::-webkit-scrollbar { width: 11px; }
-#add-dialog form::-webkit-scrollbar-track { background: var(--input); border-radius: 8px; }
-#add-dialog form::-webkit-scrollbar-thumb { background: var(--accent); border: 3px solid var(--input); border-radius: 8px; }
+#add-dialog .add-dialog-scroll::-webkit-scrollbar { width: 16px; }
+#add-dialog .add-dialog-scroll::-webkit-scrollbar-track { background: var(--input); border-left: 1px solid var(--line); }
+#add-dialog .add-dialog-scroll::-webkit-scrollbar-thumb { background: var(--accent); border: 3px solid var(--input); border-radius: 8px; min-height: 40px; }
+#add-dialog .add-dialog-scroll::-webkit-scrollbar-button { display: block; height: 12px; background: var(--accent); }
+@supports not selector(::-webkit-scrollbar) {
+  #add-dialog .add-dialog-scroll { scrollbar-color: var(--accent) var(--input); }
+}
 .add-dialog-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr);
@@ -453,13 +470,12 @@ dialog form {
 .add-dialog-destination { padding-left: 18px; border-left: 1px solid var(--line); }
 #add-dialog .dialog-head h2 { margin-bottom: 14px; }
 #add-dialog .dialog-actions {
-  position: sticky;
-  z-index: 3;
-  bottom: -22px;
-  margin: 14px -22px -22px;
-  padding: 14px 22px 22px;
+  position: static;
+  margin: 0;
+  padding: 14px 22px;
   border-top: 1px solid var(--line);
   background: var(--surface);
+  flex-shrink: 0;
 }
 #add-dialog #destination-list { max-height: 118px; }
 #add-dialog #torrent-files { max-height: min(310px, calc(100vh - 330px)); }
@@ -1023,7 +1039,7 @@ nav button:hover, nav button.active, .download-icon { color: var(--accent); }
   .history-search { max-width: none; }
 }
 @media (max-width: 760px) {
-  #add-dialog form { display: block; height:calc(100vh - 30px); }
+  #add-dialog form { height:calc(100vh - 32px); }
   .add-dialog-grid { display: block; }
   .add-dialog-destination { margin-top: 14px; padding-left: 0; border-left: 0; }
   #settings-dialog form, #tools-dialog form { display: block; height: auto; }
@@ -1032,3 +1048,15 @@ nav button:hover, nav button.active, .download-icon { color: var(--accent); }
   .settings-columns > div + div { padding-left: 0; border-left: 0; }
   #tools-dialog #tool-list { grid-template-columns: 1fr; }
 }
+
+/* Persistent Save-form rail, independent of platform auto-hidden scrollbars. */
+#add-dialog .add-dialog-viewport { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+#add-dialog .add-dialog-scroll.custom-scroll-ready { scrollbar-width: none; scrollbar-gutter: auto; }
+#add-dialog .add-dialog-scroll.custom-scroll-ready::-webkit-scrollbar { display: none; }
+#add-dialog .add-dialog-scrollbar { width: 24px; margin-right: 5px; display: grid; grid-template-rows: 24px minmax(0, 1fr) 24px; background: var(--input); border: 1px solid var(--line); border-radius: 8px; }
+#add-dialog .add-dialog-scrollbar[hidden] { display: none; }
+#add-dialog .add-dialog-scrollbar:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+#add-dialog .add-dialog-scrollbar button { padding: 0; margin: 0; min-width: 0; border: 0; border-radius: 5px; font-size: 12px; background: var(--surface-2); color: var(--accent); }
+#add-dialog .add-dialog-scrollbar [data-scroll-area] { position: relative; touch-action: none; min-height: 0; }
+#add-dialog .add-dialog-scrollbar [data-scroll-thumb] { position: absolute; left: 4px; right: 4px; background: var(--accent); border-radius: 6px; cursor: grab; }
+#add-dialog .add-dialog-scrollbar [data-scroll-thumb]:active { cursor: grabbing; }

@@ -170,6 +170,22 @@ const loadThumbnail = (image, item) => {
     });
   };
 };
+// Preview and Download start from the SAME row identity. previewUrl is only a
+// thumbnail/player hint and can be a partial track, blob, or a generic feed URL.
+function previewRequestFor(item, pageUrl) {
+  const url = item.extractorUrl || item.url;
+  let parsed;
+  try { parsed = new URL(url); } catch { return null; }
+  if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) return null;
+  const pageExtractor = Boolean(item.extractorUrl || item.pageExtractor);
+  if (item.ambiguousSocialTrack && item.kind !== "audio" && !pageExtractor && !item.audioUrl) return null;
+  return { type: "APOCALIPSE_PREVIEW_MEDIA", url, pageUrl,
+    audioUrl: pageExtractor ? null : item.audioUrl || null,
+    mediaKind: item.kind, pageExtractor,
+    contentType: pageExtractor ? null : item.contentType || null,
+    userAgent: item.userAgent || null };
+}
+
 const render = () => {
   const root = document.querySelector("#items");
   root.textContent = "";
@@ -212,12 +228,22 @@ const render = () => {
     metadata.textContent = [extension, formatBytes(item.size), formatDuration(item.duration), item.ambiguousSocialTrack ? t("incompleteTrack") : (item.recommended ? t("recommended") : ""), parsed?.hostname].filter(Boolean).join(" · ");
     const previewButton = row.querySelector(".external-preview");
     previewButton.textContent = t("externalPreview");
-    previewButton.hidden = item.kind === "image" || item.ambiguousSocialTrack;
+    previewButton.hidden = item.kind === "image";
+    const previewRequest = previewRequestFor(item, activePageUrl);
+    previewButton.disabled = !previewRequest;
+    previewButton.title = previewRequest ? t("externalPreview") : t("incompleteTrack");
     previewButton.onclick = () => {
+      if (!previewRequest) return;
       previewButton.disabled = true;
-      chrome.runtime.sendMessage({ type: "APOCALIPSE_PREVIEW_MEDIA", url: item.previewUrl || item.url, pageUrl: activePageUrl, contentType: item.contentType || null, userAgent: item.userAgent || null }, (result) => {
+      chrome.runtime.sendMessage(previewRequest, (result) => {
         previewButton.disabled = false;
         const error = chrome.runtime.lastError?.message || result?.error;
+        if (result?.ok && result.preparing) {
+          const label = document.querySelector("#bridge-label");
+          label.removeAttribute("data-i18n");
+          label.textContent = locale === "pt_BR" ? "Preparando a m\u00eddia completa no ADM antes de abrir o player..."
+            : locale === "zh_CN" ? "ADM \u6b63\u5728\u51c6\u5907\u5b8c\u6574\u5a92\u4f53..." : "ADM is preparing complete media before opening the player...";
+        }
         if (!result?.ok || error) {
           const label = document.querySelector("#bridge-label");
           label.removeAttribute("data-i18n");

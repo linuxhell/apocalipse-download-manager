@@ -88,11 +88,15 @@ fn checked_url(value: &str) -> Result<Url, String> {
     }
     Ok(url)
 }
-fn validate(request: &MediaPreviewRequest) -> Result<(), String> {
+pub(super) fn validate(request: &MediaPreviewRequest) -> Result<(), String> {
     checked_url(&request.url)?;
+    if let Some(audio) = request.audio_url.as_deref() {
+        checked_url(audio)?;
+    }
     for (value, limit) in [
         (&request.user_agent, 1024),
         (&request.cookie_header, 16384),
+        (&request.audio_cookie_header, 16384),
         (&request.referer, 8192),
     ] {
         if let Some(value) = value {
@@ -165,7 +169,7 @@ fn full_media_url(value: &str) -> String {
     }
     result
 }
-fn effective_player(player: &Path) -> PathBuf {
+pub(super) fn effective_player(player: &Path) -> PathBuf {
     if player
         .file_name()
         .and_then(|s| s.to_str())
@@ -182,7 +186,7 @@ fn effective_player(player: &Path) -> PathBuf {
     }
     player.to_owned()
 }
-fn player_command(player: &Path, target: &str) -> Command {
+pub(super) fn player_command(player: &Path, target: &str) -> Command {
     let mut command = Command::new(player);
     #[cfg(windows)]
     if player
@@ -217,7 +221,7 @@ fn player_command(player: &Path, target: &str) -> Command {
 // Only these directly launched binaries have a process lifetime we own.
 // PotPlayer, portable launchers and other players may hand off to an existing
 // window and exit successfully while that window still reads the local URL.
-fn owns_player_process(player: &Path) -> bool {
+pub(super) fn owns_player_process(player: &Path) -> bool {
     matches!(
         player
             .file_name()
@@ -758,6 +762,69 @@ async fn serve(
         bytes += chunk.len() as u64;
     }
     report("media.preview_transfer_completed", format!("bytes={bytes}"));
+    Ok(())
+}
+
+// Reuse the authenticated, redirect-safe transport when a preview needs local
+// video/audio muxing. Each input carries only its own captured cookie scope.
+pub(super) async fn download_to(
+    mut request: MediaPreviewRequest,
+    builder: reqwest::ClientBuilder,
+    destination: &Path,
+    limit: u64,
+) -> Result<(), String> {
+    validate(&request)?;
+    request.url = full_media_url(&request.url);
+    let client = builder
+        .redirect(reqwest::redirect::Policy::none())
+        .referer(false)
+        .connect_timeout(Duration::from_secs(15))
+        .read_timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|_| "preview_network_configuration_failed")?;
+    let response = upstream(
+        &client,
+        &request,
+        &LocalRequest {
+            method: Method::GET,
+            range: None,
+        },
+    )
+    .await?;
+    validate_response(&response)?;
+    // A bound CDN response is not a complete track, even when HTTP succeeds.
+    if response.status() != StatusCode::OK {
+        return Err("preview_incomplete_media_response".into());
+    }
+    if response.content_length().is_some_and(|size| size > limit) {
+        return Err("preview_size_limit".into());
+    }
+    let mut output = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)
+        .await
+        .map_err(|_| "preview_file_create_failed")?;
+    let mut bytes = 0_u64;
+    let mut chunks = response.bytes_stream();
+    while let Some(chunk) = chunks.next().await {
+        let chunk = chunk.map_err(|_| "preview_upstream_read_failed")?;
+        bytes = bytes.saturating_add(chunk.len() as u64);
+        if bytes > limit {
+            return Err("preview_size_limit".into());
+        }
+        output
+            .write_all(&chunk)
+            .await
+            .map_err(|_| "preview_file_write_failed")?;
+    }
+    if bytes == 0 {
+        return Err("preview_empty_media".into());
+    }
+    output
+        .flush()
+        .await
+        .map_err(|_| "preview_file_write_failed")?;
     Ok(())
 }
 

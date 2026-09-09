@@ -197,6 +197,8 @@
           </div>
           <button type="button" class="close" data-dialog-close>×</button>
         </div>
+        <div class="add-dialog-viewport">
+        <div id="add-dialog-scroll" class="add-dialog-scroll" tabindex="0" role="region" aria-label="Download options">
         <div class="add-dialog-grid">
         <section class="add-dialog-analysis">
         <label data-i18n="sourceUrl">Source URL</label
@@ -259,6 +261,13 @@
           <div class="range-scale"><span>1</span><span>8</span><span>16</span><span>32</span></div>
         </section>
         </section>
+        </div>
+        </div>
+        <div id="add-dialog-scrollbar" class="add-dialog-scrollbar" role="scrollbar" tabindex="0" aria-controls="add-dialog-scroll" aria-orientation="vertical" aria-label="Scroll download options" hidden>
+          <button type="button" data-scroll-up tabindex="-1" aria-label="Scroll up">&#9650;</button>
+          <div data-scroll-area><div data-scroll-thumb></div></div>
+          <button type="button" data-scroll-down tabindex="-1" aria-label="Scroll down">&#9660;</button>
+        </div>
         </div>
         <div class="dialog-actions">
           <button type="button" data-dialog-close data-i18n="cancel">
@@ -534,6 +543,8 @@
         <div class="dialog-actions"><button type="button" data-export-close data-i18n="cancel">Cancel</button><button id="export-recording" type="button" class="primary" data-i18n="export">Export</button></div>
       </form>
     </dialog>
+    <script src="dialog-scrollbar.js"></script>
+    <script src="task-list-state.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

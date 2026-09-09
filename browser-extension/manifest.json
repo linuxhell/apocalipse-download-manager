@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.98",
+  "version": "0.3.99",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -25,6 +25,19 @@
   "content_scripts": [
     {
       "matches": [
+        "https://tiktok.com/*",
+        "https://*.tiktok.com/*"
+      ],
+      "js": [
+        "tiktok-identity.js",
+        "tiktok-page-identity.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": [
         "https://chatgpt.com/*",
         "https://rapidgator.net/*",
         "https://*.rapidgator.net/*"
@@ -42,6 +55,7 @@
         "https://*/*"
       ],
       "js": [
+        "tiktok-identity.js",
         "content.js"
       ],
       "run_at": "document_start",

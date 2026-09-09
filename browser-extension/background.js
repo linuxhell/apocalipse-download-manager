@@ -430,25 +430,48 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
   if (message?.type === "APOCALIPSE_PREVIEW_MEDIA") {
     // Snapshot the clicked resource before awaiting the exact-URL cookie lookup.
-    const url = message.url;
     const referer = message.pageUrl || sender.tab?.url || null;
-    const contentType = message.contentType || null;
+    const mediaKind = message.mediaKind || null;
+    let url = message.url;
+    let pageExtractor = Boolean(message.pageExtractor);
+    let audioUrl = message.audioUrl || null;
+    // Match the existing Instagram download rule, without rewriting other sites.
+    if (mediaKind === "video" && referer) {
+      try {
+        const page = new URL(referer);
+        if (/(^|\.)instagram\.com$/i.test(page.hostname) && /^\/(?:reel|reels|p)\/[^/]+/i.test(page.pathname)) {
+          url = referer; pageExtractor = true; audioUrl = null;
+        }
+      } catch {}
+    }
+    const contentType = pageExtractor ? null : message.contentType || null;
     const userAgent = message.userAgent || navigator.userAgent;
     const traceId = crypto.randomUUID();
     (async () => {
-      let parsed;
-      try { parsed = new URL(url); } catch { throw new Error("invalid_preview_url"); }
-      if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password
-        || typeof url !== "string" || /[\u0000-\u001f\u007f]/.test(url)) throw new Error("invalid_preview_url");
-      const host = parsed.hostname.toLowerCase();
-      const social = ["tiktok.com", "tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com", "tiktokv.com", "tiktokv.us", "byteoversea.com", "ibytedtos.com", "muscdn.com", "facebook.com", "fbcdn.net", "fbsbx.com", "instagram.com", "cdninstagram.com"]
-        .some(domain => host === domain || host.endsWith(`.${domain}`));
-      // Never merge page cookies into a different CDN's request.
-      const cookies = social ? await chrome.cookies.getAll({ url }).catch(() => []) : [];
-      const cookieHeader = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join("; ") || null;
+      const check = value => {
+        let parsed;
+        try { parsed = new URL(value); } catch { throw new Error("invalid_preview_url"); }
+        if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password
+          || typeof value !== "string" || /[\u0000-\u001f\u007f]/.test(value)) throw new Error("invalid_preview_url");
+        return parsed;
+      };
+      check(url);
+      if (audioUrl) check(audioUrl);
+      const cookiesFor = async value => {
+        const host = check(value).hostname.toLowerCase();
+        const social = ["tiktok.com", "tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com", "tiktokv.com", "tiktokv.us", "byteoversea.com", "ibytedtos.com", "muscdn.com", "facebook.com", "fbcdn.net", "fbsbx.com", "instagram.com", "cdninstagram.com"]
+          .some(domain => host === domain || host.endsWith(`.${domain}`));
+        const cookies = social ? await chrome.cookies.getAll({ url: value }).catch(() => []) : [];
+        return cookies.map(cookie => `${cookie.name}=${cookie.value}`).join("; ") || null;
+      };
+      // Separate identities for separate resources: page/video cookies must not
+      // be copied into a different audio origin, or vice versa.
+      const [cookieHeader, audioCookieHeader] = await Promise.all([
+        cookiesFor(url), audioUrl ? cookiesFor(audioUrl) : Promise.resolve(null),
+      ]);
       return bridgeRequest("/v1/preview-media", {
         method: "POST",
-        body: JSON.stringify({ url, userAgent, referer, cookieHeader, contentType }),
+        body: JSON.stringify({ url, audioUrl, mediaKind, pageExtractor, userAgent, referer, cookieHeader, audioCookieHeader, contentType }),
       });
     })().then(result => {
       void diagnostic(result?.ok === false ? "popup.preview_failed" : "popup.preview_handed_off", { traceId, url, pageUrl: referer, startedAt: Date.now() }, result?.ok === false ? { level: "ERROR", error: String(result.error || "preview_failed") } : {});
