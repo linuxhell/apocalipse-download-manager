@@ -23,11 +23,11 @@ if (chrome.webRequest?.onResponseStarted) {
     const disposition = responseHeader(details.responseHeaders, "content-disposition").toLowerCase();
     const looksLikeFile = disposition.includes("attachment")
       || (!contentType.includes("text/html") && /(?:application\/(?:octet-stream|x-rar|zip)|binary)/i.test(contentType));
-    const isTikTokTabMedia = /(?:^|\.)(?:tiktok\.com|tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com)$/i
+    const isSocialTabMedia = /(?:^|\.)(?:tiktok\.com|tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com|facebook\.com|fbcdn\.net|fbsbx\.com)$/i
       .test((() => { try { return new URL(details.url).hostname; } catch { return ""; } })())
       && (/^(?:video|audio)\//i.test(contentType)
         || /(?:\/video\/tos\/|\/aweme\/v1\/play\/|mime_type=video|\.mp4(?:$|[?]))/i.test(details.url));
-    if (isTikTokTabMedia) {
+    if (isSocialTabMedia) {
       recentMediaResponses.push({
         tabId: details.tabId,
         frameId: details.frameId,
@@ -380,7 +380,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       .filter((item) => item.tabId === tabId && item.capturedAt >= cutoff)
       .sort((left, right) => right.capturedAt - left.capturedAt)
       .slice(0, 30);
-    reply({ media });
+    reply({ media: media.map((item) => ({ ...item, ageMs: Date.now() - item.capturedAt })) });
     return;
   }
   if (message?.type === "APOCALIPSE_FETCH_THUMBNAIL") {
