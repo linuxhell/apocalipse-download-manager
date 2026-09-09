@@ -1,8 +1,9 @@
 let media = [], selected = "video", locale = "en";
+const selectedUrls = new Set();
 const messages = {
-  en: { mediaIntelligence: "Media intelligence", video: "Video", audio: "Audio", images: "Images", download: "Download", empty: "No media detected in this tab.", unknownSize: "Size unavailable", connected: "Connected to Apocalipse", disconnected: "Disconnected", pairingToken: "Pairing token", connect: "Connect", recommended: "Recommended", capturedResource: "Captured media resource", forceShortcut: "Force Apocalipse", bypassShortcut: "Bypass Apocalipse" },
-  pt_BR: { mediaIntelligence: "Inteligência de mídia", video: "Vídeo", audio: "Áudio", images: "Imagens", download: "Download", empty: "Nenhuma mídia detectada nesta aba.", unknownSize: "Tamanho indisponível", connected: "Conectada ao Apocalipse", disconnected: "Desconectada", pairingToken: "Token de pareamento", connect: "Conectar", recommended: "Recomendada", capturedResource: "Recurso de mídia capturado", forceShortcut: "Forçar Apocalipse", bypassShortcut: "Ignorar Apocalipse" },
-  zh_CN: { mediaIntelligence: "媒体智能", video: "视频", audio: "音频", images: "图片", download: "下载", empty: "此标签页未检测到媒体。", unknownSize: "大小未知", connected: "已连接到 Apocalipse", disconnected: "未连接", pairingToken: "配对令牌", connect: "连接", recommended: "推荐", capturedResource: "已捕获的媒体资源", forceShortcut: "强制使用 Apocalipse", bypassShortcut: "绕过 Apocalipse" }
+  en: { mediaIntelligence: "Media intelligence", video: "Video", audio: "Audio", images: "Images", download: "Download", empty: "No media detected in this tab.", unknownSize: "Size unavailable", connected: "Connected to Apocalipse", disconnected: "Disconnected", pairingToken: "Pairing token", connect: "Connect", recommended: "Recommended", capturedResource: "Captured media resource", requestedMedia: "You tried to download", selectAll: "Select all", downloadSelected: "Download selected", forceShortcut: "Force Apocalipse", bypassShortcut: "Bypass Apocalipse" },
+  pt_BR: { mediaIntelligence: "Inteligência de mídia", video: "Vídeo", audio: "Áudio", images: "Imagens", download: "Download", empty: "Nenhuma mídia detectada nesta aba.", unknownSize: "Tamanho indisponível", connected: "Conectada ao Apocalipse", disconnected: "Desconectada", pairingToken: "Token de pareamento", connect: "Conectar", recommended: "Recomendada", capturedResource: "Recurso de mídia capturado", requestedMedia: "Você tentou baixar", selectAll: "Selecionar todos", downloadSelected: "Baixar selecionados", forceShortcut: "Forçar Apocalipse", bypassShortcut: "Ignorar Apocalipse" },
+  zh_CN: { mediaIntelligence: "媒体智能", video: "视频", audio: "音频", images: "图片", download: "下载", empty: "此标签页未检测到媒体。", unknownSize: "大小未知", connected: "已连接到 Apocalipse", disconnected: "未连接", pairingToken: "配对令牌", connect: "连接", recommended: "推荐", capturedResource: "已捕获的媒体资源", requestedMedia: "您尝试下载", selectAll: "全选", downloadSelected: "下载所选项目", forceShortcut: "强制使用 Apocalipse", bypassShortcut: "绕过 Apocalipse" }
 };
 const t = (key) => messages[locale]?.[key] || messages.en[key] || key;
 const formatBytes = (bytes) => {
@@ -121,6 +122,12 @@ const render = () => {
   const root = document.querySelector("#items");
   root.textContent = "";
   const matches = media.filter((item) => item.kind === selected);
+  const updateBulk = () => {
+    const chosen = matches.filter((item) => selectedUrls.has(item.url)).length;
+    document.querySelector("#download-selected").disabled = chosen === 0;
+    document.querySelector("#select-all").checked = matches.length > 0 && chosen === matches.length;
+    document.querySelector("#select-all").indeterminate = chosen > 0 && chosen < matches.length;
+  };
   if (!matches.length) {
     const empty = document.createElement("div");
     empty.id = "empty";
@@ -131,19 +138,42 @@ const render = () => {
   for (const item of matches) {
     const row = document.querySelector("#row").content.cloneNode(true);
     const image = row.querySelector("img");
+    const preview = row.querySelector(".preview");
+    const previewVideo = row.querySelector("video");
+    const audioPreview = row.querySelector(".audio-preview");
+    const previewAudio = row.querySelector("audio");
+    const metadata = row.querySelector("small");
+    const checkbox = row.querySelector(".media-select");
+    checkbox.checked = selectedUrls.has(item.url);
+    checkbox.onchange = () => { checkbox.checked ? selectedUrls.add(item.url) : selectedUrls.delete(item.url); updateBulk(); };
     const audio = row.querySelector(".audio-icon");
     if (selected === "audio") {
-      image.hidden = true;
+      preview.hidden = true;
       audio.hidden = false;
+      audioPreview.hidden = false;
+      previewAudio.src = item.url;
+      previewAudio.onloadedmetadata = () => {
+        if (!item.duration && Number.isFinite(previewAudio.duration)) item.duration = previewAudio.duration;
+        metadata.textContent = [extension, formatBytes(item.size), formatDuration(item.duration), item.recommended ? t("recommended") : "", parsed?.hostname].filter(Boolean).join(" · ");
+      };
     } else {
       loadThumbnail(image, item);
+      if (item.networkCaptured && item.kind === "video") {
+        previewVideo.style.display = "block";
+        previewVideo.src = item.url;
+        previewVideo.onloadedmetadata = () => {
+          if (!item.duration && Number.isFinite(previewVideo.duration)) item.duration = previewVideo.duration;
+          if (previewVideo.duration > 0.2) previewVideo.currentTime = 0.1;
+          metadata.textContent = [extension, formatBytes(item.size), formatDuration(item.duration), item.recommended ? t("recommended") : "", parsed?.hostname].filter(Boolean).join(" · ");
+        };
+      }
     }
     let parsed;
     try { parsed = new URL(item.url); } catch { parsed = null; }
     const pathName = parsed?.pathname?.split("/").filter(Boolean).pop() || "";
     const extension = (pathName.match(/\.([a-z0-9]{2,8})$/i)?.[1] || item.ext || (/\.m3u8(?:$|[?#])/i.test(item.url) ? "m3u8" : item.kind)).toUpperCase();
     row.querySelector("b").textContent = item.title || decodeURIComponent(pathName) || item.url;
-    row.querySelector("small").textContent = [extension, formatBytes(item.size), formatDuration(item.duration), item.recommended ? t("recommended") : "", parsed?.hostname].filter(Boolean).join(" · ");
+    metadata.textContent = [extension, formatBytes(item.size), formatDuration(item.duration), item.recommended ? t("recommended") : "", parsed?.hostname].filter(Boolean).join(" · ");
     const button = row.querySelector("button");
     button.textContent = t("download");
     button.onclick = () => chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item }, (result) => {
@@ -153,6 +183,7 @@ const render = () => {
     });
     root.append(row);
   }
+  updateBulk();
 };
 document.querySelectorAll("nav button").forEach((button) => {
   button.onclick = () => {
@@ -161,6 +192,21 @@ document.querySelectorAll("nav button").forEach((button) => {
     render();
   };
 });
+document.querySelector("#select-all").onchange = (event) => {
+  for (const item of media.filter((value) => value.kind === selected)) {
+    if (event.target.checked) selectedUrls.add(item.url); else selectedUrls.delete(item.url);
+  }
+  render();
+};
+document.querySelector("#download-selected").onclick = async () => {
+  const button = document.querySelector("#download-selected");
+  button.disabled = true;
+  for (const item of media.filter((value) => selectedUrls.has(value.url))) {
+    await chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item }).catch(() => null);
+  }
+  selectedUrls.clear();
+  render();
+};
 chrome.storage.local.get({ language: "en" }, ({ language }) => {
   locale = language;
   document.querySelector("#language").value = locale;
@@ -188,11 +234,19 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
           ext: video ? "mp4" : "audio",
           title: (() => { try { return new URL(item.url).hostname.includes("tiktok") ? `TikTok — ${t("capturedResource")}` : t("capturedResource"); } catch { return t("capturedResource"); } })(),
           capturedAt: item.capturedAt,
+          networkCaptured: true,
         };
       });
       const unique = new Map();
       for (const item of [...scanned, ...network]) if (item?.url && !unique.has(item.url)) unique.set(item.url, item);
       media = [...unique.values()];
+      const picker = await chrome.runtime.sendMessage({ type: "APOCALIPSE_MEDIA_PICKER_CONTEXT", tabId: tab.id }).catch(() => null);
+      const requested = document.querySelector("#requested-media");
+      if (picker?.context) {
+        requested.hidden = false;
+        requested.querySelector("b").textContent = picker.context.title || t("capturedResource");
+        loadThumbnail(requested.querySelector("img"), picker.context);
+      } else requested.hidden = true;
       render();
     });
   });

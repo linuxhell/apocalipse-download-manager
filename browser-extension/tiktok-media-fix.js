@@ -399,7 +399,16 @@
       toast.style.cssText = "position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:2147483647;max-width:560px;padding:13px 18px;border:1px solid #31d9ee;border-radius:10px;background:#111a20f2;color:#f3fbff;font:600 14px system-ui;box-shadow:0 6px 24px #000a;text-align:center";
       document.documentElement.append(toast);
       setTimeout(() => toast.remove(), 5000);
-      chrome.runtime.sendMessage({ type: "APOCALIPSE_OPEN_MEDIA_PICKER" }).catch(() => {});
+      let context = video;
+      for (let depth = 0; context && depth < 10; depth += 1, context = context.parentElement) {
+        const text = String(context.innerText || "").trim();
+        if (text.length >= 8 && text.length <= 1200) break;
+      }
+      const title = String(context?.innerText || document.title || "TikTok").trim().replace(/\s+/g, " ").slice(0, 240);
+      chrome.runtime.sendMessage({
+        type: "APOCALIPSE_OPEN_MEDIA_PICKER",
+        context: { title, thumbnail: video.poster || "", kind: "video", duration: Number.isFinite(video.duration) ? video.duration : null },
+      }).catch(() => {});
       setTimeout(() => { button.textContent = original; }, 2500);
       return;
     }

@@ -9,6 +9,7 @@ let lastShortcutMode = "normal";
 let diagnosticOutbox = [];
 const recentFileResponses = [];
 const recentMediaResponses = [];
+const mediaPickerContexts = new Map();
 const ASSISTED_PREFIX = "assisted-download:";
 const DIRECT_PREFIX = "direct-download:";
 
@@ -384,8 +385,16 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return;
   }
   if (message?.type === "APOCALIPSE_OPEN_MEDIA_PICKER") {
+    if (sender.tab?.id && message.context) {
+      mediaPickerContexts.set(sender.tab.id, { ...message.context, capturedAt: Date.now() });
+    }
     chrome.action.openPopup().then(() => reply({ ok: true })).catch((error) => reply({ ok: false, error: String(error) }));
     return true;
+  }
+  if (message?.type === "APOCALIPSE_MEDIA_PICKER_CONTEXT") {
+    const context = mediaPickerContexts.get(message.tabId) || null;
+    reply({ context: context && Date.now() - context.capturedAt <= 120_000 ? context : null });
+    return;
   }
   if (message?.type === "APOCALIPSE_FETCH_THUMBNAIL") {
     (async () => {
