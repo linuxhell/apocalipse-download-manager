@@ -367,16 +367,19 @@
     }
     if (!copyItem) return null;
     copyItem.click();
-    return "clipboard-copied";
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    try {
+      const copied = await navigator.clipboard.readText();
+      if (copied && isFacebookMediaUrl(copied)) return copied;
+    } catch {}
+    return null;
   };
   const revealFacebookUrl = async (element) => {
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
-    const postText = element.closest?.('[role="article"],article')?.textContent || "";
-    const sponsored = /(?:patrocinado|sponsored)/i.test(postText);
-    if (sponsored) {
-      const menuUrl = await facebookUrlFromMenu(element);
-      if (menuUrl && menuUrl !== "clipboard-copied") return menuUrl;
-    }
+    // The site's own Copy link command is the authoritative association
+    // between a feed card and its canonical Reel/post URL.
+    const copiedUrl = await facebookUrlFromMenu(element);
+    if (copiedUrl) return copiedUrl;
     const immediate = facebookUrlFor(element);
     if (immediate) return immediate;
     const rect = element.getBoundingClientRect();
@@ -696,13 +699,15 @@
         button.textContent = "…";
         trace("overlay_download_clicked", "download", { tag: element.tagName, facebook: isFacebookVideo, tiktokPage: isTikTokPage, tiktokPermalink: isTikTokVideo, overlays: activeOverlays.size });
         const visibleFacebookUrl = isFacebookVideo && isFacebookMediaUrl(location.href) ? location.href : null;
-        const resolved = visibleFacebookUrl || (isFacebookVideo ? await revealFacebookUrl(element) : tikTokUrlFor(element) || await resolveDownloadUrl(element));
-        if (resolved === "clipboard-copied") {
-          button.textContent = "✓";
-          button.title = "Link copiado; o Apocalipse abrirá a janela de download";
-          setTimeout(() => { button.textContent = originalText; }, 2500);
-          return;
+        let enteredTikTokFullscreen = false;
+        if (isTikTokPage && !tikTokUrlFor(element) && document.fullscreenElement !== element && element.requestFullscreen) {
+          try {
+            await element.requestFullscreen();
+            enteredTikTokFullscreen = true;
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          } catch {}
         }
+        const resolved = visibleFacebookUrl || (isFacebookVideo ? await revealFacebookUrl(element) : tikTokUrlFor(element) || await resolveDownloadUrl(element));
         const liveSource = String(element.currentSrc || element.src || "");
         const liveBlobUrl = /^blob:/i.test(liveSource) ? liveSource : null;
         const liveHttpUrl = /^https?:/i.test(liveSource) ? liveSource : null;
@@ -727,7 +732,9 @@
         // A resolved HLS manifest is more authoritative than incidental network
         // traffic or a generic HTTP source exposed by the player.
         let currentUrl = isFacebookVideo
-          ? (liveHttpUrl || networkMediaUrl || resolved?.url || resolved)
+          ? ((typeof resolved === "string" && isFacebookMediaUrl(resolved))
+            ? resolved
+            : (resolved?.url || liveHttpUrl || networkMediaUrl || resolved))
           : (resolved?.url || resolved || liveHttpUrl || networkMediaUrl || (isYouTubeVideo ? location.href : null));
         const facebookPlayableUrl = isFacebookVideo && currentUrl && (
           isFacebookMediaUrl(currentUrl)
@@ -767,12 +774,13 @@
           pageFallback: Boolean(isFacebookVideo && isFacebookMediaUrl(currentUrl)),
           candidate: currentUrl,
         });
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls, userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: isFacebookVideo ? facebookDownloadTitle(visibleFacebookUrl || location.href) : document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls, userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
           const failed = chrome.runtime.lastError || !result?.ok;
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";
           if (failed) button.title = result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable";
           setTimeout(() => { button.textContent = originalText; }, 1500);
+          if (enteredTikTokFullscreen && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
         });
       });
       if (element.tagName === "VIDEO") {
@@ -811,7 +819,7 @@
             const safeTitle = (document.title || "recording").replace(/[<>:\"/\\|?*]+/g, "_").slice(0, 120);
             const begin = await chrome.runtime.sendMessage({
               type: "APOCALIPSE_BLOB_BEGIN",
-              request: { fileName: `${safeTitle}.recording.webm`, total: 0, source: location.href, streaming: true },
+              request: { fileName: `${safeTitle}.recording.webm`, total: 0, source: location.href, streaming: true, recording: true },
             });
             if (!begin?.uploadId) throw new Error(begin?.error || "recording_begin_failed");
             trace("recording_bridge_started", "record", { uploadId: begin.uploadId, mimeType });

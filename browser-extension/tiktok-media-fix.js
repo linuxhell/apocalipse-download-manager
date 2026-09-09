@@ -1,4 +1,5 @@
 (() => {
+  const replaying = new WeakSet();
   const validUrl = (value) => {
     try {
       const url = new URL(String(value || "").replaceAll("\\/", "/"), location.href);
@@ -117,14 +118,52 @@
     return urlInState(video) || urlInPageJson(video);
   };
 
-  document.addEventListener("click", (event) => {
+  const copiedPermalinkFor = async (video) => {
+    let container = video;
+    let share = null;
+    for (let depth = 0; container && depth < 16 && !share; depth += 1, container = container.parentElement) {
+      share = [...(container.querySelectorAll?.('button,[role="button"]') || [])].find((item) =>
+        /(?:compartilhar|share|分享)/i.test(`${item.getAttribute("aria-label") || ""} ${item.title || ""} ${item.textContent || ""}`));
+    }
+    if (!share) return null;
+    share.click();
+    let copyItem = null;
+    for (let attempt = 0; attempt < 15 && !copyItem; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      copyItem = [...document.querySelectorAll('[role="menuitem"],button,[role="button"]')].find((item) =>
+        /(?:copiar link|copy link|复制链接|複製連結)/i.test(item.textContent || ""));
+    }
+    if (!copyItem) return null;
+    copyItem.click();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    try { return validUrl(await navigator.clipboard.readText()); } catch { return null; }
+  };
+
+  document.addEventListener("click", async (event) => {
     const button = event.target?.closest?.(".apocalipse-media-download:not(.apocalipse-media-record)");
-    if (!button) return;
+    if (!button || replaying.has(button)) {
+      if (button) replaying.delete(button);
+      return;
+    }
     const video = videoForButton(button);
-    const url = permalinkFor(video);
-    if (!video || !url) return;
+    if (!video) return;
     event.preventDefault();
     event.stopImmediatePropagation();
+    let enteredFullscreen = false;
+    let url = permalinkFor(video) || await copiedPermalinkFor(video);
+    if (!url && video.requestFullscreen) {
+      try {
+        await video.requestFullscreen();
+        enteredFullscreen = true;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        url = permalinkFor(video);
+      } catch {}
+    }
+    if (!url) {
+      replaying.add(button);
+      button.click();
+      return;
+    }
     const original = button.textContent;
     button.textContent = "…";
     chrome.runtime.sendMessage({
@@ -141,6 +180,7 @@
     }, (result) => {
       const failed = chrome.runtime.lastError || !result?.ok;
       button.textContent = failed ? "⚠" : "✓";
+      if (enteredFullscreen && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
       button.title = failed
         ? result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable"
         : "Enviado ao Apocalipse";
