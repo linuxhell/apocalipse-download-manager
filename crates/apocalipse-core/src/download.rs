@@ -209,32 +209,38 @@ impl DownloadEngine {
                     if let Some(total) = range_total {
                         let useful_connections = requested.min(total.div_ceil(4_194_304) as usize);
                         if useful_connections > 1 {
-                            let segmented = self
-                                .download_segmented(
-                                    request.clone(),
-                                    events.clone(),
-                                    total,
-                                    useful_connections,
-                                )
-                                .await;
-                            return match segmented {
-                                Ok(()) => Ok(()),
-                                Err(error)
-                                    if error.chain().any(|cause| {
-                                        cause
-                                            .to_string()
-                                            .contains("server stopped supporting byte ranges")
-                                    }) =>
-                                {
-                                    // Some CDNs advertise ranges during the probe but stop
-                                    // honoring them once parallel workers begin. Discard only
-                                    // this task's isolated chunks and retry as a single stream.
-                                    let destination = request.destination.clone();
-                                    cleanup_chunk_artifacts(&destination).await?;
-                                    self.download_single(request, events).await
+                            let mut attempt_connections = useful_connections;
+                            loop {
+                                let segmented = self
+                                    .download_segmented(
+                                        request.clone(),
+                                        events.clone(),
+                                        total,
+                                        attempt_connections,
+                                    )
+                                    .await;
+                                match segmented {
+                                    Ok(()) => return Ok(()),
+                                    Err(error)
+                                        if error.chain().any(|cause| {
+                                            cause
+                                                .to_string()
+                                                .contains("server stopped supporting byte ranges")
+                                        }) =>
+                                    {
+                                        // File hosts may briefly reject part of a parallel burst.
+                                        // Reduce concurrency progressively before giving up on
+                                        // byte ranges and falling back to a single stream.
+                                        cleanup_chunk_artifacts(&request.destination).await?;
+                                        if attempt_connections > 2 {
+                                            attempt_connections = (attempt_connections / 2).max(2);
+                                            continue;
+                                        }
+                                        return self.download_single(request, events).await;
+                                    }
+                                    Err(error) => return Err(error),
                                 }
-                                Err(error) => Err(error),
-                            };
+                            }
                         }
                     }
                 }
@@ -382,7 +388,12 @@ impl DownloadEngine {
                         .send()
                         .await?;
                     if response.status() != StatusCode::PARTIAL_CONTENT {
-                        bail!("server stopped supporting byte ranges");
+                        bail!(
+                            "server stopped supporting byte ranges: status {} for bytes={}-{}",
+                            response.status(),
+                            start + existing,
+                            end
+                        );
                     }
                     let file = if existing > 0 {
                         fs::OpenOptions::new().append(true).open(&segment).await?
