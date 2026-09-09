@@ -458,3 +458,62 @@ async fn preflight_rejects_a_middle_fragment_without_an_initial_media_header() {
     let relay = Relay::bind(request(&origin.url), Client::builder().no_proxy()).unwrap();
     assert_eq!(relay.probe().await.unwrap_err(), "preview_incomplete_media");
 }
+
+#[test]
+fn potplayer_arguments_use_local_url_without_vlc_flags() {
+    for name in [
+        "PotPlayerMini64.exe",
+        "PotPlayerMini.exe",
+        "PotPlayerPortable.exe",
+    ] {
+        let player = Path::new(name);
+        let target = "http://127.0.0.1:1234/synthetic-token/media";
+        let command = player_command(player, target);
+        let args = command
+            .get_args()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(args, vec![target.to_owned()]);
+        assert!(!owns_player_process(player));
+        assert!(!format!("{command:?}").contains("signature="));
+    }
+    assert!(owns_player_process(Path::new("vlc.exe")));
+    assert!(owns_player_process(Path::new("mpv.exe")));
+    assert!(!owns_player_process(Path::new("VLCPortable.exe")));
+}
+
+#[tokio::test]
+async fn successful_launcher_handoff_keeps_stream_alive_and_expires() {
+    let _serial = SERIAL.lock().await;
+    let origin = fixture(vec![response(
+        "200 OK",
+        "Content-Type: video/mp4\r\n",
+        "movie",
+    )])
+    .await;
+    let relay = Relay::bind(request(&origin.url), Client::builder().no_proxy()).unwrap();
+    let target = relay.target.clone();
+    let (sender, receiver) = oneshot::channel();
+    let reporter: Reporter = Arc::new(|_, _| {});
+    let server = tokio::spawn(relay.run(
+        receiver,
+        reporter,
+        Duration::from_millis(500),
+        Duration::from_secs(5),
+    ));
+    // Simulate a successful launcher exit before the existing player requests data.
+    let keeper = tokio::spawn(retain_handoff_session(sender));
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let answer = client().get(&target).send().await.unwrap();
+    assert_eq!(answer.status(), StatusCode::OK);
+    assert_eq!(answer.text().await.unwrap(), "movie");
+    tokio::time::timeout(Duration::from_secs(6), server)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), keeper)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(client().get(&target).send().await.is_err());
+}

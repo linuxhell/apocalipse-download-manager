@@ -712,11 +712,18 @@
           } catch {}
         }
         const resolved = visibleFacebookUrl || (isFacebookVideo ? await revealFacebookUrl(element) : tikTokUrlFor(element) || await resolveDownloadUrl(element));
+        // The Reel/post permalink represents the complete video. A recent CDN
+        // response can be only one DASH track (even when labelled video/mp4).
+        // Use the same page-extractor route as the popup, before blobs or CDN URLs.
+        const facebookPageUrl = isFacebookVideo
+          ? [typeof resolved === "string" ? resolved : resolved?.url, visibleFacebookUrl]
+            .find((value) => value && isFacebookMediaUrl(value)) || null
+          : null;
         const liveSource = String(element.currentSrc || element.src || "");
         const liveBlobUrl = /^blob:/i.test(liveSource) ? liveSource : null;
         const liveHttpUrl = /^https?:/i.test(liveSource) ? liveSource : null;
         const networkMediaUrl = recentNetworkMediaUrl();
-        const capturedSocialMedia = (isTikTokPage || (isFacebookVideo && isFacebookMediaUrl(location.href)))
+        const capturedSocialMedia = (isTikTokPage || (isFacebookVideo && !facebookPageUrl && isFacebookMediaUrl(location.href)))
           ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null)
           : null;
         const browserVideoItem = capturedSocialMedia?.media?.find((item) =>
@@ -740,7 +747,7 @@
         // For a real <video>, the source feeding the player is more authoritative
         // than location.href. Try readable blob first; for MSE blobs, fall through
         // to the most recent underlying media request captured by Performance API.
-        if (liveBlobUrl) {
+        if (liveBlobUrl && !facebookPageUrl) {
           try {
             const fallbackName = isFacebookVideo ? facebookDownloadTitle(location.href) : null;
             await uploadBlobUrl(liveBlobUrl, fallbackName);
@@ -756,7 +763,7 @@
         // A resolved HLS manifest is more authoritative than incidental network
         // traffic or a generic HTTP source exposed by the player.
         let currentUrl = isFacebookVideo
-          ? (browserVideoMedia || ((typeof resolved === "string" && isFacebookMediaUrl(resolved))
+          ? (facebookPageUrl || browserVideoMedia || ((typeof resolved === "string" && isFacebookMediaUrl(resolved))
             ? resolved
             : (resolved?.url || liveHttpUrl || networkMediaUrl || resolved)))
           : (isTikTokPage
@@ -787,7 +794,9 @@
           }
         }
         const directFacebookMedia = isFacebookVideo ? absolute(element.currentSrc || element.src) : null;
-        const requestUrls = [...new Set([
+        // Do not attach unrelated CDN audio to an extractor page task.
+        const companionAudioUrl = isFacebookVideo && !facebookPageUrl ? browserAudioMedia : null;
+        const requestUrls = facebookPageUrl ? [] : [...new Set([
           ...(resolved?.requestUrls?.length ? resolved.requestUrls : (/\.m3u8(?:$|[?#])/i.test(String(currentUrl)) ? hlsForPage().candidates : [])),
           ...(directFacebookMedia && /^https?:/i.test(directFacebookMedia) ? [directFacebookMedia] : []),
         ])];
@@ -810,9 +819,10 @@
           directPlayer: Boolean(liveHttpUrl && currentUrl === liveHttpUrl),
           networkMedia: Boolean(networkMediaUrl && currentUrl === networkMediaUrl),
           pageFallback: Boolean(isFacebookVideo && isFacebookMediaUrl(currentUrl)),
+          facebookPageExtractorPreferred: Boolean(facebookPageUrl),
           candidate: currentUrl,
         });
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, audioUrl: isFacebookVideo ? browserAudioMedia : null, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(browserAudioMedia ? [browserAudioMedia] : [])], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, audioUrl: companionAudioUrl, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail: thumbnailFor(element, "video") } }, (result) => {
           const failed = chrome.runtime.lastError || !result?.ok;
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";

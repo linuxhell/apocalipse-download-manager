@@ -214,6 +214,26 @@ fn player_command(player: &Path, target: &str) -> Command {
     command
 }
 
+// Only these directly launched binaries have a process lifetime we own.
+// PotPlayer, portable launchers and other players may hand off to an existing
+// window and exit successfully while that window still reads the local URL.
+fn owns_player_process(player: &Path) -> bool {
+    matches!(
+        player
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .as_str(),
+        "vlc" | "vlc.exe" | "mpv" | "mpv.exe"
+    )
+}
+async fn retain_handoff_session(mut keepalive: oneshot::Sender<()>) {
+    // The relay still enforces idle/lifetime limits. Release this sender as soon
+    // as the receiver closes; do not retain an unbounded background process.
+    keepalive.closed().await;
+}
+
 pub(super) fn open(app: &tauri::AppHandle, mut request: MediaPreviewRequest) -> Result<(), String> {
     validate(&request)?;
     let settings = app
@@ -305,8 +325,11 @@ pub(super) fn open(app: &tauri::AppHandle, mut request: MediaPreviewRequest) -> 
             player.display()
         ),
     );
+    let owns_process = owns_player_process(&player);
     tauri::async_runtime::spawn_blocking(move || {
-        match child.wait() {
+        let outcome = child.wait();
+        let handed_off = !owns_process && outcome.as_ref().is_ok_and(|status| status.success());
+        match outcome {
             Ok(status) if status.success() => {
                 report("media.preview_player_exited", format!("pid={pid} code=0"))
             }
@@ -316,7 +339,15 @@ pub(super) fn open(app: &tauri::AppHandle, mut request: MediaPreviewRequest) -> 
             ),
             Err(_) => report("media.preview_error", "preview_player_wait_failed".into()),
         }
-        let _ = stop.send(());
+        if handed_off {
+            report(
+                "media.preview_handoff_retained",
+                "waiting_for_local_transport_idle".into(),
+            );
+            tauri::async_runtime::spawn(retain_handoff_session(stop));
+        } else {
+            let _ = stop.send(());
+        }
     });
     Ok(())
 }
