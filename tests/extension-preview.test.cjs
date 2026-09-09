@@ -67,3 +67,30 @@ test('does not gather cookies for unrelated sites or spoofed TikTok hosts', asyn
   }
   assert.equal(lookups.length, 0); assert.ok(previews.every(item => item.cookieHeader === null));
 });
+
+
+test('Facebook and Instagram use separate exact-media cookie scopes and page context', async () => {
+  const { send, previews, lookups } = worker();
+  const entries = [
+    ['https://video.xx.fbcdn.net/clip.mp4?sig=a%2Bb%3D&bytestart=1024&byteend=2047', 'https://www.facebook.com/reel/123'],
+    ['https://scontent.cdninstagram.com/clip.mp4?sig=a%2Bb%3D&&x=%20&x=a+b', 'https://www.instagram.com/reel/123/'],
+  ];
+  const results = await Promise.all(entries.map(([url, pageUrl]) => send({ type: 'APOCALIPSE_PREVIEW_MEDIA', url, pageUrl, contentType: 'video/mp4' })));
+  assert.ok(results.every(result => result.ok));
+  for (const [url, pageUrl] of entries) {
+    const payload = previews.find(item => item.url === url);
+    assert.equal(payload.referer, pageUrl);
+    assert.equal(payload.contentType, 'video/mp4');
+    assert.equal(payload.cookieHeader, `sid=${new URL(url).hostname}`);
+    assert.ok(lookups.some(item => item.url === url && !item.domain));
+  }
+  assert.equal(lookups.length, 2);
+});
+test('spoofed Facebook and Instagram CDN names never receive cookies', async () => {
+  const { send, previews, lookups } = worker();
+  for (const url of ['https://fbcdn.net.evil.example/video.mp4', 'https://cdninstagram.com.evil.example/video.mp4']) {
+    assert.equal((await send({ type: 'APOCALIPSE_PREVIEW_MEDIA', url })).ok, true);
+  }
+  assert.equal(lookups.length, 0);
+  assert.ok(previews.every(item => item.cookieHeader === null));
+});

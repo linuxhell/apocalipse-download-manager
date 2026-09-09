@@ -1,4 +1,4 @@
-//! Direct TikTok media is streamed locally, so the player never parses a signed CDN URL.
+//! Direct TikTok, Instagram and Facebook media use authenticated local streams.
 use super::{diagnostic_log, AppState, MediaPreviewRequest};
 use apocalipse_core::DownloadEngine;
 use futures_util::StreamExt;
@@ -40,6 +40,11 @@ pub(super) fn is_candidate(request: &MediaPreviewRequest) -> bool {
         "byteoversea.com",
         "ibytedtos.com",
         "muscdn.com",
+        "facebook.com",
+        "fbcdn.net",
+        "fbsbx.com",
+        "instagram.com",
+        "cdninstagram.com",
     ]
     .iter()
     .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")));
@@ -105,6 +110,61 @@ fn validate(request: &MediaPreviewRequest) -> Result<(), String> {
     Ok(())
 }
 
+fn meta_host(host: &str) -> bool {
+    [
+        "fbcdn.net",
+        "fbsbx.com",
+        "cdninstagram.com",
+        "instagram.com",
+        "facebook.com",
+    ]
+    .iter()
+    .any(|domain| {
+        host.eq_ignore_ascii_case(domain)
+            || host.to_ascii_lowercase().ends_with(&format!(".{domain}"))
+    })
+}
+fn full_media_url(value: &str) -> String {
+    let Ok(url) = Url::parse(value) else {
+        return value.to_owned();
+    };
+    if !url.host_str().is_some_and(meta_host) {
+        return value.to_owned();
+    }
+    let (without_fragment, fragment) = value
+        .split_once('#')
+        .map_or((value, None), |(a, b)| (a, Some(b)));
+    let Some((base, query)) = without_fragment.split_once('?') else {
+        return value.to_owned();
+    };
+    let is_bound = |pair: &str, key: &str| {
+        pair.split_once('=').is_some_and(|(name, number)| {
+            name.eq_ignore_ascii_case(key)
+                && !number.is_empty()
+                && number.bytes().all(|c| c.is_ascii_digit())
+        })
+    };
+    if !query.split('&').any(|p| is_bound(p, "bytestart"))
+        || !query.split('&').any(|p| is_bound(p, "byteend"))
+    {
+        return value.to_owned();
+    }
+    let remaining = query
+        .split('&')
+        .filter(|p| !is_bound(p, "bytestart") && !is_bound(p, "byteend"))
+        .collect::<Vec<_>>()
+        .join("&");
+    let mut result = base.to_owned();
+    if !remaining.is_empty() {
+        result.push('?');
+        result.push_str(&remaining);
+    }
+    if let Some(fragment) = fragment {
+        result.push('#');
+        result.push_str(fragment);
+    }
+    result
+}
 fn effective_player(player: &Path) -> PathBuf {
     if player
         .file_name()
@@ -165,7 +225,9 @@ pub(super) fn open(app: &tauri::AppHandle, mut request: MediaPreviewRequest) -> 
     if request.user_agent.as_deref().is_none_or(|s| s.is_empty()) {
         request.user_agent = settings.user_agent.clone();
     }
-    if request.referer.as_deref().is_none_or(|s| s.is_empty()) {
+    if request.referer.as_deref().is_none_or(|s| s.is_empty())
+        && !checked_url(&request.url)?.host_str().is_some_and(meta_host)
+    {
         request.referer = Some("https://www.tiktok.com/".into());
     }
     validate(&request)?;
@@ -203,9 +265,16 @@ pub(super) fn open(app: &tauri::AppHandle, mut request: MediaPreviewRequest) -> 
             &format!("trace={trace} {detail}"),
         );
         if error && !first_error.swap(true, Ordering::SeqCst) {
+            super::show_main_window(&report_app);
             let _ = report_app.emit("media-preview-error", detail);
         }
     });
+    // Verify the selected stream before opening VLC. Starting a process alone
+    // does not establish that the remote media is accessible or complete.
+    if let Err(error) = tauri::async_runtime::block_on(relay.probe()) {
+        report("media.preview_error", error.clone());
+        return Err(error);
+    }
     let mut command = player_command(&player, &relay.target);
     let (stop, stopped) = oneshot::channel();
     tauri::async_runtime::spawn(relay.run(
@@ -232,7 +301,7 @@ pub(super) fn open(app: &tauri::AppHandle, mut request: MediaPreviewRequest) -> 
     report(
         "media.preview_player_started",
         format!(
-            "pid={pid} transport=tiktok_local_stream player={}",
+            "pid={pid} transport=social_local_stream player={}",
             player.display()
         ),
     );
@@ -278,8 +347,12 @@ struct Relay {
     _slot: Slot,
 }
 impl Relay {
-    fn bind(request: MediaPreviewRequest, builder: reqwest::ClientBuilder) -> Result<Self, String> {
+    fn bind(
+        mut request: MediaPreviewRequest,
+        builder: reqwest::ClientBuilder,
+    ) -> Result<Self, String> {
         validate(&request)?;
+        request.url = full_media_url(&request.url);
         let slot = Slot::acquire()?;
         // Redirects must be followed explicitly so captured cookies cannot escape their scope.
         let client = builder
@@ -309,6 +382,45 @@ impl Relay {
             client,
             _slot: slot,
         })
+    }
+    async fn probe(&self) -> Result<(), String> {
+        let local = LocalRequest {
+            method: Method::GET,
+            range: Some("bytes=0-1023".into()),
+        };
+        tokio::time::timeout(Duration::from_secs(12), async {
+            let response = upstream(&self.client, &self.request, &local).await?;
+            validate_response(&response)?;
+            if !matches!(
+                response.status(),
+                StatusCode::OK | StatusCode::PARTIAL_CONTENT
+            ) {
+                return Err(format!(
+                    "preview_upstream_http_{}",
+                    response.status().as_u16()
+                ));
+            }
+            if response.status() == StatusCode::PARTIAL_CONTENT
+                && !response
+                    .headers()
+                    .get(header::CONTENT_RANGE)
+                    .and_then(|value| value.to_str().ok())
+                    .is_some_and(|value| value.starts_with("bytes 0-"))
+            {
+                return Err("preview_incomplete_media".into());
+            }
+            let mut chunks = response.bytes_stream();
+            loop {
+                match chunks.next().await {
+                    Some(Ok(chunk)) if !chunk.is_empty() => return Ok(()),
+                    Some(Ok(_)) => continue,
+                    Some(Err(_)) => return Err("preview_upstream_read_failed".into()),
+                    None => return Err("preview_empty_media".into()),
+                }
+            }
+        })
+        .await
+        .map_err(|_| "preview_upstream_timeout".to_owned())?
     }
     async fn run(
         self,
@@ -470,6 +582,44 @@ async fn upstream(
     }
     Err("preview_too_many_redirects".into())
 }
+fn validate_response(response: &Response) -> Result<(), String> {
+    let status = response.status();
+    if !matches!(
+        status,
+        StatusCode::OK | StatusCode::PARTIAL_CONTENT | StatusCode::RANGE_NOT_SATISFIABLE
+    ) {
+        return Err(format!("preview_upstream_http_{}", status.as_u16()));
+    }
+    if response
+        .headers()
+        .get(header::CONTENT_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| !v.eq_ignore_ascii_case("identity"))
+    {
+        return Err("preview_encoded_media".into());
+    }
+    let mime = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if status != StatusCode::RANGE_NOT_SATISFIABLE
+        && (mime.starts_with("text/")
+            || mime.starts_with("image/")
+            || mime.contains("mpegurl")
+            || mime.contains("dash+xml")
+            || mime.contains("json")
+            || mime.contains("xml"))
+    {
+        return Err("preview_not_direct_media".into());
+    }
+    if status != StatusCode::RANGE_NOT_SATISFIABLE && response.content_length() == Some(0) {
+        return Err("preview_empty_media".into());
+    }
+    Ok(())
+}
+
 async fn serve(
     mut stream: TcpStream,
     route: &str,
@@ -511,21 +661,9 @@ async fn serve(
         }
     };
     let status = response.status();
-    if !matches!(
-        status,
-        StatusCode::OK | StatusCode::PARTIAL_CONTENT | StatusCode::RANGE_NOT_SATISFIABLE
-    ) {
+    if let Err(error) = validate_response(&response) {
         reject(&mut stream, "502 Bad Gateway").await;
-        return Err(format!("preview_upstream_http_{}", status.as_u16()));
-    }
-    if response
-        .headers()
-        .get(header::CONTENT_ENCODING)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| !v.eq_ignore_ascii_case("identity"))
-    {
-        reject(&mut stream, "502 Bad Gateway").await;
-        return Err("preview_encoded_media".into());
+        return Err(error);
     }
     let mime = response
         .headers()
@@ -533,15 +671,6 @@ async fn serve(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_ascii_lowercase();
-    if status != StatusCode::RANGE_NOT_SATISFIABLE
-        && (mime.starts_with("text/")
-            || mime.contains("mpegurl")
-            || mime.contains("dash+xml")
-            || mime.starts_with("application/json"))
-    {
-        reject(&mut stream, "502 Bad Gateway").await;
-        return Err("preview_not_direct_media".into());
-    }
     let mut headers = format!("HTTP/1.1 {} {}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n", status.as_u16(), status.canonical_reason().unwrap_or("OK"));
     for key in [
         header::CONTENT_TYPE,

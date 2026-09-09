@@ -24,7 +24,7 @@ if (chrome.webRequest?.onResponseStarted) {
     const disposition = responseHeader(details.responseHeaders, "content-disposition").toLowerCase();
     const looksLikeFile = disposition.includes("attachment")
       || (!contentType.includes("text/html") && /(?:application\/(?:octet-stream|x-rar|zip)|binary)/i.test(contentType));
-    const isSocialTabMedia = /(?:^|\.)(?:tiktok\.com|tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com|facebook\.com|fbcdn\.net|fbsbx\.com)$/i
+    const isSocialTabMedia = /(?:^|\.)(?:tiktok\.com|tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com|facebook\.com|fbcdn\.net|fbsbx\.com|instagram\.com|cdninstagram\.com)$/i
       .test((() => { try { return new URL(details.url).hostname; } catch { return ""; } })())
       && (/^(?:video|audio)\//i.test(contentType)
         || /(?:\/video\/tos\/|\/aweme\/v1\/play\/|mime_type=video|\.mp4(?:$|[?]))/i.test(details.url));
@@ -62,6 +62,10 @@ async function bridgeRequest(path, options = {}, suppliedToken = null) {
     });
     if (!response.ok) {
       const body = path === "/v1/preview-media" ? await response.json().catch(() => ({})) : {};
+      if (path === "/v1/preview-media" && response.status === 400) {
+        bridgeConnected = true;
+        return { ok: false, error: typeof body.error === "string" ? body.error : "preview_failed" };
+      }
       throw new Error(typeof body.error === "string" ? body.error : `bridge_http_${response.status}`);
     }
     bridgeConnected = true;
@@ -437,17 +441,17 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password
         || typeof url !== "string" || /[\u0000-\u001f\u007f]/.test(url)) throw new Error("invalid_preview_url");
       const host = parsed.hostname.toLowerCase();
-      const tiktok = ["tiktok.com", "tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com", "tiktokv.com", "tiktokv.us", "byteoversea.com", "ibytedtos.com", "muscdn.com"]
+      const social = ["tiktok.com", "tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com", "tiktokv.com", "tiktokv.us", "byteoversea.com", "ibytedtos.com", "muscdn.com", "facebook.com", "fbcdn.net", "fbsbx.com", "instagram.com", "cdninstagram.com"]
         .some(domain => host === domain || host.endsWith(`.${domain}`));
       // Never merge page cookies into a different CDN's request.
-      const cookies = tiktok ? await chrome.cookies.getAll({ url }).catch(() => []) : [];
+      const cookies = social ? await chrome.cookies.getAll({ url }).catch(() => []) : [];
       const cookieHeader = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join("; ") || null;
       return bridgeRequest("/v1/preview-media", {
         method: "POST",
         body: JSON.stringify({ url, userAgent, referer, cookieHeader, contentType }),
       });
     })().then(result => {
-      void diagnostic("popup.preview_handed_off", { traceId, url, pageUrl: referer, startedAt: Date.now() }, {});
+      void diagnostic(result?.ok === false ? "popup.preview_failed" : "popup.preview_handed_off", { traceId, url, pageUrl: referer, startedAt: Date.now() }, result?.ok === false ? { level: "ERROR", error: String(result.error || "preview_failed") } : {});
       reply(result);
     }).catch(error => {
       void diagnostic("popup.preview_failed", { traceId, url, pageUrl: referer, startedAt: Date.now() }, { level: "ERROR", error: String(error) });

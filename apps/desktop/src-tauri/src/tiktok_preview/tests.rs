@@ -368,3 +368,93 @@ fn portable_player_path_and_local_url_are_separate_arguments() {
     assert!(!format!("{command:?}").contains("signature="));
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn meta_fragment_bounds_are_removed_without_reencoding_signed_query() {
+    for host in [
+        "video.xx.fbcdn.net",
+        "scontent.cdninstagram.com",
+        "media.fbsbx.com",
+    ] {
+        let raw = format!("https://{host}/clip.mp4?sig=a%2Bb%3D&&bytestart=1024&byteend=2047&space=%20&plus=a+b#keep");
+        let expected = format!("https://{host}/clip.mp4?sig=a%2Bb%3D&&space=%20&plus=a+b#keep");
+        assert_eq!(full_media_url(&raw), expected);
+    }
+    for raw in [
+        "https://v16.tiktok.com/video/tos/clip/?bytestart=0&byteend=10&sig=a%2B",
+        "https://fbcdn.net.unrelated.example/v.mp4?bytestart=0&byteend=10",
+        "https://video.fbcdn.net/v.mp4?bytestart=0&sig=a%20b",
+        "https://video.fbcdn.net/v.mp4?bytestart=invalid&byteend=10",
+        "https://scontent.cdninstagram.com/v.mp4?sig=a%2B&&a=a+b",
+    ] {
+        assert_eq!(full_media_url(raw), raw);
+    }
+}
+
+#[tokio::test]
+async fn preflight_rejects_images_error_pages_and_empty_bodies() {
+    let _serial = SERIAL.lock().await;
+    for (mime, body, expected) in [
+        ("image/jpeg", "image", "preview_not_direct_media"),
+        ("text/html", "private account", "preview_not_direct_media"),
+        ("video/mp4", "", "preview_empty_media"),
+    ] {
+        let origin = fixture(vec![response(
+            "200 OK",
+            &format!("Content-Type: {mime}\r\n"),
+            body,
+        )])
+        .await;
+        let relay = Relay::bind(request(&origin.url), Client::builder().no_proxy()).unwrap();
+        assert_eq!(relay.probe().await.unwrap_err(), expected);
+    }
+}
+
+#[tokio::test]
+async fn preflight_checks_a_small_authenticated_prefix_without_downloading_the_video() {
+    let _serial = SERIAL.lock().await;
+    let origin = fixture(vec![response(
+        "206 Partial Content",
+        "Content-Type: video/mp4\r\nContent-Range: bytes 0-4/9000\r\n",
+        "movie",
+    )])
+    .await;
+    let relay = Relay::bind(request(&origin.url), Client::builder().no_proxy()).unwrap();
+    relay.probe().await.unwrap();
+    let received = origin.received.lock().unwrap()[0].clone();
+    assert!(received.contains("range: bytes=0-1023"));
+    assert!(received.contains("cookie: session=synthetic-secret"));
+}
+
+#[test]
+fn facebook_instagram_direct_media_is_supported_but_spoofed_domains_are_not() {
+    for host in [
+        "video.xx.fbcdn.net",
+        "scontent.cdninstagram.com",
+        "media.fbsbx.com",
+        "cdn.instagram.com",
+    ] {
+        assert!(is_candidate(&request(&format!(
+            "https://{host}/clip.mp4?sig=synthetic"
+        ))));
+    }
+    for host in [
+        "fbcdn.net.evil.example",
+        "cdninstagram.com.evil.example",
+        "fakeinstagram.com",
+    ] {
+        assert!(!is_candidate(&request(&format!("https://{host}/clip.mp4"))));
+    }
+}
+#[tokio::test]
+async fn preflight_rejects_a_middle_fragment_without_an_initial_media_header() {
+    let _serial = SERIAL.lock().await;
+    let origin = fixture(vec![response(
+        "206 Partial Content",
+        "Content-Type: video/mp4\r\nContent-Range: bytes 1024-1028/9000\r\n",
+        "movie",
+    )])
+    .await;
+    let relay = Relay::bind(request(&origin.url), Client::builder().no_proxy()).unwrap();
+    assert_eq!(relay.probe().await.unwrap_err(), "preview_incomplete_media");
+}
