@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.79",
+  "version": "0.3.80",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -9,6 +9,7 @@
     "storage",
     "downloads",
     "alarms",
+    "clipboardRead",
     "cookies",
     "webRequest"
   ],
@@ -45,17 +46,6 @@
       ],
       "run_at": "document_start",
       "all_frames": true
-    },
-    {
-      "matches": [
-        "https://facebook.com/*",
-        "https://*.facebook.com/*"
-      ],
-      "js": [
-        "facebook-media-fix.js"
-      ],
-      "run_at": "document_start",
-      "all_frames": false
     },
     {
       "matches": [
