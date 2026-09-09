@@ -3,9 +3,14 @@
   const validUrl = (value) => {
     try {
       const url = new URL(String(value || "").replaceAll("\\/", "/"), location.href);
-      return /(^|\.)tiktok\.com$/i.test(url.hostname) && /\/@[^/]+\/video\/\d+/i.test(url.pathname)
-        ? url.href
-        : null;
+      const match = url.pathname.match(/^\/@([^/]+)\/video\/(\d+)/i);
+      if (!/(^|\.)tiktok\.com$/i.test(url.hostname) || !match) return null;
+      let author = "_";
+      try {
+        const decoded = decodeURIComponent(match[1]);
+        if (/^[A-Za-z0-9._-]+$/.test(decoded)) author = decoded;
+      } catch {}
+      return `https://www.tiktok.com/@${author}/video/${match[2]}`;
     } catch { return null; }
   };
 
