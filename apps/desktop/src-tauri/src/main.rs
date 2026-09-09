@@ -665,7 +665,10 @@ fn open_media_preview(state: &AppState, request: MediaPreviewRequest) -> Result<
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000);
     }
-    command.spawn().map(|_| ()).map_err(|error| error.to_string())
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
