@@ -3,9 +3,15 @@
   const validUrl = (value) => {
     try {
       const url = new URL(String(value || "").replaceAll("\\/", "/"), location.href);
-      return /(^|\.)tiktok\.com$/i.test(url.hostname) && /\/@[^/]+\/video\/\d+/i.test(url.pathname)
-        ? url.href
-        : null;
+      const match = url.pathname.match(/^\/@([^/]+)\/video\/(\d+)/i);
+      if (!/(^|\.)tiktok\.com$/i.test(url.hostname) || !match) return null;
+      let author = null;
+      try {
+        const decoded = decodeURIComponent(match[1]);
+        if (/^[A-Za-z0-9._-]+$/.test(decoded)) author = decoded;
+      } catch {}
+      if (!author) return null;
+      return `https://www.tiktok.com/@${author}/video/${match[2]}`;
     } catch { return null; }
   };
 
@@ -56,7 +62,7 @@
       if (!value || typeof value !== "object" || visited.has(value)) continue;
       visited.add(value);
       const id = String(value.id || value.itemId || value.aweme_id || "");
-      const author = value.author?.uniqueId || value.author?.unique_id || value.authorName || value.uniqueId;
+      const author = value.author?.uniqueId || value.author?.unique_id || value.uniqueId;
       if (/^\d{15,}$/.test(id) && author) {
         const url = validUrl(`https://www.tiktok.com/@${author}/video/${id}`);
         if (url) return url;
@@ -90,7 +96,7 @@
       if (!value || typeof value !== "object" || visited.has(value)) continue;
       visited.add(value);
       const id = String(value.id || value.itemId || value.aweme_id || "");
-      const author = value.author?.uniqueId || value.author?.unique_id || value.authorName || value.uniqueId;
+      const author = value.author?.uniqueId || value.author?.unique_id || value.uniqueId;
       if (/^\d{15,}$/.test(id) && author) {
         const url = validUrl(`https://www.tiktok.com/@${author}/video/${id}`);
         const description = String(value.desc || value.description || value.title || "").trim().toLowerCase();

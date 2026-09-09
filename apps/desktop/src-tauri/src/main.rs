@@ -807,6 +807,29 @@ struct RequestIdentity {
     request_content_type: Option<String>,
 }
 
+fn social_cookie_domain(url: &str) -> Option<&'static str> {
+    let host = url::Url::parse(url).ok()?.host_str()?.to_ascii_lowercase();
+    ["facebook.com", "instagram.com", "tiktok.com"]
+        .into_iter()
+        .find(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+}
+
+fn write_social_cookie_jar(path: &Path, url: &str, header: &str) -> Result<(), String> {
+    let domain = social_cookie_domain(url).ok_or_else(|| "unsupported_cookie_domain".to_owned())?;
+    let mut jar = String::from("# Netscape HTTP Cookie File\n");
+    for item in header.split(';') {
+        let Some((name, value)) = item.trim().split_once('=') else { continue };
+        if name.is_empty()
+            || name.chars().any(|character| matches!(character, '\t' | '\r' | '\n'))
+            || value.chars().any(|character| matches!(character, '\t' | '\r' | '\n'))
+        {
+            continue;
+        }
+        jar.push_str(&format!(".{domain}\tTRUE\t/\tTRUE\t0\t{name}\t{value}\n"));
+    }
+    fs::write(path, jar).map_err(|error| error.to_string())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DestinationChoice {
@@ -1135,7 +1158,20 @@ async fn inspect_media_formats(
         .arg("--js-runtimes")
         .arg(format!("quickjs:{}", quickjs.display()))
         .arg(&url);
-    if let Some(cookie) = cookie_header.as_deref().filter(|value| !value.is_empty()) {
+    let cookie_jar = cookie_header
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .and_then(|cookie| {
+            let path = state
+                .queue_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(format!("inspect-cookies-{}.txt", uuid::Uuid::new_v4()));
+            write_social_cookie_jar(&path, &url, cookie).ok().map(|_| path)
+        });
+    if let Some(path) = cookie_jar.as_ref() {
+        command.arg("--cookies").arg(path);
+    } else if let Some(cookie) = cookie_header.as_deref().filter(|value| !value.is_empty()) {
         command.arg("--add-headers").arg(format!("Cookie:{cookie}"));
     } else if url.contains("youtube.com/") || url.contains("youtu.be/") {
         // Manual URLs do not carry an extension identity. Reuse the browser
@@ -1183,6 +1219,9 @@ async fn inspect_media_formats(
         .output()
         .await
         .map_err(|error| format!("yt_dlp_unavailable: {error}"))?;
+    if let Some(path) = cookie_jar {
+        let _ = fs::remove_file(path);
+    }
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
     }
@@ -1979,7 +2018,16 @@ async fn run_external_download(
                 .and_then(|value| value.cookie_header.as_deref())
                 .filter(|value| !value.is_empty())
             {
-                command.arg("--add-headers").arg(format!("Cookie:{cookie}"));
+                let cookie_jar = media_work_directory
+                    .as_deref()
+                    .map(|directory| directory.join("browser-cookies.txt"));
+                if let Some(path) = cookie_jar.as_ref().filter(|path| {
+                    write_social_cookie_jar(path, &task.source, cookie).is_ok()
+                }) {
+                    command.arg("--cookies").arg(path);
+                } else {
+                    command.arg("--add-headers").arg(format!("Cookie:{cookie}"));
+                }
             } else if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
                 command.args(["--cookies-from-browser", "chrome"]);
             }
