@@ -69,13 +69,22 @@ pub fn contextual_media_page<'a>(
             .next()
             .is_some_and(|id| !id.is_empty())
     } else if host_is("facebook.com") || host_is("fb.watch") {
-        ["/reel/", "/reels/", "/videos/", "/posts/", "/share/r/", "/share/v/"]
-            .iter()
-            .any(|prefix| path.to_ascii_lowercase().contains(prefix))
+        [
+            "/reel/",
+            "/reels/",
+            "/videos/",
+            "/posts/",
+            "/share/r/",
+            "/share/v/",
+        ]
+        .iter()
+        .any(|prefix| path.to_ascii_lowercase().contains(prefix))
             || (["/watch/", "/watch"]
                 .iter()
                 .any(|value| path.eq_ignore_ascii_case(value))
-                && page.query_pairs().any(|(name, value)| name == "v" && !value.is_empty()))
+                && page
+                    .query_pairs()
+                    .any(|(name, value)| name == "v" && !value.is_empty()))
             || (["/permalink.php", "/story.php"]
                 .iter()
                 .any(|value| path.eq_ignore_ascii_case(value))
