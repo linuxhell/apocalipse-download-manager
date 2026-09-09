@@ -1,0 +1,138 @@
+name: Validate portable candidates
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  extensions:
+    name: Extension regression tests and packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test extension handoffs
+        run: |
+          node --check browser-extension/background.js
+          node --check browser-extension/popup.js
+          node --test tests/extension-handoff.test.cjs
+      - name: Package extension candidates
+        shell: python
+        run: |
+          import copy, json, pathlib, zipfile
+          source = pathlib.Path('browser-extension')
+          dist = pathlib.Path('dist')
+          dist.mkdir(exist_ok=True)
+          manifest = json.loads((source / 'manifest.json').read_text(encoding='utf-8'))
+          version = manifest['version']
+          firefox = copy.deepcopy(manifest)
+          worker = firefox.pop('background')['service_worker']
+          firefox['background'] = {'scripts': [worker]}
+          firefox['browser_specific_settings'] = {'gecko': {
+              'id': 'apocalipse-download-manager@linuxhell',
+              'strict_min_version': '140.0',
+              'data_collection_permissions': {'required': ['authenticationInfo', 'browsingActivity', 'websiteContent']}
+          }}
+          for browser, suffix in [('chrome', '.zip'), ('edge', '.zip'), ('firefox', '-unsigned.xpi')]:
+              with zipfile.ZipFile(dist / f'apocalipse-{browser}-{version}{suffix}', 'w', zipfile.ZIP_DEFLATED) as archive:
+                  for path in sorted(source.rglob('*')):
+                      if not path.is_file():
+                          continue
+                      relative = path.relative_to(source).as_posix()
+                      if browser == 'firefox' and relative == 'manifest.json':
+                          archive.writestr(relative, json.dumps(firefox, ensure_ascii=False, indent=2) + '\n')
+                      else:
+                          archive.write(path, relative)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-extension-candidates
+          path: dist/*
+          retention-days: 14
+          if-no-files-found: error
+
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64 portable
+            os: windows-latest
+            artifact: apocalipse-windows-x64-candidate
+            output: apocalipse-download-manager-windows-x64-portable.zip
+          - name: Linux x64 portable
+            os: ubuntu-latest
+            artifact: apocalipse-linux-x64-candidate
+            output: apocalipse-download-manager-linux-x64-portable.tar.gz
+          - name: macOS portable
+            os: macos-latest
+            artifact: apocalipse-macos-candidate
+            output: apocalipse-download-manager-macos-portable.zip
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Validate formatting and workspace tests
+        shell: bash
+        run: |
+          cargo fmt --all -- --check
+          cargo test --workspace --locked
+      - name: Build desktop candidate
+        run: cargo build --release --locked -p apocalipse-desktop
+      - name: Stage Windows portable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $package = 'dist/Apocalipse Download Manager'
+          New-Item -ItemType Directory -Force $package | Out-Null
+          Copy-Item 'target/release/apocalipse-desktop.exe' "$package/Apocalipse Download Manager.exe"
+          Copy-Item 'README.md','LICENSE' $package
+          Compress-Archive -Path $package -DestinationPath 'dist/${{ matrix.output }}' -Force
+      - name: Stage Linux portable
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          package='dist/Apocalipse Download Manager'
+          mkdir -p "$package"
+          install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
+          cp README.md LICENSE "$package/"
+          tar -C dist -czf 'dist/${{ matrix.output }}' 'Apocalipse Download Manager'
+      - name: Stage macOS portable
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app='dist/Apocalipse Download Manager.app'
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
+          chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
+          cp packaging/macos/Info.plist "$app/Contents/Info.plist"
+          cp README.md LICENSE "$app/Contents/Resources/"
+          ditto -c -k --sequesterRsrc --keepParent "$app" 'dist/${{ matrix.output }}'
+      - name: Record candidate provenance
+        shell: bash
+        run: |
+          git rev-parse HEAD > dist/build-commit.txt
+          printf '%s\n' '${{ github.event.pull_request.head.sha || github.sha }}' >> dist/build-commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/${{ matrix.output }}
+            dist/build-commit.txt
+          retention-days: 14
+          if-no-files-found: error
