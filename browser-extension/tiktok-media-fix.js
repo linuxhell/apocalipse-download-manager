@@ -344,7 +344,9 @@
 
     const liveHttpUrl = directVideoUrl(video.currentSrc || video.src);
     const soleFreshCandidate = freshVideoCandidates.length === 1 ? freshVideoCandidates[0]?.url : null;
-    const selectedUrl = stateMediaUrl || liveHttpUrl || soleFreshCandidate;
+    const newestFreshCandidate = [...freshVideoCandidates]
+      .sort((left, right) => left.ageMs - right.ageMs)[0]?.url || null;
+    const selectedUrl = stateMediaUrl || liveHttpUrl || soleFreshCandidate || newestFreshCandidate;
     const selectedId = url?.match(/\/video\/(\d+)/i)?.[1] || "none";
     const newestCaptured = capturedMedia[0] || null;
     if (!url) {
@@ -369,13 +371,13 @@
       pageUrl: location.href,
       at: Date.now(),
       detail: {
-        selection: stateMediaUrl ? "matched_state_media" : liveHttpUrl ? "player_http_media" : soleFreshCandidate ? "sole_fresh_media" : "unresolved",
+        selection: stateMediaUrl ? "matched_state_media" : liveHttpUrl ? "player_http_media" : soleFreshCandidate ? "sole_fresh_media" : newestFreshCandidate ? "newest_fresh_media" : "unresolved",
         selectedVideoId: selectedId,
-        browserCapturedMedia: Boolean(soleFreshCandidate && selectedUrl === soleFreshCandidate),
+        browserCapturedMedia: Boolean(newestFreshCandidate && selectedUrl === newestFreshCandidate),
         browserCandidates: capturedMedia.length,
         browserFreshVideoCandidates: freshVideoCandidates.length,
-        browserCandidatesRejected: capturedMedia.length - (soleFreshCandidate ? 1 : 0),
-        browserRejectionReason: freshVideoCandidates.length > 1 ? "ambiguous_feed_media" : "uncorrelated_feed_media",
+        browserCandidatesRejected: capturedMedia.length - (newestFreshCandidate ? 1 : 0),
+        browserRejectionReason: newestFreshCandidate ? "newest_feed_media_selected" : "uncorrelated_feed_media",
         browserCandidateAgeMs: newestCaptured?.ageMs ?? -1,
         browserCandidateType: newestCaptured?.contentType || "none",
         browserCandidateBytes: newestCaptured?.contentLength || 0,
