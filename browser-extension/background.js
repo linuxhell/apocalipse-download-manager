@@ -140,6 +140,36 @@ async function sourcePageUrl(sender) {
 
 const fileNameFromPath = (path) => String(path || "").split(/[\\/]/).pop() || null;
 
+// Derive a usable media name without changing the signed source URL.
+// Uniqueness belongs to the desktop queue, not to timing or random client names.
+function mediaDownloadFileName(item) {
+  const supplied = String(item.fileName || item.filename || "").trim();
+  if (/\.[a-z0-9]{1,10}$/i.test(supplied)) return supplied;
+  let url;
+  try { url = new URL(item.url); } catch { return supplied || null; }
+  const extensions = {
+    "video/mp4": "mp4", "video/webm": "webm", "video/x-matroska": "mkv",
+    "video/quicktime": "mov", "audio/mp4": "m4a", "audio/x-m4a": "m4a",
+    "audio/mpeg": "mp3", "audio/webm": "webm", "audio/ogg": "ogg",
+    "audio/opus": "opus", "audio/aac": "aac", "image/jpeg": "jpg",
+    "image/png": "png", "image/webp": "webp", "image/avif": "avif",
+  };
+  const fromMime = (value) => extensions[String(value || "").split(";")[0].trim().toLowerCase().replaceAll("_", "/")];
+  const hints = [...url.searchParams].filter(([key]) => /^(?:mime_type|mime|content_type)$/i.test(key));
+  const known = new Set(Object.values(extensions));
+  const pathExt = url.pathname.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  const itemExt = String(item.ext || "").toLowerCase();
+  const ext = fromMime(item.contentType) || hints.map(([, value]) => fromMime(value)).find(Boolean)
+    || (known.has(pathExt) ? pathExt : null) || (known.has(itemExt) ? itemExt : null);
+  if (!ext) return supplied || null;
+  const fallback = item.kind === "video" ? "video" : item.kind === "audio" ? "audio" : "download";
+  let stem = (supplied && supplied.toLowerCase() !== "download" ? supplied : String(item.title || fallback))
+    .replace(/[\x00-\x1f\x7f<>:"/\\|?*]/g, "_").trim().replace(/[ .]+$/g, "");
+  stem = [...stem].slice(0, 100).join("") || fallback;
+  if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(stem)) stem = `_${stem}`;
+  return `${stem}.${ext}`;
+}
+
 async function handOffTelegramBlob(item) {
   const tabs = await chrome.tabs.query({ url: ["https://web.telegram.org/*"] }).catch(() => []);
   for (const tab of tabs) {
@@ -432,7 +462,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       body: JSON.stringify({
         url: item.url,
         audioUrl: item.audioUrl || null,
-        fileName: item.fileName || item.filename || null,
+        fileName: mediaDownloadFileName(item),
         pageUrl,
         title: item.title || null,
         thumbnail: item.thumbnail || null,
@@ -469,7 +499,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           body: JSON.stringify({
             url: item.url,
             audioUrl: item.audioUrl || null,
-            fileName: item.fileName || item.filename || null,
+            fileName: mediaDownloadFileName(item),
             pageUrl,
             title: item.title || null,
             thumbnail: item.thumbnail || null,
