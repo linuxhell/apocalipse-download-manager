@@ -69,6 +69,7 @@
     return found;
   };
   const frameAncestorUrl = () => {
+    if (typeof window === 'undefined') return null;
     let currentWindow = window;
     for (let frameDepth = 0; frameDepth < 4; frameDepth += 1) {
       let frame = null, parentDocument = null, parentWindow = null;
