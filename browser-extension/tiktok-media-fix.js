@@ -21,6 +21,15 @@
     if (!video) return;
     event.preventDefault();
     event.stopImmediatePropagation();
+    chrome.runtime.sendMessage({
+      type: "APOCALIPSE_CAPTURE_TRACE",
+      eventName: "tiktok_overlay_handler_claimed",
+      mode: "download",
+      traceId: crypto.randomUUID(),
+      pageUrl: location.href,
+      at: Date.now(),
+      detail: { topFrame: window === window.top, hasBoundVideo: true },
+    }).catch(() => {});
     const original = button.textContent;
     const clickSource = String(video.currentSrc || video.src || "");
     const clickPage = location.href;
