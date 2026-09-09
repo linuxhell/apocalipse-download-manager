@@ -4,8 +4,8 @@ const { join } = require('node:path');
 const { webcrypto } = require('node:crypto');
 const { test } = require('node:test');
 const vm = require('node:vm');
-function worker(rejectPreview = false) {
-  const listeners = [], previews = [], lookups = [];
+function worker(rejectPreview = false, tabUrl = 'https://www.tiktok.com/') {
+  const listeners = [], previews = [], downloads = [], lookups = [];
   const event = { addListener() {} };
   const storage = { get: async () => ({ pairingToken: 'test-token' }), set: async () => {}, remove: async () => {} };
   const context = vm.createContext({ URL, crypto: webcrypto, console, navigator: { userAgent: 'SyntheticBrowser/1.0' },
@@ -19,12 +19,13 @@ function worker(rejectPreview = false) {
     fetch: async (url, options = {}) => {
       const preview = url.endsWith('/v1/preview-media');
       if (preview) previews.push(JSON.parse(options.body));
+      if (url.endsWith('/v1/download')) downloads.push(JSON.parse(options.body));
       return { ok: !(preview && rejectPreview), status: rejectPreview ? 400 : 202,
         json: async () => preview && rejectPreview ? { ok: false, error: 'preview_player_start_failed:NotFound' } : { ok: true } };
     },
   });
   vm.runInContext(readFileSync(join(__dirname, '../browser-extension/background.js'), 'utf8'), context);
-  return { previews, lookups, send: message => new Promise(resolve => listeners[0](message, { tab: { url: 'https://www.tiktok.com/' } }, resolve)) };
+  return { previews, downloads, lookups, send: message => new Promise(resolve => listeners[0](message, { tab: { url: tabUrl } }, resolve)) };
 }
 const signed = 'https://v16-webapp-prime.tiktok.com/video/tos/synthetic/?a=1988&&signature=a%2Bb%3D&mime_type=video_mp4';
 test('preserves the exact TikTok URL and only requests matching media cookies', async () => {
@@ -93,4 +94,32 @@ test('spoofed Facebook and Instagram CDN names never receive cookies', async () 
   }
   assert.equal(lookups.length, 0);
   assert.ok(previews.every(item => item.cookieHeader === null));
+});
+
+test('Instagram Reel popup downloads use the page extractor instead of a silent CDN video track', async () => {
+  const pageUrl = 'https://www.instagram.com/reel/SyntheticId/';
+  const directVideo = 'https://scontent.cdninstagram.com/clip.mp4?sig=synthetic';
+  const { send, downloads, lookups } = worker(false, pageUrl);
+  const result = await send({
+    type: 'APOCALIPSE_DOWNLOAD',
+    item: { url: directVideo, kind: 'video', title: 'Synthetic Reel' },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(downloads.length, 1);
+  assert.equal(downloads[0].url, pageUrl);
+  assert.equal(downloads[0].audioUrl, null);
+  assert.ok(lookups.some(item => item.url === pageUrl));
+  assert.ok(!lookups.some(item => item.url === directVideo));
+});
+
+test('popup routing leaves non-Instagram videos and Instagram images on their direct URLs', async () => {
+  for (const [tabUrl, item] of [
+    ['https://www.facebook.com/reel/123/', { url: 'https://video.fbcdn.net/clip.mp4', kind: 'video' }],
+    ['https://www.instagram.com/reel/123/', { url: 'https://scontent.cdninstagram.com/poster.jpg', kind: 'image' }],
+    ['https://instagram.com.evil.example/reel/123/', { url: 'https://cdn.example/clip.mp4', kind: 'video' }],
+  ]) {
+    const { send, downloads } = worker(false, tabUrl);
+    assert.equal((await send({ type: 'APOCALIPSE_DOWNLOAD', item })).ok, true);
+    assert.equal(downloads[0].url, item.url);
+  }
 });

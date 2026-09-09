@@ -485,13 +485,22 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "APOCALIPSE_DOWNLOAD") {
     const item = message.item || {};
     const traceId = crypto.randomUUID();
-    Promise.all([
-      sourcePageUrl(sender),
-      cookieHeaderFor([item.url, item.audioUrl, sender.tab?.url]),
-    ]).then(([pageUrl, cookieHeader]) => bridgeRequest("/v1/download", {
+    (async () => {
+      const pageUrl = await sourcePageUrl(sender);
+      let downloadUrl = item.url;
+      try {
+        const page = new URL(pageUrl);
+        if (item.kind === "video"
+          && /(^|\.)instagram\.com$/i.test(page.hostname)
+          && /\/(?:reel|reels|p)\/[^/?#]+/i.test(page.pathname)) {
+          downloadUrl = page.href;
+        }
+      } catch {}
+      const cookieHeader = await cookieHeaderFor([downloadUrl, item.audioUrl]);
+      return bridgeRequest("/v1/download", {
       method: "POST",
       body: JSON.stringify({
-        url: item.url,
+        url: downloadUrl,
         audioUrl: item.audioUrl || null,
         fileName: mediaDownloadFileName(item),
         pageUrl,
@@ -507,7 +516,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         requestContentType: null,
         startImmediately: false,
       }),
-    })).then((result) => {
+      });
+    })().then((result) => {
       void diagnostic("popup.download_handed_off", { traceId, url: item.url, pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { detail: `kind=${item.kind || "unknown"} thumbnail=${Boolean(item.thumbnail)}` });
       reply({ ok: true, target: "desktop", ...result });
     }).catch((error) => {
