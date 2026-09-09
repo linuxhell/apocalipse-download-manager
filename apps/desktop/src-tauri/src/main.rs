@@ -639,8 +639,23 @@ fn open_media_preview(state: &AppState, request: MediaPreviewRequest) -> Result<
         .media_player_path
         .clone()
         .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "vlc.exe" } else { "vlc" }));
-    let mut command = Command::new(&player);
-    let player_name = player
+    let effective_player = if cfg!(windows)
+        && player
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case("VLCPortable.exe"))
+    {
+        let bundled_vlc = player
+            .parent()
+            .map(|parent| parent.join("App").join("vlc").join("vlc.exe"));
+        bundled_vlc
+            .filter(|candidate| candidate.is_file())
+            .unwrap_or_else(|| player.clone())
+    } else {
+        player.clone()
+    };
+    let mut command = Command::new(&effective_player);
+    let player_name = effective_player
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("")
@@ -672,7 +687,8 @@ fn open_media_preview(state: &AppState, request: MediaPreviewRequest) -> Result<
         "INFO",
         "media.preview_requested",
         &format!(
-            "player={} url={} referer={}",
+            "player={} configured_player={} url={} referer={}",
+            effective_player.display(),
             player.display(),
             redact_url(&request.url),
             request

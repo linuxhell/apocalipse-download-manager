@@ -189,10 +189,10 @@ document.querySelector("#select-all").onchange = (event) => {
 document.querySelector("#download-selected").onclick = async () => {
   const button = document.querySelector("#download-selected");
   button.disabled = true;
-  for (const item of media.filter((value) => selectedUrls.has(value.url))) {
-    await chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item }).catch(() => null);
-  }
-  selectedUrls.clear();
+  const items = media.filter((value) => selectedUrls.has(value.url));
+  const result = await chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD_BATCH", items }).catch((error) => ({ ok: false, error: String(error) }));
+  if (result?.ok) selectedUrls.clear();
+  else showBridgeError(result?.error || "unavailable");
   render();
 };
 chrome.storage.local.get({ language: "en" }, ({ language }) => {

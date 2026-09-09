@@ -455,6 +455,45 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     });
     return true;
   }
+  if (message?.type === "APOCALIPSE_DOWNLOAD_BATCH") {
+    const items = Array.isArray(message.items) ? message.items.filter((item) => item?.url).slice(0, 100) : [];
+    const traceId = crypto.randomUUID();
+    (async () => {
+      if (!items.length) throw new Error("empty_batch");
+      const pageUrl = await sourcePageUrl(sender);
+      const cookieHeader = await cookieHeaderFor([...items.flatMap((item) => [item.url, item.audioUrl]), sender.tab?.url]);
+      const taskIds = [];
+      for (const item of items) {
+        const result = await bridgeRequest("/v1/download", {
+          method: "POST",
+          body: JSON.stringify({
+            url: item.url,
+            audioUrl: item.audioUrl || null,
+            fileName: item.fileName || item.filename || null,
+            pageUrl,
+            title: item.title || null,
+            thumbnail: item.thumbnail || null,
+            mediaKind: item.kind || null,
+            expectedSize: Number.isFinite(item.size) ? item.size : null,
+            duration: Number.isFinite(item.duration) ? item.duration : null,
+            cookieHeader: cookieHeader || null,
+            userAgent: item.userAgent || globalThis.navigator?.userAgent || null,
+            requestMethod: null,
+            requestBody: null,
+            requestContentType: null,
+            startImmediately: true,
+          }),
+        });
+        if (result?.taskId) taskIds.push(result.taskId);
+      }
+      void diagnostic("popup.batch_download_handed_off", { traceId, pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { detail: `items=${items.length}` });
+      reply({ ok: true, target: "desktop", taskIds });
+    })().catch((error) => {
+      void diagnostic("popup.batch_download_failed", { traceId, pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { level: "ERROR", error: String(error), detail: `items=${items.length}` });
+      reply({ ok: false, target: "error", error: String(error) });
+    });
+    return true;
+  }
   if (message?.type === "APOCALIPSE_PAIR") {
     const token = String(message.token || "").trim();
     if (!token) {
