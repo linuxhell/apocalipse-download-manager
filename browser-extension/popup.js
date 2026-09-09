@@ -53,9 +53,9 @@ const mergeDetectedMedia = (scanned, network, pageUrl) => {
   return pairSocialTracks([...unique.values()], pageUrl);
 };
 const messages = {
-  en: { mediaIntelligence: "Media intelligence", video: "Video", audio: "Audio", images: "Images", download: "Download", externalPreview: "Open in player", incompleteTrack: "Incomplete track", empty: "No media detected in this tab.", unknownSize: "Size unavailable", connected: "Connected to Apocalipse", disconnected: "Disconnected", pairingToken: "Pairing token", connect: "Connect", recommended: "Recommended", capturedResource: "Captured media resource", requestedMedia: "You tried to download", selectAll: "Select all", downloadSelected: "Download selected", forceShortcut: "Force Apocalipse", bypassShortcut: "Bypass Apocalipse" },
-  pt_BR: { mediaIntelligence: "Inteligência de mídia", video: "Vídeo", audio: "Áudio", images: "Imagens", download: "Download", externalPreview: "Abrir no player", incompleteTrack: "Faixa incompleta", empty: "Nenhuma mídia detectada nesta aba.", unknownSize: "Tamanho indisponível", connected: "Conectada ao Apocalipse", disconnected: "Desconectada", pairingToken: "Token de pareamento", connect: "Conectar", recommended: "Recomendada", capturedResource: "Recurso de mídia capturado", requestedMedia: "Você tentou baixar", selectAll: "Selecionar todos", downloadSelected: "Baixar selecionados", forceShortcut: "Forçar Apocalipse", bypassShortcut: "Ignorar Apocalipse" },
-  zh_CN: { mediaIntelligence: "媒体智能", video: "视频", audio: "音频", images: "图片", download: "下载", externalPreview: "在播放器中打开", incompleteTrack: "不完整音视频轨道", empty: "此标签页未检测到媒体。", unknownSize: "大小未知", connected: "已连接到 Apocalipse", disconnected: "未连接", pairingToken: "配对令牌", connect: "连接", recommended: "推荐", capturedResource: "已捕获的媒体资源", requestedMedia: "您尝试下载", selectAll: "全选", downloadSelected: "下载所选项目", forceShortcut: "强制使用 Apocalipse", bypassShortcut: "绕过 Apocalipse" }
+  en: { mediaIntelligence: "Media intelligence", video: "Video", audio: "Audio", images: "Images", download: "Download", externalPreview: "Open in player", incompleteTrack: "Incomplete track", emp: "Empty" },
+  pt_BR: { mediaIntelligence: "Inteligência de mídia", video: "Vídeo", audio: "Áudio", images: "Imagens", download: "Download", externalPreview: "Abrir no player", incompleteTrack: "Faixa incompleta", emp: "Vazio" },
+  zh_CN: { mediaIntelligence: "媒体智能", video: "视频", audio: "音频", images: "图片", download: "下载", externalPreview: "在播放器中打开", incompleteTrack: "不完整音视频", emp: "空" },
 };
 const t = (key) => messages[locale]?.[key] || messages.en[key] || key;
 const formatBytes = (bytes) => {
@@ -169,10 +169,8 @@ const loadThumbnail = (image, item) => {
       image.src = !chrome.runtime.lastError && result?.dataUrl ? result.dataUrl : fallback;
     });
   };
-};
-// Preview and Download start from the SAME row identity. previewUrl is only a
-// thumbnail/player hint and can be a partial track, blob, or a generic feed URL.
-function previewRequestFor(item, pageUrl) {
+
+const previewRequestFor = (item, pageUrl) => {
   const url = item.extractorUrl || item.url;
   let parsed;
   try { parsed = new URL(url); } catch { return null; }
@@ -184,7 +182,7 @@ function previewRequestFor(item, pageUrl) {
     mediaKind: item.kind, pageExtractor,
     contentType: pageExtractor ? null : item.contentType || null,
     userAgent: item.userAgent || null };
-}
+};
 
 const render = () => {
   const root = document.querySelector("#items");
@@ -225,7 +223,7 @@ const render = () => {
     const pathName = parsed?.pathname?.split("/").filter(Boolean).pop() || "";
     const extension = (pathName.match(/\.([a-z0-9]{2,8})$/i)?.[1] || item.ext || (/\.m3u8(?:$|[?#])/i.test(item.url) ? "m3u8" : item.kind)).toUpperCase();
     row.querySelector("b").textContent = item.title || decodeURIComponent(pathName) || item.url;
-    metadata.textContent = [extension, formatBytes(item.size), formatDuration(item.duration), item.ambiguousSocialTrack ? t("incompleteTrack") : (item.recommended ? t("recommended") : ""), parsed?.hostname].filter(Boolean).join(" · ");
+    metadata.textContent = [extension, formatBytes(item.size), formatDuration(item.duration), item.ambiguousSocialTrack ? t("incompleteTrack") : (item.recommended ? t("recommended") : ""), parsed[...]
     const previewButton = row.querySelector(".external-preview");
     previewButton.textContent = t("externalPreview");
     previewButton.hidden = item.kind === "image";
@@ -305,6 +303,9 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
     chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_SCAN" }, { frameId: 0 }, async (response) => {
       const error = chrome.runtime.lastError;
       const scanned = error ? [] : (response?.media || []);
+      if (response?.diagnostics) {
+        try { chrome.runtime.sendMessage({ type: 'APOCALIPSE_TIKTOK_SCAN_DIAG', diagnostics: response.diagnostics, tabId: tab.id }, () => {}); } catch {}
+      }
       const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA", tabId: tab.id }).catch(() => null);
       const network = (captured?.media || []).map((item) => {
         const video = networkMediaKind(item) === "video";
