@@ -1135,12 +1135,7 @@ async fn inspect_media_formats(
         .arg("--js-runtimes")
         .arg(format!("quickjs:{}", quickjs.display()))
         .arg(&url);
-    let browser_session_site = url.contains("instagram.com/")
-        || url.contains("tiktok.com/")
-        || url.contains("facebook.com/");
-    if browser_session_site {
-        command.args(["--cookies-from-browser", "chrome"]);
-    } else if let Some(cookie) = cookie_header.as_deref().filter(|value| !value.is_empty()) {
+    if let Some(cookie) = cookie_header.as_deref().filter(|value| !value.is_empty()) {
         command.arg("--add-headers").arg(format!("Cookie:{cookie}"));
     } else if url.contains("youtube.com/") || url.contains("youtu.be/") {
         // Manual URLs do not carry an extension identity. Reuse the browser
@@ -1979,9 +1974,7 @@ async fn run_external_download(
             let browser_session_site = task.source.contains("instagram.com/")
                 || task.source.contains("tiktok.com/")
                 || task.source.contains("facebook.com/");
-            if browser_session_site {
-                command.args(["--cookies-from-browser", "chrome"]);
-            } else if let Some(cookie) = identity
+            if let Some(cookie) = identity
                 .as_ref()
                 .and_then(|value| value.cookie_header.as_deref())
                 .filter(|value| !value.is_empty())
