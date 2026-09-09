@@ -73,6 +73,59 @@
     return null;
   };
 
+  const reactPayloadsFor = (video) => {
+    const payloads = [];
+    const fibers = [];
+    let element = video;
+    for (let depth = 0; element && depth < 12; depth += 1, element = element.parentElement) {
+      for (const key of Object.getOwnPropertyNames(element)) {
+        if (/^__reactFiber/i.test(key) && element[key]) fibers.push(element[key]);
+        if (/^__reactProps/i.test(key) && element[key]) payloads.push(element[key]);
+      }
+    }
+    const seen = new WeakSet();
+    for (const initial of fibers) {
+      let fiber = initial;
+      for (let depth = 0; fiber && depth < 120 && !seen.has(fiber); depth += 1) {
+        seen.add(fiber);
+        for (const value of [fiber.memoizedProps, fiber.pendingProps, fiber.memoizedState]) {
+          if (value && typeof value === "object") payloads.push(value);
+        }
+        fiber = fiber.return;
+      }
+    }
+    return payloads;
+  };
+
+  const permalinkInObject = (root) => {
+    const queue = [root];
+    const visited = new WeakSet();
+    let inspected = 0;
+    while (queue.length && inspected < 12_000) {
+      const value = queue.shift();
+      inspected += 1;
+      if (typeof value === "string") {
+        const path = value.replaceAll("\\/", "/").match(/\/@[^/"'<>&\s]+\/video\/\d+/i)?.[0];
+        const url = path && validUrl(path);
+        if (url) return url;
+        continue;
+      }
+      if (!value || typeof value !== "object" || visited.has(value)) continue;
+      visited.add(value);
+      const id = String(value.id || value.itemId || value.aweme_id || value.awemeId || value.videoId || "");
+      const author = value.author?.uniqueId || value.author?.unique_id || value.author?.unique_id_str
+        || value.authorInfo?.uniqueId || value.authorInfo?.unique_id || value.uniqueId || value.authorName;
+      if (/^\d{15,}$/.test(id) && author) {
+        const url = validUrl(`https://www.tiktok.com/@${author}/video/${id}`);
+        if (url) return url;
+      }
+      for (const child of Object.values(value)) {
+        if ((child && typeof child === "object") || typeof child === "string") queue.push(child);
+      }
+    }
+    return null;
+  };
+
   const urlInPageJson = (video) => {
     let context = "";
     let container = video;
@@ -118,6 +171,10 @@
     let container = video;
     for (let depth = 0; container && depth < 28; depth += 1, container = container.parentElement) {
       const url = urlInside(container);
+      if (url) return url;
+    }
+    for (const payload of reactPayloadsFor(video)) {
+      const url = permalinkInObject(payload);
       if (url) return url;
     }
     return urlInState(video) || urlInPageJson(video);
@@ -208,6 +265,10 @@
   };
 
   const directMediaForPlayer = (video) => {
+    for (const payload of reactPayloadsFor(video)) {
+      const url = mediaUrlInObject(payload);
+      if (url) return url;
+    }
     let element = video;
     for (let depth = 0; element && depth < 8; depth += 1, element = element.parentElement) {
       const keys = Object.getOwnPropertyNames(element)

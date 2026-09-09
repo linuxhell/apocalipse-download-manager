@@ -357,7 +357,7 @@ impl DownloadEngine {
         }
 
         let mut jobs = FuturesUnordered::new();
-        for _ in 0..worker_count {
+        for worker_index in 0..worker_count {
             let client = self.client.clone();
             let url = request.url.clone();
             let headers = request.headers.clone();
@@ -367,6 +367,9 @@ impl DownloadEngine {
             let cursor = next_chunk.clone();
             let limiters = request.limiters.clone();
             jobs.push(async move {
+                if worker_index > 0 {
+                    tokio::time::sleep(Duration::from_millis(worker_index as u64 * 150)).await;
+                }
                 loop {
                     let index = cursor.fetch_add(1, Ordering::Relaxed);
                     if index >= chunk_count {
