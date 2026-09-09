@@ -818,10 +818,16 @@ fn write_social_cookie_jar(path: &Path, url: &str, header: &str) -> Result<(), S
     let domain = social_cookie_domain(url).ok_or_else(|| "unsupported_cookie_domain".to_owned())?;
     let mut jar = String::from("# Netscape HTTP Cookie File\n");
     for item in header.split(';') {
-        let Some((name, value)) = item.trim().split_once('=') else { continue };
+        let Some((name, value)) = item.trim().split_once('=') else {
+            continue;
+        };
         if name.is_empty()
-            || name.chars().any(|character| matches!(character, '\t' | '\r' | '\n'))
-            || value.chars().any(|character| matches!(character, '\t' | '\r' | '\n'))
+            || name
+                .chars()
+                .any(|character| matches!(character, '\t' | '\r' | '\n'))
+            || value
+                .chars()
+                .any(|character| matches!(character, '\t' | '\r' | '\n'))
         {
             continue;
         }
@@ -1167,7 +1173,9 @@ async fn inspect_media_formats(
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .join(format!("inspect-cookies-{}.txt", uuid::Uuid::new_v4()));
-            write_social_cookie_jar(&path, &url, cookie).ok().map(|_| path)
+            write_social_cookie_jar(&path, &url, cookie)
+                .ok()
+                .map(|_| path)
         });
     if let Some(path) = cookie_jar.as_ref() {
         command.arg("--cookies").arg(path);
@@ -2021,9 +2029,10 @@ async fn run_external_download(
                 let cookie_jar = media_work_directory
                     .as_deref()
                     .map(|directory| directory.join("browser-cookies.txt"));
-                if let Some(path) = cookie_jar.as_ref().filter(|path| {
-                    write_social_cookie_jar(path, &task.source, cookie).is_ok()
-                }) {
+                if let Some(path) = cookie_jar
+                    .as_ref()
+                    .filter(|path| write_social_cookie_jar(path, &task.source, cookie).is_ok())
+                {
                     command.arg("--cookies").arg(path);
                 } else {
                     command.arg("--add-headers").arg(format!("Cookie:{cookie}"));
