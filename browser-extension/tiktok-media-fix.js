@@ -344,9 +344,7 @@
 
     const liveHttpUrl = directVideoUrl(video.currentSrc || video.src);
     const soleFreshCandidate = freshVideoCandidates.length === 1 ? freshVideoCandidates[0]?.url : null;
-    const newestFreshCandidate = [...freshVideoCandidates]
-      .sort((left, right) => left.ageMs - right.ageMs)[0]?.url || null;
-    const selectedUrl = stateMediaUrl || liveHttpUrl || soleFreshCandidate || newestFreshCandidate;
+    const selectedUrl = stateMediaUrl || liveHttpUrl || soleFreshCandidate;
     const selectedId = url?.match(/\/video\/(\d+)/i)?.[1] || "none";
     const newestCaptured = capturedMedia[0] || null;
     if (!url) {
@@ -371,13 +369,13 @@
       pageUrl: location.href,
       at: Date.now(),
       detail: {
-        selection: stateMediaUrl ? "matched_state_media" : liveHttpUrl ? "player_http_media" : soleFreshCandidate ? "sole_fresh_media" : newestFreshCandidate ? "newest_fresh_media" : "unresolved",
+        selection: stateMediaUrl ? "matched_state_media" : liveHttpUrl ? "player_http_media" : soleFreshCandidate ? "sole_fresh_media" : "media_picker_required",
         selectedVideoId: selectedId,
-        browserCapturedMedia: Boolean(newestFreshCandidate && selectedUrl === newestFreshCandidate),
+        browserCapturedMedia: Boolean(soleFreshCandidate && selectedUrl === soleFreshCandidate),
         browserCandidates: capturedMedia.length,
         browserFreshVideoCandidates: freshVideoCandidates.length,
-        browserCandidatesRejected: capturedMedia.length - (newestFreshCandidate ? 1 : 0),
-        browserRejectionReason: newestFreshCandidate ? "newest_feed_media_selected" : "uncorrelated_feed_media",
+        browserCandidatesRejected: capturedMedia.length - (soleFreshCandidate ? 1 : 0),
+        browserRejectionReason: capturedMedia.length ? "media_picker_required" : "uncorrelated_feed_media",
         browserCandidateAgeMs: newestCaptured?.ageMs ?? -1,
         browserCandidateType: newestCaptured?.contentType || "none",
         browserCandidateBytes: newestCaptured?.contentLength || 0,
@@ -385,8 +383,23 @@
       },
     }).catch(() => {});
     if (!selectedUrl) {
-      button.textContent = "⚠";
-      button.title = "Não foi possível confirmar a mídia deste vídeo";
+      const language = (await chrome.storage.local.get({ language: "en" })).language;
+      const notice = language === "pt_BR"
+        ? "Há recursos de vídeo disponíveis na extensão. Escolha o arquivo."
+        : language === "zh_CN"
+          ? "扩展中有可用的视频资源。请选择文件。"
+          : "Video resources are available in the extension. Choose a file.";
+      button.textContent = "!";
+      button.title = notice;
+      const previousNotice = document.querySelector("#apocalipse-media-picker-notice");
+      previousNotice?.remove();
+      const toast = document.createElement("div");
+      toast.id = "apocalipse-media-picker-notice";
+      toast.textContent = notice;
+      toast.style.cssText = "position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:2147483647;max-width:560px;padding:13px 18px;border:1px solid #31d9ee;border-radius:10px;background:#111a20f2;color:#f3fbff;font:600 14px system-ui;box-shadow:0 6px 24px #000a;text-align:center";
+      document.documentElement.append(toast);
+      setTimeout(() => toast.remove(), 5000);
+      chrome.runtime.sendMessage({ type: "APOCALIPSE_OPEN_MEDIA_PICKER" }).catch(() => {});
       setTimeout(() => { button.textContent = original; }, 2500);
       return;
     }

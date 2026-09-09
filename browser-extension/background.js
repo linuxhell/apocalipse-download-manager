@@ -374,7 +374,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return;
   }
   if (message?.type === "APOCALIPSE_RECENT_TAB_MEDIA") {
-    const tabId = sender.tab?.id;
+    const tabId = Number.isInteger(message.tabId) ? message.tabId : sender.tab?.id;
     const cutoff = Date.now() - 120_000;
     const media = recentMediaResponses
       .filter((item) => item.tabId === tabId && item.capturedAt >= cutoff)
@@ -382,6 +382,10 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       .slice(0, 30);
     reply({ media: media.map((item) => ({ ...item, ageMs: Date.now() - item.capturedAt })) });
     return;
+  }
+  if (message?.type === "APOCALIPSE_OPEN_MEDIA_PICKER") {
+    chrome.action.openPopup().then(() => reply({ ok: true })).catch((error) => reply({ ok: false, error: String(error) }));
+    return true;
   }
   if (message?.type === "APOCALIPSE_FETCH_THUMBNAIL") {
     (async () => {
