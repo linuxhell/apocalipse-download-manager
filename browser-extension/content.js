@@ -309,6 +309,20 @@
     const id = facebookMediaId(url);
     return id ? `${id}.mp4` : "facebook-video.mp4";
   };
+  const mediaResourceIdentity = (value) => {
+    try {
+      const url = new URL(value, location.href);
+      const query = [...url.searchParams.entries()].filter(([name]) =>
+        !name.toLowerCase().match(/^(?:bytestart|byteend|range|start|end)$/));
+      url.search = "";
+      for (const [name, item] of query) url.searchParams.append(name, item);
+      return url.href;
+    } catch { return ""; }
+  };
+  const sameMediaResource = (left, right) => {
+    const a = mediaResourceIdentity(left), b = mediaResourceIdentity(right);
+    return Boolean(a && b && a === b);
+  };
 
   const waitForFacebookUrl = async (element, attempts = 20) => {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -423,7 +437,11 @@
         element.querySelectorAll("source").forEach((source) => add(source.src, "video", element));
       }
       const tikTokUrl = tikTokUrlFor(element);
-      if (tikTokUrl) add(tikTokUrl, "video", element);
+      if (tikTokUrl) add(tikTokUrl, "video", element, undefined, {
+        pageExtractor: true,
+        previewUrl: absolute(element.currentSrc || element.src),
+        recommended: true,
+      });
     });
     const facebookPageUrl = facebookUrlFor(document.querySelector("video"));
     if (facebookPageUrl && !items.has(`video:${facebookPageUrl}`)) {
@@ -448,7 +466,7 @@
     });
     const collected = [...items.values()];
     if (collected.some((item) => item.kind === "video" && item.pageExtractor
-      && /(^|\.)facebook\.com$/i.test(location.hostname))) {
+      && /(^|\.)(?:facebook|tiktok)\.com$/i.test(location.hostname))) {
       return collected.filter((item) => item.kind !== "audio"
         && (item.kind !== "video" || item.pageExtractor));
     }
@@ -747,19 +765,21 @@
         const capturedSocialMedia = (isTikTokPage || (isFacebookVideo && !facebookPageUrl && isFacebookMediaUrl(location.href)))
           ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null)
           : null;
+        // Bind the overlay to this exact player. Never use an arbitrary recent
+        // response from the tab: feeds may keep several videos buffered.
         const browserVideoItem = capturedSocialMedia?.media?.find((item) =>
-          /^https?:/i.test(item.url || "") && /^video\//i.test(item.contentType || ""))
-          || capturedSocialMedia?.media?.find((item) =>
-            /^https?:/i.test(item.url || "") && !/^audio\//i.test(item.contentType || ""))
-          || null;
+          /^https?:/i.test(item.url || "")
+          && !/^audio\//i.test(item.contentType || "")
+          && sameMediaResource(item.url, liveHttpUrl)) || null;
         const browserAudioCandidates = (capturedSocialMedia?.media || [])
-          .filter((item) => /^https?:/i.test(item.url || "") && /^audio\//i.test(item.contentType || ""))
+          .filter((item) => /^https?:/i.test(item.url || "") && /^audio\//i.test(item.contentType || "")
+            && (item.frameId == null || browserVideoItem?.frameId == null || item.frameId === browserVideoItem.frameId))
           .sort((left, right) => Math.abs((left.capturedAt || 0) - (browserVideoItem?.capturedAt || 0))
             - Math.abs((right.capturedAt || 0) - (browserVideoItem?.capturedAt || 0)));
         const closestAudioItem = browserAudioCandidates[0] || null;
         const browserAudioItem = closestAudioItem
           && browserVideoItem
-          && Math.abs((closestAudioItem.capturedAt || 0) - (browserVideoItem.capturedAt || 0)) <= 30_000
+          && Math.abs((closestAudioItem.capturedAt || 0) - (browserVideoItem.capturedAt || 0)) <= 8_000
           ? closestAudioItem
           : null;
         const browserVideoMedia = browserVideoItem?.url || null;
@@ -788,7 +808,9 @@
             ? resolved
             : (resolved?.url || liveHttpUrl || networkMediaUrl || resolved)))
           : (isTikTokPage
-            ? (browserVideoMedia || liveHttpUrl || networkMediaUrl || resolved?.url || resolved)
+            ? ([typeof resolved === "string" ? resolved : resolved?.url, tikTokUrl]
+              .find((value) => value && isTikTokVideoUrl(value))
+              || browserVideoMedia || liveHttpUrl || networkMediaUrl || resolved?.url || resolved)
             : (resolved?.url || resolved || liveHttpUrl || networkMediaUrl || (isYouTubeVideo ? location.href : null)));
         const facebookPlayableUrl = isFacebookVideo && currentUrl && (
           isFacebookMediaUrl(currentUrl)
@@ -816,8 +838,9 @@
         }
         const directFacebookMedia = isFacebookVideo ? absolute(element.currentSrc || element.src) : null;
         // Do not attach unrelated CDN audio to an extractor page task.
-        const companionAudioUrl = isFacebookVideo && !facebookPageUrl ? browserAudioMedia : null;
-        const requestUrls = facebookPageUrl ? [] : [...new Set([
+        const extractorPageSelected = Boolean(facebookPageUrl || isTikTokVideoUrl(currentUrl));
+        const companionAudioUrl = !extractorPageSelected && (isFacebookVideo || isTikTokPage) ? browserAudioMedia : null;
+        const requestUrls = extractorPageSelected ? [] : [...new Set([
           ...(resolved?.requestUrls?.length ? resolved.requestUrls : (/\.m3u8(?:$|[?#])/i.test(String(currentUrl)) ? hlsForPage().candidates : [])),
           ...(directFacebookMedia && /^https?:/i.test(directFacebookMedia) ? [directFacebookMedia] : []),
         ])];

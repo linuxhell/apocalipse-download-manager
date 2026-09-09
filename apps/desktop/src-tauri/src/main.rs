@@ -815,6 +815,8 @@ struct BridgeDownload {
     #[serde(default)]
     media_kind: Option<String>,
     #[serde(default)]
+    ambiguous_social_track: bool,
+    #[serde(default)]
     expected_size: Option<u64>,
     duration: Option<f64>,
     cookie_header: Option<String>,
@@ -1100,6 +1102,7 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                         title: None,
                         thumbnail: None,
                         media_kind: None,
+                        ambiguous_social_track: false,
                         expected_size: None,
                         duration: None,
                         cookie_header: None,
@@ -5414,6 +5417,18 @@ fn queue_from_bridge(
     mut request: BridgeDownload,
 ) -> Result<Option<DownloadId>, String> {
     let state = app.state::<AppState>();
+    if request.ambiguous_social_track && request.audio_url.is_none() {
+        diagnostic_log(
+            &state,
+            "WARN",
+            "bridge.incomplete_social_track_rejected",
+            &format!(
+                "candidate={} reason=missing_permalink_or_companion_audio",
+                redact_url(&request.url)
+            ),
+        );
+        return Err("incomplete_social_media_track".to_owned());
+    }
     if let Some(page_url) = contextual_media_page(
         &request.url,
         request.page_url.as_deref(),
@@ -5714,6 +5729,7 @@ fn queue_associated_source(app: &tauri::AppHandle, source: String) -> Result<(),
             title: None,
             thumbnail: None,
             media_kind: None,
+            ambiguous_social_track: false,
             expected_size: None,
             duration: None,
             cookie_header: None,
@@ -6194,6 +6210,7 @@ fn forward_to_running_instance(source: &str, token: &str) -> bool {
         title: None,
         thumbnail: None,
         media_kind: None,
+        ambiguous_social_track: false,
         expected_size: None,
         duration: None,
         cookie_header: None,

@@ -123,3 +123,14 @@ test('popup routing leaves non-Instagram videos and Instagram images on their di
     assert.equal(downloads[0].url, item.url);
   }
 });
+
+test('popup rejects a social CDN track explicitly marked incomplete', async () => {
+  const { send, downloads } = worker(false, 'https://www.tiktok.com/');
+  const result = await send({
+    type: 'APOCALIPSE_DOWNLOAD',
+    item: { url: signed, kind: 'video', ambiguousSocialTrack: true },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /incomplete_social_media_track/);
+  assert.equal(downloads.length, 0);
+});
