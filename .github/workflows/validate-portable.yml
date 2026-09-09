@@ -25,7 +25,7 @@ jobs:
         run: |
           node --check browser-extension/background.js
           node --check browser-extension/popup.js
-          node --test tests/extension-handoff.test.cjs
+          node --test tests/*.test.cjs
       - name: Package extension candidates
         shell: python
         run: |

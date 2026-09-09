@@ -159,9 +159,19 @@ const render = () => {
     const previewButton = row.querySelector(".external-preview");
     previewButton.textContent = t("externalPreview");
     previewButton.hidden = item.kind === "image";
-    previewButton.onclick = () => chrome.runtime.sendMessage({ type: "APOCALIPSE_PREVIEW_MEDIA", url: item.url, pageUrl: activePageUrl }, (result) => {
-      if (!result?.ok || chrome.runtime.lastError) showBridgeError(result?.error || chrome.runtime.lastError?.message || "unavailable");
-    });
+    previewButton.onclick = () => {
+      previewButton.disabled = true;
+      chrome.runtime.sendMessage({ type: "APOCALIPSE_PREVIEW_MEDIA", url: item.url, pageUrl: activePageUrl, contentType: item.contentType || null, userAgent: item.userAgent || null }, (result) => {
+        previewButton.disabled = false;
+        const error = chrome.runtime.lastError?.message || result?.error;
+        if (!result?.ok || error) {
+          const label = document.querySelector("#bridge-label");
+          label.removeAttribute("data-i18n");
+          const prefix = locale === "pt_BR" ? "Falha ao abrir a pr\u00e9via" : locale === "zh_CN" ? "\u65e0\u6cd5\u6253\u5f00\u9884\u89c8" : "Could not open preview";
+          label.textContent = `${prefix}: ${error || "unavailable"}`;
+        }
+      });
+    };
     const button = row.querySelector(".download-item");
     button.textContent = t("download");
     button.onclick = () => chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item }, (result) => {

@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod tiktok_preview;
+
 use apocalipse_core::{
     classify_url, cleanup_chunk_artifacts, partial_path, plan_download, BandwidthLimiter,
     Capabilities, DownloadEngine, DownloadEvent, DownloadId, DownloadKind, DownloadRequest,
@@ -620,6 +622,8 @@ struct MediaPreviewRequest {
     url: String,
     user_agent: Option<String>,
     referer: Option<String>,
+    cookie_header: Option<String>,
+    content_type: Option<String>,
 }
 
 #[tauri::command]
@@ -627,7 +631,14 @@ fn get_app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-fn open_media_preview(state: &AppState, request: MediaPreviewRequest) -> Result<(), String> {
+fn open_media_preview(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    request: MediaPreviewRequest,
+) -> Result<(), String> {
+    if tiktok_preview::is_candidate(&request) {
+        return tiktok_preview::open(app, request);
+    }
     let parsed = url::Url::parse(&request.url).map_err(|_| "invalid_preview_url".to_owned())?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err("invalid_preview_url".to_owned());
@@ -6036,10 +6047,18 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     } else if first.starts_with("POST /v1/preview-media ") {
         match serde_json::from_str::<MediaPreviewRequest>(body)
             .map_err(|error| error.to_string())
-            .and_then(|request| open_media_preview(&state, request))
+            .and_then(|request| open_media_preview(app, &state, request))
         {
             Ok(()) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
-            Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
+            Err(error) => {
+                diagnostic_log(&state, "ERROR", "media.preview_rejected", &error);
+                bridge_response(
+                    &mut stream,
+                    "400 Bad Request",
+                    origin,
+                    &serde_json::json!({"ok": false, "error": error}).to_string(),
+                );
+            }
         }
     } else if first.starts_with("POST /v1/download-status ") {
         let status = serde_json::from_str::<BridgeDownloadStatus>(body)

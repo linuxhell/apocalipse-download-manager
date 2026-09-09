@@ -128,7 +128,7 @@ jobs:
         run: |
           node --check browser-extension/background.js
           node --check browser-extension/popup.js
-          node --test tests/extension-handoff.test.cjs
+          node --test tests/*.test.cjs
 
       - uses: actions/download-artifact@v4
         with:
