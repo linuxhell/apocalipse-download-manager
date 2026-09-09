@@ -218,6 +218,7 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
         const video = /^video\//i.test(item.contentType || "") || /(?:\/video\/tos\/|mime_type=video|\.mp4(?:$|[?#]))/i.test(item.url || "");
         return {
           url: item.url,
+          contentType: item.contentType || null,
           kind: video ? "video" : "audio",
           size: item.contentLength || null,
           ext: video ? "mp4" : "audio",
