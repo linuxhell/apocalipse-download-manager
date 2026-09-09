@@ -391,6 +391,13 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     chrome.action.openPopup().then(() => reply({ ok: true })).catch((error) => reply({ ok: false, error: String(error) }));
     return true;
   }
+  if (message?.type === "APOCALIPSE_PREVIEW_MEDIA") {
+    bridgeRequest("/v1/preview-media", {
+      method: "POST",
+      body: JSON.stringify({ url: message.url, userAgent: navigator.userAgent, referer: message.pageUrl || null }),
+    }).then(reply).catch((error) => reply({ ok: false, error: String(error) }));
+    return true;
+  }
   if (message?.type === "APOCALIPSE_MEDIA_PICKER_CONTEXT") {
     const context = mediaPickerContexts.get(message.tabId) || null;
     reply({ context: context && Date.now() - context.capturedAt <= 120_000 ? context : null });

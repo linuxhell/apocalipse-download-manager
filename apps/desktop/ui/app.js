@@ -577,6 +577,9 @@ const invoke = (command, args = {}) => {
     throw error;
   });
 };
+invoke("get_app_version").then((version) => {
+  document.querySelector("#app-version").textContent = `v${version}`;
+}).catch(() => {});
 window.addEventListener("error", (event) => invoke("record_ui_diagnostic", { level: "ERROR", event: "javascript_error", detail: `message=${event.message} file=${event.filename || "inline"} line=${event.lineno || 0} column=${event.colno || 0}` }).catch(() => {}));
 window.addEventListener("unhandledrejection", (event) => invoke("record_ui_diagnostic", { level: "ERROR", event: "unhandled_rejection", detail: `reason=${String(event.reason)}` }).catch(() => {}));
 

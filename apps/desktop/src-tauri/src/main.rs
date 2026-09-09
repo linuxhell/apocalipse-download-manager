@@ -614,6 +614,60 @@ struct ToolStatus {
     version: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaPreviewRequest {
+    url: String,
+    user_agent: Option<String>,
+    referer: Option<String>,
+}
+
+#[tauri::command]
+fn get_app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+fn open_media_preview(state: &AppState, request: MediaPreviewRequest) -> Result<(), String> {
+    let parsed = url::Url::parse(&request.url).map_err(|_| "invalid_preview_url".to_owned())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("invalid_preview_url".to_owned());
+    }
+    let player = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .media_player_path
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "vlc.exe" } else { "vlc" }));
+    let mut command = Command::new(&player);
+    let player_name = player
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if let Some(agent) = request.user_agent.filter(|value| !value.trim().is_empty()) {
+        if player_name.contains("vlc") {
+            command.arg(format!("--http-user-agent={agent}"));
+        } else if player_name.contains("mpv") {
+            command.arg(format!("--user-agent={agent}"));
+        }
+    }
+    if let Some(referer) = request.referer.filter(|value| !value.trim().is_empty()) {
+        if player_name.contains("vlc") {
+            command.arg(format!("--http-referrer={referer}"));
+        } else if player_name.contains("mpv") {
+            command.arg(format!("--referrer={referer}"));
+        }
+    }
+    command.arg(&request.url);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command.spawn().map(|_| ()).map_err(|error| error.to_string())
+}
+
 fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
     path.clone()
         .filter(|value| !value.as_os_str().is_empty())
@@ -5821,6 +5875,14 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             Ok(None) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
             Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
         }
+    } else if first.starts_with("POST /v1/preview-media ") {
+        match serde_json::from_str::<MediaPreviewRequest>(body)
+            .map_err(|error| error.to_string())
+            .and_then(|request| open_media_preview(&state, request))
+        {
+            Ok(()) => bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}"),
+            Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
+        }
     } else if first.starts_with("POST /v1/download-status ") {
         let status = serde_json::from_str::<BridgeDownloadStatus>(body)
             .ok()
@@ -6671,6 +6733,7 @@ fn main() {
             get_tool_statuses,
             set_tool_paths,
             get_media_player,
+            get_app_version,
             set_media_player,
             preview_torrent,
             update_tool,
