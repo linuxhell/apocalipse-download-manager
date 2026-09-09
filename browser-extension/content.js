@@ -716,6 +716,13 @@
         const liveBlobUrl = /^blob:/i.test(liveSource) ? liveSource : null;
         const liveHttpUrl = /^https?:/i.test(liveSource) ? liveSource : null;
         const networkMediaUrl = recentNetworkMediaUrl();
+        const capturedTikTokMedia = isTikTokPage
+          ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null)
+          : null;
+        const tikTokBrowserMedia = capturedTikTokMedia?.media?.find((item) =>
+          /^https?:/i.test(item.url || "") && /^(?:video|audio)\//i.test(item.contentType || ""))?.url
+          || capturedTikTokMedia?.media?.find((item) => /^https?:/i.test(item.url || ""))?.url
+          || null;
 
         // For a real <video>, the source feeding the player is more authoritative
         // than location.href. Try readable blob first; for MSE blobs, fall through
@@ -739,7 +746,9 @@
           ? ((typeof resolved === "string" && isFacebookMediaUrl(resolved))
             ? resolved
             : (resolved?.url || liveHttpUrl || networkMediaUrl || resolved))
-          : (resolved?.url || resolved || liveHttpUrl || networkMediaUrl || (isYouTubeVideo ? location.href : null));
+          : (isTikTokPage
+            ? (tikTokBrowserMedia || liveHttpUrl || networkMediaUrl || resolved?.url || resolved)
+            : (resolved?.url || resolved || liveHttpUrl || networkMediaUrl || (isYouTubeVideo ? location.href : null)));
         const facebookPlayableUrl = isFacebookVideo && currentUrl && (
           isFacebookMediaUrl(currentUrl)
           || /\.(?:mp4|webm|m3u8|mpd)(?:[?#]|$)/i.test(currentUrl)
@@ -773,6 +782,7 @@
           facebook: isFacebookVideo,
           tiktokPage: isTikTokPage,
           tiktokPermalink: Boolean(isTikTokVideoUrl(currentUrl)),
+          tiktokBrowserMedia: Boolean(tikTokBrowserMedia && currentUrl === tikTokBrowserMedia),
           directPlayer: Boolean(liveHttpUrl && currentUrl === liveHttpUrl),
           networkMedia: Boolean(networkMediaUrl && currentUrl === networkMediaUrl),
           pageFallback: Boolean(isFacebookVideo && isFacebookMediaUrl(currentUrl)),

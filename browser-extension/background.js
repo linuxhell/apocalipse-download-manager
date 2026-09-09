@@ -8,6 +8,7 @@ let forceHeld = false;
 let lastShortcutMode = "normal";
 let diagnosticOutbox = [];
 const recentFileResponses = [];
+const recentMediaResponses = [];
 const ASSISTED_PREFIX = "assisted-download:";
 const DIRECT_PREFIX = "direct-download:";
 
@@ -22,6 +23,21 @@ if (chrome.webRequest?.onResponseStarted) {
     const disposition = responseHeader(details.responseHeaders, "content-disposition").toLowerCase();
     const looksLikeFile = disposition.includes("attachment")
       || (!contentType.includes("text/html") && /(?:application\/(?:octet-stream|x-rar|zip)|binary)/i.test(contentType));
+    const isTikTokTabMedia = /(?:^|\.)(?:tiktok\.com|tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com)$/i
+      .test((() => { try { return new URL(details.url).hostname; } catch { return ""; } })())
+      && (/^(?:video|audio)\//i.test(contentType)
+        || /(?:\/video\/tos\/|\/aweme\/v1\/play\/|mime_type=video|\.mp4(?:$|[?]))/i.test(details.url));
+    if (isTikTokTabMedia) {
+      recentMediaResponses.push({
+        tabId: details.tabId,
+        frameId: details.frameId,
+        url: details.url,
+        contentType,
+        contentLength: Number.parseInt(responseHeader(details.responseHeaders, "content-length") || "0", 10) || null,
+        capturedAt: Date.now(),
+      });
+      recentMediaResponses.splice(0, Math.max(0, recentMediaResponses.length - 200));
+    }
     if (!looksLikeFile) return;
     recentFileResponses.push({ url: details.url, disposition, capturedAt: Date.now() });
     recentFileResponses.splice(0, Math.max(0, recentFileResponses.length - 50));
@@ -355,6 +371,16 @@ chrome.downloads.onChanged.addListener((delta) => {
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "APOCALIPSE_WORKER_PING") {
     reply({ ok: true, version: chrome.runtime.getManifest().version });
+    return;
+  }
+  if (message?.type === "APOCALIPSE_RECENT_TAB_MEDIA") {
+    const tabId = sender.tab?.id;
+    const cutoff = Date.now() - 120_000;
+    const media = recentMediaResponses
+      .filter((item) => item.tabId === tabId && item.capturedAt >= cutoff)
+      .sort((left, right) => right.capturedAt - left.capturedAt)
+      .slice(0, 30);
+    reply({ media });
     return;
   }
   if (message?.type === "APOCALIPSE_FETCH_THUMBNAIL") {
