@@ -406,11 +406,12 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     const traceId = crypto.randomUUID();
     Promise.all([
       sourcePageUrl(sender),
-      cookieHeaderFor([item.url, sender.tab?.url]),
+      cookieHeaderFor([item.url, item.audioUrl, sender.tab?.url]),
     ]).then(([pageUrl, cookieHeader]) => bridgeRequest("/v1/download", {
       method: "POST",
       body: JSON.stringify({
         url: item.url,
+        audioUrl: item.audioUrl || null,
         fileName: item.fileName || item.filename || null,
         pageUrl,
         title: item.title || null,

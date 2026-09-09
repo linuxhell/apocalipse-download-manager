@@ -719,10 +719,23 @@
         const capturedSocialMedia = (isTikTokPage || (isFacebookVideo && isFacebookMediaUrl(location.href)))
           ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null)
           : null;
-        const browserVideoMedia = capturedSocialMedia?.media?.find((item) =>
-          /^https?:/i.test(item.url || "") && /^(?:video|audio)\//i.test(item.contentType || ""))?.url
-          || capturedSocialMedia?.media?.find((item) => /^https?:/i.test(item.url || ""))?.url
+        const browserVideoItem = capturedSocialMedia?.media?.find((item) =>
+          /^https?:/i.test(item.url || "") && /^video\//i.test(item.contentType || ""))
+          || capturedSocialMedia?.media?.find((item) =>
+            /^https?:/i.test(item.url || "") && !/^audio\//i.test(item.contentType || ""))
           || null;
+        const browserAudioCandidates = (capturedSocialMedia?.media || [])
+          .filter((item) => /^https?:/i.test(item.url || "") && /^audio\//i.test(item.contentType || ""))
+          .sort((left, right) => Math.abs((left.capturedAt || 0) - (browserVideoItem?.capturedAt || 0))
+            - Math.abs((right.capturedAt || 0) - (browserVideoItem?.capturedAt || 0)));
+        const closestAudioItem = browserAudioCandidates[0] || null;
+        const browserAudioItem = closestAudioItem
+          && browserVideoItem
+          && Math.abs((closestAudioItem.capturedAt || 0) - (browserVideoItem.capturedAt || 0)) <= 30_000
+          ? closestAudioItem
+          : null;
+        const browserVideoMedia = browserVideoItem?.url || null;
+        const browserAudioMedia = browserAudioItem?.url || null;
 
         // For a real <video>, the source feeding the player is more authoritative
         // than location.href. Try readable blob first; for MSE blobs, fall through
@@ -787,12 +800,19 @@
           browserCandidateAgeMs: capturedSocialMedia?.media?.[0]?.ageMs ?? -1,
           browserCandidateType: capturedSocialMedia?.media?.[0]?.contentType || "none",
           browserCandidateBytes: capturedSocialMedia?.media?.[0]?.contentLength || 0,
+          browserAudioCaptured: Boolean(browserAudioMedia),
+          browserAudioAgeMs: browserAudioItem?.ageMs ?? -1,
+          browserAudioType: browserAudioItem?.contentType || "none",
+          browserAudioCandidates: browserAudioCandidates.length,
+          browserAudioDeltaMs: browserAudioItem && browserVideoItem
+            ? Math.abs((browserAudioItem.capturedAt || 0) - (browserVideoItem.capturedAt || 0))
+            : -1,
           directPlayer: Boolean(liveHttpUrl && currentUrl === liveHttpUrl),
           networkMedia: Boolean(networkMediaUrl && currentUrl === networkMediaUrl),
           pageFallback: Boolean(isFacebookVideo && isFacebookMediaUrl(currentUrl)),
           candidate: currentUrl,
         });
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, duration: resolved?.duration || null, requestUrls, userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, audioUrl: isFacebookVideo ? browserAudioMedia : null, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(browserAudioMedia ? [browserAudioMedia] : [])], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title, thumbnail: thumbnailFor(element, "video") } }, (result) => {
           const failed = chrome.runtime.lastError || !result?.ok;
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";

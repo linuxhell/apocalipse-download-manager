@@ -1,5 +1,4 @@
 (() => {
-  const replaying = new WeakSet();
   const validUrl = (value) => {
     try {
       const url = new URL(String(value || "").replaceAll("\\/", "/"), location.href);
@@ -124,48 +123,99 @@
     return urlInState(video) || urlInPageJson(video);
   };
 
-  const copiedPermalinkFor = async (video) => {
-    let container = video;
-    let share = null;
-    for (let depth = 0; container && depth < 16 && !share; depth += 1, container = container.parentElement) {
-      share = [...(container.querySelectorAll?.('button,[role="button"]') || [])].find((item) =>
-        /(?:compartilhar|share|分享)/i.test(`${item.getAttribute("aria-label") || ""} ${item.title || ""} ${item.textContent || ""}`));
+  const directVideoUrl = (value) => {
+    try {
+      const url = new URL(String(value || "").replaceAll("\\/", "/"), location.href);
+      const host = url.hostname.toLowerCase();
+      if (!/(?:^|\.)(?:tiktok\.com|tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com)$/i.test(host)) return null;
+      const normalized = url.href.toLowerCase();
+      if (/mime_type=(?:audio|image)/i.test(normalized)) return null;
+      if (!/(?:\/video\/tos\/|\/aweme\/v1\/(?:play|download)\/|mime_type=video|\.mp4(?:$|[?#]))/i.test(normalized)) return null;
+      return url.href;
+    } catch { return null; }
+  };
+
+  const mediaUrlInObject = (root) => {
+    const queue = [{ value: root, path: "" }];
+    const visited = new WeakSet();
+    const candidates = [];
+    let inspected = 0;
+    while (queue.length && inspected < 5000) {
+      const { value, path } = queue.shift();
+      inspected += 1;
+      if (typeof value === "string") {
+        const url = directVideoUrl(value);
+        if (url) {
+          const score = (/playaddr|downloadaddr|urllist|bitrate/i.test(path) ? 8 : 0)
+            + (/mime_type=video/i.test(url) ? 4 : 0)
+            + (/\/video\/tos\//i.test(url) ? 2 : 0);
+          candidates.push({ url, score });
+        }
+        continue;
+      }
+      if (!value || typeof value !== "object" || visited.has(value)) continue;
+      visited.add(value);
+      for (const [key, child] of Object.entries(value)) {
+        if ((child && typeof child === "object") || typeof child === "string") {
+          queue.push({ value: child, path: `${path}.${key}` });
+        }
+      }
     }
-    if (!share) return null;
-    share.click();
-    let copyItem = null;
-    for (let attempt = 0; attempt < 15 && !copyItem; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      copyItem = [...document.querySelectorAll('[role="menuitem"],button,[role="button"]')].find((item) =>
-        /(?:copiar link|copy link|复制链接|複製連結)/i.test(item.textContent || ""));
+    candidates.sort((left, right) => right.score - left.score);
+    return candidates[0]?.url || null;
+  };
+
+  const mediaUrlInTree = (roots, targetId) => {
+    const queue = [...roots];
+    const visited = new WeakSet();
+    let inspected = 0;
+    while (queue.length && inspected < 30000) {
+      const value = queue.shift();
+      inspected += 1;
+      if (!value || typeof value !== "object" || visited.has(value)) continue;
+      visited.add(value);
+      const id = String(value.id || value.itemId || value.aweme_id || value.awemeId || "");
+      if (id === targetId) {
+        const url = mediaUrlInObject(value.video || value.videoInfo || value);
+        if (url) return url;
+      }
+      for (const child of Object.values(value)) {
+        if (child && typeof child === "object") queue.push(child);
+      }
     }
-    if (!copyItem) return null;
-    copyItem.click();
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    try { return validUrl(await navigator.clipboard.readText()); } catch { return null; }
+    return null;
+  };
+
+  const directMediaFor = (video, permalink) => {
+    const targetId = permalink.match(/\/video\/(\d+)/i)?.[1];
+    if (!targetId) return null;
+    const roots = [];
+    let element = video;
+    for (let depth = 0; element && depth < 20; depth += 1, element = element.parentElement) {
+      for (const key of Object.getOwnPropertyNames(element)) {
+        if (/^__(?:react|next|vue)/i.test(key)) roots.push(element[key]);
+      }
+    }
+    const fromState = mediaUrlInTree(roots, targetId);
+    if (fromState) return fromState;
+    const pageRoots = [];
+    for (const script of document.querySelectorAll('script[type="application/json"],script[id*="DATA"],script[id*="STATE"]')) {
+      const text = script.textContent || "";
+      if (!text.includes(targetId) || text.length > 15_000_000) continue;
+      try { pageRoots.push(JSON.parse(text)); } catch {}
+    }
+    return mediaUrlInTree(pageRoots, targetId);
   };
 
   document.addEventListener("click", async (event) => {
     const button = event.target?.closest?.(".apocalipse-media-download:not(.apocalipse-media-record)");
-    if (!button || replaying.has(button)) {
-      if (button) replaying.delete(button);
-      return;
-    }
+    if (!button) return;
     const video = videoForButton(button);
     if (!video) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     const original = button.textContent;
-    let enteredFullscreen = false;
-    let url = permalinkFor(video) || await copiedPermalinkFor(video);
-    if (!url && video.requestFullscreen) {
-      try {
-        await video.requestFullscreen();
-        enteredFullscreen = true;
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        url = permalinkFor(video);
-      } catch {}
-    }
+    const url = permalinkFor(video);
     if (!url) {
       chrome.runtime.sendMessage({
         type: "APOCALIPSE_CAPTURE_TRACE",
@@ -178,11 +228,11 @@
       }).catch(() => {});
       button.textContent = "⚠";
       button.title = "Abra o vídeo ou use Compartilhar e Copiar link";
-      if (enteredFullscreen && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
       setTimeout(() => { button.textContent = original; }, 2500);
       return;
     }
     button.textContent = "…";
+    const stateMediaUrl = directMediaFor(video, url);
     const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null);
     const capturedMedia = Array.isArray(captured?.media) ? captured.media : [];
     const freshVideoCandidates = capturedMedia.filter((item) =>
@@ -192,15 +242,10 @@
       && item.ageMs >= 0
       && item.ageMs <= 8_000);
 
-    // TikTok keeps requests from several feed items in the same tab. A recent
-    // CDN response cannot be correlated to the clicked <video> reliably: the
-    // newest request may belong to the next preloaded item or to the previous
-    // item that is still buffered. The permalink was resolved from the exact
-    // video/button DOM context above, so it is the only safe download identity.
-    // Captured media remains diagnostic-only until it carries an aweme/video id
-    // that can be proven equal to the permalink id.
-    const selectedUrl = url;
-    const selectedId = selectedUrl.match(/\/video\/(\d+)/i)?.[1] || "none";
+    const liveHttpUrl = directVideoUrl(video.currentSrc || video.src);
+    const soleFreshCandidate = freshVideoCandidates.length === 1 ? freshVideoCandidates[0]?.url : null;
+    const selectedUrl = stateMediaUrl || liveHttpUrl || soleFreshCandidate;
+    const selectedId = url.match(/\/video\/(\d+)/i)?.[1] || "none";
     const newestCaptured = capturedMedia[0] || null;
     chrome.runtime.sendMessage({
       type: "APOCALIPSE_CAPTURE_TRACE",
@@ -210,25 +255,31 @@
       pageUrl: location.href,
       at: Date.now(),
       detail: {
-        selection: "permalink",
+        selection: stateMediaUrl ? "matched_state_media" : liveHttpUrl ? "player_http_media" : soleFreshCandidate ? "sole_fresh_media" : "unresolved",
         selectedVideoId: selectedId,
-        browserCapturedMedia: false,
+        browserCapturedMedia: Boolean(soleFreshCandidate && selectedUrl === soleFreshCandidate),
         browserCandidates: capturedMedia.length,
         browserFreshVideoCandidates: freshVideoCandidates.length,
-        browserCandidatesRejected: capturedMedia.length,
-        browserRejectionReason: "uncorrelated_feed_media",
+        browserCandidatesRejected: capturedMedia.length - (soleFreshCandidate ? 1 : 0),
+        browserRejectionReason: freshVideoCandidates.length > 1 ? "ambiguous_feed_media" : "uncorrelated_feed_media",
         browserCandidateAgeMs: newestCaptured?.ageMs ?? -1,
         browserCandidateType: newestCaptured?.contentType || "none",
         browserCandidateBytes: newestCaptured?.contentLength || 0,
         browserCandidateHost: (() => { try { return new URL(newestCaptured?.url || "").hostname; } catch { return "none"; } })(),
       },
     }).catch(() => {});
+    if (!selectedUrl) {
+      button.textContent = "⚠";
+      button.title = "Não foi possível confirmar a mídia deste vídeo";
+      setTimeout(() => { button.textContent = original; }, 2500);
+      return;
+    }
     chrome.runtime.sendMessage({
       type: "APOCALIPSE_DOWNLOAD",
       item: {
         url: selectedUrl,
         duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null,
-        requestUrls: [selectedUrl],
+        requestUrls: [selectedUrl, url],
         userAgent: navigator.userAgent,
         kind: "video",
         title: document.title,
@@ -237,7 +288,6 @@
     }, (result) => {
       const failed = chrome.runtime.lastError || !result?.ok;
       button.textContent = failed ? "⚠" : "✓";
-      if (enteredFullscreen && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
       button.title = failed
         ? result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable"
         : "Enviado ao Apocalipse";

@@ -698,6 +698,8 @@ struct BridgePairing {
 #[serde(rename_all = "camelCase")]
 struct BridgeDownload {
     url: String,
+    #[serde(default)]
+    audio_url: Option<String>,
     file_name: Option<String>,
     page_url: Option<String>,
     #[serde(default)]
@@ -791,6 +793,8 @@ struct DownloadContext {
     title: Option<String>,
     #[serde(default)]
     thumbnail: Option<String>,
+    #[serde(default)]
+    audio_url: Option<String>,
     cookie_header: Option<String>,
     user_agent: Option<String>,
     request_method: Option<String>,
@@ -984,6 +988,7 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                     app,
                     BridgeDownload {
                         url: request.url,
+                        audio_url: None,
                         file_name: None,
                         page_url: None,
                         title: None,
@@ -1535,6 +1540,172 @@ fn update_task(
             let _ = save_queue(&state, &queue);
         }
     }
+}
+
+async fn run_adaptive_social_download(
+    app: tauri::AppHandle,
+    id: DownloadId,
+    task: DownloadTask,
+    mut cancellation: oneshot::Receiver<()>,
+) {
+    let Some(audio_url) = task.companion_audio_url.clone() else {
+        return;
+    };
+    update_task(&app, id, true, |item| {
+        item.state = DownloadState::Downloading;
+        item.progress_percent = Some(0.0);
+        item.resume_supported = Some(false);
+    });
+    let state = app.state::<AppState>();
+    let ffmpeg = state
+        .settings
+        .lock()
+        .map(|settings| {
+            configured_tool(
+                &settings.ffmpeg_path,
+                if cfg!(windows) {
+                    "ffmpeg.exe"
+                } else {
+                    "ffmpeg"
+                },
+            )
+        })
+        .unwrap_or_else(|_| {
+            PathBuf::from(if cfg!(windows) {
+                "ffmpeg.exe"
+            } else {
+                "ffmpeg"
+            })
+        });
+    let identity = state
+        .request_identities
+        .lock()
+        .ok()
+        .and_then(|items| items.get(&id).cloned());
+    let user_agent = identity
+        .as_ref()
+        .and_then(|value| value.user_agent.as_deref())
+        .unwrap_or(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36",
+        );
+    let mut headers = String::new();
+    if let Some(referer) = task.referer.as_deref() {
+        headers.push_str(&format!("Referer: {referer}\r\n"));
+    }
+    if let Some(cookie) = identity
+        .as_ref()
+        .and_then(|value| value.cookie_header.as_deref())
+    {
+        headers.push_str(&format!("Cookie: {cookie}\r\n"));
+    }
+    let temporary = task
+        .destination
+        .with_file_name(format!(".{id}.apocalipse-muxing.mp4"));
+    let _ = fs::remove_file(&temporary);
+    diagnostic_log(
+        &state,
+        "INFO",
+        "adaptive_media.mux_start",
+        &format!(
+            "task={id} video={} audio={} destination={}",
+            redact_url(&task.source),
+            redact_url(&audio_url),
+            task.destination.display()
+        ),
+    );
+    let mut command = tokio::process::Command::new(ffmpeg);
+    command.args(["-y", "-loglevel", "warning", "-user_agent", user_agent]);
+    if !headers.is_empty() {
+        command.args(["-headers", &headers]);
+    }
+    command.arg("-i").arg(&task.source);
+    command.args(["-user_agent", user_agent]);
+    if !headers.is_empty() {
+        command.args(["-headers", &headers]);
+    }
+    command
+        .arg("-i")
+        .arg(&audio_url)
+        .args([
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+        ])
+        .arg(&temporary)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.as_std_mut().creation_flags(0x08000000);
+    }
+    let result = match command.spawn() {
+        Ok(mut child) => {
+            let stderr = child
+                .stderr
+                .take()
+                .map(|stream| tauri::async_runtime::spawn(read_process_tail(stream, None)));
+            let status = tokio::select! {
+                biased;
+                _ = &mut cancellation => { let _ = child.kill().await; None }
+                value = child.wait() => value.ok(),
+            };
+            let error_text = match stderr {
+                Some(output) => String::from_utf8_lossy(&output.await.unwrap_or_default()).into_owned(),
+                None => String::new(),
+            };
+            match status {
+                Some(status) if status.success() && temporary.is_file() => {
+                    fs::rename(&temporary, &task.destination).map_err(|error| error.to_string())
+                }
+                Some(status) => Err(external_error_detail(&error_text, status.code())),
+                None => Err("cancelled".to_owned()),
+            }
+        }
+        Err(error) => Err(format!("ffmpeg_unavailable: {error}")),
+    };
+    let _ = fs::remove_file(&temporary);
+    match result {
+        Ok(()) => {
+            let size = fs::metadata(&task.destination)
+                .map(|value| value.len())
+                .unwrap_or_default();
+            diagnostic_log(
+                &state,
+                "INFO",
+                "adaptive_media.mux_completed",
+                &format!("task={id} bytes={size}"),
+            );
+            update_task(&app, id, true, |item| {
+                item.received = size;
+                item.total = Some(size);
+                item.progress_percent = Some(100.0);
+                item.state = DownloadState::Completed;
+                item.completed_at = Some(epoch_seconds());
+            });
+        }
+        Err(message) if message == "cancelled" => {
+            update_task(&app, id, true, |item| item.state = DownloadState::Paused);
+        }
+        Err(message) => {
+            diagnostic_log(&state, "ERROR", "adaptive_media.mux_failed", &format!("task={id} error={message}"));
+            update_task(&app, id, true, |item| item.state = DownloadState::Failed { message });
+        }
+    }
+    if let Ok(mut workers) = state.workers.lock() {
+        workers.remove(&id);
+    }
+    start_next_queued(&app);
 }
 
 async fn run_download(
@@ -3986,6 +4157,10 @@ fn enqueue_download_impl(
                     || value.starts_with("http://")
                     || value.starts_with("data:image/"))
         });
+        task.companion_audio_url = context.audio_url.filter(|value| {
+            value != &task.source
+                && (value.starts_with("https://") || value.starts_with("http://"))
+        });
         let cookie_header = context.cookie_header.filter(|value| {
             value.len() <= 16_384 && !value.contains('\r') && !value.contains('\n')
         });
@@ -4104,6 +4279,15 @@ fn start_download(
         "task.dispatched",
         &format!("task={} engine={kind:?}", task.id),
     );
+    if kind == DownloadKind::Http && task.companion_audio_url.is_some() {
+        tauri::async_runtime::spawn(run_adaptive_social_download(
+            app.clone(),
+            task.id,
+            task,
+            cancelled,
+        ));
+        return Ok(());
+    }
     if kind == DownloadKind::Http {
         let identity = state
             .request_identities
@@ -5003,6 +5187,20 @@ fn queue_from_bridge(
             );
         }
     }
+    if let Some(audio_url) = request.audio_url.as_mut() {
+        if let Ok(mut expanded) = url::Url::parse(audio_url) {
+            let query = expanded
+                .query_pairs()
+                .filter(|(name, _)| {
+                    !name.eq_ignore_ascii_case("bytestart") && !name.eq_ignore_ascii_case("byteend")
+                })
+                .map(|(name, value)| (name.into_owned(), value.into_owned()))
+                .collect::<Vec<_>>();
+            expanded.set_query(None);
+            expanded.query_pairs_mut().extend_pairs(query);
+            *audio_url = expanded.into();
+        }
+    }
     let image_mislabeled_as_video = request
         .media_kind
         .as_deref()
@@ -5066,10 +5264,11 @@ fn queue_from_bridge(
         "INFO",
         "bridge.download",
         &format!(
-            "url={} method={} media_kind={} thumbnail={} expected_size={} user_agent={} cookie_count={} cookie_names={} cookie_bytes={}",
+            "url={} method={} media_kind={} companion_audio={} thumbnail={} expected_size={} user_agent={} cookie_count={} cookie_names={} cookie_bytes={}",
             redact_url(&request.url),
             request.request_method.as_deref().unwrap_or("GET"),
             request.media_kind.as_deref().unwrap_or("none"),
+            request.audio_url.is_some(),
             request.thumbnail.is_some(),
             request.expected_size.map_or_else(|| "unknown".to_owned(), |value| value.to_string()),
             request.user_agent.as_deref().map(|value| value.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_else(|| "none".to_owned()),
@@ -5084,6 +5283,7 @@ fn queue_from_bridge(
             known_duration: request.duration,
             title: request.title,
             thumbnail: request.thumbnail,
+            audio_url: request.audio_url,
             cookie_header: request.cookie_header,
             user_agent: request.user_agent,
             request_method: request.request_method,
@@ -5218,6 +5418,7 @@ fn queue_associated_source(app: &tauri::AppHandle, source: String) -> Result<(),
         app,
         BridgeDownload {
             url: source,
+            audio_url: None,
             file_name: None,
             page_url: None,
             title: None,
@@ -5670,6 +5871,7 @@ fn forward_to_running_instance(source: &str, token: &str) -> bool {
     };
     let request = BridgeDownload {
         url: source.to_owned(),
+        audio_url: None,
         file_name: None,
         page_url: None,
         title: None,

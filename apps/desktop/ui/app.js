@@ -539,6 +539,7 @@ let pendingReferer = null;
 let pendingDuration = null;
 let pendingTitle = null;
 let pendingThumbnail = null;
+let pendingAudioUrl = null;
 let pendingMediaKind = null;
 let pendingExpectedSize = null;
 let pendingCookieHeader = null;
@@ -1249,6 +1250,7 @@ document.querySelectorAll("#add,#empty-add").forEach(
       pendingDuration = null;
       pendingTitle = null;
       pendingThumbnail = null;
+      pendingAudioUrl = null;
       pendingMediaKind = null;
       pendingExpectedSize = null;
       pendingCookieHeader = null;
@@ -1891,6 +1893,7 @@ document.querySelector("#enqueue").onclick = async () => {
           knownDuration: pendingDuration,
           title: pendingTitle,
           thumbnail: pendingThumbnail,
+          audioUrl: pendingAudioUrl,
           cookieHeader: pendingCookieHeader,
           userAgent: pendingUserAgent,
           requestMethod: pendingRequestMethod,
@@ -1909,6 +1912,7 @@ document.querySelector("#enqueue").onclick = async () => {
     document.querySelector("#task-connections-value").value = "8";
     pendingTitle = null;
     pendingThumbnail = null;
+    pendingAudioUrl = null;
     pendingMediaKind = null;
     pendingExpectedSize = null;
     resetMediaInspection();
@@ -1960,6 +1964,7 @@ setInterval(async () => {
     pendingDuration = null;
     pendingTitle = null;
     pendingThumbnail = null;
+    pendingAudioUrl = null;
     pendingMediaKind = null;
     pendingExpectedSize = null;
     pendingCookieHeader = null;
@@ -1993,6 +1998,7 @@ async function consumeBridgeDownload() {
     pendingDuration = Number.isFinite(request.duration) ? request.duration : null;
     pendingTitle = request.title || null;
     pendingThumbnail = request.thumbnail || null;
+    pendingAudioUrl = request.audioUrl || null;
     pendingMediaKind = request.mediaKind || null;
     pendingExpectedSize = Number.isFinite(request.expectedSize) ? request.expectedSize : null;
     pendingCookieHeader = request.cookieHeader || null;

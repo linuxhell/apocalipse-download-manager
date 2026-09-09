@@ -55,6 +55,9 @@ pub struct DownloadTask {
     /// Preview image for this task. Older queue files simply deserialize it as absent.
     #[serde(default)]
     pub thumbnail: Option<String>,
+    /// Optional separate audio stream for browser-captured adaptive media.
+    #[serde(default)]
+    pub companion_audio_url: Option<String>,
     #[serde(default)]
     pub mirrors: Vec<String>,
     #[serde(default)]
@@ -97,6 +100,7 @@ impl DownloadTask {
             known_duration: None,
             display_title: None,
             thumbnail: None,
+            companion_audio_url: None,
             mirrors: Vec::new(),
             priority: 0,
             bandwidth_limit: None,
