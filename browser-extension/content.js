@@ -716,12 +716,12 @@
         const liveBlobUrl = /^blob:/i.test(liveSource) ? liveSource : null;
         const liveHttpUrl = /^https?:/i.test(liveSource) ? liveSource : null;
         const networkMediaUrl = recentNetworkMediaUrl();
-        const capturedTikTokMedia = isTikTokPage
+        const capturedSocialMedia = (isTikTokPage || (isFacebookVideo && isFacebookMediaUrl(location.href)))
           ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null)
           : null;
-        const tikTokBrowserMedia = capturedTikTokMedia?.media?.find((item) =>
+        const browserVideoMedia = capturedSocialMedia?.media?.find((item) =>
           /^https?:/i.test(item.url || "") && /^(?:video|audio)\//i.test(item.contentType || ""))?.url
-          || capturedTikTokMedia?.media?.find((item) => /^https?:/i.test(item.url || ""))?.url
+          || capturedSocialMedia?.media?.find((item) => /^https?:/i.test(item.url || ""))?.url
           || null;
 
         // For a real <video>, the source feeding the player is more authoritative
@@ -743,11 +743,11 @@
         // A resolved HLS manifest is more authoritative than incidental network
         // traffic or a generic HTTP source exposed by the player.
         let currentUrl = isFacebookVideo
-          ? ((typeof resolved === "string" && isFacebookMediaUrl(resolved))
+          ? (browserVideoMedia || ((typeof resolved === "string" && isFacebookMediaUrl(resolved))
             ? resolved
-            : (resolved?.url || liveHttpUrl || networkMediaUrl || resolved))
+            : (resolved?.url || liveHttpUrl || networkMediaUrl || resolved)))
           : (isTikTokPage
-            ? (tikTokBrowserMedia || liveHttpUrl || networkMediaUrl || resolved?.url || resolved)
+            ? (browserVideoMedia || liveHttpUrl || networkMediaUrl || resolved?.url || resolved)
             : (resolved?.url || resolved || liveHttpUrl || networkMediaUrl || (isYouTubeVideo ? location.href : null)));
         const facebookPlayableUrl = isFacebookVideo && currentUrl && (
           isFacebookMediaUrl(currentUrl)
@@ -782,7 +782,11 @@
           facebook: isFacebookVideo,
           tiktokPage: isTikTokPage,
           tiktokPermalink: Boolean(isTikTokVideoUrl(currentUrl)),
-          tiktokBrowserMedia: Boolean(tikTokBrowserMedia && currentUrl === tikTokBrowserMedia),
+          browserCapturedMedia: Boolean(browserVideoMedia && currentUrl === browserVideoMedia),
+          browserCandidates: capturedSocialMedia?.media?.length || 0,
+          browserCandidateAgeMs: capturedSocialMedia?.media?.[0]?.ageMs ?? -1,
+          browserCandidateType: capturedSocialMedia?.media?.[0]?.contentType || "none",
+          browserCandidateBytes: capturedSocialMedia?.media?.[0]?.contentLength || 0,
           directPlayer: Boolean(liveHttpUrl && currentUrl === liveHttpUrl),
           networkMedia: Boolean(networkMediaUrl && currentUrl === networkMediaUrl),
           pageFallback: Boolean(isFacebookVideo && isFacebookMediaUrl(currentUrl)),

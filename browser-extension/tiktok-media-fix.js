@@ -172,12 +172,35 @@
     }
     const original = button.textContent;
     button.textContent = "…";
+    const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null);
+    const browserMedia = captured?.media?.find((item) =>
+      /^https?:/i.test(item.url || "") && /^video\//i.test(item.contentType || ""))
+      || captured?.media?.find((item) =>
+        /^https?:/i.test(item.url || "") && !/^audio\//i.test(item.contentType || ""))
+      || null;
+    const selectedUrl = browserMedia?.url || url;
+    chrome.runtime.sendMessage({
+      type: "APOCALIPSE_CAPTURE_TRACE",
+      eventName: "tiktok_browser_media_selection",
+      mode: "download",
+      traceId: crypto.randomUUID(),
+      pageUrl: location.href,
+      at: Date.now(),
+      detail: {
+        browserCapturedMedia: Boolean(browserMedia),
+        browserCandidates: captured?.media?.length || 0,
+        browserCandidateAgeMs: browserMedia?.ageMs ?? -1,
+        browserCandidateType: browserMedia?.contentType || "none",
+        browserCandidateBytes: browserMedia?.contentLength || 0,
+        browserCandidateHost: (() => { try { return new URL(browserMedia?.url || "").hostname; } catch { return "none"; } })(),
+      },
+    }).catch(() => {});
     chrome.runtime.sendMessage({
       type: "APOCALIPSE_DOWNLOAD",
       item: {
-        url,
+        url: selectedUrl,
         duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null,
-        requestUrls: [],
+        requestUrls: captured?.media?.map((item) => item.url).filter(Boolean) || [],
         userAgent: navigator.userAgent,
         kind: "video",
         title: document.title,
