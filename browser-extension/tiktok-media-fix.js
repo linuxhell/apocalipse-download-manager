@@ -155,6 +155,7 @@
     if (!video) return;
     event.preventDefault();
     event.stopImmediatePropagation();
+    const original = button.textContent;
     let enteredFullscreen = false;
     let url = permalinkFor(video) || await copiedPermalinkFor(video);
     if (!url && video.requestFullscreen) {
@@ -166,19 +167,41 @@
       } catch {}
     }
     if (!url) {
-      replaying.add(button);
-      button.click();
+      chrome.runtime.sendMessage({
+        type: "APOCALIPSE_CAPTURE_TRACE",
+        eventName: "tiktok_video_identity_unresolved",
+        mode: "download",
+        traceId: crypto.randomUUID(),
+        pageUrl: location.href,
+        at: Date.now(),
+        detail: { fallbackBlocked: true, reason: "no_verified_permalink" },
+      }).catch(() => {});
+      button.textContent = "⚠";
+      button.title = "Abra o vídeo ou use Compartilhar e Copiar link";
+      if (enteredFullscreen && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+      setTimeout(() => { button.textContent = original; }, 2500);
       return;
     }
-    const original = button.textContent;
     button.textContent = "…";
     const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null);
-    const browserMedia = captured?.media?.find((item) =>
-      /^https?:/i.test(item.url || "") && /^video\//i.test(item.contentType || ""))
-      || captured?.media?.find((item) =>
-        /^https?:/i.test(item.url || "") && !/^audio\//i.test(item.contentType || ""))
-      || null;
-    const selectedUrl = browserMedia?.url || url;
+    const capturedMedia = Array.isArray(captured?.media) ? captured.media : [];
+    const freshVideoCandidates = capturedMedia.filter((item) =>
+      /^https?:/i.test(item.url || "")
+      && /^video\//i.test(item.contentType || "")
+      && Number.isFinite(item.ageMs)
+      && item.ageMs >= 0
+      && item.ageMs <= 8_000);
+
+    // TikTok keeps requests from several feed items in the same tab. A recent
+    // CDN response cannot be correlated to the clicked <video> reliably: the
+    // newest request may belong to the next preloaded item or to the previous
+    // item that is still buffered. The permalink was resolved from the exact
+    // video/button DOM context above, so it is the only safe download identity.
+    // Captured media remains diagnostic-only until it carries an aweme/video id
+    // that can be proven equal to the permalink id.
+    const selectedUrl = url;
+    const selectedId = selectedUrl.match(/\/video\/(\d+)/i)?.[1] || "none";
+    const newestCaptured = capturedMedia[0] || null;
     chrome.runtime.sendMessage({
       type: "APOCALIPSE_CAPTURE_TRACE",
       eventName: "tiktok_browser_media_selection",
@@ -187,12 +210,17 @@
       pageUrl: location.href,
       at: Date.now(),
       detail: {
-        browserCapturedMedia: Boolean(browserMedia),
-        browserCandidates: captured?.media?.length || 0,
-        browserCandidateAgeMs: browserMedia?.ageMs ?? -1,
-        browserCandidateType: browserMedia?.contentType || "none",
-        browserCandidateBytes: browserMedia?.contentLength || 0,
-        browserCandidateHost: (() => { try { return new URL(browserMedia?.url || "").hostname; } catch { return "none"; } })(),
+        selection: "permalink",
+        selectedVideoId: selectedId,
+        browserCapturedMedia: false,
+        browserCandidates: capturedMedia.length,
+        browserFreshVideoCandidates: freshVideoCandidates.length,
+        browserCandidatesRejected: capturedMedia.length,
+        browserRejectionReason: "uncorrelated_feed_media",
+        browserCandidateAgeMs: newestCaptured?.ageMs ?? -1,
+        browserCandidateType: newestCaptured?.contentType || "none",
+        browserCandidateBytes: newestCaptured?.contentLength || 0,
+        browserCandidateHost: (() => { try { return new URL(newestCaptured?.url || "").hostname; } catch { return "none"; } })(),
       },
     }).catch(() => {});
     chrome.runtime.sendMessage({
@@ -200,7 +228,7 @@
       item: {
         url: selectedUrl,
         duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null,
-        requestUrls: captured?.media?.map((item) => item.url).filter(Boolean) || [],
+        requestUrls: [selectedUrl],
         userAgent: navigator.userAgent,
         kind: "video",
         title: document.title,
