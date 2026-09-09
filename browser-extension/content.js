@@ -366,12 +366,16 @@
         /(?:copiar link|copy link|复制链接|複製連結)/i.test(item.textContent || ""));
     }
     if (!copyItem) return null;
+    let previousClipboard = "";
+    try { previousClipboard = await navigator.clipboard.readText(); } catch {}
     copyItem.click();
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    try {
-      const copied = await navigator.clipboard.readText();
-      if (copied && isFacebookMediaUrl(copied)) return copied;
-    } catch {}
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      try {
+        const copied = await navigator.clipboard.readText();
+        if (copied && copied !== previousClipboard && isFacebookMediaUrl(copied)) return copied;
+      } catch {}
+    }
     return null;
   };
   const revealFacebookUrl = async (element) => {
