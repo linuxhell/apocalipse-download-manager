@@ -1,0 +1,48 @@
+name: Handoff fix workspace (temporary)
+
+on:
+  push:
+    branches: [fix/concurrent-extension-handoffs]
+    paths:
+      - .github/workflows/handoff-workspace.yml
+      - .handoff.patch
+
+permissions:
+  contents: write
+
+concurrency:
+  group: handoff-fix-workspace
+  cancel-in-progress: false
+
+jobs:
+  workspace:
+    if: github.repository == 'linuxhell/apocalipse-download-manager' && github.ref == 'refs/heads/fix/concurrent-extension-handoffs'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply reviewed patch on the fix branch only
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f .handoff.patch ]]; then
+            git apply --check .handoff.patch
+            git apply --index .handoff.patch
+            git rm .handoff.patch
+            git diff --cached --check
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'fix: isolate concurrent extension download destinations and media names'
+            git push origin HEAD:refs/heads/fix/concurrent-extension-handoffs
+          fi
+      - name: Export exact source snapshot
+        shell: bash
+        run: |
+          mkdir -p /tmp/handoff-source
+          git archive --format=tar HEAD | gzip > /tmp/handoff-source/source.tar.gz
+          git rev-parse HEAD > /tmp/handoff-source/commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: handoff-source
+          path: /tmp/handoff-source/*
+          retention-days: 2
+          if-no-files-found: error
