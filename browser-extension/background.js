@@ -675,11 +675,41 @@ async function streamCapturedUrl(request) {
       detail: `expected_bytes=${total} content_type=${contentType.slice(0, 120)} file=${fileName}`,
     });
 
+    // POST-generated files need the regular destination/analysis dialog. Probe
+    // once to learn the server-provided filename, then let the native engine
+    // repeat the exact request after the user confirms where to save it.
+    if (method === "POST") {
+      await response.body?.cancel().catch(() => {});
+      const cookieHeader = await cookieHeaderFor([url, request.pageUrl]);
+      await bridgePost("/v1/download", {
+        url,
+        fileName,
+        pageUrl: request.pageUrl || url,
+        title: fileName,
+        thumbnail: null,
+        mediaKind: null,
+        expectedSize: total || null,
+        duration: null,
+        cookieHeader: cookieHeader || null,
+        userAgent: globalThis.navigator?.userAgent || null,
+        requestMethod: "POST",
+        requestBody: request.body || null,
+        requestContentType: request.contentType || "application/x-www-form-urlencoded;charset=UTF-8",
+        startImmediately: false,
+      });
+      await diagnostic(`${kind}.prehook.handed_off`, state, {
+        status: response.status,
+        detail: `method=POST file=${fileName} expected_bytes=${total}`,
+      });
+      return { ok: true, kind, handedOff: true };
+    }
+
     const begin = await bridgePost("/v1/blob/begin", {
       fileName,
       total,
       source: request.pageUrl || url,
       streaming: total === 0,
+      recording: false,
       promptForDestination: true,
     });
     uploadId = begin?.uploadId || null;
