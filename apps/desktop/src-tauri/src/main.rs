@@ -652,7 +652,14 @@ fn open_media_preview(state: &AppState, request: MediaPreviewRequest) -> Result<
             command.arg(format!("--user-agent={agent}"));
         }
     }
-    if let Some(referer) = request.referer.filter(|value| !value.trim().is_empty()) {
+    if player_name.contains("vlc") {
+        command.arg("--http-reconnect");
+    }
+    if let Some(referer) = request
+        .referer
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
         if player_name.contains("vlc") {
             command.arg(format!("--http-referrer={referer}"));
         } else if player_name.contains("mpv") {
@@ -660,6 +667,21 @@ fn open_media_preview(state: &AppState, request: MediaPreviewRequest) -> Result<
         }
     }
     command.arg(&request.url);
+    diagnostic_log(
+        state,
+        "INFO",
+        "media.preview_requested",
+        &format!(
+            "player={} url={} referer={}",
+            player.display(),
+            redact_url(&request.url),
+            request
+                .referer
+                .as_deref()
+                .and_then(host_from_url)
+                .unwrap_or_else(|| "none".to_owned())
+        ),
+    );
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;

@@ -20,8 +20,7 @@ main { height: 460px; overflow-y: auto; overflow-x: hidden; padding: 8px; scroll
 article { display: grid; grid-template-columns: auto 144px minmax(230px,1fr) auto; gap: 10px; align-items: center; padding: 10px; margin-bottom: 7px; border: 1px solid #1b3240; border-radius: 10px; background: #101821; }
 article img, .audio-icon { width: 144px; height: 81px; object-fit: cover; border-radius: 6px; background: #1b2630; }
 .preview { position: relative; width: 144px; height: 81px; }
-.preview img, .preview video { position: absolute; inset: 0; width: 144px; height: 81px; object-fit: cover; border-radius: 6px; background: #1b2630; }
-.preview video { display: none; }
+.preview img { position: absolute; inset: 0; width: 144px; height: 81px; object-fit: cover; border-radius: 6px; background: #1b2630; }
 .media-select { width: 17px; height: 17px; accent-color: #19cce8; }
 #bulk-actions { display: flex; justify-content: space-between; align-items: center; padding: 4px 12px 6px; }
 #bulk-actions label { display: flex; gap: 7px; align-items: center; color: #a9c0ca; }
@@ -30,13 +29,11 @@ article img, .audio-icon { width: 144px; height: 81px; object-fit: cover; border
 #requested-media { margin: 0 8px 4px; padding: 8px; display: grid; grid-template-columns: 80px 1fr; gap: 10px; align-items: center; border: 1px solid #247487; border-radius: 9px; background: #0d202a; }
 #requested-media[hidden] { display: none; }
 #requested-media img { width: 80px; height: 45px; object-fit: cover; border-radius: 5px; background: #1b2630; }
-#requested-media b, #requested-media small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#requested-media div { min-width: 0; }
+#requested-media small { display: block; margin-bottom: 3px; white-space: nowrap; }
+#requested-media b { display: -webkit-box; overflow: hidden; white-space: normal; overflow-wrap: anywhere; line-height: 1.3; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .audio-icon { display: grid; place-items: center; background: linear-gradient(135deg,#152735,#203d51); font-size: 28px; color: #5cecff; }
 .audio-icon[hidden] { display: none; }
-.audio-preview { width: 144px; display: grid; gap: 4px; }
-.audio-preview[hidden] { display: none; }
-.audio-preview .audio-icon { width: 144px; height: 40px; }
-.audio-preview audio { width: 144px; height: 32px; }
 article b, article small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 article b { font-size: 13px; line-height: 1.35; color: #f0fbff; }
 article small { margin-top: 5px; font-size: 11px; line-height: 1.35; color: #a9c0ca; }

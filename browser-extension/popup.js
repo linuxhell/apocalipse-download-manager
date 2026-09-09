@@ -1,4 +1,4 @@
-let media = [], selected = "video", locale = "en";
+let media = [], selected = "video", locale = "en", activePageUrl = "";
 const selectedUrls = new Set();
 const messages = {
   en: { mediaIntelligence: "Media intelligence", video: "Video", audio: "Audio", images: "Images", download: "Download", externalPreview: "Open in player", empty: "No media detected in this tab.", unknownSize: "Size unavailable", connected: "Connected to Apocalipse", disconnected: "Disconnected", pairingToken: "Pairing token", connect: "Connect", recommended: "Recommended", capturedResource: "Captured media resource", requestedMedia: "You tried to download", selectAll: "Select all", downloadSelected: "Download selected", forceShortcut: "Force Apocalipse", bypassShortcut: "Bypass Apocalipse" },
@@ -139,9 +139,6 @@ const render = () => {
     const row = document.querySelector("#row").content.cloneNode(true);
     const image = row.querySelector("img");
     const preview = row.querySelector(".preview");
-    const previewVideo = row.querySelector("video");
-    const audioPreview = row.querySelector(".audio-preview");
-    const previewAudio = row.querySelector("audio");
     const metadata = row.querySelector("small");
     const checkbox = row.querySelector(".media-select");
     checkbox.checked = selectedUrls.has(item.url);
@@ -150,23 +147,8 @@ const render = () => {
     if (selected === "audio") {
       preview.hidden = true;
       audio.hidden = false;
-      audioPreview.hidden = false;
-      previewAudio.src = item.url;
-      previewAudio.onloadedmetadata = () => {
-        if (!item.duration && Number.isFinite(previewAudio.duration)) item.duration = previewAudio.duration;
-        metadata.textContent = [extension, formatBytes(item.size), formatDuration(item.duration), item.recommended ? t("recommended") : "", parsed?.hostname].filter(Boolean).join(" · ");
-      };
     } else {
       loadThumbnail(image, item);
-      if (item.networkCaptured && item.kind === "video") {
-        previewVideo.style.display = "block";
-        previewVideo.src = item.url;
-        previewVideo.onloadedmetadata = () => {
-          if (!item.duration && Number.isFinite(previewVideo.duration)) item.duration = previewVideo.duration;
-          if (previewVideo.duration > 0.2) previewVideo.currentTime = 0.1;
-          metadata.textContent = [extension, formatBytes(item.size), formatDuration(item.duration), item.recommended ? t("recommended") : "", parsed?.hostname].filter(Boolean).join(" · ");
-        };
-      }
     }
     let parsed;
     try { parsed = new URL(item.url); } catch { parsed = null; }
@@ -177,7 +159,7 @@ const render = () => {
     const previewButton = row.querySelector(".external-preview");
     previewButton.textContent = t("externalPreview");
     previewButton.hidden = item.kind === "image";
-    previewButton.onclick = () => chrome.runtime.sendMessage({ type: "APOCALIPSE_PREVIEW_MEDIA", url: item.url, pageUrl: location.href }, (result) => {
+    previewButton.onclick = () => chrome.runtime.sendMessage({ type: "APOCALIPSE_PREVIEW_MEDIA", url: item.url, pageUrl: activePageUrl }, (result) => {
       if (!result?.ok || chrome.runtime.lastError) showBridgeError(result?.error || chrome.runtime.lastError?.message || "unavailable");
     });
     const button = row.querySelector(".download-item");
@@ -219,6 +201,7 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
   translate();
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const tab = tabs[0];
+    activePageUrl = tab?.url || "";
     if (!tab?.id || !/^https?:/i.test(tab.url || "")) {
       media = [];
       render();
