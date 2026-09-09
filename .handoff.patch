@@ -1,0 +1,709 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index c359924..7124389 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -49,7 +49,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+ 
+ [[package]]
+ name = "apocalipse-cli"
+-version = "0.4.23"
++version = "0.4.24"
+ dependencies = [
+  "anyhow",
+  "apocalipse-core",
+@@ -58,7 +58,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "apocalipse-core"
+-version = "0.4.23"
++version = "0.4.24"
+ dependencies = [
+  "anyhow",
+  "async-trait",
+@@ -77,7 +77,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "apocalipse-desktop"
+-version = "0.4.23"
++version = "0.4.24"
+ dependencies = [
+  "anyhow",
+  "apocalipse-core",
+diff --git a/Cargo.toml b/Cargo.toml
+index 40d3820..cc671db 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -3,7 +3,7 @@ resolver = "2"
+ members = ["crates/apocalipse-core", "crates/apocalipse-cli", "apps/desktop/src-tauri"]
+ 
+ [workspace.package]
+-version = "0.4.23"
++version = "0.4.24"
+ edition = "2021"
+ license = "GPL-3.0-or-later"
+ repository = "https://github.com/linuxhell/apocalipse-download-manager"
+diff --git a/apps/desktop/src-tauri/src/main.rs b/apps/desktop/src-tauri/src/main.rs
+index 7015e3d..f4781f0 100644
+--- a/apps/desktop/src-tauri/src/main.rs
++++ b/apps/desktop/src-tauri/src/main.rs
+@@ -3375,33 +3375,116 @@ fn append_source_extension(file_name: String, source: &str, kind: DownloadKind)
+                     .chars()
+                     .all(|character| character.is_ascii_alphanumeric())
+         });
++    let query_extension = url::Url::parse(source).ok().and_then(|url| {
++        url.query_pairs().find_map(|(key, value)| {
++            matches!(key.to_ascii_lowercase().as_str(), "mime_type" | "mime" | "content_type")
++                .then(|| media_extension(&value))
++                .flatten()
++        })
++    });
+     extension
++        .or(query_extension)
+         .map(|extension| format!("{file_name}.{extension}"))
+         .unwrap_or(file_name)
+ }
+ 
+-fn unique_destination(directory: &Path, file_name: &str) -> PathBuf {
+-    let original = directory.join(file_name);
+-    if !original.exists() && !partial_path(&original).exists() {
+-        return original;
++fn media_extension(mime: &str) -> Option<&'static str> {
++    match mime.split(';').next()?.trim().to_ascii_lowercase().replace('_', "/").as_str() {
++        "video/mp4" => Some("mp4"),
++        "video/webm" | "audio/webm" => Some("webm"),
++        "video/x-matroska" => Some("mkv"),
++        "video/quicktime" => Some("mov"),
++        "audio/mp4" | "audio/x-m4a" => Some("m4a"),
++        "audio/mpeg" => Some("mp3"),
++        "audio/aac" => Some("aac"),
++        "audio/ogg" => Some("ogg"),
++        "audio/opus" => Some("opus"),
++        _ => None,
++    }
++}
++
++// All queue producers must allocate and insert under the SAME queue lock.
++// A queued/paused/failed task owns its path even before an engine creates .part.
++fn destination_key(path: &Path) -> String {
++    let mut normalized = PathBuf::new();
++    for component in path.components() {
++        match component {
++            std::path::Component::CurDir => {}
++            std::path::Component::ParentDir => { normalized.pop(); }
++            other => normalized.push(other.as_os_str()),
++        }
+     }
++    let value = normalized.to_string_lossy().into_owned();
++    if cfg!(any(windows, target_os = "macos")) {
++        value.to_lowercase()
++    } else {
++        value
++    }
++}
++
++fn destination_exists(path: &Path) -> bool {
++    // Do not reuse dangling symlinks or paths we cannot inspect.
++    !matches!(fs::symlink_metadata(path), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
++}
++
++fn unique_destination_with_queue(
++    directory: &Path,
++    file_name: &str,
++    queue: &[DownloadTask],
++) -> Result<PathBuf, String> {
++    let reserved = queue.iter().flat_map(|task| {
++        [destination_key(&task.destination), destination_key(&partial_path(&task.destination))]
++    }).collect::<HashSet<_>>();
+     let path = Path::new(file_name);
+-    let stem = path
+-        .file_stem()
+-        .and_then(|value| value.to_str())
+-        .unwrap_or("download");
++    let stem = path.file_stem().and_then(|value| value.to_str()).unwrap_or("download");
+     let extension = path.extension().and_then(|value| value.to_str());
+-    for index in 1..10_000 {
+-        let candidate_name = match extension {
+-            Some(extension) => format!("{stem} ({index}).{extension}"),
+-            None => format!("{stem} ({index})"),
++    for index in 0..10_000 {
++        let candidate_name = if index == 0 {
++            file_name.to_owned()
++        } else {
++            match extension {
++                Some(extension) => format!("{stem} ({index}).{extension}"),
++                None => format!("{stem} ({index})"),
++            }
+         };
+         let candidate = directory.join(candidate_name);
+-        if !candidate.exists() && !partial_path(&candidate).exists() {
+-            return candidate;
++        let partial = partial_path(&candidate);
++        if !reserved.contains(&destination_key(&candidate))
++            && !reserved.contains(&destination_key(&partial))
++            && !destination_exists(&candidate)
++            && !destination_exists(&partial)
++            && !destination_exists(&apocalipse_core::chunk_directory(&candidate))
++        {
++            return Ok(candidate);
++        }
++    }
++    // Never fall back to an unchecked name or silently discard its extension.
++    Err("download_destination_names_exhausted".to_owned())
++}
++
++fn unique_destination(directory: &Path, file_name: &str) -> Result<PathBuf, String> {
++    unique_destination_with_queue(directory, file_name, &[])
++}
++
++fn reserve_queued_task(
++    queue: &mut Vec<DownloadTask>,
++    task: &mut DownloadTask,
++    reject_active_duplicate: bool,
++) -> Result<(), String> {
++    if reject_active_duplicate {
++        if let Some(existing) = queue.iter().find(|existing| {
++            existing.source == task.source
++                && !matches!(existing.state, DownloadState::Completed | DownloadState::Failed { .. })
++        }) {
++            return Err(format!("duplicate_active_download:{}", existing.id));
+         }
+     }
+-    directory.join(format!("{stem}-10000"))
++    let directory = task.destination.parent().unwrap_or_else(|| Path::new("."));
++    let file_name = task.destination.file_name().and_then(|value| value.to_str())
++        .ok_or_else(|| "invalid_file_name".to_owned())?;
++    task.destination = unique_destination_with_queue(directory, file_name, queue)?;
++    queue.push(task.clone());
++    Ok(())
+ }
+ 
+ #[tauri::command]
+@@ -4223,21 +4306,6 @@ fn enqueue_download_impl(
+     connections_override: Option<usize>,
+     context: Option<DownloadContext>,
+ ) -> Result<DownloadTask, String> {
+-    if let Some(existing) = state
+-        .queue
+-        .lock()
+-        .map_err(|error| error.to_string())?
+-        .iter()
+-        .find(|task| {
+-            task.source == url
+-                && !matches!(
+-                    task.state,
+-                    DownloadState::Completed | DownloadState::Failed { .. }
+-                )
+-        })
+-    {
+-        return Err(format!("duplicate_active_download:{}", existing.id));
+-    }
+     inspect_url(url.clone())?;
+     let kind = classify_url(&url).ok_or_else(|| "unsupported_url".to_owned())?;
+     let download_dir = match destination_directory.filter(|path| !path.trim().is_empty()) {
+@@ -4253,7 +4321,8 @@ fn enqueue_download_impl(
+     let proposed = file_name.unwrap_or_else(|| suggested_name(&url));
+     let file_name = validate_file_name(&append_source_extension(proposed, &url, kind))?;
+     remember_download_directory(state, &download_dir)?;
+-    let mut task = DownloadTask::new(&url, unique_destination(&download_dir, &file_name));
++    let mut task = DownloadTask::new(&url, download_dir.join(&file_name));
++    let mut request_identity = None;
+     task.format_selection = format_selection.filter(|value| !value.trim().is_empty());
+     task.torrent_selection = torrent_selection
+         .unwrap_or_default()
+@@ -4315,25 +4384,26 @@ fn enqueue_download_impl(
+             .request_content_type
+             .filter(|value| value.len() <= 256 && !value.contains('\r') && !value.contains('\n'));
+         if cookie_header.is_some() || user_agent.is_some() || request_method == "POST" {
+-            state
+-                .request_identities
+-                .lock()
+-                .map_err(|error| error.to_string())?
+-                .insert(
+-                    task.id,
+-                    RequestIdentity {
+-                        cookie_header,
+-                        user_agent,
+-                        request_method,
+-                        request_body,
+-                        request_content_type,
+-                    },
+-                );
++            request_identity = Some(RequestIdentity {
++                cookie_header,
++                user_agent,
++                request_method,
++                request_body,
++                request_content_type,
++            });
+         }
+     }
+     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+-    queue.push(task.clone());
+-    save_queue(state, &queue)?;
++    let mut identities = state.request_identities.lock().map_err(|error| error.to_string())?;
++    reserve_queued_task(&mut queue, &mut task, true)?;
++    if let Err(error) = save_queue(state, &queue) {
++        queue.pop();
++        return Err(error);
++    }
++    if let Some(identity) = request_identity {
++        identities.insert(task.id, identity);
++    }
++    drop(identities);
+     drop(queue);
+     diagnostic_log(
+         state,
+@@ -4681,7 +4751,7 @@ fn redownload_downloads(
+             .and_then(|value| value.to_str())
+             .unwrap_or("download");
+         let mut task =
+-            DownloadTask::new(&original.source, unique_destination(directory, file_name));
++            DownloadTask::new(&original.source, directory.join(file_name));
+         task.format_selection = original.format_selection.clone();
+         task.referer = original.referer.clone();
+         task.known_duration = original.known_duration;
+@@ -4694,15 +4764,19 @@ fn redownload_downloads(
+     }
+     {
+         let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+-        queue.extend(repeated.iter().cloned());
+-        save_queue(&state, &queue)?;
+-    }
+-    if !repeated_identities.is_empty() {
+-        state
+-            .request_identities
+-            .lock()
+-            .map_err(|error| error.to_string())?
+-            .extend(repeated_identities);
++        let mut identities = state.request_identities.lock().map_err(|error| error.to_string())?;
++        let previous_len = queue.len();
++        for task in &mut repeated {
++            if let Err(error) = reserve_queued_task(&mut queue, task, false) {
++                queue.truncate(previous_len);
++                return Err(error);
++            }
++        }
++        if let Err(error) = save_queue(&state, &queue) {
++            queue.truncate(previous_len);
++            return Err(error);
++        }
++        identities.extend(repeated_identities);
+     }
+     for task in &repeated {
+         let kind = classify_url(&task.source).ok_or_else(|| "unsupported_url".to_owned())?;
+@@ -5644,18 +5718,25 @@ fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid:
+     let state = app.state::<AppState>();
+     let directory = configured_download_directory(app, &state)?;
+     let file_name = validate_file_name(&request.file_name)?;
+-    let destination = unique_destination(&directory, &file_name);
+-    let partial = partial_path(&destination);
+-    fs::File::create(&partial).map_err(|error| error.to_string())?;
+-    let mut task = DownloadTask::new(request.source, destination.clone());
++    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
++    let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
++    let mut task = DownloadTask::new(request.source, directory.join(&file_name));
+     task.state = DownloadState::Downloading;
+     task.total = (!request.streaming).then_some(request.total);
+     let task_id = task.id;
+-    {
+-        let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+-        queue.push(task);
+-        save_queue(&state, &queue)?;
++    reserve_queued_task(&mut queue, &mut task, false)?;
++    let destination = task.destination.clone();
++    let partial = partial_path(&destination);
++    if let Err(error) = OpenOptions::new().write(true).create_new(true).open(&partial) {
++        queue.pop();
++        return Err(error.to_string());
++    }
++    if let Err(error) = save_queue(&state, &queue) {
++        queue.pop();
++        let _ = fs::remove_file(&partial);
++        return Err(error);
+     }
++    drop(queue);
+     let upload_id = uuid::Uuid::new_v4();
+     state
+         .blob_uploads
+@@ -6200,7 +6281,7 @@ async fn export_recording(
+     if !output_directory.is_dir() {
+         return Err("export_directory_not_found".to_owned());
+     }
+-    let output = unique_destination(&output_directory, &format!("{stem}.{format}"));
++    let output = unique_destination(&output_directory, &format!("{stem}.{format}"))?;
+     let audio_only = matches!(format.as_str(), "mp3" | "m4a" | "opus" | "flac" | "wav");
+     let mut command = tokio::process::Command::new(ffmpeg);
+     command.args(["-y", "-i"]).arg(&source);
+@@ -6842,6 +6923,176 @@ fn main() {
+ mod tests {
+     use super::*;
+ 
++    struct HandoffTestDirectory(PathBuf);
++
++    impl HandoffTestDirectory {
++        fn new() -> Self {
++            let path = std::env::temp_dir().join(format!("adm-handoff-{}", uuid::Uuid::new_v4()));
++            fs::create_dir_all(&path).unwrap();
++            Self(path)
++        }
++    }
++
++    impl Drop for HandoffTestDirectory {
++        fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
++    }
++
++    #[test]
++    fn handoff_reserves_names_before_any_worker_creates_a_file() {
++        let directory = HandoffTestDirectory::new();
++        let mut queue = Vec::new();
++        for index in 0..3 {
++            let mut task = DownloadTask::new(format!("https://media.example/{index}"), directory.0.join("download.mp4"));
++            reserve_queued_task(&mut queue, &mut task, true).unwrap();
++        }
++        assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 0);
++        assert_eq!(queue[0].destination, directory.0.join("download.mp4"));
++        assert_eq!(queue[1].destination, directory.0.join("download (1).mp4"));
++        assert_eq!(queue[2].destination, directory.0.join("download (2).mp4"));
++    }
++
++    #[test]
++    fn handoff_concurrent_workers_keep_distinct_payloads_and_destinations() {
++        let directory = HandoffTestDirectory::new();
++        let queue = Mutex::new(Vec::new());
++        let barrier = std::sync::Barrier::new(32);
++        std::thread::scope(|scope| {
++            for index in 0..32 {
++                let queue = &queue;
++                let barrier = &barrier;
++                let destination = directory.0.join("download.mp4");
++                scope.spawn(move || {
++                    barrier.wait();
++                    let source = format!("https://media.example/{index}/?mime_type=video_mp4");
++                    let mut task = DownloadTask::new(source.clone(), destination);
++                    {
++                        let mut queue = queue.lock().unwrap();
++                        reserve_queued_task(&mut queue, &mut task, true).unwrap();
++                    }
++                    // Every reservation exists before ANY producer writes a partial file.
++                    barrier.wait();
++                    fs::write(partial_path(&task.destination), source.as_bytes()).unwrap();
++                    fs::rename(partial_path(&task.destination), &task.destination).unwrap();
++                });
++            }
++        });
++        let queue = queue.lock().unwrap();
++        assert_eq!(queue.len(), 32);
++        assert_eq!(queue.iter().map(|task| &task.destination).collect::<HashSet<_>>().len(), 32);
++        for task in queue.iter() {
++            assert_eq!(fs::read_to_string(&task.destination).unwrap(), task.source);
++        }
++    }
++
++    #[test]
++    fn handoff_duplicate_url_check_is_atomic() {
++        let directory = HandoffTestDirectory::new();
++        let queue = Mutex::new(Vec::new());
++        let barrier = std::sync::Barrier::new(16);
++        let accepted = std::sync::atomic::AtomicUsize::new(0);
++        std::thread::scope(|scope| {
++            for _ in 0..16 {
++                let (queue, barrier, accepted) = (&queue, &barrier, &accepted);
++                let destination = directory.0.join("video.mp4");
++                scope.spawn(move || {
++                    let mut task = DownloadTask::new("https://media.example/same", destination);
++                    barrier.wait();
++                    let result = reserve_queued_task(&mut queue.lock().unwrap(), &mut task, true);
++                    match result {
++                        Ok(()) => { accepted.fetch_add(1, std::sync::atomic::Ordering::SeqCst); }
++                        Err(error) => assert!(error.starts_with("duplicate_active_download:")),
++                    }
++                });
++            }
++        });
++        assert_eq!(accepted.load(std::sync::atomic::Ordering::SeqCst), 1);
++        assert_eq!(queue.lock().unwrap().len(), 1);
++    }
++
++    #[test]
++    fn handoff_preserves_existing_files_partials_and_chunk_artifacts() {
++        let directory = HandoffTestDirectory::new();
++        fs::write(directory.0.join("video.mp4"), b"original").unwrap();
++        fs::write(partial_path(&directory.0.join("video (1).mp4")), b"partial").unwrap();
++        fs::create_dir_all(apocalipse_core::chunk_directory(&directory.0.join("video (2).mp4"))).unwrap();
++        let mut queue = Vec::new();
++        let mut task = DownloadTask::new("https://media.example/new", directory.0.join("video.mp4"));
++        reserve_queued_task(&mut queue, &mut task, true).unwrap();
++        assert_eq!(task.destination, directory.0.join("video (3).mp4"));
++        assert_eq!(fs::read(directory.0.join("video.mp4")).unwrap(), b"original");
++        assert_eq!(fs::read(partial_path(&directory.0.join("video (1).mp4"))).unwrap(), b"partial");
++    }
++
++    #[test]
++    fn handoff_keeps_paused_failed_and_completed_queue_paths_reserved() {
++        let directory = HandoffTestDirectory::new();
++        for state in [DownloadState::Paused, DownloadState::Failed { message: "test".into() }, DownloadState::Completed] {
++            let mut original = DownloadTask::new("https://media.example/old", directory.0.join("video.mp4"));
++            original.state = state;
++            let mut queue = vec![original];
++            let mut task = DownloadTask::new("https://media.example/new", directory.0.join("video.mp4"));
++            reserve_queued_task(&mut queue, &mut task, true).unwrap();
++            assert_eq!(task.destination, directory.0.join("video (1).mp4"));
++        }
++    }
++
++    #[test]
++    fn handoff_redownload_can_repeat_a_source_without_reusing_its_destination() {
++        let directory = HandoffTestDirectory::new();
++        let mut queue = Vec::new();
++        for _ in 0..3 {
++            let mut task = DownloadTask::new("https://media.example/same", directory.0.join("download"));
++            reserve_queued_task(&mut queue, &mut task, false).unwrap();
++        }
++        assert_eq!(queue.iter().map(|task| &task.destination).collect::<HashSet<_>>().len(), 3);
++        assert_eq!(queue[2].destination, directory.0.join("download (2)"));
++    }
++
++    #[test]
++    fn handoff_reserves_partial_namespace_and_normalized_paths() {
++        let directory = HandoffTestDirectory::new();
++        let original = DownloadTask::new("https://media.example/old", directory.0.join("video.mp4"));
++        let mut queue = vec![original];
++        let mut partial_named = DownloadTask::new("https://media.example/new", directory.0.join("video.mp4.part"));
++        reserve_queued_task(&mut queue, &mut partial_named, true).unwrap();
++        assert_ne!(partial_named.destination, partial_path(&queue[0].destination));
++        let mut normalized = DownloadTask::new("https://media.example/other", directory.0.join("sub/../video.mp4"));
++        reserve_queued_task(&mut queue, &mut normalized, true).unwrap();
++        assert_ne!(destination_key(&normalized.destination), destination_key(&queue[0].destination));
++    }
++
++    #[cfg(any(windows, target_os = "macos"))]
++    #[test]
++    fn handoff_reserves_case_insensitive_file_names() {
++        let directory = HandoffTestDirectory::new();
++        let mut queue = vec![DownloadTask::new("https://media.example/old", directory.0.join("Video.MP4"))];
++        let mut task = DownloadTask::new("https://media.example/new", directory.0.join("video.mp4"));
++        reserve_queued_task(&mut queue, &mut task, true).unwrap();
++        assert_eq!(task.destination, directory.0.join("video (1).mp4"));
++    }
++
++    #[test]
++    fn handoff_exhausted_names_fail_instead_of_using_an_unchecked_fallback() {
++        let directory = HandoffTestDirectory::new();
++        let mut queue = vec![DownloadTask::new("https://media.example/0", directory.0.join("video.mp4"))];
++        for index in 1..10_000 {
++            queue.push(DownloadTask::new(format!("https://media.example/{index}"), directory.0.join(format!("video ({index}).mp4"))));
++        }
++        let mut task = DownloadTask::new("https://media.example/new", directory.0.join("video.mp4"));
++        assert_eq!(reserve_queued_task(&mut queue, &mut task, true).unwrap_err(), "download_destination_names_exhausted");
++        assert_eq!(queue.len(), 10_000);
++    }
++
++    #[test]
++    fn handoff_signed_media_query_supplies_extension_without_mutating_url() {
++        let source = "https://media.example/video/opaque/?a=1988&&mime_type=video_mp4&signature=a%2Bb%3D";
++        assert_eq!(append_source_extension("download".into(), source, DownloadKind::Http), "download.mp4");
++        assert_eq!(append_source_extension("chosen.mkv".into(), source, DownloadKind::Http), "chosen.mkv");
++        assert_eq!(append_source_extension("audio".into(), "https://media.example/?mime_type=audio%2Fmp4", DownloadKind::Http), "audio.m4a");
++        assert_eq!(append_source_extension("clip".into(), "https://media.example/?mime_type=video_webm", DownloadKind::Http), "clip.webm");
++        assert_eq!(append_source_extension("download".into(), "https://media.example/?mime_type=text_html", DownloadKind::Http), "download");
++    }
++
+     #[test]
+     fn normalizes_site_credential_domains_and_matches_subdomains() {
+         assert_eq!(
+diff --git a/apps/desktop/src-tauri/tauri.conf.json b/apps/desktop/src-tauri/tauri.conf.json
+index d4e71b4..267b527 100644
+--- a/apps/desktop/src-tauri/tauri.conf.json
++++ b/apps/desktop/src-tauri/tauri.conf.json
+@@ -1,7 +1,7 @@
+ {
+   "$schema": "https://schema.tauri.app/config/2",
+   "productName": "Apocalipse Download Manager",
+-  "version": "0.4.23",
++  "version": "0.4.24",
+   "identifier": "com.linuxhell.apocalipse",
+   "build": {
+     "frontendDist": "../ui"
+diff --git a/browser-extension/background.js b/browser-extension/background.js
+index 5740c3e..5d6bf3c 100644
+--- a/browser-extension/background.js
++++ b/browser-extension/background.js
+@@ -140,6 +140,36 @@ async function sourcePageUrl(sender) {
+ 
+ const fileNameFromPath = (path) => String(path || "").split(/[\\/]/).pop() || null;
+ 
++// Derive a usable media name without changing the signed source URL.
++// Uniqueness belongs to the desktop queue, not to timing or random client names.
++function mediaDownloadFileName(item) {
++  const supplied = String(item.fileName || item.filename || "").trim();
++  if (/\.[a-z0-9]{1,10}$/i.test(supplied)) return supplied;
++  let url;
++  try { url = new URL(item.url); } catch { return supplied || null; }
++  const extensions = {
++    "video/mp4": "mp4", "video/webm": "webm", "video/x-matroska": "mkv",
++    "video/quicktime": "mov", "audio/mp4": "m4a", "audio/x-m4a": "m4a",
++    "audio/mpeg": "mp3", "audio/webm": "webm", "audio/ogg": "ogg",
++    "audio/opus": "opus", "audio/aac": "aac", "image/jpeg": "jpg",
++    "image/png": "png", "image/webp": "webp", "image/avif": "avif",
++  };
++  const fromMime = (value) => extensions[String(value || "").split(";")[0].trim().toLowerCase().replaceAll("_", "/")];
++  const hints = [...url.searchParams].filter(([key]) => /^(?:mime_type|mime|content_type)$/i.test(key));
++  const known = new Set(Object.values(extensions));
++  const pathExt = url.pathname.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
++  const itemExt = String(item.ext || "").toLowerCase();
++  const ext = fromMime(item.contentType) || hints.map(([, value]) => fromMime(value)).find(Boolean)
++    || (known.has(pathExt) ? pathExt : null) || (known.has(itemExt) ? itemExt : null);
++  if (!ext) return supplied || null;
++  const fallback = item.kind === "video" ? "video" : item.kind === "audio" ? "audio" : "download";
++  let stem = (supplied && supplied.toLowerCase() !== "download" ? supplied : String(item.title || fallback))
++    .replace(/[\x00-\x1f\x7f<>:"/\\|?*]/g, "_").trim().replace(/[ .]+$/g, "");
++  stem = [...stem].slice(0, 100).join("") || fallback;
++  if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(stem)) stem = `_${stem}`;
++  return `${stem}.${ext}`;
++}
++
+ async function handOffTelegramBlob(item) {
+   const tabs = await chrome.tabs.query({ url: ["https://web.telegram.org/*"] }).catch(() => []);
+   for (const tab of tabs) {
+@@ -432,7 +462,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
+       body: JSON.stringify({
+         url: item.url,
+         audioUrl: item.audioUrl || null,
+-        fileName: item.fileName || item.filename || null,
++        fileName: mediaDownloadFileName(item),
+         pageUrl,
+         title: item.title || null,
+         thumbnail: item.thumbnail || null,
+@@ -469,7 +499,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
+           body: JSON.stringify({
+             url: item.url,
+             audioUrl: item.audioUrl || null,
+-            fileName: item.fileName || item.filename || null,
++            fileName: mediaDownloadFileName(item),
+             pageUrl,
+             title: item.title || null,
+             thumbnail: item.thumbnail || null,
+diff --git a/browser-extension/manifest.json b/browser-extension/manifest.json
+index 5a84ea2..4fa4b79 100644
+--- a/browser-extension/manifest.json
++++ b/browser-extension/manifest.json
+@@ -1,7 +1,7 @@
+ {
+   "manifest_version": 3,
+   "name": "__MSG_extensionName__",
+-  "version": "0.3.94",
++  "version": "0.3.95",
+   "description": "__MSG_extensionDescription__",
+   "default_locale": "en",
+   "permissions": [
+diff --git a/browser-extension/popup.js b/browser-extension/popup.js
+index 291cc58..ca080ac 100644
+--- a/browser-extension/popup.js
++++ b/browser-extension/popup.js
+@@ -218,6 +218,7 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
+         const video = /^video\//i.test(item.contentType || "") || /(?:\/video\/tos\/|mime_type=video|\.mp4(?:$|[?#]))/i.test(item.url || "");
+         return {
+           url: item.url,
++          contentType: item.contentType || null,
+           kind: video ? "video" : "audio",
+           size: item.contentLength || null,
+           ext: video ? "mp4" : "audio",
+diff --git a/tests/extension-handoff.test.cjs b/tests/extension-handoff.test.cjs
+new file mode 100644
+index 0000000..f20124a
+--- /dev/null
++++ b/tests/extension-handoff.test.cjs
+@@ -0,0 +1,93 @@
++const assert = require('node:assert/strict');
++const { readFileSync } = require('node:fs');
++const { join } = require('node:path');
++const { webcrypto } = require('node:crypto');
++const { test } = require('node:test');
++const vm = require('node:vm');
++
++function worker() {
++  const listeners = [];
++  const requests = [];
++  const event = { addListener() {} };
++  const storage = { get: async () => ({ pairingToken: 'synthetic-test-token' }), set: async () => {}, remove: async () => {} };
++  const context = vm.createContext({
++    URL, crypto: webcrypto, console, navigator: { userAgent: 'Test browser' },
++    chrome: {
++      runtime: { onMessage: { addListener(fn) { listeners.push(fn); } }, onInstalled: event, onStartup: event, getManifest: () => ({ version: 'test' }) },
++      alarms: { create() {}, onAlarm: event }, webRequest: { onResponseStarted: event },
++      downloads: { onDeterminingFilename: event, onChanged: event },
++      storage: { local: storage, session: storage },
++      cookies: { getAll: async () => [] },
++      tabs: { query: async () => [{ url: 'https://page.example/' }] },
++    },
++    fetch: async (url, options = {}) => {
++      let taskId;
++      if (url.endsWith('/v1/download')) {
++        const payload = JSON.parse(options.body);
++        requests.push(payload);
++        taskId = `task-${requests.length}`;
++        await new Promise(resolve => setImmediate(resolve));
++      }
++      return { ok: true, json: async () => ({ ok: true, taskId }) };
++    },
++  });
++  vm.runInContext(readFileSync(join(__dirname, '../browser-extension/background.js'), 'utf8'), context);
++  const send = (message, pageUrl = 'https://page.example/') => new Promise((resolve, reject) => {
++    if (listeners[0](message, { tab: { id: 1, url: pageUrl } }, resolve) !== true) reject(new Error('message not handled'));
++  });
++  return { context, requests, send, name: item => context.mediaDownloadFileName(item) };
++}
++
++const signed = index => `https://media.example/video/opaque-${index}/?a=1988&&mime_type=video_mp4&signature=a%2Bb%3D`;
++
++test('media names preserve container, supplied names and signed URLs', () => {
++  const { name } = worker();
++  const item = { url: signed(1), kind: 'video', title: 'Clip' };
++  assert.equal(name(item), 'Clip.mp4');
++  assert.equal(item.url, signed(1));
++  assert.equal(name({ ...item, fileName: 'chosen.mkv' }), 'chosen.mkv');
++  assert.equal(name({ url: 'https://media.example/opaque/', contentType: 'video/webm; codecs=vp9', title: 'Clip' }), 'Clip.webm');
++  assert.equal(name({ url: 'https://media.example/opaque/', contentType: 'audio/mp4', kind: 'audio' }), 'audio.m4a');
++  assert.equal(name({ url: 'https://media.example/file', kind: 'video' }), null);
++  assert.equal(name({ ...item, title: '../bad: name?' }), '.._bad_ name_.mp4');
++  assert.equal(name({ ...item, title: 'CON' }), '_CON.mp4');
++});
++
++test('batch handoff retains a separate name, source and metadata for every item', async () => {
++  const { requests, send } = worker();
++  const items = [0, 1, 2].map(index => ({ url: signed(index), title: 'Clip', kind: 'video', size: 1000 + index, audioUrl: `https://media.example/audio/${index}`, thumbnail: `https://media.example/image/${index}.jpg` }));
++  const original = JSON.stringify(items);
++  const result = await send({ type: 'APOCALIPSE_DOWNLOAD_BATCH', items });
++  assert.equal(result.ok, true);
++  assert.equal(result.taskIds.length, 3);
++  assert.equal(new Set(result.taskIds).size, 3);
++  assert.equal(requests.length, 3);
++  requests.forEach((payload, index) => {
++    assert.equal(payload.url, items[index].url);
++    assert.equal(payload.fileName, 'Clip.mp4'); // desktop atomically reserves suffixes
++    assert.equal(payload.audioUrl, items[index].audioUrl);
++    assert.equal(payload.thumbnail, items[index].thumbnail);
++    assert.equal(payload.expectedSize, items[index].size);
++    assert.equal(payload.startImmediately, true);
++  });
++  assert.equal(JSON.stringify(items), original);
++});
++
++test('overlapping batches and a single request do not share mutable request state', async () => {
++  const { requests, send } = worker();
++  const group = offset => [0, 1].map(i => ({ url: signed(offset + i), kind: 'video', title: `Clip ${offset + i}` }));
++  const results = await Promise.all([
++    send({ type: 'APOCALIPSE_DOWNLOAD_BATCH', items: group(0) }, 'https://page.example/a'),
++    send({ type: 'APOCALIPSE_DOWNLOAD_BATCH', items: group(2) }, 'https://page.example/b'),
++    send({ type: 'APOCALIPSE_DOWNLOAD', item: { url: signed(4), title: 'Single', kind: 'video' } }, 'https://page.example/c'),
++  ]);
++  assert.ok(results.every(result => result.ok));
++  assert.equal(requests.length, 5);
++  assert.equal(new Set(requests.map(payload => payload.url)).size, 5);
++  for (let index = 0; index < 5; index++) {
++    const payload = requests.find(item => item.url === signed(index));
++    assert.equal(payload.fileName, index === 4 ? 'Single.mp4' : `Clip ${index}.mp4`);
++    assert.equal(payload.pageUrl, `https://page.example/${index < 2 ? 'a' : index < 4 ? 'b' : 'c'}`);
++    assert.equal(payload.startImmediately, index !== 4);
++  }
++});
