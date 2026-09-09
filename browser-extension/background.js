@@ -99,8 +99,17 @@ async function analyzeHls(urls, expectedDuration) {
 }
 
 async function cookieHeaderFor(urls) {
-  const cookies = await Promise.all([...new Set((urls || []).filter((url) => /^https?:/i.test(url)))]
-    .map((url) => chrome.cookies.getAll({ url }).catch(() => [])));
+  const targets = [...new Set((urls || []).filter((url) => /^https?:/i.test(url)))];
+  const domains = [...new Set(targets.map((value) => {
+    try {
+      const host = new URL(value).hostname.toLowerCase();
+      return ["facebook.com", "instagram.com", "tiktok.com"].find((domain) => host === domain || host.endsWith(`.${domain}`)) || null;
+    } catch { return null; }
+  }).filter(Boolean))];
+  const cookies = await Promise.all([
+    ...targets.map((url) => chrome.cookies.getAll({ url }).catch(() => [])),
+    ...domains.map((domain) => chrome.cookies.getAll({ domain }).catch(() => [])),
+  ]);
   const values = new Map();
   for (const cookie of cookies.flat()) values.set(cookie.name, cookie.value);
   return [...values].map(([name, value]) => `${name}=${value}`).join("; ");
