@@ -1,0 +1,21 @@
+name: Review source snapshot
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.github/workflows/review-source.yml']
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: git archive --format=zip --output=review-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: review-source
+          path: review-source.zip
+          retention-days: 1
+          if-no-files-found: error
