@@ -180,6 +180,46 @@
     return urlInState(video) || urlInPageJson(video);
   };
 
+  const copiedPermalinkFor = async (video) => {
+    let container = video;
+    let share = null;
+    for (let depth = 0; container && depth < 18 && !share; depth += 1, container = container.parentElement) {
+      share = [...(container.querySelectorAll?.('button,[role="button"]') || [])].find((item) =>
+        /(?:compartilhar|share|分享)/i.test(`${item.getAttribute("aria-label") || ""} ${item.title || ""} ${item.textContent || ""}`));
+    }
+    if (!share) return null;
+    const shield = document.createElement("style");
+    shield.textContent = `
+      html[data-apocalipse-tiktok-resolving] [role="dialog"],
+      html[data-apocalipse-tiktok-resolving] [data-e2e*="share"],
+      html[data-apocalipse-tiktok-resolving] [class*="ShareModal"],
+      html[data-apocalipse-tiktok-resolving] [class*="share-modal"] {
+        opacity: 0 !important;
+        visibility: hidden !important;
+        transition: none !important;
+      }
+    `;
+    document.documentElement.dataset.apocalipseTiktokResolving = "1";
+    document.documentElement.append(shield);
+    try {
+      share.click();
+      let copyItem = null;
+      for (let attempt = 0; attempt < 20 && !copyItem; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 75));
+        copyItem = [...document.querySelectorAll('[role="menuitem"],button,[role="button"]')].find((item) =>
+          /(?:copiar link|copy link|复制链接|複製連結)/i.test(`${item.getAttribute("aria-label") || ""} ${item.textContent || ""}`));
+      }
+      if (!copyItem) return null;
+      copyItem.click();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      try { return validUrl(await navigator.clipboard.readText()); } catch { return null; }
+    } finally {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+      delete document.documentElement.dataset.apocalipseTiktokResolving;
+      shield.remove();
+    }
+  };
+
   const directVideoUrl = (value) => {
     try {
       const url = new URL(String(value || "").replaceAll("\\/", "/"), location.href);
@@ -290,7 +330,7 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     const original = button.textContent;
-    const url = permalinkFor(video);
+    const url = permalinkFor(video) || await copiedPermalinkFor(video);
     button.textContent = "…";
     const stateMediaUrl = url ? directMediaFor(video, url) : directMediaForPlayer(video);
     const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null);

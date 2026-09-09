@@ -30,7 +30,7 @@ pub struct StrategyPlan {
 pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<StrategyPlan> {
     let kind = classify_url(input)?;
     let plan = match kind {
-        DownloadKind::Http => StrategyPlan {
+        DownloadKind::Http | DownloadKind::AcceleratedHttp => StrategyPlan {
             primary: Engine::NativeHttp,
             fallbacks: capabilities
                 .aria2

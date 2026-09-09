@@ -2018,7 +2018,10 @@ async fn run_external_download(
         item.state = DownloadState::Downloading;
         item.progress_percent = Some(0.0);
         item.resume_supported = Some(match kind {
-            DownloadKind::Torrent | DownloadKind::Magnet | DownloadKind::Ftp => true,
+            DownloadKind::Torrent
+            | DownloadKind::Magnet
+            | DownloadKind::Ftp
+            | DownloadKind::AcceleratedHttp => true,
             DownloadKind::MediaPage => true,
             DownloadKind::Hls => !task
                 .format_selection
@@ -2371,7 +2374,10 @@ async fn run_external_download(
                 command
             }
         }
-        DownloadKind::Torrent | DownloadKind::Magnet | DownloadKind::Ftp => {
+        DownloadKind::Torrent
+        | DownloadKind::Magnet
+        | DownloadKind::Ftp
+        | DownloadKind::AcceleratedHttp => {
             let mut command = tokio::process::Command::new(&tools.3);
             if !tools.8.is_empty() {
                 command.arg(format!(
@@ -2398,6 +2404,26 @@ async fn run_external_download(
                     command
                         .arg(format!("--ftp-user={}", credential.username))
                         .arg(format!("--ftp-passwd={}", credential.password));
+                }
+            }
+            if kind == DownloadKind::AcceleratedHttp {
+                command.args([
+                    "--split=16",
+                    "--max-connection-per-server=16",
+                    "--min-split-size=1M",
+                    "--optimize-concurrent-downloads=true",
+                    "--stream-piece-selector=geom",
+                ]);
+                command.arg(format!("--out={file_name}"));
+                command.arg(format!("--user-agent={user_agent}"));
+                if let Some(referer) = task.referer.as_deref() {
+                    command.arg(format!("--referer={referer}"));
+                }
+                if let Some(cookie) = identity
+                    .as_ref()
+                    .and_then(|value| value.cookie_header.as_deref())
+                {
+                    command.arg(format!("--header=Cookie: {cookie}"));
                 }
             }
             command.arg(format!("--dir={}", directory.display())).args([
@@ -2950,7 +2976,10 @@ async fn read_process_tail(
                 if let Some((app, id, kind)) = progress.as_ref() {
                     if matches!(
                         *kind,
-                        DownloadKind::Torrent | DownloadKind::Magnet | DownloadKind::Ftp
+                        DownloadKind::Torrent
+                            | DownloadKind::Magnet
+                            | DownloadKind::Ftp
+                            | DownloadKind::AcceleratedHttp
                     ) {
                         if let Some((
                             received,
@@ -4292,6 +4321,25 @@ fn start_download(
             app.clone(),
             task.id,
             task,
+            cancelled,
+        ));
+        return Ok(());
+    }
+    if kind == DownloadKind::Http
+        && task.source.starts_with("https://")
+        && task.source.contains(".freefilehub.com:")
+    {
+        diagnostic_log(
+            state,
+            "INFO",
+            "http.accelerated",
+            &format!("task={} engine=aria2", task.id),
+        );
+        tauri::async_runtime::spawn(run_external_download(
+            app.clone(),
+            task.id,
+            task,
+            DownloadKind::AcceleratedHttp,
             cancelled,
         ));
         return Ok(());

@@ -3,6 +3,7 @@ use url::Url;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DownloadKind {
     Http,
+    AcceleratedHttp,
     Magnet,
     Torrent,
     Hls,
