@@ -487,7 +487,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     const traceId = crypto.randomUUID();
     (async () => {
       const pageUrl = await sourcePageUrl(sender);
-      let downloadUrl = item.url;
+      let downloadUrl = item.extractorUrl || item.url;
       try {
         const page = new URL(pageUrl);
         if (item.kind === "video"
@@ -496,6 +496,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           downloadUrl = page.href;
         }
       } catch {}
+      if (item.ambiguousSocialTrack && !item.audioUrl && downloadUrl === item.url) {
+        throw new Error("incomplete_social_media_track");
+      }
       const cookieHeader = await cookieHeaderFor([downloadUrl, item.audioUrl]);
       return bridgeRequest("/v1/download", {
       method: "POST",
@@ -507,6 +510,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         title: item.title || null,
         thumbnail: item.thumbnail || null,
         mediaKind: item.kind || null,
+        ambiguousSocialTrack: Boolean(item.ambiguousSocialTrack),
         expectedSize: Number.isFinite(item.size) ? item.size : null,
         duration: Number.isFinite(item.duration) ? item.duration : null,
         cookieHeader: cookieHeader || null,
@@ -535,16 +539,18 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       const cookieHeader = await cookieHeaderFor([...items.flatMap((item) => [item.url, item.audioUrl]), sender.tab?.url]);
       const taskIds = [];
       for (const item of items) {
+        if (item.ambiguousSocialTrack && !item.audioUrl && !item.extractorUrl) continue;
         const result = await bridgeRequest("/v1/download", {
           method: "POST",
           body: JSON.stringify({
-            url: item.url,
+            url: item.extractorUrl || item.url,
             audioUrl: item.audioUrl || null,
             fileName: mediaDownloadFileName(item),
             pageUrl,
             title: item.title || null,
             thumbnail: item.thumbnail || null,
             mediaKind: item.kind || null,
+            ambiguousSocialTrack: Boolean(item.ambiguousSocialTrack),
             expectedSize: Number.isFinite(item.size) ? item.size : null,
             duration: Number.isFinite(item.duration) ? item.duration : null,
             cookieHeader: cookieHeader || null,

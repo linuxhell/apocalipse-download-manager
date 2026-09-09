@@ -434,8 +434,15 @@ dialog form {
 }
 #add-dialog form {
   display: grid;
-  min-height: 100%;
+  height: min(760px, calc(100vh - 30px));
+  min-height: 0;
+  overflow-y: scroll;
+  scrollbar-color: var(--accent) var(--input);
+  scrollbar-width: thin;
 }
+#add-dialog form::-webkit-scrollbar { width: 11px; }
+#add-dialog form::-webkit-scrollbar-track { background: var(--input); border-radius: 8px; }
+#add-dialog form::-webkit-scrollbar-thumb { background: var(--accent); border: 3px solid var(--input); border-radius: 8px; }
 .add-dialog-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr);
@@ -1016,7 +1023,7 @@ nav button:hover, nav button.active, .download-icon { color: var(--accent); }
   .history-search { max-width: none; }
 }
 @media (max-width: 760px) {
-  #add-dialog form { display: block; }
+  #add-dialog form { display: block; height:calc(100vh - 30px); }
   .add-dialog-grid { display: block; }
   .add-dialog-destination { margin-top: 14px; padding-left: 0; border-left: 0; }
   #settings-dialog form, #tools-dialog form { display: block; height: auto; }

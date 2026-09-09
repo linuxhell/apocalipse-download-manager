@@ -129,11 +129,51 @@ test('watch and shared-video page URLs keep the extractor route', async () => {
   }
 });
 
-test('TikTok keeps its existing captured-media download path', async () => {
+test('TikTok permalink wins over a potentially incomplete captured media track', async () => {
   const url = 'https://v16.tiktok.com/video/tos/synthetic/?mime_type=video_mp4';
   const p = page({ url: 'https://www.tiktok.com/@synthetic/video/123456789', source: url, network: [{ url, contentType: 'video/mp4' }] });
   await p.click();
-  assert.equal(p.downloads()[0].item.url, url);
+  assert.equal(p.downloads()[0].item.url, 'https://www.tiktok.com/@synthetic/video/123456789');
+  assert.equal(p.downloads()[0].item.audioUrl, null);
+});
+
+test('TikTok generic feed pairs a captured video track with its audio track', async () => {
+  const video = 'https://v16.tiktok.com/video/tos/synthetic/?mime_type=video_mp4';
+  const audio = 'https://v16.tiktok.com/audio/tos/synthetic/';
+  const unrelatedVideo = 'https://v16.tiktok.com/video/tos/another/?mime_type=video_mp4';
+  const unrelatedAudio = 'https://v16.tiktok.com/audio/tos/another/';
+  const p = page({ url: 'https://www.tiktok.com/', source: video, network: [
+    { url: unrelatedVideo, contentType: 'video/mp4', capturedAt: 5000 },
+    { url: unrelatedAudio, contentType: 'audio/mp4', capturedAt: 5001 },
+    { url: video, contentType: 'video/mp4', capturedAt: 1000 },
+    { url: audio, contentType: 'audio/mp4', capturedAt: 1001 },
+  ] });
+  await p.click();
+  assert.equal(p.downloads()[0].item.url, video);
+  assert.equal(p.downloads()[0].item.audioUrl, audio);
+});
+
+test('a scrolled TikTok feed rebinds the same overlay to the new player source', async () => {
+  const firstVideo = 'https://v16.tiktok.com/video/tos/first/?mime_type=video_mp4';
+  const firstAudio = 'https://v16.tiktok.com/audio/tos/first/';
+  const secondVideo = 'https://v16.tiktok.com/video/tos/second/?mime_type=video_mp4';
+  const secondAudio = 'https://v16.tiktok.com/audio/tos/second/';
+  const network = [
+    { url: firstVideo, contentType: 'video/mp4', capturedAt: 1000 },
+    { url: firstAudio, contentType: 'audio/mp4', capturedAt: 1001 },
+  ];
+  const p = page({ url: 'https://www.tiktok.com/', source: firstVideo, network });
+  await p.click();
+  p.video.currentSrc = secondVideo;
+  p.video.src = secondVideo;
+  network.unshift(
+    { url: secondVideo, contentType: 'video/mp4', capturedAt: 5000 },
+    { url: secondAudio, contentType: 'audio/mp4', capturedAt: 5001 },
+  );
+  await p.click();
+  assert.deepEqual(p.downloads().map(message => [message.item.url, message.item.audioUrl]), [
+    [firstVideo, firstAudio], [secondVideo, secondAudio],
+  ]);
 });
 
 test('YouTube page extraction and ordinary direct HTTP downloads are unchanged', async () => {

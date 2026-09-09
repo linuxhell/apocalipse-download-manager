@@ -232,96 +232,6 @@
     } catch { return null; }
   };
 
-  const mediaUrlInObject = (root) => {
-    const queue = [{ value: root, path: "" }];
-    const visited = new WeakSet();
-    const candidates = [];
-    let inspected = 0;
-    while (queue.length && inspected < 5000) {
-      const { value, path } = queue.shift();
-      inspected += 1;
-      if (typeof value === "string") {
-        const url = directVideoUrl(value);
-        if (url) {
-          const score = (/playaddr|downloadaddr|urllist|bitrate/i.test(path) ? 8 : 0)
-            + (/mime_type=video/i.test(url) ? 4 : 0)
-            + (/\/video\/tos\//i.test(url) ? 2 : 0);
-          candidates.push({ url, score });
-        }
-        continue;
-      }
-      if (!value || typeof value !== "object" || visited.has(value)) continue;
-      visited.add(value);
-      for (const [key, child] of Object.entries(value)) {
-        if ((child && typeof child === "object") || typeof child === "string") {
-          queue.push({ value: child, path: `${path}.${key}` });
-        }
-      }
-    }
-    candidates.sort((left, right) => right.score - left.score);
-    return candidates[0]?.url || null;
-  };
-
-  const mediaUrlInTree = (roots, targetId) => {
-    const queue = [...roots];
-    const visited = new WeakSet();
-    let inspected = 0;
-    while (queue.length && inspected < 30000) {
-      const value = queue.shift();
-      inspected += 1;
-      if (!value || typeof value !== "object" || visited.has(value)) continue;
-      visited.add(value);
-      const id = String(value.id || value.itemId || value.aweme_id || value.awemeId || "");
-      if (id === targetId) {
-        const url = mediaUrlInObject(value.video || value.videoInfo || value);
-        if (url) return url;
-      }
-      for (const child of Object.values(value)) {
-        if (child && typeof child === "object") queue.push(child);
-      }
-    }
-    return null;
-  };
-
-  const directMediaFor = (video, permalink) => {
-    const targetId = permalink.match(/\/video\/(\d+)/i)?.[1];
-    if (!targetId) return null;
-    const roots = [];
-    let element = video;
-    for (let depth = 0; element && depth < 20; depth += 1, element = element.parentElement) {
-      for (const key of Object.getOwnPropertyNames(element)) {
-        if (/^__(?:react|next|vue)/i.test(key)) roots.push(element[key]);
-      }
-    }
-    const fromState = mediaUrlInTree(roots, targetId);
-    if (fromState) return fromState;
-    const pageRoots = [];
-    for (const script of document.querySelectorAll('script[type="application/json"],script[id*="DATA"],script[id*="STATE"]')) {
-      const text = script.textContent || "";
-      if (!text.includes(targetId) || text.length > 15_000_000) continue;
-      try { pageRoots.push(JSON.parse(text)); } catch {}
-    }
-    return mediaUrlInTree(pageRoots, targetId);
-  };
-
-  const directMediaForPlayer = (video) => {
-    for (const payload of reactPayloadsFor(video)) {
-      const url = mediaUrlInObject(payload);
-      if (url) return url;
-    }
-    let element = video;
-    for (let depth = 0; element && depth < 8; depth += 1, element = element.parentElement) {
-      const keys = Object.getOwnPropertyNames(element)
-        .filter((key) => /^__(?:react|next|vue)/i.test(key))
-        .sort((left, right) => Number(/props/i.test(right)) - Number(/props/i.test(left)));
-      for (const key of keys) {
-        const url = mediaUrlInObject(element[key]);
-        if (url) return url;
-      }
-    }
-    return null;
-  };
-
   document.addEventListener("click", async (event) => {
     const button = event.target?.closest?.(".apocalipse-media-download:not(.apocalipse-media-record)");
     if (!button) return;
@@ -330,37 +240,54 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     const original = button.textContent;
-    const url = permalinkFor(video) || await copiedPermalinkFor(video);
+    const clickSource = String(video.currentSrc || video.src || "");
+    const clickPage = location.href;
     button.textContent = "…";
-    const stateMediaUrl = url ? directMediaFor(video, url) : directMediaForPlayer(video);
-    const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null);
+    const url = permalinkFor(video) || await copiedPermalinkFor(video);
+    // A permalink is a complete extractor task, never a hint for selecting a
+    // possibly audio-only/video-only CDN response from the same tab.
+    const captured = !url
+      ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null)
+      : null;
     const capturedMedia = Array.isArray(captured?.media) ? captured.media : [];
-    const freshVideoCandidates = capturedMedia.filter((item) =>
-      /^https?:/i.test(item.url || "")
-      && /^video\//i.test(item.contentType || "")
-      && Number.isFinite(item.ageMs)
-      && item.ageMs >= 0
-      && item.ageMs <= 8_000);
-
-    const liveHttpUrl = directVideoUrl(video.currentSrc || video.src);
-    const soleFreshCandidate = freshVideoCandidates.length === 1 ? freshVideoCandidates[0]?.url : null;
-    const selectedUrl = stateMediaUrl || liveHttpUrl || soleFreshCandidate;
-    const selectedId = url?.match(/\/video\/(\d+)/i)?.[1] || "none";
-    const newestCaptured = capturedMedia[0] || null;
-    if (!url) {
-      chrome.runtime.sendMessage({
-        type: "APOCALIPSE_CAPTURE_TRACE",
-        eventName: "tiktok_video_identity_unresolved",
-        mode: "download",
-        traceId: crypto.randomUUID(),
-        pageUrl: location.href,
-        at: Date.now(),
-        detail: {
-          fallbackBlocked: !selectedUrl,
-          reason: selectedUrl ? "player_media_without_permalink" : "no_verified_player_media",
-        },
-      }).catch(() => {});
+    if (!video.isConnected || clickSource !== String(video.currentSrc || video.src || "") || clickPage !== location.href) {
+      button.textContent = "!";
+      button.title = "O vídeo mudou. Clique novamente no vídeo atual.";
+      setTimeout(() => { button.textContent = original; }, 2500);
+      return;
     }
+    const resourceKey = (value) => {
+      if (!value || !/^https?:/i.test(value)) return "";
+      try {
+        const parsed = new URL(value);
+        for (const name of [...parsed.searchParams.keys()]) {
+          if (/^(?:bytestart|byteend|range|start|end)$/i.test(name)) parsed.searchParams.delete(name);
+        }
+        return parsed.href;
+      } catch { return ""; }
+    };
+    // Never select a lone buffered response or an unrelated item in global
+    // React state: neither establishes which video the user clicked.
+    const liveHttpUrl = directVideoUrl(clickSource);
+    const videoItem = liveHttpUrl ? capturedMedia.find((item) =>
+      /^video\//i.test(item.contentType || "") && resourceKey(item.url) === resourceKey(liveHttpUrl)) : null;
+    const audioCandidates = videoItem && Number.isFinite(videoItem.capturedAt) && videoItem.capturedAt > 0
+      ? capturedMedia.filter((item) => /^https?:/i.test(item.url || "") && /^audio\//i.test(item.contentType || "")
+        && Number.isFinite(item.capturedAt) && item.capturedAt > 0
+        && (item.frameId === videoItem.frameId || (item.frameId == null && videoItem.frameId == null))
+        && Math.abs(item.capturedAt - videoItem.capturedAt) <= 8_000)
+        .filter((audio) => !capturedMedia.some((other) =>
+          /^video\//i.test(other.contentType || "") && Number.isFinite(other.capturedAt) && other.capturedAt > 0
+          && (other.frameId === audio.frameId || (other.frameId == null && audio.frameId == null))
+          && resourceKey(other.url) !== resourceKey(videoItem.url)
+          && Math.abs(other.capturedAt - audio.capturedAt) <= Math.abs(videoItem.capturedAt - audio.capturedAt)))
+        .sort((left, right) => Math.abs(left.capturedAt - videoItem.capturedAt) - Math.abs(right.capturedAt - videoItem.capturedAt))
+      : [];
+    const selectedUrl = url || videoItem?.url || liveHttpUrl;
+    const tiedAudio = audioCandidates.length > 1
+      && Math.abs(audioCandidates[0].capturedAt - videoItem.capturedAt) === Math.abs(audioCandidates[1].capturedAt - videoItem.capturedAt);
+    const audioUrl = url || tiedAudio ? null : audioCandidates[0]?.url || null;
+    const ambiguousSocialTrack = Boolean(!url && !audioUrl && selectedUrl);
     chrome.runtime.sendMessage({
       type: "APOCALIPSE_CAPTURE_TRACE",
       eventName: "tiktok_browser_media_selection",
@@ -369,17 +296,12 @@
       pageUrl: location.href,
       at: Date.now(),
       detail: {
-        selection: stateMediaUrl ? "matched_state_media" : liveHttpUrl ? "player_http_media" : soleFreshCandidate ? "sole_fresh_media" : "media_picker_required",
-        selectedVideoId: selectedId,
-        browserCapturedMedia: Boolean(soleFreshCandidate && selectedUrl === soleFreshCandidate),
+        selection: url ? "complete_page_extractor" : videoItem ? "matched_player_media" : liveHttpUrl ? "player_http_media" : "media_picker_required",
+        selectedVideoId: url?.match(/\/video\/(\d+)/i)?.[1] || "none",
+        browserCapturedMedia: Boolean(videoItem),
         browserCandidates: capturedMedia.length,
-        browserFreshVideoCandidates: freshVideoCandidates.length,
-        browserCandidatesRejected: capturedMedia.length - (soleFreshCandidate ? 1 : 0),
-        browserRejectionReason: capturedMedia.length ? "media_picker_required" : "uncorrelated_feed_media",
-        browserCandidateAgeMs: newestCaptured?.ageMs ?? -1,
-        browserCandidateType: newestCaptured?.contentType || "none",
-        browserCandidateBytes: newestCaptured?.contentLength || 0,
-        browserCandidateHost: (() => { try { return new URL(newestCaptured?.url || "").hostname; } catch { return "none"; } })(),
+        browserAudioCaptured: Boolean(audioUrl),
+        ambiguousSocialTrack,
       },
     }).catch(() => {});
     if (!selectedUrl) {
@@ -417,7 +339,10 @@
       item: {
         url: selectedUrl,
         duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null,
-        requestUrls: [selectedUrl, ...(url ? [url] : [])],
+        audioUrl,
+        ambiguousSocialTrack,
+        pageExtractor: Boolean(url),
+        requestUrls: url ? [] : [selectedUrl, ...(audioUrl ? [audioUrl] : [])],
         userAgent: navigator.userAgent,
         kind: "video",
         title: document.title,
