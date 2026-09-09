@@ -754,6 +754,7 @@ struct BlobUpload {
     destination: PathBuf,
     received: u64,
     total: Option<u64>,
+    recording: bool,
 }
 
 #[derive(Deserialize)]
@@ -764,6 +765,8 @@ struct BlobBegin {
     source: String,
     #[serde(default)]
     streaming: bool,
+    #[serde(default)]
+    recording: bool,
 }
 
 #[derive(Deserialize)]
@@ -1132,7 +1135,12 @@ async fn inspect_media_formats(
         .arg("--js-runtimes")
         .arg(format!("quickjs:{}", quickjs.display()))
         .arg(&url);
-    if let Some(cookie) = cookie_header.as_deref().filter(|value| !value.is_empty()) {
+    let browser_session_site = url.contains("instagram.com/")
+        || url.contains("tiktok.com/")
+        || url.contains("facebook.com/");
+    if browser_session_site {
+        command.args(["--cookies-from-browser", "chrome"]);
+    } else if let Some(cookie) = cookie_header.as_deref().filter(|value| !value.is_empty()) {
         command.arg("--add-headers").arg(format!("Cookie:{cookie}"));
     } else if url.contains("youtube.com/") || url.contains("youtu.be/") {
         // Manual URLs do not carry an extension identity. Reuse the browser
@@ -1968,7 +1976,12 @@ async fn run_external_download(
             } else {
                 command.args(["--js-runtimes", "quickjs"]);
             }
-            if let Some(cookie) = identity
+            let browser_session_site = task.source.contains("instagram.com/")
+                || task.source.contains("tiktok.com/")
+                || task.source.contains("facebook.com/");
+            if browser_session_site {
+                command.args(["--cookies-from-browser", "chrome"]);
+            } else if let Some(cookie) = identity
                 .as_ref()
                 .and_then(|value| value.cookie_header.as_deref())
                 .filter(|value| !value.is_empty())
@@ -1977,7 +1990,10 @@ async fn run_external_download(
             } else if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
                 command.args(["--cookies-from-browser", "chrome"]);
             }
-            if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
+            if task.source.contains("youtube.com/")
+                || task.source.contains("youtu.be/")
+                || browser_session_site
+            {
                 command.args([
                     "--retries",
                     "10",
@@ -2269,6 +2285,7 @@ async fn run_external_download(
                 &format!("task={id} engine={kind:?} error={message}"),
             );
             update_task(&app, id, true, |item| {
+                item.progress_percent = None;
                 item.state = DownloadState::Failed { message }
             });
         }
@@ -5250,6 +5267,7 @@ fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid:
                 destination,
                 received: 0,
                 total: (!request.streaming).then_some(request.total),
+                recording: request.recording,
             },
         );
     diagnostic_log(
@@ -5327,7 +5345,9 @@ fn finish_blob_upload(app: &tauri::AppHandle, request: BlobFinish) -> Result<(),
         .map_err(|error| error.to_string())?
         .remove(&upload.task_id);
     show_main_window(app);
-    let _ = app.emit("recording-completed", upload.task_id);
+    if upload.recording {
+        let _ = app.emit("recording-completed", upload.task_id);
+    }
     Ok(())
 }
 
