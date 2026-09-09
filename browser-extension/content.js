@@ -310,6 +310,7 @@
     return id ? `${id}.mp4` : "facebook-video.mp4";
   };
   const mediaResourceIdentity = (value) => {
+    if (!value || !/^https?:/i.test(value)) return "";
     try {
       const url = new URL(value, location.href);
       const query = [...url.searchParams.entries()].filter(([name]) =>
@@ -739,6 +740,9 @@
         event.preventDefault();
         event.stopPropagation();
         const originalText = button.textContent;
+        const clickSource = String(element.currentSrc || element.src || "");
+        const clickPage = location.href;
+        const socialVideo = isFacebookVideo || (isTikTokPage && element.tagName === "VIDEO");
         button.textContent = "…";
         trace("overlay_download_clicked", "download", { tag: element.tagName, facebook: isFacebookVideo, tiktokPage: isTikTokPage, tiktokPermalink: isTikTokVideo, overlays: activeOverlays.size });
         const visibleFacebookUrl = isFacebookVideo && isFacebookMediaUrl(location.href) ? location.href : null;
@@ -758,13 +762,27 @@
           ? [typeof resolved === "string" ? resolved : resolved?.url, visibleFacebookUrl]
             .find((value) => value && isFacebookMediaUrl(value)) || null
           : null;
+        const tikTokPageUrl = isTikTokPage
+          ? [typeof resolved === "string" ? resolved : resolved?.url, tikTokUrlFor(element)]
+            .find((value) => value && isTikTokVideoUrl(value)) || null
+          : null;
+        const socialPageUrl = facebookPageUrl || tikTokPageUrl;
         const liveSource = String(element.currentSrc || element.src || "");
         const liveBlobUrl = /^blob:/i.test(liveSource) ? liveSource : null;
         const liveHttpUrl = /^https?:/i.test(liveSource) ? liveSource : null;
-        const networkMediaUrl = recentNetworkMediaUrl();
-        const capturedSocialMedia = (isTikTokPage || (isFacebookVideo && !facebookPageUrl && isFacebookMediaUrl(location.href)))
+        const networkMediaUrl = socialVideo ? null : recentNetworkMediaUrl();
+        const capturedSocialMedia = socialVideo && !socialPageUrl
           ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null)
           : null;
+        if (socialVideo && (!element.isConnected || clickSource !== String(element.currentSrc || element.src || "")
+          || clickPage !== location.href)) {
+          trace("overlay_download_player_changed", "download", { facebook: isFacebookVideo, tiktokPage: isTikTokPage });
+          button.textContent = "!";
+          button.title = "O vídeo mudou. Clique novamente no vídeo atual.";
+          setTimeout(() => { button.textContent = originalText; }, 2500);
+          if (enteredTikTokFullscreen && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+          return;
+        }
         // Bind the overlay to this exact player. Never use an arbitrary recent
         // response from the tab: feeds may keep several videos buffered.
         const browserVideoItem = capturedSocialMedia?.media?.find((item) =>
@@ -773,12 +791,21 @@
           && sameMediaResource(item.url, liveHttpUrl)) || null;
         const browserAudioCandidates = (capturedSocialMedia?.media || [])
           .filter((item) => /^https?:/i.test(item.url || "") && /^audio\//i.test(item.contentType || "")
-            && (item.frameId == null || browserVideoItem?.frameId == null || item.frameId === browserVideoItem.frameId))
+            && Number.isFinite(item.capturedAt) && item.capturedAt > 0
+            && Number.isFinite(browserVideoItem?.capturedAt) && browserVideoItem.capturedAt > 0
+            && (item.frameId === browserVideoItem.frameId || (item.frameId == null && browserVideoItem.frameId == null)))
+          .filter((audio) => !(capturedSocialMedia?.media || []).some((other) =>
+            /^video\//i.test(other.contentType || "") && Number.isFinite(other.capturedAt) && other.capturedAt > 0
+            && (other.frameId === audio.frameId || (other.frameId == null && audio.frameId == null))
+            && !sameMediaResource(other.url, browserVideoItem.url)
+            && Math.abs(other.capturedAt - audio.capturedAt) <= Math.abs(browserVideoItem.capturedAt - audio.capturedAt)))
           .sort((left, right) => Math.abs((left.capturedAt || 0) - (browserVideoItem?.capturedAt || 0))
             - Math.abs((right.capturedAt || 0) - (browserVideoItem?.capturedAt || 0)));
         const closestAudioItem = browserAudioCandidates[0] || null;
         const browserAudioItem = closestAudioItem
           && browserVideoItem
+          && !(browserAudioCandidates[1] && Math.abs(browserAudioCandidates[1].capturedAt - browserVideoItem.capturedAt)
+            === Math.abs(closestAudioItem.capturedAt - browserVideoItem.capturedAt))
           && Math.abs((closestAudioItem.capturedAt || 0) - (browserVideoItem.capturedAt || 0)) <= 8_000
           ? closestAudioItem
           : null;
@@ -788,7 +815,7 @@
         // For a real <video>, the source feeding the player is more authoritative
         // than location.href. Try readable blob first; for MSE blobs, fall through
         // to the most recent underlying media request captured by Performance API.
-        if (liveBlobUrl && !facebookPageUrl) {
+        if (liveBlobUrl && !socialVideo) {
           try {
             const fallbackName = isFacebookVideo ? facebookDownloadTitle(location.href) : null;
             await uploadBlobUrl(liveBlobUrl, fallbackName);
@@ -803,15 +830,9 @@
 
         // A resolved HLS manifest is more authoritative than incidental network
         // traffic or a generic HTTP source exposed by the player.
-        let currentUrl = isFacebookVideo
-          ? (facebookPageUrl || browserVideoMedia || ((typeof resolved === "string" && isFacebookMediaUrl(resolved))
-            ? resolved
-            : (resolved?.url || liveHttpUrl || networkMediaUrl || resolved)))
-          : (isTikTokPage
-            ? ([typeof resolved === "string" ? resolved : resolved?.url, tikTokUrl]
-              .find((value) => value && isTikTokVideoUrl(value))
-              || browserVideoMedia || liveHttpUrl || networkMediaUrl || resolved?.url || resolved)
-            : (resolved?.url || resolved || liveHttpUrl || networkMediaUrl || (isYouTubeVideo ? location.href : null)));
+        let currentUrl = socialVideo
+          ? (socialPageUrl || browserVideoMedia || liveHttpUrl)
+          : (resolved?.url || resolved || liveHttpUrl || networkMediaUrl || (isYouTubeVideo ? location.href : null));
         const facebookPlayableUrl = isFacebookVideo && currentUrl && (
           isFacebookMediaUrl(currentUrl)
           || /\.(?:mp4|webm|m3u8|mpd)(?:[?#]|$)/i.test(currentUrl)
@@ -823,6 +844,7 @@
           button.textContent = "⚠";
           button.title = "Abra o vídeo ou use os três pontos e Copiar link";
           setTimeout(() => { button.textContent = originalText; }, 2500);
+          if (enteredTikTokFullscreen && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
           return;
         }
         if (/^blob:/i.test(String(currentUrl || ""))) {
@@ -838,9 +860,11 @@
         }
         const directFacebookMedia = isFacebookVideo ? absolute(element.currentSrc || element.src) : null;
         // Do not attach unrelated CDN audio to an extractor page task.
-        const extractorPageSelected = Boolean(facebookPageUrl || isTikTokVideoUrl(currentUrl));
-        const companionAudioUrl = !extractorPageSelected && (isFacebookVideo || isTikTokPage) ? browserAudioMedia : null;
-        const requestUrls = extractorPageSelected ? [] : [...new Set([
+        const extractorPageSelected = Boolean(socialPageUrl);
+        const companionAudioUrl = !extractorPageSelected && socialVideo ? browserAudioMedia : null;
+        const ambiguousSocialTrack = Boolean(socialVideo && !extractorPageSelected && !companionAudioUrl
+          && !/\.(?:m3u8|mpd)(?:$|[?#])/i.test(currentUrl));
+        const requestUrls = extractorPageSelected ? [] : socialVideo ? [currentUrl] : [...new Set([
           ...(resolved?.requestUrls?.length ? resolved.requestUrls : (/\.m3u8(?:$|[?#])/i.test(String(currentUrl)) ? hlsForPage().candidates : [])),
           ...(directFacebookMedia && /^https?:/i.test(directFacebookMedia) ? [directFacebookMedia] : []),
         ])];
@@ -866,7 +890,7 @@
           facebookPageExtractorPreferred: Boolean(facebookPageUrl),
           candidate: currentUrl,
         });
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, audioUrl: companionAudioUrl, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail: thumbnailFor(element, "video") } }, (result) => {
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail: thumbnailFor(element, "video") } }, (result) => {
           const failed = chrome.runtime.lastError || !result?.ok;
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";

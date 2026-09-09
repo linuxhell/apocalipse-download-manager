@@ -9,26 +9,53 @@ const pairSocialTracks = (items, pageUrl) => {
   const audio = items.filter((item) => item.kind === "audio" && item.networkCaptured);
   const pairedAudio = new Set();
   const result = items.map((item) => {
-    if (item.kind !== "video" || item.pageExtractor || item.audioUrl) return item;
+    if (item.kind !== "video" || item.pageExtractor || item.audioUrl || /\.(?:m3u8|mpd)(?:$|[?#])/i.test(item.url)) return item;
     const source = item.networkCaptured
       ? item
       : items.find((candidate) => candidate.networkCaptured && candidate.kind === "video" && candidate.url === item.url);
-    if (!source?.capturedAt) return { ...item, ambiguousSocialTrack: true };
-    const companion = audio
-      .filter((candidate) => candidate.frameId == null || source.frameId == null || candidate.frameId === source.frameId)
+    if (!Number.isFinite(source?.capturedAt) || source.capturedAt <= 0) return { ...item, ambiguousSocialTrack: true };
+    const candidates = audio
+      .filter((candidate) => Number.isFinite(candidate.capturedAt) && candidate.capturedAt > 0
+        && (candidate.frameId === source.frameId || (candidate.frameId == null && source.frameId == null)))
+      .filter((candidate) => !items.some((other) => other.kind === "video" && other.networkCaptured
+        && other.url !== source.url && Number.isFinite(other.capturedAt) && other.capturedAt > 0
+        && (other.frameId === candidate.frameId || (other.frameId == null && candidate.frameId == null))
+        && Math.abs(other.capturedAt - candidate.capturedAt) <= Math.abs(source.capturedAt - candidate.capturedAt)))
       .map((candidate) => ({ candidate, delta: Math.abs(candidate.capturedAt - source.capturedAt) }))
       .filter(({ delta }) => delta <= SOCIAL_TRACK_PAIR_WINDOW_MS)
-      .sort((left, right) => left.delta - right.delta)[0]?.candidate;
+      .sort((left, right) => left.delta - right.delta);
+    const companion = candidates.length > 1 && candidates[0].delta === candidates[1].delta ? null : candidates[0]?.candidate;
     if (!companion) return { ...item, ambiguousSocialTrack: true };
     pairedAudio.add(companion.url);
     return { ...item, audioUrl: companion.url, recommended: true, ambiguousSocialTrack: false };
   });
   return result.filter((item) => !(item.kind === "audio" && item.networkCaptured && pairedAudio.has(item.url)));
 };
+const networkMediaKind = (item) => {
+  if (/^audio\//i.test(item.contentType || "")) return "audio";
+  return /^video\//i.test(item.contentType || "") || /(?:\/video\/tos\/|mime_type=video|\.mp4(?:$|[?#]))/i.test(item.url || "") ? "video" : "audio";
+};
+const mergeDetectedMedia = (scanned, network, pageUrl) => {
+  const unique = new Map();
+  const hasSocialPageItems = isSocialPage(pageUrl) && scanned.some((item) => item?.kind === "video" && item.pageExtractor);
+  for (const item of [...scanned, ...network]) {
+    if (!item?.url) continue;
+    if (hasSocialPageItems && item.networkCaptured && (item.kind === "video" || item.kind === "audio")) continue;
+    const previous = unique.get(item.url);
+    if (!previous) unique.set(item.url, item);
+    else if (item.networkCaptured) unique.set(item.url, {
+      ...item, ...previous,
+      kind: /^audio\//i.test(item.contentType || "") ? "audio" : previous.kind,
+      contentType: item.contentType || previous.contentType,
+      capturedAt: item.capturedAt, frameId: item.frameId, networkCaptured: true,
+    });
+  }
+  return pairSocialTracks([...unique.values()], pageUrl);
+};
 const messages = {
   en: { mediaIntelligence: "Media intelligence", video: "Video", audio: "Audio", images: "Images", download: "Download", externalPreview: "Open in player", incompleteTrack: "Incomplete track", empty: "No media detected in this tab.", unknownSize: "Size unavailable", connected: "Connected to Apocalipse", disconnected: "Disconnected", pairingToken: "Pairing token", connect: "Connect", recommended: "Recommended", capturedResource: "Captured media resource", requestedMedia: "You tried to download", selectAll: "Select all", downloadSelected: "Download selected", forceShortcut: "Force Apocalipse", bypassShortcut: "Bypass Apocalipse" },
   pt_BR: { mediaIntelligence: "Inteligência de mídia", video: "Vídeo", audio: "Áudio", images: "Imagens", download: "Download", externalPreview: "Abrir no player", incompleteTrack: "Faixa incompleta", empty: "Nenhuma mídia detectada nesta aba.", unknownSize: "Tamanho indisponível", connected: "Conectada ao Apocalipse", disconnected: "Desconectada", pairingToken: "Token de pareamento", connect: "Conectar", recommended: "Recomendada", capturedResource: "Recurso de mídia capturado", requestedMedia: "Você tentou baixar", selectAll: "Selecionar todos", downloadSelected: "Baixar selecionados", forceShortcut: "Forçar Apocalipse", bypassShortcut: "Ignorar Apocalipse" },
-  zh_CN: { mediaIntelligence: "媒体智能", video: "视频", audio: "音频", images: "图片", download: "下载", externalPreview: "在播放器中打开", empty: "此标签页未检测到媒体。", unknownSize: "大小未知", connected: "已连接到 Apocalipse", disconnected: "未连接", pairingToken: "配对令牌", connect: "连接", recommended: "推荐", capturedResource: "已捕获的媒体资源", requestedMedia: "您尝试下载", selectAll: "全选", downloadSelected: "下载所选项目", forceShortcut: "强制使用 Apocalipse", bypassShortcut: "绕过 Apocalipse" }
+  zh_CN: { mediaIntelligence: "媒体智能", video: "视频", audio: "音频", images: "图片", download: "下载", externalPreview: "在播放器中打开", incompleteTrack: "不完整音视频轨道", empty: "此标签页未检测到媒体。", unknownSize: "大小未知", connected: "已连接到 Apocalipse", disconnected: "未连接", pairingToken: "配对令牌", connect: "连接", recommended: "推荐", capturedResource: "已捕获的媒体资源", requestedMedia: "您尝试下载", selectAll: "全选", downloadSelected: "下载所选项目", forceShortcut: "强制使用 Apocalipse", bypassShortcut: "绕过 Apocalipse" }
 };
 const t = (key) => messages[locale]?.[key] || messages.en[key] || key;
 const formatBytes = (bytes) => {
@@ -254,7 +281,7 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
       const scanned = error ? [] : (response?.media || []);
       const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA", tabId: tab.id }).catch(() => null);
       const network = (captured?.media || []).map((item) => {
-        const video = /^video\//i.test(item.contentType || "") || /(?:\/video\/tos\/|mime_type=video|\.mp4(?:$|[?#]))/i.test(item.url || "");
+        const video = networkMediaKind(item) === "video";
         return {
           url: item.url,
           contentType: item.contentType || null,
@@ -267,14 +294,7 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
           networkCaptured: true,
         };
       });
-      const unique = new Map();
-      const hasFacebookPageItems = scanned.some((item) => item?.kind === "video" && item.pageExtractor
-        && /(^|\.)facebook\.com$/i.test(new URL(tab.url).hostname));
-      for (const item of [...scanned, ...network]) {
-        if (hasFacebookPageItems && item?.networkCaptured && (item.kind === "video" || item.kind === "audio")) continue;
-        if (item?.url && !unique.has(item.url)) unique.set(item.url, item);
-      }
-      media = pairSocialTracks([...unique.values()], tab.url);
+      media = mergeDetectedMedia(scanned, network, tab.url);
       const picker = await chrome.runtime.sendMessage({ type: "APOCALIPSE_MEDIA_PICKER_CONTEXT", tabId: tab.id }).catch(() => null);
       const requested = document.querySelector("#requested-media");
       if (picker?.context) {
