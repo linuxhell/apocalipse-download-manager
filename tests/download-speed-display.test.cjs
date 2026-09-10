@@ -9,6 +9,10 @@ const desktop = fs.readFileSync(
   path.join(root, "apps/desktop/src-tauri/src/main.rs"),
   "utf8",
 );
+const cargo = fs.readFileSync(path.join(root, "Cargo.toml"), "utf8");
+const tauri = JSON.parse(
+  fs.readFileSync(path.join(root, "apps/desktop/src-tauri/tauri.conf.json"), "utf8"),
+);
 
 test("active downloads keep the engine-reported speed visible", () => {
   assert.match(
@@ -30,4 +34,11 @@ test("quiet clipboard polling does not flood diagnostics", () => {
     desktop,
     /let Ok\(value\) = app\.clipboard\(\)\.read_text\(\) else \{\s*return Ok\(None\);/,
   );
+});
+
+test("desktop package and interface versions cannot diverge", () => {
+  const packageVersion = cargo.match(/\[workspace\.package\][\s\S]*?version = "([^"]+)"/)?.[1];
+  assert.ok(packageVersion, "workspace package version is missing");
+  assert.equal(tauri.version, packageVersion);
+  assert.match(ui, /invoke\("get_app_version"\)/);
 });
