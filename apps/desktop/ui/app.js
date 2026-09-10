@@ -575,7 +575,7 @@ const invoke = (command, args = {}) => {
     if (!quiet.has(command) && command !== "record_ui_diagnostic") bridge("record_ui_diagnostic", { level: "DEBUG", event: "command_completed", detail: `command=${command} duration_ms=${Math.round(performance.now() - started)}` }).catch(() => {});
     return result;
   }).catch((error) => {
-    if (command !== "record_ui_diagnostic") bridge("record_ui_diagnostic", { level: "ERROR", event: "command_failed", detail: `command=${command} duration_ms=${Math.round(performance.now() - started)} error=${String(error)}` }).catch(() => {});
+    if (!quiet.has(command) && command !== "record_ui_diagnostic") bridge("record_ui_diagnostic", { level: "ERROR", event: "command_failed", detail: `command=${command} duration_ms=${Math.round(performance.now() - started)} error=${String(error)}` }).catch(() => {});
     throw error;
   });
 };
@@ -615,7 +615,11 @@ function updateSpeeds(tasks) {
     const active = stateKey(task.state) === "downloading";
     const changed = !previous || task.received !== previous.bytes;
     const changedAt = changed ? now : previous.changedAt;
-    const externalSpeed = now - changedAt < 2000 ? Number(task.download_speed) || 0 : 0;
+    // aria2's received byte counter is formatted in coarse units and can remain
+    // unchanged across several polls while DL still reports live throughput.
+    // Trust the engine's explicit speed while the task is active; aria2 reports
+    // zero itself when the transfer really stalls.
+    const externalSpeed = active ? Number(task.download_speed) || 0 : 0;
     let speed = active ? previous?.speed || 0 : 0;
     if (previous && active) {
       const elapsed = Math.max(0.001, (now - previous.at) / 1000);
@@ -635,7 +639,7 @@ function updateSpeeds(tasks) {
     });
     if (active) {
       overallSpeed += externalSpeed || speed;
-      overallUploadSpeed += now - changedAt < 2000 ? Number(task.upload_speed) || 0 : 0;
+      overallUploadSpeed += Number(task.upload_speed) || 0;
     }
   }
 }
@@ -732,8 +736,7 @@ function renderDownloads(force = false) {
     bar.style.width = `${percent}%`;
     const details = document.createElement("small");
     const speed = speedSamples.get(task.id)?.speed || 0;
-    const uploadSpeed = performance.now() - (speedSamples.get(task.id)?.changedAt || 0) < 2000
-      ? Number(task.upload_speed) || 0 : 0;
+    const uploadSpeed = task.state === "downloading" ? Number(task.upload_speed) || 0 : 0;
     const progressText = hasReportedPercent && !task.total
       ? `${percent.toFixed(1)}%`
       : task.total
