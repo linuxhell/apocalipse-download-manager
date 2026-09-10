@@ -2,7 +2,7 @@
 (() => {
   if (globalThis.ApocalipseDiagnostics) return;
   const producerId = crypto.randomUUID();
-  let sequence = 0, salt = producerId, capture = null;
+  let sequence = 0, salt = crypto.randomUUID(), capture = null;
   const actionIds = new WeakMap(), players = new WeakMap();
   const sensitive = /(?:cookie|authorization|password|passwd|secret|token|credential|body|html|caption|title|filename|filepath)/i;
   const uuid = value => /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value || '');
