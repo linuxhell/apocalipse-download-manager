@@ -31,18 +31,18 @@ jobs:
           assert hashlib.sha256(patch).hexdigest() == '656b0381b27d1b07def924043856b377d2c1254f74e1bfe36eb1f0f11408418b'
           pathlib.Path('/tmp/diagnostic-v3.patch').write_bytes(patch)
           PY
-          git apply --check /tmp/diagnostic-v3.patch
-          git apply --index /tmp/diagnostic-v3.patch
+          # Workflow edits are applied separately through the owner's connector.
+          git apply --check --exclude=.github/workflows/validate-portable.yml /tmp/diagnostic-v3.patch
+          git apply --index --exclude=.github/workflows/validate-portable.yml /tmp/diagnostic-v3.patch
           cargo fmt --all
           for script in browser-extension/*.js; do node --check "$script"; done
           node --test tests/*.test.cjs
           git diff --check
-      - name: Commit source and remove temporary transfer files
+      - name: Commit code and remove temporary source parts
         shell: bash
         run: |
           set -euo pipefail
           git rm -r .diagnostic-transfer
-          git rm .github/workflows/prepare-diagnostic-v3.yml
           git add -A
           git config user.name 'linuxhell'
           git config user.email '38770145+linuxhell@users.noreply.github.com'
