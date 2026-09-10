@@ -52,16 +52,21 @@ def until(predicate, page, seconds=8):
 
 def exercise(p, extension, fixed):
     REQUESTS.clear()
+    console=[]
     with tempfile.TemporaryDirectory() as profile:
         c=p.chromium.launch_persistent_context(profile,channel='chromium',headless=True,
             args=[f'--disable-extensions-except={extension}',f'--load-extension={extension}'],
             viewport={'width':1000,'height':700})
+        c.on('console',lambda m:console.append({'type':m.type,'text':m.text[:1000]}))
         try:
             c.route('https://www.tiktok.com/**',lambda r:r.fulfill(status=200,content_type='text/html',body=HTML))
             c.route('https://v16.tiktokcdn.com/**',lambda r:r.fulfill(status=200,headers={'content-type':'video/mp4','Access-Control-Allow-Origin':'*'},body=b'synthetic-response'))
             worker=c.service_workers[0] if c.service_workers else c.wait_for_event('serviceworker')
             worker.evaluate("token=>chrome.storage.local.set({pairingToken:token,language:'pt_BR'})",TOKEN)
-            site=c.new_page();site.goto('https://www.tiktok.com/');site.bring_to_front()
+            health=worker.evaluate("async()=>{try{return await bridgeRequest('/v1/health')}catch(e){return {error:String(e)}}}")
+            print(json.dumps({'baseline':not fixed,'bridgeHealth':health}),flush=True)
+            assert health.get('ok'),health
+            site=c.new_page();site.on('pageerror',lambda e:console.append({'pageerror':str(e)}));site.goto('https://www.tiktok.com/');site.bring_to_front()
             site.wait_for_selector('.apocalipse-media-download:not(.apocalipse-media-record)')
             tabid=worker.evaluate("async()=> (await chrome.tabs.query({url:'https://www.tiktok.com/*'}))[0].id")
             def downloads():return [r['body'] for r in REQUESTS if r['path']=='/v1/download']
@@ -110,6 +115,19 @@ def exercise(p, extension, fixed):
             assert not errors,errors
             print(json.dumps({'fixed':True,'fullscreenChanges':fullscreen,'sequentialReelHandoffs':['111','222'],
                 'unidentifiedBlobNotSent':True,'checkboxUsable':True,'batchGuardPreserved':True,'silentWorkerTimeout':code,'pageErrors':errors}))
+        except Exception:
+            print(json.dumps({'baseline':not fixed,'console':console,'bridgeRequests':REQUESTS}),flush=True)
+            try:
+                state=worker.evaluate("""id=>chrome.scripting.executeScript({target:{tabId:id},func:()=>{
+                  const v=document.querySelector('video'),b=document.querySelector('.apocalipse-media-download');
+                  return {identity:!!globalThis.ApocalipseTikTokIdentity,handler:!!globalThis.ADM_TIKTOK_DOWNLOAD,
+                    source:v?.currentSrc,src:v?.src,buttonText:b?.textContent,buttonTitle:b?.title,
+                    resolved:v?globalThis.ApocalipseTikTokIdentity?.resolve(v):null,
+                    bound:!!globalThis.ApocalipseTikTokIdentity?.videoFor(b),ready:document.readyState};
+                }})""",tabid)
+                print(json.dumps({'state':state}),flush=True)
+            except Exception as error:print('State capture failed',str(error),flush=True)
+            raise
         finally:c.close()
 
 if __name__=='__main__':
@@ -118,6 +136,11 @@ if __name__=='__main__':
     threading.Thread(target=server.serve_forever,daemon=True).start()
     try:
         with sync_playwright() as p:
-            if a.baseline:exercise(p,str(pathlib.Path(a.baseline).resolve()),False)
-            exercise(p,str(ROOT/'browser-extension'),True)
+            failures=[]
+            runs=[(str(pathlib.Path(a.baseline).resolve()),False)] if a.baseline else []
+            runs.append((str(ROOT/'browser-extension'),True))
+            for extension,fixed in runs:
+                try:exercise(p,extension,fixed)
+                except Exception as error:failures.append({'baseline':not fixed,'error':str(error)})
+            assert not failures,failures
     finally:server.shutdown()
