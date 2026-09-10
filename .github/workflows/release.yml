@@ -8,6 +8,10 @@ on:
       - main
     tags:
       - "v*"
+    paths-ignore:
+      - "README.md"
+      - "docs/**"
+      - ".github/workflows/release.yml"
 
 permissions:
   contents: read
