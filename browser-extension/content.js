@@ -447,11 +447,11 @@
     const value = Math.max(0, Math.floor(seconds));
     return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
   };
-  const trace = (eventName, mode, detail = {}) => chrome.runtime.sendMessage({
+  const trace = (eventName, mode, detail = {}, actionId = null) => chrome.runtime.sendMessage({
     type: "APOCALIPSE_CAPTURE_TRACE",
     eventName,
     mode,
-    traceId: crypto.randomUUID(),
+    traceId: actionId || crypto.randomUUID(),
     pageUrl: location.href,
     at: Date.now(),
     detail,
@@ -700,16 +700,19 @@
       button.addEventListener("click", async (event) => {
         event.preventDefault();
         event.stopPropagation();
+        const actionId = globalThis.ApocalipseDiagnostics?.actionFor(button) || crypto.randomUUID();
+        const actionTrace = (name, mode, detail) => trace(name, mode, detail, actionId);
         const originalText = button.textContent;
         const clickSource = String(element.currentSrc || element.src || "");
         const clickPage = location.href;
         const socialVideo = isFacebookVideo || (isTikTokPage && element.tagName === "VIDEO");
         button.textContent = "…";
-        trace("overlay_download_clicked", "download", { tag: element.tagName, facebook: isFacebookVideo, tiktokPage: isTikTokPage, tiktokPermalink: isTikTokVideo, overlays: activeOverlays.size });
+        actionTrace("overlay_download_clicked", "download", { tag: element.tagName, facebook: isFacebookVideo, tiktokPage: isTikTokPage, tiktokPermalink: isTikTokVideo, overlays: activeOverlays.size });
         const visibleFacebookUrl = isFacebookVideo && isFacebookMediaUrl(location.href) ? location.href : null;
         let enteredTikTokFullscreen = false;
         if (isTikTokPage && !tikTokUrlFor(element) && document.fullscreenElement !== element && element.requestFullscreen) {
           try {
+            actionTrace("overlay.legacy_fullscreen_requested", "download", { reason: "identity_unresolved" });
             await element.requestFullscreen();
             enteredTikTokFullscreen = true;
             await new Promise((resolve) => setTimeout(resolve, 500));
@@ -737,7 +740,7 @@
           : null;
         if (socialVideo && (!element.isConnected || clickSource !== String(element.currentSrc || element.src || "")
           || clickPage !== location.href)) {
-          trace("overlay_download_player_changed", "download", { facebook: isFacebookVideo, tiktokPage: isTikTokPage });
+          actionTrace("overlay_download_player_changed", "download", { facebook: isFacebookVideo, tiktokPage: isTikTokPage });
           button.textContent = "!";
           button.title = "O vídeo mudou. Clique novamente no vídeo atual.";
           setTimeout(() => { button.textContent = originalText; }, 2500);
@@ -801,7 +804,7 @@
             && !/\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp)(?:[?#]|$)/i.test(currentUrl))
         );
         if (!currentUrl || (isFacebookVideo && !facebookPlayableUrl)) {
-          trace("overlay_download_unresolved", "download", { liveBlob: Boolean(liveBlobUrl), liveHttp: Boolean(liveHttpUrl), networkMedia: Boolean(networkMediaUrl), facebook: isFacebookVideo });
+          actionTrace("overlay_download_unresolved", "download", { liveBlob: Boolean(liveBlobUrl), liveHttp: Boolean(liveHttpUrl), networkMedia: Boolean(networkMediaUrl), facebook: isFacebookVideo });
           button.textContent = "⚠";
           button.title = "Abra o vídeo ou use os três pontos e Copiar link";
           setTimeout(() => { button.textContent = originalText; }, 2500);
@@ -829,7 +832,7 @@
           ...(resolved?.requestUrls?.length ? resolved.requestUrls : (/\.m3u8(?:$|[?#])/i.test(String(currentUrl)) ? hlsForPage().candidates : [])),
           ...(directFacebookMedia && /^https?:/i.test(directFacebookMedia) ? [directFacebookMedia] : []),
         ])];
-        trace("overlay_download_candidate_selected", "download", {
+        actionTrace("overlay_download_candidate_selected", "download", {
           facebook: isFacebookVideo,
           tiktokPage: isTikTokPage,
           tiktokPermalink: Boolean(isTikTokVideoUrl(currentUrl)),
@@ -851,9 +854,9 @@
           facebookPageExtractorPreferred: Boolean(facebookPageUrl),
           candidate: currentUrl,
         });
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { url: currentUrl, audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail: thumbnailFor(element, "video") } }, (result) => {
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail: thumbnailFor(element, "video") } }, (result) => {
           const failed = chrome.runtime.lastError || !result?.ok;
-          trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
+          actionTrace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";
           if (failed) button.title = result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable";
           setTimeout(() => { button.textContent = originalText; }, 1500);
@@ -1023,6 +1026,9 @@
     }
     if (message?.type !== "APOCALIPSE_SCAN") return;
     const found = collect();
+    void globalThis.ApocalipseDiagnostics?.emit("popup.content_scan_result", { videos: found.filter(item => item.kind === "video").length,
+      audio: found.filter(item => item.kind === "audio").length, images: found.filter(item => item.kind === "image").length,
+      frame: window === window.top ? "top" : "child" }, message.traceId, "INFO");
     (async () => {
       let selectedItems = found;
       const hls = found.filter((item) => item.kind === "video" && /\.m3u8(?:$|[?#])/i.test(item.url));

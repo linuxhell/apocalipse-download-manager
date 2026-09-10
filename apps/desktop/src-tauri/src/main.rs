@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod diagnostics_v3;
 mod prepared_preview;
 mod tiktok_preview;
 
@@ -620,6 +621,8 @@ struct ToolStatus {
 #[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MediaPreviewRequest {
+    #[serde(default)]
+    trace_id: Option<String>,
     url: String,
     #[serde(default)]
     audio_url: Option<String>,
@@ -816,6 +819,8 @@ struct BridgePairing {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BridgeDownload {
+    #[serde(default)]
+    trace_id: Option<String>,
     url: String,
     #[serde(default)]
     audio_url: Option<String>,
@@ -908,6 +913,8 @@ struct BlobFinish {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DownloadContext {
+    #[serde(default)]
+    trace_id: Option<String>,
     referer: Option<String>,
     known_duration: Option<f64>,
     #[serde(default)]
@@ -1108,6 +1115,7 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                 let result = queue_from_bridge(
                     app,
                     BridgeDownload {
+                        trace_id: None,
                         url: request.url,
                         audio_url: None,
                         file_name: None,
@@ -1497,7 +1505,13 @@ fn save_queue(state: &AppState, queue: &[DownloadTask]) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let data = serde_json::to_vec_pretty(queue).map_err(|error| error.to_string())?;
-    fs::write(&state.queue_path, data).map_err(|error| error.to_string())
+    let result = fs::write(&state.queue_path, data).map_err(|error| error.to_string());
+    diagnostics_v3::queue_saved(
+        &state.log_path,
+        queue.iter().map(|task| task.id.to_string()).collect(),
+        result.is_ok(),
+    );
+    result
 }
 
 fn load_settings(path: &Path) -> UserSettings {
@@ -1588,6 +1602,11 @@ fn sanitize_log_detail(detail: &str) -> String {
 }
 
 fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
+    if diagnostics_v3::suppress(event, detail) {
+        return;
+    }
+    let level = diagnostics_v3::level(level, event);
+    diagnostics_v3::native(&state.log_path, level, event, detail);
     let _write_guard = match state.log_write_lock.lock() {
         Ok(guard) => guard,
         Err(_) => return,
@@ -2752,6 +2771,7 @@ fn clear_general_log(state: State<'_, AppState>) -> Result<(), String> {
             }
         }
     }
+    diagnostics_v3::clear(&state.log_path)?;
     diagnostic_log(&state, "INFO", "log.cleared", "cleared_by_user");
     Ok(())
 }
@@ -2892,7 +2912,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         .is_some_and(|seen| seen.elapsed() < Duration::from_secs(90));
     let manifest = serde_json::json!({
         "format": "apocalipse-diagnostic-bundle",
-        "formatVersion": 2,
+        "formatVersion": 3,
         "createdAt": now.to_rfc3339(),
         "applicationVersion": env!("CARGO_PKG_VERSION"),
         "os": std::env::consts::OS,
@@ -2981,8 +3001,9 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         "summary.json".to_owned(),
         serde_json::to_vec_pretty(&summary).map_err(|e| e.to_string())?,
     ));
-    let guide = b"Apocalipse diagnostic bundle v2\nUse manifest.json first, then correlate logs/events.jsonl by trace, task and timestamp. Sensitive values are redacted.\n";
+    let guide = b"Apocalipse diagnostic bundle v3\nStart with RELATORIO_PARA_IA.txt and health/coletores.json. V2 files are preserved. V3 includes bounded correlated events and explicit collector limits. Browser timestamps and receipt timestamps can differ.\n";
     entries.push(("README.txt".to_owned(), guide.to_vec()));
+    entries.extend(diagnostics_v3::export(&state.log_path)?);
     write_diagnostic_zip(&path, entries)?;
     diagnostic_log(
         &state,
@@ -2991,6 +3012,26 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         &format!("file={}", path.display()),
     );
     Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+fn mark_diagnostic_problem(state: State<'_, AppState>) -> String {
+    let id = uuid::Uuid::new_v4().to_string();
+    diagnostic_log(
+        &state,
+        "WARN",
+        "diagnostic.user_mark",
+        &format!("trace={id} marked_in_desktop=true"),
+    );
+    id
+}
+
+#[tauri::command]
+fn copy_diagnostic_report(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let report = diagnostics_v3::report(&state.log_path)?;
+    app.clipboard()
+        .write_text(report)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -4376,6 +4417,10 @@ fn enqueue_download_impl(
     let file_name = validate_file_name(&append_source_extension(proposed, &url, kind))?;
     remember_download_directory(state, &download_dir)?;
     let mut task = DownloadTask::new(&url, download_dir.join(&file_name));
+    diagnostics_v3::bind_task(
+        &task.id.to_string(),
+        context.as_ref().and_then(|c| c.trace_id.as_deref()),
+    );
     let mut request_identity = None;
     task.format_selection = format_selection.filter(|value| !value.trim().is_empty());
     task.torrent_selection = torrent_selection
@@ -5610,6 +5655,7 @@ fn queue_from_bridge(
     );
     if request.start_immediately {
         let context = DownloadContext {
+            trace_id: request.trace_id.clone(),
             referer: request.page_url,
             known_duration: request.duration,
             title: request.title,
@@ -5748,6 +5794,7 @@ fn queue_associated_source(app: &tauri::AppHandle, source: String) -> Result<(),
     queue_from_bridge(
         app,
         BridgeDownload {
+            trace_id: None,
             url: source,
             audio_url: None,
             file_name: None,
@@ -6061,6 +6108,16 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         );
         show_main_window(app);
         bridge_response(&mut stream, "200 OK", origin, "{\"ok\":true}");
+    } else if first.starts_with("POST /v1/diagnostic-v3 ") {
+        match diagnostics_v3::ingest(&state.log_path, body) {
+            Ok(result) => bridge_response(&mut stream, "202 Accepted", origin, &result.to_string()),
+            Err(error) => bridge_response(
+                &mut stream,
+                "400 Bad Request",
+                origin,
+                &serde_json::json!({"ok":false,"error":error}).to_string(),
+            ),
+        }
     } else if first.starts_with("POST /v1/diagnostic ") {
         match serde_json::from_str::<ExtensionDiagnostic>(body) {
             Ok(item) => {
@@ -6097,8 +6154,32 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     } else if first.starts_with("POST /v1/download ") {
         match serde_json::from_str::<BridgeDownload>(body)
             .map_err(|error| error.to_string())
-            .and_then(|request| queue_from_bridge(app, request))
-        {
+            .and_then(|request: BridgeDownload| {
+                let trace = diagnostics_v3::valid_id(request.trace_id.as_deref())
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                diagnostic_log(
+                    &state,
+                    "INFO",
+                    "bridge.action_received",
+                    &format!("trace={trace} route=download"),
+                );
+                let result = queue_from_bridge(app, request);
+                diagnostic_log(
+                    &state,
+                    if result.is_ok() { "INFO" } else { "WARN" },
+                    "bridge.action_result",
+                    &format!(
+                        "trace={trace} outcome={} error={}",
+                        if result.is_ok() {
+                            "accepted"
+                        } else {
+                            "rejected"
+                        },
+                        result.as_ref().err().map(String::as_str).unwrap_or("none")
+                    ),
+                );
+                result
+            }) {
             Ok(Some(task_id)) => bridge_response(
                 &mut stream,
                 "202 Accepted",
@@ -6112,8 +6193,25 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         match serde_json::from_str::<MediaPreviewRequest>(body)
             .map_err(|error| error.to_string())
             .and_then(|request| {
+                let trace = diagnostics_v3::valid_id(request.trace_id.as_deref())
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 let preparing = prepared_preview::is_candidate(&request);
-                open_media_preview(app, &state, request).map(|()| preparing)
+                diagnostic_log(
+                    &state,
+                    "INFO",
+                    "bridge.preview_received",
+                    &format!("trace={trace} preparing={preparing}"),
+                );
+                let result = open_media_preview(app, &state, request).map(|()| preparing);
+                if let Err(error) = &result {
+                    diagnostic_log(
+                        &state,
+                        "WARN",
+                        "bridge.preview_rejected",
+                        &format!("trace={trace} error={error}"),
+                    );
+                }
+                result
             }) {
             Ok(preparing) => bridge_response(
                 &mut stream,
@@ -6236,6 +6334,7 @@ fn forward_to_running_instance(source: &str, token: &str) -> bool {
         return false;
     };
     let request = BridgeDownload {
+        trace_id: None,
         url: source.to_owned(),
         audio_url: None,
         file_name: None,
@@ -6751,6 +6850,15 @@ async fn remove_downloads(
     if ids.is_empty() {
         return Ok(0);
     }
+    let removal_trace = uuid::Uuid::new_v4().to_string();
+    for id in &ids {
+        diagnostic_log(
+            &state,
+            "INFO",
+            "task.removal_requested",
+            &format!("trace={removal_trace} task={id} delete_files={delete_files}"),
+        );
+    }
     // Stop queued entries before signalling workers, so completion of another
     // task cannot redispatch an item during the asynchronous removal window.
     {
@@ -6802,6 +6910,18 @@ async fn remove_downloads(
         identities.retain(|id, _| !ids.contains(id));
     }
     save_queue(&state, &queue)?;
+    for task in &removed {
+        diagnostic_log(
+            &state,
+            "INFO",
+            "task.removal_persisted",
+            &format!(
+                "trace={removal_trace} task={} remaining={}",
+                task.id,
+                queue.len()
+            ),
+        );
+    }
     diagnostic_log(
         &state,
         "INFO",
@@ -7008,6 +7128,8 @@ fn main() {
             read_general_log,
             clear_general_log,
             export_diagnostic_bundle,
+            mark_diagnostic_problem,
+            copy_diagnostic_report,
             record_ui_diagnostic,
             set_application_language,
             get_log_editor,

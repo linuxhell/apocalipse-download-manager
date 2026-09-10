@@ -1,3 +1,4 @@
+if (typeof importScripts === "function") importScripts("diagnostics.js", "diagnostics-worker.js");
 const BRIDGE = "http://127.0.0.1:17654";
 const HEARTBEAT_ALARM = "apocalipse-bridge-heartbeat";
 let bridgeConnected = false;
@@ -28,6 +29,14 @@ if (chrome.webRequest?.onResponseStarted) {
       .test((() => { try { return new URL(details.url).hostname; } catch { return ""; } })())
       && (/^(?:video|audio)\//i.test(contentType)
         || /(?:\/video\/tos\/|\/aweme\/v1\/play\/|mime_type=video|\.mp4(?:$|[?]))/i.test(details.url));
+    if (globalThis.ApocalipseDiagnosticWorker?.scoped(details.tabId)
+      && (/^(?:video|audio)\//i.test(contentType) || /(?:mpegurl|dash\+xml)/i.test(contentType))) {
+      void globalThis.ApocalipseDiagnostics?.emit("network.capture_filter_decision", {
+        tabId: details.tabId, frameId: details.frameId, requestId: details.requestId,
+        url: details.url, contentType, accepted: isSocialTabMedia,
+        reason: isSocialTabMedia ? "accepted_by_current_filter" : "rejected_by_current_host_or_media_filter",
+      }, null, "DEBUG", "extension.background");
+    }
     if (isSocialTabMedia) {
       recentMediaResponses.push({
         tabId: details.tabId,
@@ -418,6 +427,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       .filter((item) => item.tabId === tabId && item.capturedAt >= cutoff)
       .sort((left, right) => right.capturedAt - left.capturedAt)
       .slice(0, 30);
+    void globalThis.ApocalipseDiagnostics?.emit("network.recent_media_query", { tabId, retainedTotal: recentMediaResponses.length,
+      returned: media.length, cutoffMs: 120000, storage: "volatile_downloader_cache", reason: media.length ? "candidates_returned" : "empty_after_tab_and_age_filter" }, message.traceId, "INFO", "extension.background");
     reply({ media: media.map((item) => ({ ...item, ageMs: Date.now() - item.capturedAt })) });
     return;
   }
@@ -446,7 +457,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     }
     const contentType = pageExtractor ? null : message.contentType || null;
     const userAgent = message.userAgent || navigator.userAgent;
-    const traceId = crypto.randomUUID();
+    const traceId = globalThis.ApocalipseDiagnostics?.uuid(message.traceId) ? message.traceId : crypto.randomUUID();
     (async () => {
       const check = value => {
         let parsed;
@@ -471,7 +482,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       ]);
       return bridgeRequest("/v1/preview-media", {
         method: "POST",
-        body: JSON.stringify({ url, audioUrl, mediaKind, pageExtractor, userAgent, referer, cookieHeader, audioCookieHeader, contentType }),
+        body: JSON.stringify({ url, audioUrl, mediaKind, pageExtractor, userAgent, referer, cookieHeader, audioCookieHeader, contentType, traceId }),
       });
     })().then(result => {
       void diagnostic(result?.ok === false ? "popup.preview_failed" : "popup.preview_handed_off", { traceId, url, pageUrl: referer, startedAt: Date.now() }, result?.ok === false ? { level: "ERROR", error: String(result.error || "preview_failed") } : {});
@@ -507,7 +518,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
   if (message?.type === "APOCALIPSE_DOWNLOAD") {
     const item = message.item || {};
-    const traceId = crypto.randomUUID();
+    const traceId = globalThis.ApocalipseDiagnostics?.uuid(item.traceId) ? item.traceId : crypto.randomUUID();
     (async () => {
       const pageUrl = await sourcePageUrl(sender);
       let downloadUrl = item.extractorUrl || item.url;
@@ -527,6 +538,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       method: "POST",
       body: JSON.stringify({
         url: downloadUrl,
+        traceId,
         audioUrl: item.audioUrl || null,
         fileName: mediaDownloadFileName(item),
         pageUrl,
@@ -567,6 +579,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           method: "POST",
           body: JSON.stringify({
             url: item.extractorUrl || item.url,
+            traceId: globalThis.ApocalipseDiagnostics?.uuid(item.traceId) ? item.traceId : traceId,
             audioUrl: item.audioUrl || null,
             fileName: mediaDownloadFileName(item),
             pageUrl,
@@ -650,7 +663,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
 });
 
-const APOCALIPSE_WORKER_BUILD = "0.3.71-pre-response-takeover";
+const APOCALIPSE_WORKER_BUILD = "0.3.102-diagnostic-v3";
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type !== "APOCALIPSE_WORKER_DIAGNOSTICS") return;
   reply({
@@ -766,6 +779,8 @@ function hex(bytes) {
 }
 
 async function diagnostic(event, state = {}, extra = {}) {
+  void globalThis.ApocalipseDiagnostics?.emit(event, { detail: extra.detail || "", error: extra.error || null,
+    status: extra.status ?? null }, state.traceId, extra.level || (extra.error ? "ERROR" : "INFO"), "extension.background");
   const detail = [
     extra.detail || "",
     `extension_version=${chrome.runtime.getManifest().version}`,
@@ -776,11 +791,11 @@ async function diagnostic(event, state = {}, extra = {}) {
     level: extra.level || (extra.error ? "ERROR" : "INFO"),
     traceId: state.traceId || null,
     source: "chrome-extension",
-    url: state.url || state.pageUrl || null,
+    url: globalThis.ApocalipseDiagnostics ? null : state.url || state.pageUrl || null,
     status: Number.isFinite(extra.status) ? extra.status : null,
     bytes: Number.isFinite(extra.bytes) ? extra.bytes : (Number.isFinite(state.bytes) ? state.bytes : null),
     durationMs: state.startedAt ? Math.max(0, Date.now() - state.startedAt) : null,
-    detail: detail || null,
+    detail: globalThis.ApocalipseDiagnostics ? JSON.stringify(await globalThis.ApocalipseDiagnostics.safe(detail)) : detail || null,
     clientTimestamp: new Date().toISOString(),
   };
   try {
@@ -976,6 +991,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return;
   }
   if (message?.type === "APOCALIPSE_CAPTURE_TRACE") {
+    void globalThis.ApocalipseDiagnostics?.emit(`overlay.${String(message.eventName || "event")}`, {
+      ...(message.detail || {}), tabId: sender.tab?.id ?? null, frameId: sender.frameId ?? null,
+    }, message.traceId, /(?:unresolved|failed|missing)/i.test(message.eventName || "") ? "WARN" : "INFO", "extension.background");
     const state = { traceId: message.traceId || crypto.randomUUID(), pageUrl: message.pageUrl || sender.tab?.url || null, startedAt: Number(message.at || Date.now()), bytes: 0 };
     const detail = Object.entries(message.detail || {}).map(([k,v]) => `${k}=${String(v ?? "").slice(0,180)}`).join(" ");
     void diagnostic(`capture.${String(message.eventName || "event")}`, state, { detail: `mode=${message.mode || "normal"} ${detail}`.trim() });

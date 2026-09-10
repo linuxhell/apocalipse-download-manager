@@ -1,4 +1,6 @@
 (() => {
+  globalThis.ApocalipseTikTokClickDiagnostics = { version: 3 };
+  void globalThis.ApocalipseDiagnostics?.emit("collector.tiktok_handler_ready", { script: "tiktok-media-fix.js", topFrame: window === window.top });
   const videoForButton = button => globalThis.ApocalipseTikTokIdentity?.videoFor(button) || null;
   const permalinkFor = video => globalThis.ApocalipseTikTokIdentity?.resolve(video) || null;
 
@@ -18,9 +20,23 @@
     const button = event.target?.closest?.(".apocalipse-media-download:not(.apocalipse-media-record)");
     if (!button) return;
     const video = videoForButton(button);
-    if (!video) return;
+    if (!video) {
+      void globalThis.ApocalipseDiagnostics?.emit("overlay.binding_missing", { reason: "button_not_in_identity_map" },
+        globalThis.ApocalipseDiagnostics?.actionFor(button), "WARN");
+      return;
+    }
+    const actionId = globalThis.ApocalipseDiagnostics?.actionFor(button) || crypto.randomUUID();
     event.preventDefault();
     event.stopImmediatePropagation();
+    chrome.runtime.sendMessage({
+      type: "APOCALIPSE_CAPTURE_TRACE",
+      eventName: "tiktok_overlay_handler_claimed",
+      mode: "download",
+      traceId: actionId,
+      pageUrl: location.href,
+      at: Date.now(),
+      detail: { topFrame: window === window.top, hasBoundVideo: true },
+    }).catch(() => {});
     const original = button.textContent;
     const clickSource = String(video.currentSrc || video.src || "");
     const clickPage = location.href;
@@ -74,7 +90,7 @@
       type: "APOCALIPSE_CAPTURE_TRACE",
       eventName: "tiktok_browser_media_selection",
       mode: "download",
-      traceId: crypto.randomUUID(),
+      traceId: actionId,
       pageUrl: location.href,
       at: Date.now(),
       detail: {
@@ -119,6 +135,7 @@
     chrome.runtime.sendMessage({
       type: "APOCALIPSE_DOWNLOAD",
       item: {
+        traceId: actionId,
         url: selectedUrl,
         duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null,
         audioUrl,

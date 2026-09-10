@@ -119,7 +119,8 @@ pub(super) fn open(
             .join("previews"),
     )?;
     let app = app.clone();
-    let trace = uuid::Uuid::new_v4().to_string();
+    let trace = super::diagnostics_v3::valid_id(request.trace_id.as_deref())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     diagnostic_log(
         state,
         "INFO",

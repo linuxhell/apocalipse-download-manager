@@ -1,3 +1,4 @@
+let pendingDiagnosticTrace = { id: null, source: null };
 const catalogs = {
   en: {
     downloads: "Downloads",
@@ -10,6 +11,7 @@ const catalogs = {
     themesDescription: "Personalize colors, transparency, corners and interface size.",
     languageDescription: "Choose the language used throughout Apocalipse and in the tray menu.",
     chooseTheme: "Choose theme", themeOptions: "Theme options", windowTransparency: "Window transparency", windowTransparencyHint: "Make the application window transparent", transparencyLevel: "Transparency level", roundedCorners: "Rounded corners", roundedCornersHint: "Use rounded corners on windows, panels and controls", cornerRadius: "Corner radius", interfaceSize: "Interface size", interfaceSizeHint: "Adjust text and element sizes", compact: "Compact", normal: "Normal", large: "Large", chooseLanguage: "Choose language", languageHint: "The entire application and tray menu use the selected language.",
+    markProblem: "Mark problem now", copyDiagnosticReport: "Copy report for AI", diagnosticHint: "Enable detailed capture for the affected tab in the extension, reproduce, mark the problem, then export.",
     logs: "Logs", logsDescription: "End-to-end diagnostics for extension, shortcuts, interface, bridge and downloads.", exportLog: "Export log", searchLogs: "Search events…", allLevels: "All levels",
     downloadsDescription: "Manage direct downloads, progress, speed and completed files.",
     mediaDescription: "Videos, audio, recordings and exports detected by Apocalipse.",
@@ -535,6 +537,8 @@ function applyAppearance(settings = readAppearance()) {
   document.documentElement.style.setProperty("--corner-radius", settings.roundedEnabled ? `${radius}px` : "0px");
 }
 applyAppearance();
+Object.assign(catalogs["pt-BR"], { markProblem: "Marcar problema agora", copyDiagnosticReport: "Copiar relatorio para IA", diagnosticHint: "Na extensao, ative a captura da aba afetada, reproduza o erro, marque o problema e exporte o diagnostico." });
+Object.assign(catalogs["zh-CN"], { markProblem: "Mark problem", copyDiagnosticReport: "Copy AI report", diagnosticHint: "Enable capture in the extension, reproduce, mark, then export." });
 let pendingReferer = null;
 let pendingDuration = null;
 let pendingTitle = null;
@@ -1014,6 +1018,14 @@ document.querySelector("#export-logs").onclick = async (event) => {
   try { await invoke("export_diagnostic_bundle"); } catch (error) { window.alert(String(error)); }
   finally { button.disabled = false; }
 };
+for (const [selector, command] of [["#mark-diagnostic", "mark_diagnostic_problem"], ["#copy-diagnostic", "copy_diagnostic_report"]]) {
+  document.querySelector(selector).onclick = async event => {
+    const button = event.currentTarget; button.disabled = true;
+    try { await invoke(command); await refreshLogEvents(); }
+    catch (error) { window.alert(String(error)); }
+    finally { button.disabled = false; }
+  };
+}
 document.querySelector("#clear-logs").onclick = async () => { await invoke("clear_general_log"); await refreshLogEvents(); };
 
 let linkLocalPath = "";
@@ -1912,6 +1924,7 @@ document.querySelector("#enqueue").onclick = async () => {
         bandwidthLimit: Math.round((Number(document.querySelector("#download-bandwidth-limit").value) || 0) * 1024 * 1024) || null,
         connectionsOverride: Number(document.querySelector("#task-connections").value) || 8,
         context: {
+          traceId: pendingDiagnosticTrace.source === url.value ? pendingDiagnosticTrace.id : null,
           referer: pendingReferer,
           knownDuration: pendingDuration,
           title: pendingTitle,
@@ -2016,6 +2029,7 @@ async function consumeBridgeDownload() {
     const currentUrl = dialog.open ? document.querySelector("#url").value : null;
     const request = await invoke("take_bridge_download", { currentUrl });
     if (!request) return;
+    pendingDiagnosticTrace = { id: request.traceId || null, source: request.url };
     lastClipboardLink = request.url;
     pendingReferer = request.pageUrl || null;
     pendingDuration = Number.isFinite(request.duration) ? request.duration : null;

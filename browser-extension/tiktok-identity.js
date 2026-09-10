@@ -68,6 +68,52 @@
     }
     return found;
   };
+  const frameAncestorUrl = () => {
+    if (typeof window === 'undefined') return null;
+    let currentWindow = window;
+    for (let frameDepth = 0; frameDepth < 4; frameDepth += 1) {
+      let frame = null, parentDocument = null, parentWindow = null;
+      try {
+        if (currentWindow === currentWindow.top) break;
+        frame = currentWindow.frameElement;
+        parentWindow = currentWindow.parent;
+        parentDocument = parentWindow.document;
+      } catch { break; }
+      if (!frame || !parentDocument) break;
+      const anchors = [], explicitIds = new Set(), roots = [];
+      let node = frame;
+      for (let depth = 0; node && depth < 14; depth += 1, node = node.parentElement) {
+        if (node === parentDocument.body || node === parentDocument.documentElement) break;
+        const siblingFrames = [...(node.querySelectorAll?.('iframe') || [])]
+          .filter(other => other !== frame && other.isConnected);
+        const siblingVideos = [...(node.querySelectorAll?.('video') || [])].filter(other => other.isConnected);
+        if (depth > 0 && (siblingFrames.length || siblingVideos.length)) break;
+        for (const name of ['data-video-id', 'data-item-id', 'data-aweme-id']) {
+          const id = node.getAttribute?.(name);
+          if (id && /^\d+$/.test(id)) explicitIds.add(id);
+        }
+        for (const anchor of node.querySelectorAll?.('a[href*="/video/"]') || []) anchors.push(validUrl(anchor.href));
+        for (const key of Object.getOwnPropertyNames(node)) {
+          if (/^__(?:reactProps|reactFiber|vue)/i.test(key)) roots.push(node[key]);
+        }
+        const direct = unique(anchors);
+        if (direct) return direct;
+        if (node.matches?.('article,[data-e2e="recommend-list-item-container"],[data-e2e="feed-video"],[data-e2e="browse-video"]')) break;
+      }
+      const scopedRecords = records(roots);
+      if (explicitIds.size === 1) {
+        const id = [...explicitIds][0];
+        const exact = unique([...anchors, ...scopedRecords.map(record => record.url)]
+          .filter(url => url?.endsWith(`/video/${id}`)));
+        if (exact) return exact;
+      } else if (explicitIds.size === 0) {
+        const scoped = unique([...anchors, ...scopedRecords.map(record => record.url)]);
+        if (scoped) return scoped;
+      }
+      currentWindow = parentWindow;
+    }
+    return null;
+  };
   const resolveCandidate = (video, allowPage = true) => {
     if (!video || !/(^|\.)tiktok\.com$/i.test(location.hostname)) return null;
     const scopes = scopesFor(video), anchors = [], explicitIds = new Set(), roots = [];
@@ -105,6 +151,8 @@
       const scoped = unique(scopedRecords.map(record => record.url));
       if (scopedRecords.length) return scoped;
     }
+    const framed = frameAncestorUrl();
+    if (framed) return framed;
     // Dedicated pages with one player remain supported. Never use the address
     // bar for a multi-player feed whose URL can lag behind scrolling.
     const videos = [...document.querySelectorAll('video')];
@@ -118,6 +166,10 @@
   };
   const resolveLocal = (video, allowPage = true) => {
     const url = resolveCandidate(video, allowPage);
+    if (globalThis.ApocalipseDiagnostics?.active()) void globalThis.ApocalipseDiagnostics.emit("identity.resolution", {
+      player: globalThis.ApocalipseDiagnostics.player(video), allowPage, resolved: Boolean(url),
+      selectedResource: url, reason: url ? "candidate_resolved_by_existing_rules" : "no_unambiguous_candidate",
+      scopeCount: scopesFor(video).length }, null, "DEBUG");
     if (!url) return null;
     const source = mediaKey(video.currentSrc || video.src || '') || String(video.currentSrc || video.src || '');
     const previous = resolvedBindings.get(video);
@@ -142,7 +194,7 @@
       }
       return resolveLocal(video);
     },
-    resolveLocal, scopesFor, validUrl,
+    resolveLocal, scopesFor, validUrl, frameAncestorUrl,
     bind(button, video) { buttons.set(button, video); },
     videoFor(button) { const video = buttons.get(button); return video?.isConnected ? video : null; },
   };

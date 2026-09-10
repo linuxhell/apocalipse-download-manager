@@ -42,3 +42,8 @@ article button { min-width: 92px; height: 36px; padding: 0 12px; border: 0; bord
 .row-actions .external-preview { background: #223846; color: #dffaff; }
 .row-actions .external-preview { max-width: 150px; height: auto; min-height: 36px; padding: 7px 9px; white-space: normal; line-height: 1.2; }
 #empty { padding: 28px; text-align: center; color: #7f98a2; }
+
+#diagnostic-v3 { margin: 6px 10px; padding: 10px; border: 1px solid #29404e; border-radius: 8px; }
+#diagnostic-v3 div { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
+#diagnostic-v3 button { padding: 7px; cursor: pointer; }
+#diagnostic-v3 p { margin: 7px 0 0; font-size: 11px; overflow-wrap: anywhere; }

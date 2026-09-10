@@ -57,6 +57,7 @@ const messages = {
   pt_BR: { mediaIntelligence: "Inteligência de mídia", video: "Vídeo", audio: "Áudio", images: "Imagens", download: "Download", externalPreview: "Abrir no player", incompleteTrack: "Faixa incompleta", empty: "Nenhuma mídia detectada nesta aba.", unknownSize: "Tamanho indisponível", connected: "Conectada ao Apocalipse", disconnected: "Desconectada", pairingToken: "Token de pareamento", connect: "Conectar", recommended: "Recomendada", capturedResource: "Recurso de mídia capturado", requestedMedia: "Você tentou baixar", selectAll: "Selecionar todos", downloadSelected: "Baixar selecionados", forceShortcut: "Forçar Apocalipse", bypassShortcut: "Ignorar Apocalipse" },
   zh_CN: { mediaIntelligence: "媒体智能", video: "视频", audio: "音频", images: "图片", download: "下载", externalPreview: "在播放器中打开", incompleteTrack: "不完整音视频轨道", empty: "此标签页未检测到媒体。", unknownSize: "大小未知", connected: "已连接到 Apocalipse", disconnected: "未连接", pairingToken: "配对令牌", connect: "连接", recommended: "推荐", capturedResource: "已捕获的媒体资源", requestedMedia: "您尝试下载", selectAll: "全选", downloadSelected: "下载所选项目", forceShortcut: "强制使用 Apocalipse", bypassShortcut: "绕过 Apocalipse" }
 };
+const popupScanTrace = crypto.randomUUID();
 const t = (key) => messages[locale]?.[key] || messages.en[key] || key;
 const formatBytes = (bytes) => {
   if (!bytes) return t("unknownSize");
@@ -190,6 +191,9 @@ const render = () => {
   const root = document.querySelector("#items");
   root.textContent = "";
   const matches = media.filter((item) => item.kind === selected);
+  void globalThis.ApocalipseDiagnostics?.emit("popup.render", { selectedKind: selected, total: media.length,
+    videos: media.filter(item => item.kind === "video").length, audio: media.filter(item => item.kind === "audio").length,
+    rowsShown: matches.length, disabledRows: matches.filter(item => item.ambiguousSocialTrack).length }, popupScanTrace, "INFO", "extension.popup");
   const selectable = matches.filter((item) => !item.ambiguousSocialTrack);
   const updateBulk = () => {
     const chosen = selectable.filter((item) => selectedUrls.has(item.url)).length;
@@ -231,11 +235,16 @@ const render = () => {
     previewButton.hidden = item.kind === "image";
     const previewRequest = previewRequestFor(item, activePageUrl);
     previewButton.disabled = !previewRequest;
+    if (globalThis.ApocalipseDiagnostics?.active()) void globalThis.ApocalipseDiagnostics.emit("popup.row_decision", {
+      resource: item.url, kind: item.kind, previewEnabled: Boolean(previewRequest), downloadEnabled: !item.ambiguousSocialTrack,
+      reason: item.ambiguousSocialTrack ? "ambiguous_social_track" : "selectable", pageExtractor: Boolean(item.pageExtractor) }, popupScanTrace, "DEBUG", "extension.popup");
     previewButton.title = previewRequest ? t("externalPreview") : t("incompleteTrack");
     previewButton.onclick = () => {
       if (!previewRequest) return;
       previewButton.disabled = true;
-      chrome.runtime.sendMessage(previewRequest, (result) => {
+      const traceId = globalThis.ApocalipseDiagnostics?.beginAction(previewButton) || crypto.randomUUID();
+      void globalThis.ApocalipseDiagnostics?.emit("popup.preview_clicked", { resource: previewRequest.url, kind: item.kind }, traceId, "INFO", "extension.popup");
+      chrome.runtime.sendMessage({ ...previewRequest, traceId }, (result) => {
         previewButton.disabled = false;
         const error = chrome.runtime.lastError?.message || result?.error;
         if (result?.ok && result.preparing) {
@@ -255,11 +264,15 @@ const render = () => {
     const button = row.querySelector(".download-item");
     button.textContent = t("download");
     button.disabled = Boolean(item.ambiguousSocialTrack);
-    button.onclick = () => chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item }, (result) => {
+    button.onclick = () => {
+      const traceId = globalThis.ApocalipseDiagnostics?.beginAction(button) || crypto.randomUUID();
+      void globalThis.ApocalipseDiagnostics?.emit("popup.download_clicked", { resource: item.url, kind: item.kind }, traceId, "INFO", "extension.popup");
+      return chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { ...item, traceId } }, (result) => {
       if (result?.target === "error" || chrome.runtime.lastError) {
         showBridgeError(result?.error || chrome.runtime.lastError?.message || "unavailable");
       }
     });
+    };
     root.append(row);
   }
   updateBulk();
@@ -302,9 +315,11 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
     // Social sites contain many cross-origin iframes. Without an explicit
     // frame, Chrome may return the empty scan from an advertisement/player
     // iframe instead of the visible page.
-    chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_SCAN" }, { frameId: 0 }, async (response) => {
+    chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_SCAN", traceId: popupScanTrace }, { frameId: 0 }, async (response) => {
       const error = chrome.runtime.lastError;
       const scanned = error ? [] : (response?.media || []);
+      void globalThis.ApocalipseDiagnostics?.emit("popup.primary_scan", { error: error?.message || null,
+        count: scanned.length, frameRequested: 0 }, popupScanTrace, error ? "WARN" : "INFO", "extension.popup");
       const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA", tabId: tab.id }).catch(() => null);
       const network = (captured?.media || []).map((item) => {
         const video = networkMediaKind(item) === "video";
@@ -320,6 +335,8 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
           networkCaptured: true,
         };
       });
+      void globalThis.ApocalipseDiagnostics?.emit("popup.merge_inputs", { scanned: scanned.length, network: network.length,
+        networkVideos: network.filter(item => item.kind === "video").length }, popupScanTrace, "INFO", "extension.popup");
       media = mergeDetectedMedia(scanned, network, tab.url);
       const picker = await chrome.runtime.sendMessage({ type: "APOCALIPSE_MEDIA_PICKER_CONTEXT", tabId: tab.id }).catch(() => null);
       const requested = document.querySelector("#requested-media");

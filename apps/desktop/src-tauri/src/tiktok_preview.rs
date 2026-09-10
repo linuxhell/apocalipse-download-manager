@@ -277,7 +277,8 @@ pub(super) fn open(app: &tauri::AppHandle, mut request: MediaPreviewRequest) -> 
     let builder = DownloadEngine::network_client_builder(proxy, user, password, dns)
         .map_err(|_| "preview_network_configuration_failed")?;
     let relay = Relay::bind(request, builder)?;
-    let trace = uuid::Uuid::new_v4().to_string();
+    let trace = super::diagnostics_v3::valid_id(request.trace_id.as_deref())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let report_app = app.clone();
     let first_error = std::sync::atomic::AtomicBool::new(false);
     let report: Reporter = Arc::new(move |event, detail| {
