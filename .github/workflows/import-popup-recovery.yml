@@ -1,0 +1,63 @@
+name: Prepare popup recovery test source
+on:
+  push:
+    branches: [fix/popup-recovery-tiktok-click-0103]
+    paths: ['.github/popup-recovery-import/**', '.github/workflows/import-popup-recovery.yml']
+permissions:
+  contents: write
+jobs:
+  prepare:
+    if: contains(github.event.head_commit.message, 'apply verified popup recovery')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply authored source after all hashes match
+        shell: python
+        run: |
+          import base64, hashlib, json, lzma, pathlib, shutil, subprocess
+          subprocess.run(['git','merge-base','--is-ancestor','a744da7f4565f04c9e8df82f519ffe69e01a8cb5','HEAD'],check=True)
+          source=pathlib.Path('.github/popup-recovery-import')
+          encoded=''.join((source/f'part-{i}.b64').read_text().strip() for i in range(3))
+          decoder=lzma.LZMADecompressor(memlimit=256*1024*1024)
+          data=decoder.decompress(base64.b64decode(encoded,validate=True),max_length=100000)
+          assert decoder.eof and not decoder.unused_data
+          assert len(data)==50901
+          assert hashlib.sha256(data).hexdigest()=='1e855a3ba788ca2f805b5e366834edbd7ae3d815d9f8e1d4f5c200ab3b695596'
+          pending=[]
+          for item in json.loads(data):
+              path=pathlib.Path(item['path'])
+              assert not path.is_absolute() and '..' not in path.parts
+              assert path.parts[0] in ['browser-extension','tests','docs']
+              old=path.read_bytes() if path.exists() else None
+              assert (hashlib.sha256(old).hexdigest() if old is not None else None)==item['before'], str(path)
+              lines=old.decode().splitlines(keepends=True) if old else []
+              for first,last,text in reversed(item['edits']):
+                  assert 0<=first<=last<=len(lines)
+                  lines[first:last]=[text]
+              new=''.join(lines).encode()
+              assert hashlib.sha256(new).hexdigest()==item['after'], str(path)
+              pending.append((path,new))
+          for path,new in pending:
+              path.parent.mkdir(parents=True,exist_ok=True)
+              path.write_bytes(new)
+          shutil.rmtree(source)
+      - name: Validate source
+        run: |
+          for file in browser-extension/*.js; do node --check "$file"; done
+          node --test tests/*.test.cjs
+          python -m py_compile tests/popup-dom-smoke.py tests/extension-browser-smoke.py
+          git diff --check
+      - name: Commit only test-branch source (no workflow modifications)
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add browser-extension docs tests/*.cjs tests/*.py .github/popup-recovery-import
+          git commit -m 'fix: recover popup controls and bind TikTok clicks without fullscreen'
+          git push origin HEAD:refs/heads/fix/popup-recovery-tiktok-click-0103
+          git rev-parse HEAD >> "$GITHUB_STEP_SUMMARY"
