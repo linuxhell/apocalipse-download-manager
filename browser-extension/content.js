@@ -65,36 +65,27 @@
   };
   const interceptChatgptLibrary = (event) => {
     if (event.defaultPrevented || (typeof event.button === "number" && event.button !== 0)) return;
+    // Bypass must keep the browser's native download untouched. The generic
+    // pointerdown listener above also arms the worker lease for the ensuing
+    // chrome.downloads event, which may not carry a tabId.
+    if (modifierPressed(event, shortcutKeys.bypass)) return;
     const found = chatgptLibraryLinkForEvent(event);
     if (!found) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     chrome.runtime.sendMessage({
-      type: "APOCALIPSE_CHATGPT_LIBRARY_DIRECT",
-      url: found.url,
-      pageUrl: location.href,
-      fileName: found.fileName,
-    }).catch(() => {});
+      type: "APOCALIPSE_DOWNLOAD",
+      item: {
+        url: found.url,
+        requestUrls: [found.url],
+        userAgent: navigator.userAgent,
+        kind: "file",
+        title: found.fileName || "chatgpt-download",
+      },
+    }, () => void chrome.runtime.lastError);
   };
   document.addEventListener("pointerdown", interceptChatgptLibrary, true);
   document.addEventListener("click", interceptChatgptLibrary, true);
-
-  const looksLikeChatgptLibraryDownloadControl = (event) => {
-    if (!/(^|\.)chatgpt\.com$/i.test(location.hostname)) return false;
-    const path = location.pathname.toLowerCase();
-    if (!path.includes("library")) return false;
-    for (const node of event.composedPath?.() || []) {
-      const label = `${node?.getAttribute?.("aria-label") || ""} ${node?.title || ""} ${node?.textContent || ""}`.trim();
-      if (/(?:download|baixar|下载)/i.test(label)) return true;
-      const href = node?.href || node?.closest?.('a[href*="/backend-api/estuary/content"]')?.href;
-      if (href && /\/backend-api\/estuary\/content/i.test(href)) return true;
-    }
-    return false;
-  };
-  document.addEventListener("pointerdown", (event) => {
-    if (!looksLikeChatgptLibraryDownloadControl(event)) return;
-    chrome.runtime.sendMessage({ type: "APOCALIPSE_CHATGPT_LIBRARY_ARM_DENY" }).catch(() => {});
-  }, true);
 
   const recentNetworkMediaUrl = () => {
     try {
@@ -509,7 +500,7 @@
         const selected = await chrome.runtime.sendMessage({
           type: "APOCALIPSE_SELECT_HLS",
           urls: hls.candidates,
-          expectedDuration: Number.isFinite(video.duration) ? video.duration : null,
+          duration: Number.isFinite(video.duration) ? video.duration : null,
         });
         const url = selected?.url || hls.fallback;
         const requestUrls = [...new Set(selected?.requestUrls?.length ? selected.requestUrls : hls.candidates)];
@@ -619,7 +610,7 @@
       const selected = await chrome.runtime.sendMessage({
         type: "APOCALIPSE_SELECT_HLS",
         urls: hls.candidates,
-        expectedDuration: Number.isFinite(element.duration) ? element.duration : null,
+        duration: Number.isFinite(element.duration) ? element.duration : null,
       });
       return selected || { url: hls.fallback || immediate, duration: null, requestUrls: hls.candidates };
     } catch { return { url: hls.fallback || immediate, duration: null, requestUrls: hls.candidates }; }
@@ -1027,7 +1018,7 @@
       let selectedItems = found;
       const hls = found.filter((item) => item.kind === "video" && /\.m3u8(?:$|[?#])/i.test(item.url));
       if (hls.length > 1) {
-        const analyzed = await chrome.runtime.sendMessage({ type: "APOCALIPSE_ANALYZE_HLS", urls: hls.map((item) => item.url), expectedDuration: Number.isFinite(document.querySelector("video")?.duration) ? document.querySelector("video").duration : null });
+        const analyzed = await chrome.runtime.sendMessage({ type: "APOCALIPSE_ANALYZE_HLS", urls: hls.map((item) => item.url), duration: Number.isFinite(document.querySelector("video")?.duration) ? document.querySelector("video").duration : null });
         const details = new Map((analyzed || []).map((item) => [item.url, item]));
         selectedItems = found.map((item) => details.has(item.url) ? { ...item, ...details.get(item.url) } : item);
       }
