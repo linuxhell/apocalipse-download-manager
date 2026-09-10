@@ -68,6 +68,8 @@ interpret missing records as absence of network activity or blame installation.
 88 Node tests passed. Browser DOM tests additionally exercise actual rendered
 controls with mocked transport. Installed-browser tests described above use
 real extension messaging and worlds but synthetic site/desktop endpoints.
+This verifies the specific injection failure and guarded popup behavior, not
+all possible causes of the owner's report that every control appeared locked.
 
 Update only the extension; retain ADM 0.4.29 and its engines/settings. Check
 popup interaction, current-reel download, scroll to another reel and no
