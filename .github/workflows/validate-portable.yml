@@ -23,8 +23,7 @@ jobs:
           node-version: '22'
       - name: Test extension handoffs
         run: |
-          node --check browser-extension/background.js
-          node --check browser-extension/popup.js
+          for file in browser-extension/*.js apps/desktop/ui/*.js; do node --check "$file"; done
           node --test tests/*.test.cjs
       - name: Package extension candidates
         shell: python
@@ -37,7 +36,7 @@ jobs:
           version = manifest['version']
           firefox = copy.deepcopy(manifest)
           worker = firefox.pop('background')['service_worker']
-          firefox['background'] = {'scripts': [worker]}
+          firefox['background'] = {'scripts': ['diagnostics-core.js', 'diagnostics-worker.js', worker]}
           firefox['browser_specific_settings'] = {'gecko': {
               'id': 'apocalipse-download-manager@linuxhell',
               'strict_min_version': '140.0',
