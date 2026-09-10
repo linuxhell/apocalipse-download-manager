@@ -4,18 +4,38 @@
 
 <h1 align="center">Apocalipse Download Manager</h1>
 
+<p align="center"><strong>Open-source download manager and browser media detector for Windows, Linux and macOS.</strong></p>
+
+<p align="center">
+  <a href="https://github.com/linuxhell/apocalipse-download-manager/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/linuxhell/apocalipse-download-manager?style=flat-square"></a>
+  <a href="LICENSE"><img alt="License: GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-0aa8c2?style=flat-square"></a>
+  <img alt="Platforms: Windows, Linux and macOS" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-182533?style=flat-square">
+</p>
+
+<p align="center">
+  <a href="https://github.com/linuxhell/apocalipse-download-manager/releases/latest"><strong>Download the latest release</strong></a>
+  · <a href="#portable-builds">Choose your platform</a>
+  · <a href="https://github.com/linuxhell/apocalipse-download-manager/issues">Report a bug</a>
+</p>
+
 <p align="center"><a href="#english">English</a> · <a href="#português-do-brasil">Português do Brasil</a> · <a href="#简体中文">简体中文</a></p>
 
 <a id="english"></a>
 
-<p align="center"><strong>A powerful, intelligent and open-source download manager for Windows, Linux and macOS.</strong></p>
-
 > [!IMPORTANT]
-> DE UMA SEMENTE NASCE ALGO GRANDIOSO ! 一颗种子，孕育出非凡之物！FROM A SEED, SOMETHING MAGNIFICENT IS BORN!
+> FROM A SEED, SOMETHING MAGNIFICENT IS BORN! · DE UMA SEMENTE NASCE ALGO GRANDIOSO! · 一颗种子，孕育出非凡之物！
 
 ## Vision
 
 Apocalipse combines fast resumable downloads, media discovery, streaming capture and torrent workflows in one lightweight application. Its engine is written in Rust, while browser integrations use the cross-browser WebExtension standard.
+
+### Why Apocalipse?
+
+- One portable download manager for Windows, Linux and macOS
+- Media discovery for video, audio and images through Chrome, Edge and Firefox extensions
+- Resumable HTTP/HTTPS downloads, HLS capture, yt-dlp, FFmpeg and torrent workflows
+- Native interface and browser extension available in English, Brazilian Portuguese and Simplified Chinese
+- Open source, privacy-conscious and built in Rust
 
 ## Version 0.4 highlights
 
