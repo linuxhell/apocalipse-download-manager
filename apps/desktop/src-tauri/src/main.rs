@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod diagnostics_v3;
 mod prepared_preview;
 mod tiktok_preview;
 
@@ -48,6 +49,7 @@ struct AppState {
     request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
+    diagnostics: diagnostics_v3::Diagnostics,
     global_bandwidth_limiter: Arc<BandwidthLimiter>,
     download_bandwidth_limiters: Mutex<HashMap<DownloadId, Arc<BandwidthLimiter>>>,
     tray_show: MenuItem<tauri::Wry>,
@@ -620,6 +622,8 @@ struct ToolStatus {
 #[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MediaPreviewRequest {
+    #[serde(default)]
+    trace_id: Option<String>,
     url: String,
     #[serde(default)]
     audio_url: Option<String>,
@@ -816,6 +820,8 @@ struct BridgePairing {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BridgeDownload {
+    #[serde(default)]
+    trace_id: Option<String>,
     url: String,
     #[serde(default)]
     audio_url: Option<String>,
@@ -908,6 +914,8 @@ struct BlobFinish {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DownloadContext {
+    #[serde(default)]
+    trace_id: Option<String>,
     referer: Option<String>,
     known_duration: Option<f64>,
     #[serde(default)]
@@ -1108,6 +1116,7 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                 let result = queue_from_bridge(
                     app,
                     BridgeDownload {
+                        trace_id: None,
                         url: request.url,
                         audio_url: None,
                         file_name: None,
@@ -1497,7 +1506,10 @@ fn save_queue(state: &AppState, queue: &[DownloadTask]) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let data = serde_json::to_vec_pretty(queue).map_err(|error| error.to_string())?;
-    fs::write(&state.queue_path, data).map_err(|error| error.to_string())
+    let result = fs::write(&state.queue_path, data).map_err(|error| error.to_string());
+    state.diagnostics.record("queue.persisted", if result.is_ok() { "INFO" } else { "ERROR" }, None, None,
+        serde_json::json!({"ok":result.is_ok(),"taskCount":queue.len(),"taskRefs":queue.iter().take(24).map(|t|t.id.to_string()).collect::<Vec<_>>(),"truncated":queue.len()>24}));
+    result
 }
 
 fn load_settings(path: &Path) -> UserSettings {
@@ -1588,6 +1600,7 @@ fn sanitize_log_detail(detail: &str) -> String {
 }
 
 fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
+    state.diagnostics.observe_legacy(level, event, detail);
     let _write_guard = match state.log_write_lock.lock() {
         Ok(guard) => guard,
         Err(_) => return,
@@ -1657,7 +1670,12 @@ fn update_task(
         Err(_) => return,
     };
     if let Some(task) = queue.iter_mut().find(|task| task.id == id) {
+        let before = std::mem::discriminant(&task.state);
         update(task);
+        if before != std::mem::discriminant(&task.state) {
+            state.diagnostics.record("task.state_changed", "INFO", None, Some(&id.to_string()),
+                serde_json::json!({"state":serde_json::to_value(&task.state).ok().map(|v| match v { serde_json::Value::String(name) => name, serde_json::Value::Object(fields) => fields.keys().next().cloned().unwrap_or_default(), _ => "unknown".into() }),"bytes":task.received,"persistRequested":persist}));
+        }
         if persist {
             let _ = save_queue(&state, &queue);
         }
@@ -2892,7 +2910,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         .is_some_and(|seen| seen.elapsed() < Duration::from_secs(90));
     let manifest = serde_json::json!({
         "format": "apocalipse-diagnostic-bundle",
-        "formatVersion": 2,
+        "formatVersion": 3,
         "createdAt": now.to_rfc3339(),
         "applicationVersion": env!("CARGO_PKG_VERSION"),
         "os": std::env::consts::OS,
@@ -2981,8 +2999,9 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         "summary.json".to_owned(),
         serde_json::to_vec_pretty(&summary).map_err(|e| e.to_string())?,
     ));
-    let guide = b"Apocalipse diagnostic bundle v2\nUse manifest.json first, then correlate logs/events.jsonl by trace, task and timestamp. Sensitive values are redacted.\n";
+    let guide = b"Apocalipse diagnostic bundle v3\nStart with RELATORIO_PARA_IA.txt and health/collectors.json. Legacy v2 files are preserved. A missing event is not proof of no activity. Review legacy logs before sharing.\n";
     entries.push(("README.txt".to_owned(), guide.to_vec()));
+    entries.extend(state.diagnostics.export());
     write_diagnostic_zip(&path, entries)?;
     diagnostic_log(
         &state,
@@ -2991,6 +3010,50 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         &format!("file={}", path.display()),
     );
     Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+fn diagnostics_status(state: State<'_, AppState>) -> serde_json::Value {
+    let mut status = state.diagnostics.status();
+    if let Some(object) = status.as_object_mut() {
+        object.remove("salt");
+    }
+    status
+}
+
+#[tauri::command]
+fn diagnostics_control(
+    state: State<'_, AppState>,
+    action: String,
+) -> Result<serde_json::Value, String> {
+    let mut status = state.diagnostics.control(&action, None)?;
+    if let Some(object) = status.as_object_mut() {
+        object.remove("salt");
+    }
+    Ok(status)
+}
+
+#[tauri::command]
+fn record_diagnostics_ui(state: State<'_, AppState>, event: String, detail: serde_json::Value) {
+    if event.len() <= 80
+        && event
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_.".contains(&b))
+    {
+        state
+            .diagnostics
+            .record(&format!("ui.{event}"), "INFO", None, None, detail);
+    }
+}
+
+#[tauri::command]
+fn copy_diagnostics_report(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    app.clipboard()
+        .write_text(state.diagnostics.report())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -4360,6 +4423,7 @@ fn enqueue_download_impl(
     connections_override: Option<usize>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
+    let diagnostic_trace = context.as_ref().and_then(|c| c.trace_id.clone());
     inspect_url(url.clone())?;
     let kind = classify_url(&url).ok_or_else(|| "unsupported_url".to_owned())?;
     let download_dir = match destination_directory.filter(|path| !path.trim().is_empty()) {
@@ -4453,6 +4517,9 @@ fn enqueue_download_impl(
         .lock()
         .map_err(|error| error.to_string())?;
     reserve_queued_task(&mut queue, &mut task, true)?;
+    state
+        .diagnostics
+        .bind_task(&task.id.to_string(), diagnostic_trace.as_deref());
     if let Err(error) = save_queue(state, &queue) {
         queue.pop();
         return Err(error);
@@ -5443,7 +5510,16 @@ fn queue_from_bridge(
     mut request: BridgeDownload,
 ) -> Result<Option<DownloadId>, String> {
     let state = app.state::<AppState>();
+    state.diagnostics.record("handoff.desktop_received", "INFO", request.trace_id.as_deref(), None,
+        serde_json::json!({"url":request.url,"mediaKind":request.media_kind,"immediate":request.start_immediately,"paired":request.audio_url.is_some(),"ambiguous":request.ambiguous_social_track}));
     if request.ambiguous_social_track && request.audio_url.is_none() {
+        state.diagnostics.record(
+            "handoff.desktop_rejected",
+            "WARN",
+            request.trace_id.as_deref(),
+            None,
+            serde_json::json!({"reason":"incomplete_social_media_track"}),
+        );
         diagnostic_log(
             &state,
             "WARN",
@@ -5610,6 +5686,7 @@ fn queue_from_bridge(
     );
     if request.start_immediately {
         let context = DownloadContext {
+            trace_id: request.trace_id.clone(),
             referer: request.page_url,
             known_duration: request.duration,
             title: request.title,
@@ -5638,6 +5715,13 @@ fn queue_from_bridge(
         show_main_window(app);
         return Ok(Some(task.id));
     }
+    state.diagnostics.record(
+        "handoff.save_dialog_pending",
+        "INFO",
+        request.trace_id.as_deref(),
+        None,
+        serde_json::json!({}),
+    );
     state
         .bridge_pending
         .lock()
@@ -5748,6 +5832,7 @@ fn queue_associated_source(app: &tauri::AppHandle, source: String) -> Result<(),
     queue_from_bridge(
         app,
         BridgeDownload {
+            trace_id: None,
             url: source,
             audio_url: None,
             file_name: None,
@@ -6061,6 +6146,41 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         );
         show_main_window(app);
         bridge_response(&mut stream, "200 OK", origin, "{\"ok\":true}");
+    } else if first.starts_with("GET /v1/diagnostics-v3/status ") {
+        bridge_response(
+            &mut stream,
+            "200 OK",
+            origin,
+            &state.diagnostics.status().to_string(),
+        );
+    } else if first.starts_with("POST /v1/diagnostics-v3/control ") {
+        let result = serde_json::from_str::<serde_json::Value>(body)
+            .map_err(|_| "invalid_diagnostics_json".to_owned())
+            .and_then(|value| {
+                state.diagnostics.control(
+                    value["action"].as_str().unwrap_or(""),
+                    value["tabId"].as_i64(),
+                )
+            });
+        match result {
+            Ok(value) => bridge_response(&mut stream, "200 OK", origin, &value.to_string()),
+            Err(error) => bridge_response(
+                &mut stream,
+                "400 Bad Request",
+                origin,
+                &serde_json::json!({"ok":false,"error":error}).to_string(),
+            ),
+        }
+    } else if first.starts_with("POST /v1/diagnostics-v3/events ") {
+        match serde_json::from_str::<serde_json::Value>(body) {
+            Ok(value) => bridge_response(
+                &mut stream,
+                "202 Accepted",
+                origin,
+                &state.diagnostics.accept(&value).to_string(),
+            ),
+            Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
+        }
     } else if first.starts_with("POST /v1/diagnostic ") {
         match serde_json::from_str::<ExtensionDiagnostic>(body) {
             Ok(item) => {
@@ -6078,7 +6198,13 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                 );
                 diagnostic_log(
                     &state,
-                    item.level.as_deref().unwrap_or("INFO"),
+                    if item.event.contains("failed") || item.event.contains("error") {
+                        "ERROR"
+                    } else if item.event.contains("unresolved") || item.event.contains("rejected") {
+                        "WARN"
+                    } else {
+                        item.level.as_deref().unwrap_or("INFO")
+                    },
                     &format!("extension.{}", item.event),
                     &detail,
                 );
@@ -6097,7 +6223,13 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     } else if first.starts_with("POST /v1/download ") {
         match serde_json::from_str::<BridgeDownload>(body)
             .map_err(|error| error.to_string())
-            .and_then(|request| queue_from_bridge(app, request))
+            .and_then(|request| {
+                let trace = request.trace_id.clone();
+                let result = queue_from_bridge(app, request);
+                state.diagnostics.record("handoff.desktop_reply", if result.is_ok() { "INFO" } else { "ERROR" }, trace.as_deref(), None,
+                    serde_json::json!({"ok":result.is_ok(),"errorRef":result.as_ref().err(),"prompt":matches!(result,Ok(None))}));
+                result
+            })
         {
             Ok(Some(task_id)) => bridge_response(
                 &mut stream,
@@ -6113,7 +6245,12 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             .map_err(|error| error.to_string())
             .and_then(|request| {
                 let preparing = prepared_preview::is_candidate(&request);
-                open_media_preview(app, &state, request).map(|()| preparing)
+                let trace = request.trace_id.clone();
+                state.diagnostics.record("preview.desktop_received", "INFO", trace.as_deref(), None, serde_json::json!({"preparing":preparing}));
+                let result = open_media_preview(app, &state, request).map(|()| preparing);
+                state.diagnostics.record("preview.desktop_reply", if result.is_ok() { "INFO" } else { "ERROR" }, trace.as_deref(), None,
+                    serde_json::json!({"ok":result.is_ok(),"preparing":preparing,"errorRef":result.as_ref().err()}));
+                result
             }) {
             Ok(preparing) => bridge_response(
                 &mut stream,
@@ -6236,6 +6373,7 @@ fn forward_to_running_instance(source: &str, token: &str) -> bool {
         return false;
     };
     let request = BridgeDownload {
+        trace_id: None,
         url: source.to_owned(),
         audio_url: None,
         file_name: None,
@@ -6748,6 +6886,9 @@ async fn remove_downloads(
     ids: Vec<DownloadId>,
     delete_files: bool,
 ) -> Result<usize, String> {
+    let removal_trace = uuid::Uuid::new_v4().to_string();
+    state.diagnostics.record("task.removal_requested", "INFO", Some(&removal_trace), None,
+        serde_json::json!({"taskRefs":ids.iter().map(|id|id.to_string()).collect::<Vec<_>>(),"deleteFiles":delete_files}));
     if ids.is_empty() {
         return Ok(0);
     }
@@ -6808,6 +6949,15 @@ async fn remove_downloads(
         "task.removed",
         &format!("count={} delete_files={delete_files}", removed.len()),
     );
+    for task in &removed {
+        state.diagnostics.record(
+            "task.removal_confirmed",
+            "INFO",
+            Some(&removal_trace),
+            Some(&task.id.to_string()),
+            serde_json::json!({"persisted":true}),
+        );
+    }
     Ok(removed.len())
 }
 
@@ -6910,6 +7060,7 @@ fn main() {
                 request_identities: Mutex::new(HashMap::new()),
                 log_path,
                 log_write_lock: Mutex::new(()),
+                diagnostics: diagnostics_v3::Diagnostics::new(&app_data.join("logs")),
                 global_bandwidth_limiter,
                 download_bandwidth_limiters: Mutex::new(HashMap::new()),
                 tray_show: show.clone(),
@@ -7008,6 +7159,10 @@ fn main() {
             read_general_log,
             clear_general_log,
             export_diagnostic_bundle,
+            diagnostics_status,
+            diagnostics_control,
+            copy_diagnostics_report,
+            record_diagnostics_ui,
             record_ui_diagnostic,
             set_application_language,
             get_log_editor,

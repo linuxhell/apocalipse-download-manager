@@ -42,3 +42,10 @@ article button { min-width: 92px; height: 36px; padding: 0 12px; border: 0; bord
 .row-actions .external-preview { background: #223846; color: #dffaff; }
 .row-actions .external-preview { max-width: 150px; height: auto; min-height: 36px; padding: 7px 9px; white-space: normal; line-height: 1.2; }
 #empty { padding: 28px; text-align: center; color: #7f98a2; }
+
+.diag-controls {padding:8px 12px;border-bottom:1px solid #29404e;}
+.diag-controls div {display:flex;flex-wrap:wrap;gap:6px;}
+.diag-controls button {padding:7px 10px;border:1px solid #54717e;border-radius:6px;background:#18222e;color:#dffaff;cursor:pointer;}
+.diag-controls button:disabled {opacity:.5;cursor:default;}
+.diag-controls p {font-size:11px;margin:4px 0;}
+.diag-controls small {display:block;margin-top:6px;}

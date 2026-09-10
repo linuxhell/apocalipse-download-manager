@@ -11,7 +11,7 @@ test('TikTok uses one deterministic isolated-world chain in every frame', () => 
     && item.js.includes('tiktok-media-fix.js') && item.js.includes('content.js'));
   assert.ok(tiktok, 'TikTok chain must be declared');
   assert.equal(tiktok.all_frames, true);
-  assert.deepEqual(tiktok.js, ['tiktok-identity.js', 'tiktok-media-fix.js', 'content.js']);
+  assert.deepEqual(tiktok.js, ['diagnostics-core.js', 'diagnostics.js', 'tiktok-identity.js', 'tiktok-media-fix.js', 'content.js']);
   const generic = manifest.content_scripts.find((item) => Array.isArray(item.js)
     && item.js.includes('content.js') && !item.js.includes('tiktok-media-fix.js'));
   assert.ok(generic?.exclude_matches?.some((value) => value.includes('tiktok.com')),
@@ -29,7 +29,7 @@ test('TikTok identity can climb from a player frame into its parent card', () =>
   const source = fs.readFileSync(path.join(root, 'tiktok-identity.js'), 'utf8');
   assert.match(source, /const frameAncestorUrl = \(\) => \{/);
   assert.match(source, /currentWindow\.frameElement/);
-  assert.match(source, /if \(framed\) return framed/);
+  assert.match(source, /if \(framed\) return explain\(video, "parent_frame_candidate", framed\)/);
 });
 
 test('popup discovers the visible TikTok reel across all frames', () => {

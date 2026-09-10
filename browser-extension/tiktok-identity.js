@@ -1,6 +1,9 @@
 // One resolver for the popup scan and both overlay handlers. Never infer a video
 // from the first entry in a feed, a caption, a nearby button, or stale page state.
 (() => {
+  globalThis.ADM_DIAG?.register("tiktok-identity.js");
+  const reasons = new WeakMap();
+  const explain = (video, reason, value) => { reasons.set(video, { reason, resolved: Boolean(value) }); return value; };
   const buttons = new WeakMap(), pageBindings = new WeakMap(), resolvedBindings = new WeakMap();
   const validUrl = (value) => {
     try {
@@ -116,6 +119,7 @@
   };
   const resolveCandidate = (video, allowPage = true) => {
     if (!video || !/(^|\.)tiktok\.com$/i.test(location.hostname)) return null;
+    reasons.delete(video);
     const scopes = scopesFor(video), anchors = [], explicitIds = new Set(), roots = [];
     for (const node of scopes) {
       for (const name of ['data-video-id', 'data-item-id', 'data-aweme-id']) {
@@ -138,26 +142,26 @@
       }
       matched = records(globalRoots).filter(record => containsSource(record.media, source));
     }
-    if (matched.length) return unique(matched.map(record => record.url));
+    if (matched.length) return explain(video, "matched_media_source", unique(matched.map(record => record.url)));
     if (explicitIds.size === 1) {
       const id = [...explicitIds][0];
       return unique([...anchors, ...scopedRecords.map(record => record.url)].filter(url => url?.endsWith(`/video/${id}`)));
     }
-    if (explicitIds.size > 1) return null;
+    if (explicitIds.size > 1) return explain(video, "conflicting_explicit_ids", null);
     // A unique permalink in this card is authoritative; multiple links are not.
-    if (anchors.some(Boolean)) return unique(anchors);
+    if (anchors.some(Boolean)) return explain(video, "scoped_card_links", unique(anchors));
     // Props are only usable without a source match when scoped to an actual card.
     if (scopes.some(node => node.matches?.('article,[data-e2e="recommend-list-item-container"],[data-e2e="feed-video"]'))) {
       const scoped = unique(scopedRecords.map(record => record.url));
-      if (scopedRecords.length) return scoped;
+      if (scopedRecords.length) return explain(video, "scoped_framework_records", scoped);
     }
     const framed = frameAncestorUrl();
-    if (framed) return framed;
+    if (framed) return explain(video, "parent_frame_candidate", framed);
     // Dedicated pages with one player remain supported. Never use the address
     // bar for a multi-player feed whose URL can lag behind scrolling.
     const videos = [...document.querySelectorAll('video')];
     const page = validUrl(location.href);
-    if (!allowPage || !page || videos.length !== 1 || videos[0] !== video) return null;
+    if (!allowPage || !page || videos.length !== 1 || videos[0] !== video) return explain(video, "no_bound_permalink", null);
     const sourceIdentity = mediaKey(video.currentSrc || video.src || '') || String(video.currentSrc || video.src || '');
     const previous = pageBindings.get(video);
     if (previous?.page === page && previous.source !== sourceIdentity) return null;
@@ -166,6 +170,8 @@
   };
   const resolveLocal = (video, allowPage = true) => {
     const url = resolveCandidate(video, allowPage);
+    void globalThis.ADM_DIAG?.emit("identity.local_decision", { ...(reasons.get(video) || { reason: "explicit_id_or_page" }),
+      resolved: Boolean(url), ...(video && globalThis.ADM_DIAG ? globalThis.ADM_DIAG.player(video) : {}) });
     if (!url) return null;
     const source = mediaKey(video.currentSrc || video.src || '') || String(video.currentSrc || video.src || '');
     const previous = resolvedBindings.get(video);
@@ -183,14 +189,20 @@
         const source = String(video.currentSrc || video.src || '');
         try {
           video.removeAttribute('data-apocalipse-current-permalink');
+          video.removeAttribute('data-apocalipse-identity-diagnostic');
           video.dispatchEvent(new Event('apocalipse-tiktok-identity-request', { bubbles: true }));
+          const evidence = video.getAttribute('data-apocalipse-identity-diagnostic');
+          try { void globalThis.ADM_DIAG?.emit('identity.main_probe', { mainReady: Boolean(evidence),
+            ...(evidence && evidence.length < 500 ? JSON.parse(evidence) : {}) }); } catch {}
+          video.removeAttribute('data-apocalipse-identity-diagnostic');
           const candidate = validUrl(video.getAttribute('data-apocalipse-current-permalink'));
           if (candidate && source === String(video.currentSrc || video.src || '')) return candidate;
-        } catch {} finally { video.removeAttribute('data-apocalipse-current-permalink'); }
+        } catch {} finally { video.removeAttribute('data-apocalipse-current-permalink'); video.removeAttribute('data-apocalipse-identity-diagnostic'); }
       }
       return resolveLocal(video);
     },
     resolveLocal, scopesFor, validUrl, frameAncestorUrl,
+    diagnosticState(video) { return reasons.get(video) || { reason: "not_evaluated" }; },
     bind(button, video) { buttons.set(button, video); },
     videoFor(button) { const video = buttons.get(button); return video?.isConnected ? video : null; },
   };

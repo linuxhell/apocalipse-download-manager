@@ -1,3 +1,4 @@
+globalThis.ADM_DIAG?.register("popup.js");
 let media = [], selected = "video", locale = "en", activePageUrl = "";
 const selectedUrls = new Set();
 const SOCIAL_TRACK_PAIR_WINDOW_MS = 8_000;
@@ -190,6 +191,9 @@ const render = () => {
   const root = document.querySelector("#items");
   root.textContent = "";
   const matches = media.filter((item) => item.kind === selected);
+  void globalThis.ADM_DIAG?.emit("popup.render", { videos: media.filter(v => v.kind === "video").length,
+    audio: media.filter(v => v.kind === "audio").length, images: media.filter(v => v.kind === "image").length,
+    displayed: matches.length, disabled: matches.filter(v => v.ambiguousSocialTrack).length, kind: selected });
   const selectable = matches.filter((item) => !item.ambiguousSocialTrack);
   const updateBulk = () => {
     const chosen = selectable.filter((item) => selectedUrls.has(item.url)).length;
@@ -231,11 +235,16 @@ const render = () => {
     previewButton.hidden = item.kind === "image";
     const previewRequest = previewRequestFor(item, activePageUrl);
     previewButton.disabled = !previewRequest;
+    void globalThis.ADM_DIAG?.emit("popup.row_state", { url: item.url, kind: item.kind,
+      previewEnabled: Boolean(previewRequest), downloadEnabled: !item.ambiguousSocialTrack,
+      reason: item.ambiguousSocialTrack ? "ambiguous_social_track" : previewRequest ? "valid_selection" : "invalid_preview_source" });
     previewButton.title = previewRequest ? t("externalPreview") : t("incompleteTrack");
     previewButton.onclick = () => {
       if (!previewRequest) return;
       previewButton.disabled = true;
-      chrome.runtime.sendMessage(previewRequest, (result) => {
+      const traceId = globalThis.ADM_DIAG?.begin("popup.preview_clicked", { url: previewRequest.url, kind: item.kind }) || crypto.randomUUID();
+      chrome.runtime.sendMessage({ ...previewRequest, traceId }, (result) => {
+        void globalThis.ADM_DIAG?.emit("popup.preview_reply", { ok: Boolean(result?.ok), preparing: Boolean(result?.preparing) }, traceId, result?.ok ? "INFO" : "ERROR");
         previewButton.disabled = false;
         const error = chrome.runtime.lastError?.message || result?.error;
         if (result?.ok && result.preparing) {
@@ -255,11 +264,15 @@ const render = () => {
     const button = row.querySelector(".download-item");
     button.textContent = t("download");
     button.disabled = Boolean(item.ambiguousSocialTrack);
-    button.onclick = () => chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item }, (result) => {
+    button.onclick = () => {
+      const traceId = globalThis.ADM_DIAG?.begin("popup.download_clicked", { url: item.url, kind: item.kind }) || crypto.randomUUID();
+      return chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { ...item, traceId } }, (result) => {
+      void globalThis.ADM_DIAG?.emit("popup.download_reply", { ok: Boolean(result?.ok), errorRef: result?.error || "" }, traceId, result?.ok ? "INFO" : "ERROR");
       if (result?.target === "error" || chrome.runtime.lastError) {
         showBridgeError(result?.error || chrome.runtime.lastError?.message || "unavailable");
       }
     });
+    };
     root.append(row);
   }
   updateBulk();
@@ -305,6 +318,7 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
     chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_SCAN" }, { frameId: 0 }, async (response) => {
       const error = chrome.runtime.lastError;
       const scanned = error ? [] : (response?.media || []);
+      void globalThis.ADM_DIAG?.emit("popup.frame0_reply", { ok: !error, count: scanned.length, errorRef: error?.message || "" }, null, error ? "WARN" : "INFO");
       const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA", tabId: tab.id }).catch(() => null);
       const network = (captured?.media || []).map((item) => {
         const video = networkMediaKind(item) === "video";
@@ -321,6 +335,7 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
         };
       });
       media = mergeDetectedMedia(scanned, network, tab.url);
+      void globalThis.ADM_DIAG?.emit("popup.merged_inventory", { domCount: scanned.length, networkCount: network.length, mergedCount: media.length });
       const picker = await chrome.runtime.sendMessage({ type: "APOCALIPSE_MEDIA_PICKER_CONTEXT", tabId: tab.id }).catch(() => null);
       const requested = document.querySelector("#requested-media");
       if (picker?.context) {

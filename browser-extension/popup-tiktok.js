@@ -1,4 +1,5 @@
 (() => {
+  globalThis.ADM_DIAG?.register("popup-tiktok.js");
   const isTikTok = (value) => {
     try { return /(^|\.)tiktok\.com$/i.test(new URL(value).hostname); } catch { return false; }
   };
@@ -70,7 +71,11 @@
         }
         return found;
       },
-    }).catch(() => []);
+    }).catch(error => {
+      void globalThis.ADM_DIAG?.emit("popup.all_frames_failed", { errorRef: String(error) }, null, "ERROR");
+      return [];
+    });
+    void globalThis.ADM_DIAG?.emit("popup.all_frames_reply", { frames: results.length, candidates: results.reduce((n,e) => n + (e.result?.length || 0),0) });
     return results.flatMap(entry => Array.isArray(entry.result) ? entry.result : []);
   }
 
@@ -85,6 +90,8 @@
     }
     const best = [...unique.values()][0];
     if (!best) return;
+    void globalThis.ADM_DIAG?.emit("popup.all_frames_selection", { url: best.url, candidates: candidates.length,
+      reason: "viewport_heuristic_not_proven_binding", bindingProven: false }, null, "WARN");
     const identified = {
       url: best.url,
       extractorUrl: best.url,

@@ -535,6 +535,7 @@ function applyAppearance(settings = readAppearance()) {
   document.documentElement.style.setProperty("--corner-radius", settings.roundedEnabled ? `${radius}px` : "0px");
 }
 applyAppearance();
+let pendingDiagnosticTrace = null;
 let pendingReferer = null;
 let pendingDuration = null;
 let pendingTitle = null;
@@ -568,7 +569,7 @@ const invoke = (command, args = {}) => {
   const bridge = window.__TAURI__?.core?.invoke;
   if (!bridge) throw new Error("Desktop bridge unavailable in preview");
   const started = performance.now();
-  const quiet = new Set(["list_downloads", "read_general_log", "get_bridge_pairing"]);
+  const quiet = new Set(["list_downloads", "read_general_log", "get_bridge_pairing", "read_clipboard_link", "take_bridge_download", "diagnostics_status"]);
   if (!quiet.has(command) && command !== "record_ui_diagnostic") bridge("record_ui_diagnostic", { level: "DEBUG", event: "command_started", detail: `command=${command}` }).catch(() => {});
   return bridge(command, args).then((result) => {
     if (!quiet.has(command) && command !== "record_ui_diagnostic") bridge("record_ui_diagnostic", { level: "DEBUG", event: "command_completed", detail: `command=${command} duration_ms=${Math.round(performance.now() - started)}` }).catch(() => {});
@@ -1258,6 +1259,7 @@ document.querySelectorAll("#add,#empty-add").forEach(
       document.querySelector("#analysis").hidden = true;
       document.querySelector("#enqueue").hidden = true;
       document.querySelector("#analyze").hidden = false;
+      pendingDiagnosticTrace = null;
       pendingReferer = null;
       pendingDuration = null;
       pendingTitle = null;
@@ -1912,6 +1914,7 @@ document.querySelector("#enqueue").onclick = async () => {
         bandwidthLimit: Math.round((Number(document.querySelector("#download-bandwidth-limit").value) || 0) * 1024 * 1024) || null,
         connectionsOverride: Number(document.querySelector("#task-connections").value) || 8,
         context: {
+          traceId: pendingDiagnosticTrace,
           referer: pendingReferer,
           knownDuration: pendingDuration,
           title: pendingTitle,
@@ -1983,6 +1986,7 @@ setInterval(async () => {
     // especially important on SPA feeds such as TikTok, where the clipboard may
     // still contain a previously copied reel while the extension sends a new one.
     if (dialog.open) return;
+    pendingDiagnosticTrace = null;
     pendingReferer = null;
     pendingDuration = null;
     pendingTitle = null;
@@ -2017,6 +2021,7 @@ async function consumeBridgeDownload() {
     const request = await invoke("take_bridge_download", { currentUrl });
     if (!request) return;
     lastClipboardLink = request.url;
+    pendingDiagnosticTrace = request.traceId || null;
     pendingReferer = request.pageUrl || null;
     pendingDuration = Number.isFinite(request.duration) ? request.duration : null;
     pendingTitle = request.title || null;
@@ -2050,6 +2055,7 @@ async function consumeBridgeDownload() {
     await refreshDestinationHistory();
     await invoke("activate_main_window");
     if (!dialog.open) dialog.showModal();
+    invoke("record_ui_diagnostic", { level: "INFO", event: "save_dialog_opened", detail: `trace=${pendingDiagnosticTrace || "none"}` }).catch(() => {});
     document.querySelector("#url").focus();
   } catch (error) { console.error(error); }
   finally { consumingBridgeDownload = false; }

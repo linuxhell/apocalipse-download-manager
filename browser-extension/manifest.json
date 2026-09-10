@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.101",
+  "version": "0.3.102",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -60,6 +60,8 @@
         "https://*.tiktok.com/*"
       ],
       "js": [
+        "diagnostics-core.js",
+        "diagnostics.js",
         "tiktok-identity.js",
         "content.js"
       ],
@@ -72,6 +74,8 @@
         "https://*.tiktok.com/*"
       ],
       "js": [
+        "diagnostics-core.js",
+        "diagnostics.js",
         "tiktok-identity.js",
         "tiktok-media-fix.js",
         "content.js"
