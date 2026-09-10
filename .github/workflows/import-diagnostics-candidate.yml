@@ -1,5 +1,5 @@
-# One-time source import for the owner's diagnostic test candidate.
-# This workflow NEVER creates a release or a tag; it pushes this branch only.
+# One-time source import; no releases or tags, this branch only.
+# Workflow-file changes are performed separately through the owner's connector.
 name: Prepare diagnostics test candidate
 
 on:
@@ -34,18 +34,19 @@ jobs:
           subprocess.run(['git','merge-base','--is-ancestor','f40d5227aea77c453c714a26bc60377d4035a854','HEAD'], check=True)
           source = pathlib.Path('.github/diagnostics-import')
           encoded = ''.join((source / f'part-{i}.b64').read_text().strip() for i in range(3))
-          packed = base64.b64decode(encoded, validate=True)
           decoder = lzma.LZMADecompressor(memlimit=256 * 1024 * 1024)
-          patch = decoder.decompress(packed, max_length=200000)
-          assert decoder.eof and not decoder.unused_data, 'Incomplete or oversized source patch'
-          assert len(patch) == 139459, f'Wrong patch size: {len(patch)}'
-          assert hashlib.sha256(patch).hexdigest() == '4934ae0f77f0d7137f047af4d7232eeafc4aeb6b6372ecaef9ae110e3d6fac76', 'Patch checksum mismatch'
+          patch = decoder.decompress(base64.b64decode(encoded, validate=True), max_length=200000)
+          assert decoder.eof and not decoder.unused_data
+          assert len(patch) == 139459
+          assert hashlib.sha256(patch).hexdigest() == '4934ae0f77f0d7137f047af4d7232eeafc4aeb6b6372ecaef9ae110e3d6fac76'
           path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'diagnostics-v3.patch'
           path.write_bytes(patch)
           subprocess.run(['git','apply','--check',str(path)], check=True)
           subprocess.run(['git','apply',str(path)], check=True)
           shutil.rmtree(source)
-          pathlib.Path('.github/workflows/import-diagnostics-candidate.yml').unlink()
+          # GITHUB_TOKEN cannot maintain workflow files. Restore them unchanged;
+          # the connected owner performs those writes separately.
+          subprocess.run(['git','restore','--source=HEAD','--worktree','.github/workflows'], check=True)
       - name: Format Rust and test JavaScript
         shell: bash
         run: |
@@ -54,7 +55,7 @@ jobs:
           for file in browser-extension/*.js apps/desktop/ui/*.js; do node --check "$file"; done
           node --test tests/*.test.cjs
           git diff --check
-      - name: Commit formatted test source on candidate branch only
+      - name: Commit formatted source on candidate branch only
         shell: bash
         run: |
           set -euo pipefail
