@@ -23,8 +23,7 @@ jobs:
           node-version: '22'
       - name: Test extension handoffs
         run: |
-          node --check browser-extension/background.js
-          node --check browser-extension/popup.js
+          for script in browser-extension/*.js; do node --check "$script"; done
           node --test tests/*.test.cjs
       - name: Package extension candidates
         shell: python
@@ -37,7 +36,7 @@ jobs:
           version = manifest['version']
           firefox = copy.deepcopy(manifest)
           worker = firefox.pop('background')['service_worker']
-          firefox['background'] = {'scripts': [worker]}
+          firefox['background'] = {'scripts': ['diagnostics.js', 'diagnostics-worker.js', worker]}
           firefox['browser_specific_settings'] = {'gecko': {
               'id': 'apocalipse-download-manager@linuxhell',
               'strict_min_version': '140.0',
@@ -57,6 +56,18 @@ jobs:
         with:
           name: browser-extension-candidates
           path: dist/*
+          retention-days: 14
+          if-no-files-found: error
+      - name: Record tested source
+        run: |
+          mkdir -p /tmp/tested-source
+          git archive --format=zip HEAD > /tmp/tested-source/tested-source.zip
+          git rev-parse HEAD > /tmp/tested-source/commit.txt
+          git rev-parse 'HEAD^{tree}' > /tmp/tested-source/tree.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tested-diagnostic-source
+          path: /tmp/tested-source/*
           retention-days: 14
           if-no-files-found: error
 
