@@ -9,15 +9,22 @@
       invalidate() { revision += 1; },
       beginRead() { return { revision, sequence: ++requested }; },
       acceptRead(ticket, tasks) {
-        if (ticket.revision !== revision || ticket.sequence < applied) return null;
+        if (ticket.revision !== revision || ticket.sequence < applied) {
+          root.ADM_TASK_DIAGNOSTICS?.("snapshot_discarded", { revision, requestedRevision: ticket.revision, sequence: ticket.sequence, applied });
+          return null;
+        }
         applied = ticket.sequence;
-        return visible(tasks);
+        const result = visible(tasks);
+        if (result.length !== tasks.length) root.ADM_TASK_DIAGNOSTICS?.("removed_id_filtered", { count: tasks.length - result.length });
+        return result;
       },
       beginRemoval(ids) {
+        root.ADM_TASK_DIAGNOSTICS?.("removal_started", { taskRefs: ids, revision });
         revision += 1;
         for (const id of ids) removing.add(id);
       },
       finishRemoval(ids, succeeded) {
+        root.ADM_TASK_DIAGNOSTICS?.("removal_finished", { taskRefs: ids, succeeded, revision });
         revision += 1;
         for (const id of ids) {
           removing.delete(id);

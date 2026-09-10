@@ -6,33 +6,38 @@
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
-    <header><strong>APOCALIPSE</strong><span data-i18n="mediaIntelligence"></span></header>
+    <header><span><strong>APOCALIPSE</strong><small id="extension-version"></small></span><span class="connection"><i id="bridge-dot"></i><span id="bridge-label" data-i18n="disconnected">Disconnected</span></span><button id="settings-toggle" type="button" aria-expanded="false" aria-label="Settings">⚙</button></header>
     <section class="pairing">
-      <i id="bridge-dot"></i>
-      <span id="bridge-label" data-i18n="disconnected">Disconnected</span>
       <input id="pairing-token" type="password" data-i18n-placeholder="pairingToken" placeholder="Pairing token">
       <button id="connect" data-i18n="connect">Connect</button>
     </section>
-    <section class="language">
+    <section id="compact-settings" hidden>
+    <div class="language">
       <select id="language" aria-label="Language">
         <option value="en">English</option>
         <option value="pt_BR">Português (Brasil)</option>
         <option value="zh_CN">简体中文</option>
       </select>
-    </section>
-    <section class="shortcuts">
+    </div>
+    <div class="shortcuts">
       <label><span data-i18n="forceShortcut">Force Apocalipse</span><select id="force-shortcut"><option>Shift</option><option>Alt</option><option value="Control">Ctrl</option></select></label>
       <label><span data-i18n="bypassShortcut">Bypass Apocalipse</span><select id="bypass-shortcut"><option>Alt</option><option>Shift</option><option value="Control">Ctrl</option></select></label>
+    </div>
     </section>
     <nav>
       <button data-kind="video" data-i18n="video" class="active"></button>
       <button data-kind="audio" data-i18n="audio"></button>
       <button data-kind="image" data-i18n="images"></button>
+      <button data-kind="logs" data-i18n="logs"></button>
     </nav>
     <section id="requested-media" hidden><img alt=""><div><small data-i18n="requestedMedia"></small><b></b></div></section>
     <section id="bulk-actions"><label><input id="select-all" type="checkbox"><span data-i18n="selectAll"></span></label><button id="download-selected" data-i18n="downloadSelected" disabled></button></section>
-    <main id="items"></main>
+    <main><div id="items"></div><section id="logs-panel" hidden><section class="diag-controls"><div><button type="button" data-action="start"></button><button type="button" data-action="mark"></button><button type="button" data-action="stop"></button></div><small role="status"></small><p></p></section></section></main>
     <template id="row"><article><input class="media-select" type="checkbox"><span class="preview"><img alt=""></span><span class="audio-icon" hidden>♫</span><div><b></b><small></small></div><span class="row-actions"><button class="external-preview"></button><button class="download-item">Download</button></span></article></template>
+    <script src="diagnostics-core.js"></script>
+    <script src="diagnostics.js"></script>
     <script src="popup.js"></script>
+    <script src="diagnostics-popup.js"></script>
+    <script src="popup-tiktok.js"></script>
   </body>
 </html>

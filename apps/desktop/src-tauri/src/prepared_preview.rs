@@ -119,7 +119,11 @@ pub(super) fn open(
             .join("previews"),
     )?;
     let app = app.clone();
-    let trace = uuid::Uuid::new_v4().to_string();
+    let trace = request
+        .trace_id
+        .clone()
+        .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     diagnostic_log(
         state,
         "INFO",
@@ -149,6 +153,13 @@ pub(super) fn open(
                 return;
             }
         };
+        app.state::<AppState>().diagnostics.record(
+            "preview.streams_verified",
+            "INFO",
+            Some(&trace),
+            None,
+            serde_json::json!({"verified":true,"pictureAndSoundNotObserved":true}),
+        );
         // Remove the credential jar before starting an external player.
         let _ = fs::remove_file(work.0.join("cookies.txt"));
         let configured = settings
@@ -159,6 +170,13 @@ pub(super) fn open(
         let mut command = tiktok_preview::player_command(&player, &media.to_string_lossy());
         match command.spawn() {
             Ok(mut child) => {
+                app.state::<AppState>().diagnostics.record(
+                    "preview.player_process_started",
+                    "INFO",
+                    Some(&trace),
+                    None,
+                    serde_json::json!({"pid":child.id(),"playbackConfirmed":false}),
+                );
                 diagnostic_log(
                     &app.state::<AppState>(),
                     "INFO",

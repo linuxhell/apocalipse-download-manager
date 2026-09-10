@@ -1,19 +1,233 @@
-# Release publication is intentionally disabled by the repository owner.
-# Test builds are produced ONLY by validate-portable.yml as Actions artifacts.
-# Do not restore push/tag publication without a new explicit owner request.
-name: Release publication disabled
+name: Release builds
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-publication
+  cancel-in-progress: false
+
 jobs:
-  publication-disabled:
-    runs-on: ubuntu-latest
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64 portable
+            os: windows-latest
+            artifact: apocalipse-download-manager-windows-x64-portable
+            output: apocalipse-download-manager-windows-x64-portable.zip
+          - name: Linux x64 portable
+            os: ubuntu-latest
+            artifact: apocalipse-download-manager-linux-x64-portable
+            output: apocalipse-download-manager-linux-x64-portable.tar.gz
+          - name: macOS portable
+            os: macos-latest
+            artifact: apocalipse-download-manager-macos-portable
+            output: apocalipse-download-manager-macos-portable.zip
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     steps:
-      - name: Explain test-only policy
+      - uses: actions/checkout@v4
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf ffmpeg
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Validate
+        shell: bash
         run: |
-          echo 'Release publication is disabled. Use Validate portable candidates.'
-          echo 'No release, tag, or release asset is created by this workflow.'
+          cargo fmt --all -- --check
+          cargo test --workspace --locked
+
+      - name: Verify prepared media with FFmpeg and FFprobe
+        if: runner.os == 'Linux'
+        run: cargo test -p apocalipse-desktop --locked paired_preview_uses_real_mux_and_probe -- --ignored
+      - name: Build desktop
+        run: cargo build --release --locked -p apocalipse-desktop
+
+      - name: Stage Windows portable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $package = "dist/Apocalipse Download Manager"
+          New-Item -ItemType Directory -Force $package | Out-Null
+          Copy-Item "target/release/apocalipse-desktop.exe" "$package/Apocalipse Download Manager.exe"
+          Copy-Item "README.md","LICENSE" $package
+          Compress-Archive -Path $package -DestinationPath "dist/${{ matrix.output }}" -Force
+
+      - name: Stage Linux portable
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          package="dist/Apocalipse Download Manager"
+          mkdir -p "$package"
+          install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
+          cp README.md LICENSE "$package/"
+          tar -C dist -czf "dist/${{ matrix.output }}" "Apocalipse Download Manager"
+
+      - name: Stage macOS portable
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app="dist/Apocalipse Download Manager.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
+          chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
+          cp packaging/macos/Info.plist "$app/Contents/Info.plist"
+          python3 - "$app/Contents/Info.plist" <<'PYMAC'
+          import plistlib
+          import sys
+          import tomllib
+
+          with open("Cargo.toml", "rb") as stream:
+              version = tomllib.load(stream)["workspace"]["package"]["version"]
+          version = version.split("-", 1)[0].split("+", 1)[0]
+          path = sys.argv[1]
+          with open(path, "rb") as stream:
+              info = plistlib.load(stream)
+          info["CFBundleShortVersionString"] = version
+          info["CFBundleVersion"] = version
+          with open(path, "wb") as stream:
+              plistlib.dump(info, stream, sort_keys=False)
+          PYMAC
+          cp README.md LICENSE "$app/Contents/Resources/"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "dist/${{ matrix.output }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.output }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish clean release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate extension handoffs before publication
+        run: |
+          node --check browser-extension/background.js
+          node --check browser-extension/popup.js
+          node --test tests/*.test.cjs
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Package current browser extensions
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 -c "import json; print(json.load(open('browser-extension/manifest.json'))['version'])")
+          stage=$(mktemp -d)
+          cp -R browser-extension "$stage/chromium"
+          (cd "$stage/chromium" && zip -qr "$GITHUB_WORKSPACE/dist/apocalipse-chrome-${version}.zip" .)
+          cp "$GITHUB_WORKSPACE/dist/apocalipse-chrome-${version}.zip" "$GITHUB_WORKSPACE/dist/apocalipse-edge-${version}.zip"
+
+          signed="packaging/firefox/apocalipse-firefox-${version}.xpi"
+          if [[ -f "$signed" ]]; then
+            cp "$signed" "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
+          else
+            cp -R browser-extension "$stage/firefox"
+            python3 - "$stage/firefox/manifest.json" <<'PY'
+          import json
+          import sys
+
+          path = sys.argv[1]
+          with open(path, encoding="utf-8") as stream:
+              manifest = json.load(stream)
+          worker = manifest.pop("background", {}).get("service_worker")
+          if not worker:
+              raise SystemExit("Chromium background service worker is missing")
+          manifest["background"] = {"scripts": [worker]}
+          manifest["browser_specific_settings"] = {
+              "gecko": {
+                  "id": "apocalipse-download-manager@linuxhell",
+                  "strict_min_version": "140.0",
+                  "data_collection_permissions": {
+                      "required": [
+                          "authenticationInfo",
+                          "browsingActivity",
+                          "websiteContent"
+                      ]
+                  }
+              }
+          }
+          with open(path, "w", encoding="utf-8") as stream:
+              json.dump(manifest, stream, ensure_ascii=False, indent=2)
+              stream.write("\n")
+          PY
+            (cd "$stage/firefox" && zip -qr "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}-unsigned.xpi" .)
+          fi
+
+      - name: Publish validated release without replacing another commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")
+          tag="v${version}"
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "$tag" ]]; then
+            echo "::error::Release tag must match Cargo version: $tag"
+            exit 1
+          fi
+
+          # Never move an existing version tag to a different commit.
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            git fetch --no-tags origin "refs/tags/$tag"
+            tagged_commit=$(git rev-parse 'FETCH_HEAD^{commit}')
+            if [[ "$tagged_commit" != "$GITHUB_SHA" ]]; then
+              echo "::error::$tag already belongs to another commit. Bump the application version before publishing new changes."
+              exit 1
+            fi
+          else
+            status=$?
+            if [[ "$status" -ne 2 ]]; then
+              echo "::error::Could not check the remote release tag."
+              exit "$status"
+            fi
+            git tag "$tag" "$GITHUB_SHA"
+            git push origin "refs/tags/$tag"
+          fi
+
+          # Retries may finish an unpublished draft, but never erase a live release.
+          if is_draft=$(gh release view "$tag" --json isDraft --jq '.isDraft'); then
+            if [[ "$is_draft" != true ]]; then
+              echo "::notice::$tag is already published for this commit; leaving its assets unchanged."
+              exit 0
+            fi
+          else
+            prerelease=()
+            if [[ "$version" == *-* ]]; then
+              prerelease=(--prerelease)
+            fi
+            gh release create "$tag" --verify-tag --generate-notes --draft "${prerelease[@]}"
+          fi
+          (cd dist && sha256sum apocalipse-*) > dist/SHA256SUMS.txt
+          gh release upload "$tag" dist/* --clobber
+          gh release edit "$tag" --draft=false

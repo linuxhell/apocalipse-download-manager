@@ -94,6 +94,14 @@ test('buttons keep their exact video reference, not the nearest player geometry'
   assert.equal(f.api.videoFor(button), b.video); assert.notEqual(f.api.videoFor(button), a.video);
   b.video.isConnected = false; assert.equal(f.api.videoFor(button), null);
 });
+test('button binding survives a resolver realm restart without guessing another player', () => {
+  const f = fixture(); const a = f.card('111', 'blob:a'), b = f.card('222', 'blob:b');
+  const button = {}; f.api.bind(button, b.video);
+  vm.runInContext(script, f.context);
+  const restarted = f.context.ApocalipseTikTokIdentity;
+  assert.equal(restarted.videoFor(button), b.video);
+  assert.notEqual(restarted.videoFor(button), a.video);
+});
 test('unsafe integer IDs and spoofed TikTok hosts are rejected', () => {
   const f = fixture(); const a = f.card('111', 'blob:current'); a.root.children = [a.video];
   a.root.__reactProps$test = { item: { id: 9007199254740993, author: { uniqueId: 'creator' } } };

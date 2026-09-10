@@ -1,3 +1,6 @@
+try { if (typeof importScripts === "function") importScripts("diagnostics-core.js", "diagnostics-worker.js"); }
+catch { console.warn("ADM diagnostics modules unavailable; download handling is preserved."); }
+
 const BRIDGE = "http://127.0.0.1:17654";
 const HEARTBEAT_ALARM = "apocalipse-bridge-heartbeat";
 let bridgeConnected = false;
@@ -28,6 +31,8 @@ if (chrome.webRequest?.onResponseStarted) {
       .test((() => { try { return new URL(details.url).hostname; } catch { return ""; } })())
       && (/^(?:video|audio)\//i.test(contentType)
         || /(?:\/video\/tos\/|\/aweme\/v1\/play\/|mime_type=video|\.mp4(?:$|[?]))/i.test(details.url));
+    void globalThis.ADM_DIAG_WORKER?.network(details, isSocialTabMedia,
+      isSocialTabMedia ? "accepted_by_capture_filter" : /^(?:video|audio)\//i.test(contentType) ? "host_not_in_capture_filter" : "not_classified_as_media");
     if (isSocialTabMedia) {
       recentMediaResponses.push({
         tabId: details.tabId,
@@ -407,6 +412,7 @@ chrome.downloads.onChanged.addListener((delta) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (globalThis.ADM_DIAG_WORKER?.message(message, sender, reply)) return true;
   if (message?.type === "APOCALIPSE_WORKER_PING") {
     reply({ ok: true, version: chrome.runtime.getManifest().version });
     return;
@@ -418,6 +424,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       .filter((item) => item.tabId === tabId && item.capturedAt >= cutoff)
       .sort((left, right) => right.capturedAt - left.capturedAt)
       .slice(0, 30);
+    void globalThis.ADM_DIAG_WORKER?.emit("capture.worker_inventory", { count: media.length, retained: recentMediaResponses.length, cutoffMs: 120000 }, null, "INFO", tabId);
     reply({ media: media.map((item) => ({ ...item, ageMs: Date.now() - item.capturedAt })) });
     return;
   }
@@ -446,7 +453,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     }
     const contentType = pageExtractor ? null : message.contentType || null;
     const userAgent = message.userAgent || navigator.userAgent;
-    const traceId = crypto.randomUUID();
+    const traceId = /^[a-f0-9-]{36}$/i.test(message.traceId || "") ? message.traceId : crypto.randomUUID();
+    void globalThis.ADM_DIAG_WORKER?.emitForSender(sender, "handoff.received", { kind: "apocalipse_preview_media", stage: "worker", url }, traceId, "INFO");
     (async () => {
       const check = value => {
         let parsed;
@@ -471,12 +479,14 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       ]);
       return bridgeRequest("/v1/preview-media", {
         method: "POST",
-        body: JSON.stringify({ url, audioUrl, mediaKind, pageExtractor, userAgent, referer, cookieHeader, audioCookieHeader, contentType }),
+        body: JSON.stringify({ traceId, url, audioUrl, mediaKind, pageExtractor, userAgent, referer, cookieHeader, audioCookieHeader, contentType }),
       });
     })().then(result => {
+      void globalThis.ADM_DIAG_WORKER?.emitForSender(sender, "handoff.preview_reply", { ok: result?.ok !== false, preparing: Boolean(result?.preparing) }, traceId, result?.ok === false ? "ERROR" : "INFO");
       void diagnostic(result?.ok === false ? "popup.preview_failed" : "popup.preview_handed_off", { traceId, url, pageUrl: referer, startedAt: Date.now() }, result?.ok === false ? { level: "ERROR", error: String(result.error || "preview_failed") } : {});
       reply(result);
     }).catch(error => {
+      void globalThis.ADM_DIAG_WORKER?.emitForSender(sender, "handoff.failed", { errorRef: String(error), stage: "worker" }, traceId, "ERROR");
       void diagnostic("popup.preview_failed", { traceId, url, pageUrl: referer, startedAt: Date.now() }, { level: "ERROR", error: String(error) });
       reply({ ok: false, error: String(error) });
     });
@@ -507,7 +517,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
   if (message?.type === "APOCALIPSE_DOWNLOAD") {
     const item = message.item || {};
-    const traceId = crypto.randomUUID();
+    const traceId = /^[a-f0-9-]{36}$/i.test(item.traceId || "") ? item.traceId : crypto.randomUUID();
+    void globalThis.ADM_DIAG_WORKER?.emitForSender(sender, "handoff.received", { kind: "apocalipse_download", stage: "worker", url: item.extractorUrl || item.url }, traceId, "INFO");
     (async () => {
       const pageUrl = await sourcePageUrl(sender);
       let downloadUrl = item.extractorUrl || item.url;
@@ -526,6 +537,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       return bridgeRequest("/v1/download", {
       method: "POST",
       body: JSON.stringify({
+        traceId,
         url: downloadUrl,
         audioUrl: item.audioUrl || null,
         fileName: mediaDownloadFileName(item),
@@ -545,9 +557,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       }),
       });
     })().then((result) => {
+      void globalThis.ADM_DIAG_WORKER?.emitForSender(sender, "handoff.download_reply", { ok: true, taskId: result?.taskId || null, prompt: !result?.taskId }, traceId, "INFO");
       void diagnostic("popup.download_handed_off", { traceId, url: item.url, pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { detail: `kind=${item.kind || "unknown"} thumbnail=${Boolean(item.thumbnail)}` });
       reply({ ok: true, target: "desktop", ...result });
     }).catch((error) => {
+      void globalThis.ADM_DIAG_WORKER?.emitForSender(sender, "handoff.failed", { errorRef: String(error), stage: "worker" }, traceId, "ERROR");
       void diagnostic("popup.download_failed", { traceId, url: item.url, pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { level: "ERROR", error: String(error), detail: `kind=${item.kind || "unknown"}` });
       reply({ ok: false, target: "error", error: String(error) });
     });
@@ -555,7 +569,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
   if (message?.type === "APOCALIPSE_DOWNLOAD_BATCH") {
     const items = Array.isArray(message.items) ? message.items.filter((item) => item?.url).slice(0, 100) : [];
-    const traceId = crypto.randomUUID();
+    const traceId = /^[a-f0-9-]{36}$/i.test(message.traceId || "") ? message.traceId : crypto.randomUUID();
+    void globalThis.ADM_DIAG_WORKER?.emitForSender(sender, "handoff.received", { kind: "apocalipse_download_batch", stage: "worker", count: items.length }, traceId, "INFO");
     (async () => {
       if (!items.length) throw new Error("empty_batch");
       const pageUrl = await sourcePageUrl(sender);
@@ -566,6 +581,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         const result = await bridgeRequest("/v1/download", {
           method: "POST",
           body: JSON.stringify({
+            traceId,
             url: item.extractorUrl || item.url,
             audioUrl: item.audioUrl || null,
             fileName: mediaDownloadFileName(item),

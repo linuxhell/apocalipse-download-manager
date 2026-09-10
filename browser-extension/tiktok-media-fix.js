@@ -1,4 +1,5 @@
 (() => {
+  globalThis.ADM_DIAG?.register("tiktok-media-fix.js");
   const videoForButton = button => globalThis.ApocalipseTikTokIdentity?.videoFor(button) || null;
   const permalinkFor = video => globalThis.ApocalipseTikTokIdentity?.resolve(video) || null;
 
@@ -18,14 +19,28 @@
     const button = event.target?.closest?.(".apocalipse-media-download:not(.apocalipse-media-record)");
     if (!button) return;
     const video = videoForButton(button);
-    if (!video) return;
+    if (!video) {
+      void globalThis.ADM_DIAG?.emit("overlay.binding_missing", { reason: "no_video_for_button", identityAvailable: Boolean(globalThis.ApocalipseTikTokIdentity) }, null, "WARN");
+      return;
+    }
+    const actionId = globalThis.ADM_DIAG?.begin("overlay.click", { ...globalThis.ADM_DIAG.player(video), handler: "tiktok" }) || crypto.randomUUID();
     event.preventDefault();
     event.stopImmediatePropagation();
+    chrome.runtime.sendMessage({
+      type: "APOCALIPSE_CAPTURE_TRACE",
+      eventName: "tiktok_overlay_handler_claimed",
+      mode: "download",
+      traceId: actionId,
+      pageUrl: location.href,
+      at: Date.now(),
+      detail: { topFrame: window === window.top, hasBoundVideo: true },
+    }).catch(() => {});
     const original = button.textContent;
     const clickSource = String(video.currentSrc || video.src || "");
     const clickPage = location.href;
     button.textContent = "…";
     const url = permalinkFor(video);
+    void globalThis.ADM_DIAG?.emit("identity.overlay_result", { ...globalThis.ADM_DIAG.player(video), resolved: Boolean(url), permalinkUrl: url || "" }, actionId, url ? "INFO" : "WARN");
     // A permalink is a complete extractor task, never a hint for selecting a
     // possibly audio-only/video-only CDN response from the same tab.
     const captured = !url
@@ -33,6 +48,7 @@
       : null;
     const capturedMedia = Array.isArray(captured?.media) ? captured.media : [];
     if (!video.isConnected || clickSource !== String(video.currentSrc || video.src || "") || clickPage !== location.href) {
+      void globalThis.ADM_DIAG?.emit("overlay.player_changed", { reason: "player_changed_during_lookup" }, actionId, "WARN");
       button.textContent = "!";
       button.title = "O vídeo mudou. Clique novamente no vídeo atual.";
       setTimeout(() => { button.textContent = original; }, 2500);
@@ -66,6 +82,7 @@
         .sort((left, right) => Math.abs(left.capturedAt - videoItem.capturedAt) - Math.abs(right.capturedAt - videoItem.capturedAt))
       : [];
     const selectedUrl = url || videoItem?.url || liveHttpUrl;
+    void globalThis.ADM_DIAG?.emit("capture.overlay_inventory", { candidates: capturedMedia.length, selected: Boolean(selectedUrl), url: selectedUrl || "", matchedPlayer: Boolean(videoItem), pageExtractor: Boolean(url) }, actionId);
     const tiedAudio = audioCandidates.length > 1
       && Math.abs(audioCandidates[0].capturedAt - videoItem.capturedAt) === Math.abs(audioCandidates[1].capturedAt - videoItem.capturedAt);
     const audioUrl = url || tiedAudio ? null : audioCandidates[0]?.url || null;
@@ -74,7 +91,7 @@
       type: "APOCALIPSE_CAPTURE_TRACE",
       eventName: "tiktok_browser_media_selection",
       mode: "download",
-      traceId: crypto.randomUUID(),
+      traceId: actionId,
       pageUrl: location.href,
       at: Date.now(),
       detail: {
@@ -119,6 +136,7 @@
     chrome.runtime.sendMessage({
       type: "APOCALIPSE_DOWNLOAD",
       item: {
+        traceId: actionId,
         url: selectedUrl,
         duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null,
         audioUrl,
@@ -132,6 +150,7 @@
       },
     }, (result) => {
       const failed = chrome.runtime.lastError || !result?.ok;
+      void globalThis.ADM_DIAG?.emit("overlay.handoff_reply", { ok: !failed, errorRef: result?.error || "" }, actionId, failed ? "ERROR" : "INFO");
       button.textContent = failed ? "⚠" : "✓";
       button.title = failed
         ? result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable"

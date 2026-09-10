@@ -21,12 +21,20 @@ test('paired direct preview preserves video AND audio identity', () => {
   const result = preview(item, 'https://www.tiktok.com/');
   assert.equal(result.url, item.url); assert.equal(result.audioUrl, item.audioUrl); assert.equal(result.mediaKind, 'video');
 });
-test('isolated incomplete videos stay visible but disabled; explicit audio remains playable', () => {
+test('an explicitly selected video can be previewed so the user can identify the current reel', () => {
   const item = { url: 'https://v16.tiktok.com/track.mp4', ambiguousSocialTrack: true, kind: 'video' };
-  assert.equal(preview(item, 'https://www.tiktok.com/'), null);
+  assert.ok(preview(item, 'https://www.tiktok.com/'));
   assert.ok(preview({ ...item, kind: 'audio' }, 'https://www.tiktok.com/'));
   assert.ok(source.includes('previewButton.hidden = item.kind === "image"'));
   assert.ok(source.includes('previewButton.disabled = !previewRequest'));
+});
+test('manual popup handoff keeps the exact URL but clears automatic ambiguity rejection', () => {
+  const item = { url: 'https://v16.tiktok.com/current.mp4', ambiguousSocialTrack: true, kind: 'video' };
+  const selected = context.manualMediaSelection(item);
+  assert.equal(selected.url, item.url);
+  assert.equal(selected.ambiguousSocialTrack, false);
+  assert.equal(selected.manualMediaSelection, true);
+  assert.equal(item.ambiguousSocialTrack, true);
 });
 test('invalid preview sources cannot be passed to the desktop player', () => {
   for (const url of ['file:///secret', 'https://user:pass@host.test/a.mp4', 'blob:x', '?onlyquery=1']) {

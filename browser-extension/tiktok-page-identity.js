@@ -6,6 +6,7 @@
     if (video?.tagName !== 'VIDEO' || !video.isConnected) return;
     const source = String(video.currentSrc || video.src || '');
     const url = identity.resolveLocal(video, false);
+    video.setAttribute('data-apocalipse-identity-diagnostic', JSON.stringify(identity.diagnosticState?.(video) || { reason: 'reader_ready' }));
     if (url && source === String(video.currentSrc || video.src || '')) {
       video.setAttribute('data-apocalipse-current-permalink', url);
     }

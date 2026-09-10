@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.99",
+  "version": "0.3.107",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -11,7 +11,8 @@
     "alarms",
     "clipboardRead",
     "cookies",
-    "webRequest"
+    "webRequest",
+    "scripting"
   ],
   "host_permissions": [
     "http://127.0.0.1/*",
@@ -29,7 +30,7 @@
         "https://*.tiktok.com/*"
       ],
       "js": [
-        "tiktok-identity.js",
+        "tiktok-main-identity.js",
         "tiktok-page-identity.js"
       ],
       "run_at": "document_start",
@@ -54,8 +55,29 @@
         "http://*/*",
         "https://*/*"
       ],
+      "exclude_matches": [
+        "https://tiktok.com/*",
+        "https://*.tiktok.com/*"
+      ],
       "js": [
+        "diagnostics-core.js",
+        "diagnostics.js",
         "tiktok-identity.js",
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://tiktok.com/*",
+        "https://*.tiktok.com/*"
+      ],
+      "js": [
+        "diagnostics-core.js",
+        "diagnostics.js",
+        "tiktok-identity.js",
+        "tiktok-media-fix.js",
         "content.js"
       ],
       "run_at": "document_start",
@@ -68,17 +90,6 @@
       ],
       "js": [
         "instagram-media-fix.js"
-      ],
-      "run_at": "document_start",
-      "all_frames": false
-    },
-    {
-      "matches": [
-        "https://tiktok.com/*",
-        "https://*.tiktok.com/*"
-      ],
-      "js": [
-        "tiktok-media-fix.js"
       ],
       "run_at": "document_start",
       "all_frames": false

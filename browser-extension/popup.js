@@ -1,3 +1,4 @@
+globalThis.ADM_DIAG?.register("popup.js");
 let media = [], selected = "video", locale = "en", activePageUrl = "";
 const selectedUrls = new Set();
 const SOCIAL_TRACK_PAIR_WINDOW_MS = 8_000;
@@ -53,9 +54,9 @@ const mergeDetectedMedia = (scanned, network, pageUrl) => {
   return pairSocialTracks([...unique.values()], pageUrl);
 };
 const messages = {
-  en: { mediaIntelligence: "Media intelligence", video: "Video", audio: "Audio", images: "Images", download: "Download", externalPreview: "Open in player", incompleteTrack: "Incomplete track", empty: "No media detected in this tab.", unknownSize: "Size unavailable", connected: "Connected to Apocalipse", disconnected: "Disconnected", pairingToken: "Pairing token", connect: "Connect", recommended: "Recommended", capturedResource: "Captured media resource", requestedMedia: "You tried to download", selectAll: "Select all", downloadSelected: "Download selected", forceShortcut: "Force Apocalipse", bypassShortcut: "Bypass Apocalipse" },
-  pt_BR: { mediaIntelligence: "Inteligência de mídia", video: "Vídeo", audio: "Áudio", images: "Imagens", download: "Download", externalPreview: "Abrir no player", incompleteTrack: "Faixa incompleta", empty: "Nenhuma mídia detectada nesta aba.", unknownSize: "Tamanho indisponível", connected: "Conectada ao Apocalipse", disconnected: "Desconectada", pairingToken: "Token de pareamento", connect: "Conectar", recommended: "Recomendada", capturedResource: "Recurso de mídia capturado", requestedMedia: "Você tentou baixar", selectAll: "Selecionar todos", downloadSelected: "Baixar selecionados", forceShortcut: "Forçar Apocalipse", bypassShortcut: "Ignorar Apocalipse" },
-  zh_CN: { mediaIntelligence: "媒体智能", video: "视频", audio: "音频", images: "图片", download: "下载", externalPreview: "在播放器中打开", incompleteTrack: "不完整音视频轨道", empty: "此标签页未检测到媒体。", unknownSize: "大小未知", connected: "已连接到 Apocalipse", disconnected: "未连接", pairingToken: "配对令牌", connect: "连接", recommended: "推荐", capturedResource: "已捕获的媒体资源", requestedMedia: "您尝试下载", selectAll: "全选", downloadSelected: "下载所选项目", forceShortcut: "强制使用 Apocalipse", bypassShortcut: "绕过 Apocalipse" }
+  en: { extension: "Extension", settings: "Settings", mediaIntelligence: "Media intelligence", video: "Videos", audio: "Music", images: "Images", logs: "Logs", download: "Download", externalPreview: "Preview", incompleteTrack: "Incomplete track", empty: "No media detected in this tab.", unknownSize: "Size unavailable", connected: "Connected", disconnected: "Disconnected", pairingToken: "Pairing token", connect: "Connect", recommended: "Recommended", capturedResource: "Captured media resource", requestedMedia: "You tried to download", selectAll: "Select all", downloadSelected: "Download selected", forceShortcut: "Force Apocalipse", bypassShortcut: "Bypass Apocalipse" },
+  pt_BR: { extension: "Extensão", settings: "Configurações", mediaIntelligence: "Inteligência de mídia", video: "Vídeos", audio: "Músicas", images: "Imagens", logs: "Logs", download: "Baixar", externalPreview: "Visualizar", incompleteTrack: "Faixa incompleta", empty: "Nenhuma mídia detectada nesta aba.", unknownSize: "Tamanho indisponível", connected: "Conectado", disconnected: "Desconectado", pairingToken: "Token de pareamento", connect: "Conectar", recommended: "Recomendada", capturedResource: "Recurso de mídia capturado", requestedMedia: "Você tentou baixar", selectAll: "Selecionar tudo", downloadSelected: "Baixar selecionados", forceShortcut: "Forçar Apocalipse", bypassShortcut: "Ignorar Apocalipse" },
+  zh_CN: { extension: "扩展", settings: "设置", mediaIntelligence: "媒体智能", video: "视频", audio: "音乐", images: "图片", logs: "日志", download: "下载", externalPreview: "预览", incompleteTrack: "不完整音视频轨道", empty: "此标签页未检测到媒体。", unknownSize: "大小未知", connected: "已连接", disconnected: "未连接", pairingToken: "配对令牌", connect: "连接", recommended: "推荐", capturedResource: "已捕获的媒体资源", requestedMedia: "您尝试下载", selectAll: "全选", downloadSelected: "下载所选项目", forceShortcut: "强制使用 Apocalipse", bypassShortcut: "绕过 Apocalipse" }
 };
 const t = (key) => messages[locale]?.[key] || messages.en[key] || key;
 const formatBytes = (bytes) => {
@@ -69,9 +70,12 @@ const formatDuration = (seconds) => {
   const hours = Math.floor(seconds / 3600), minutes = Math.floor((seconds % 3600) / 60), rest = Math.floor(seconds % 60);
   return [hours, minutes, rest].filter((_, index) => index || hours).map((value) => String(value).padStart(2, "0")).join(":");
 };
-const translate = () => document.querySelectorAll("[data-i18n]").forEach((element) => {
-  element.textContent = t(element.dataset.i18n);
-});
+const translate = () => {
+  document.querySelectorAll("[data-i18n]").forEach((element) => { element.textContent = t(element.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((element) => { element.placeholder = t(element.dataset.i18nPlaceholder); });
+  document.querySelector("#extension-version").textContent = `${t("extension")} ${chrome.runtime.getManifest().version}`;
+  document.querySelector("#settings-toggle").ariaLabel = t("settings");
+};
 const setBridgeStatus = (connected) => {
   document.querySelector("#bridge-dot").classList.toggle("connected", connected);
   const label = document.querySelector("#bridge-label");
@@ -178,7 +182,6 @@ function previewRequestFor(item, pageUrl) {
   try { parsed = new URL(url); } catch { return null; }
   if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) return null;
   const pageExtractor = Boolean(item.extractorUrl || item.pageExtractor);
-  if (item.ambiguousSocialTrack && item.kind !== "audio" && !pageExtractor && !item.audioUrl) return null;
   return { type: "APOCALIPSE_PREVIEW_MEDIA", url, pageUrl,
     audioUrl: pageExtractor ? null : item.audioUrl || null,
     mediaKind: item.kind, pageExtractor,
@@ -186,11 +189,29 @@ function previewRequestFor(item, pageUrl) {
     userAgent: item.userAgent || null };
 }
 
+// The automatic overlay must never guess between buffered social videos. In
+// the popup, however, clicking a named row is an explicit user selection: let
+// Preview identify it and let Download hand off that exact resource.
+function manualMediaSelection(item) {
+  return item?.ambiguousSocialTrack
+    ? { ...item, ambiguousSocialTrack: false, manualMediaSelection: true }
+    : item;
+}
+
 const render = () => {
   const root = document.querySelector("#items");
   root.textContent = "";
+  const logs = selected === "logs";
+  document.querySelector("#logs-panel").hidden = !logs;
+  root.hidden = logs;
+  document.querySelector("#bulk-actions").hidden = logs;
+  document.querySelector("#requested-media").classList.toggle("tab-hidden", logs);
+  if (logs) return;
   const matches = media.filter((item) => item.kind === selected);
-  const selectable = matches.filter((item) => !item.ambiguousSocialTrack);
+  void globalThis.ADM_DIAG?.emit("popup.render", { videos: media.filter(v => v.kind === "video").length,
+    audio: media.filter(v => v.kind === "audio").length, images: media.filter(v => v.kind === "image").length,
+    displayed: matches.length, disabled: matches.filter(v => v.ambiguousSocialTrack).length, kind: selected });
+  const selectable = matches;
   const updateBulk = () => {
     const chosen = selectable.filter((item) => selectedUrls.has(item.url)).length;
     document.querySelector("#download-selected").disabled = chosen === 0;
@@ -210,7 +231,7 @@ const render = () => {
     const preview = row.querySelector(".preview");
     const metadata = row.querySelector("small");
     const checkbox = row.querySelector(".media-select");
-    checkbox.disabled = Boolean(item.ambiguousSocialTrack);
+    checkbox.disabled = false;
     checkbox.checked = selectedUrls.has(item.url);
     checkbox.onchange = () => { checkbox.checked ? selectedUrls.add(item.url) : selectedUrls.delete(item.url); updateBulk(); };
     const audio = row.querySelector(".audio-icon");
@@ -231,11 +252,16 @@ const render = () => {
     previewButton.hidden = item.kind === "image";
     const previewRequest = previewRequestFor(item, activePageUrl);
     previewButton.disabled = !previewRequest;
+    void globalThis.ADM_DIAG?.emit("popup.row_state", { url: item.url, kind: item.kind,
+      previewEnabled: Boolean(previewRequest), downloadEnabled: true,
+      reason: item.ambiguousSocialTrack ? "manual_selection_available" : previewRequest ? "valid_selection" : "invalid_preview_source" });
     previewButton.title = previewRequest ? t("externalPreview") : t("incompleteTrack");
     previewButton.onclick = () => {
       if (!previewRequest) return;
       previewButton.disabled = true;
-      chrome.runtime.sendMessage(previewRequest, (result) => {
+      const traceId = globalThis.ADM_DIAG?.begin("popup.preview_clicked", { url: previewRequest.url, kind: item.kind }) || crypto.randomUUID();
+      chrome.runtime.sendMessage({ ...previewRequest, traceId }, (result) => {
+        void globalThis.ADM_DIAG?.emit("popup.preview_reply", { ok: Boolean(result?.ok), preparing: Boolean(result?.preparing) }, traceId, result?.ok ? "INFO" : "ERROR");
         previewButton.disabled = false;
         const error = chrome.runtime.lastError?.message || result?.error;
         if (result?.ok && result.preparing) {
@@ -254,12 +280,16 @@ const render = () => {
     };
     const button = row.querySelector(".download-item");
     button.textContent = t("download");
-    button.disabled = Boolean(item.ambiguousSocialTrack);
-    button.onclick = () => chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item }, (result) => {
+    button.disabled = false;
+    button.onclick = () => {
+      const traceId = globalThis.ADM_DIAG?.begin("popup.download_clicked", { url: item.url, kind: item.kind }) || crypto.randomUUID();
+      return chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { ...manualMediaSelection(item), traceId } }, (result) => {
+      void globalThis.ADM_DIAG?.emit("popup.download_reply", { ok: Boolean(result?.ok), errorRef: result?.error || "" }, traceId, result?.ok ? "INFO" : "ERROR");
       if (result?.target === "error" || chrome.runtime.lastError) {
         showBridgeError(result?.error || chrome.runtime.lastError?.message || "unavailable");
       }
     });
+    };
     root.append(row);
   }
   updateBulk();
@@ -273,7 +303,6 @@ document.querySelectorAll("nav button").forEach((button) => {
 });
 document.querySelector("#select-all").onchange = (event) => {
   for (const item of media.filter((value) => value.kind === selected)) {
-    if (item.ambiguousSocialTrack) continue;
     if (event.target.checked) selectedUrls.add(item.url); else selectedUrls.delete(item.url);
   }
   render();
@@ -281,7 +310,7 @@ document.querySelector("#select-all").onchange = (event) => {
 document.querySelector("#download-selected").onclick = async () => {
   const button = document.querySelector("#download-selected");
   button.disabled = true;
-  const items = media.filter((value) => selectedUrls.has(value.url));
+  const items = media.filter((value) => selectedUrls.has(value.url)).map(manualMediaSelection);
   const result = await chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD_BATCH", items }).catch((error) => ({ ok: false, error: String(error) }));
   if (result?.ok) selectedUrls.clear();
   else showBridgeError(result?.error || "unavailable");
@@ -305,6 +334,7 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
     chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_SCAN" }, { frameId: 0 }, async (response) => {
       const error = chrome.runtime.lastError;
       const scanned = error ? [] : (response?.media || []);
+      void globalThis.ADM_DIAG?.emit("popup.frame0_reply", { ok: !error, count: scanned.length, errorRef: error?.message || "" }, null, error ? "WARN" : "INFO");
       const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA", tabId: tab.id }).catch(() => null);
       const network = (captured?.media || []).map((item) => {
         const video = networkMediaKind(item) === "video";
@@ -321,6 +351,7 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
         };
       });
       media = mergeDetectedMedia(scanned, network, tab.url);
+      void globalThis.ADM_DIAG?.emit("popup.merged_inventory", { domCount: scanned.length, networkCount: network.length, mergedCount: media.length });
       const picker = await chrome.runtime.sendMessage({ type: "APOCALIPSE_MEDIA_PICKER_CONTEXT", tabId: tab.id }).catch(() => null);
       const requested = document.querySelector("#requested-media");
       if (picker?.context) {
@@ -397,4 +428,9 @@ document.querySelector("#language").onchange = (event) => {
   chrome.storage.local.set({ language: locale });
   translate();
   render();
+};
+document.querySelector("#settings-toggle").onclick = () => {
+  const panel = document.querySelector("#compact-settings");
+  panel.hidden = !panel.hidden;
+  document.querySelector("#settings-toggle").setAttribute("aria-expanded", String(!panel.hidden));
 };
