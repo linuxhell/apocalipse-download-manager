@@ -1,3 +1,4 @@
+# Release publication re-enabled by explicit repository-owner authorization.
 name: Release builds
 
 on:
