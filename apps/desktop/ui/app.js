@@ -39,9 +39,6 @@ const catalogs = {
     keepFiles: "Keep downloaded and partial files on disk",
     listAndFiles: "Clear list and files",
     deleteFiles: "Permanently delete downloaded and partial files",
-    emptyTitle: "Ready for your next download",
-    emptyText: "Add a URL, drop a torrent, or use the browser extension.",
-    addFirst: "Add your first download",
     bridgeStatus: "Extension bridge not configured",
     newTask: "NEW TASK",
     sourceUrl: "Source URL",
@@ -210,10 +207,6 @@ const catalogs = {
     keepFiles: "Manter no disco os arquivos baixados e parciais",
     listAndFiles: "Limpar lista e arquivos",
     deleteFiles: "Excluir permanentemente os arquivos baixados e parciais",
-    emptyTitle: "Pronto para o próximo download",
-    emptyText:
-      "Adicione uma URL, arraste um torrent ou use a extensão do navegador.",
-    addFirst: "Adicionar primeiro download",
     bridgeStatus: "Ponte da extensão não configurada",
     newTask: "NOVA TAREFA",
     sourceUrl: "URL de origem",
@@ -382,9 +375,6 @@ const catalogs = {
     keepFiles: "保留磁盘上的已下载文件和部分文件",
     listAndFiles: "清除列表和文件",
     deleteFiles: "永久删除已下载文件和部分文件",
-    emptyTitle: "准备开始新的下载",
-    emptyText: "添加网址、拖入种子或使用浏览器扩展。",
-    addFirst: "添加第一个下载",
     bridgeStatus: "扩展桥接尚未配置",
     newTask: "新任务",
     sourceUrl: "来源网址",
@@ -661,7 +651,6 @@ let lastDownloadRenderSignature = "";
 
 function renderDownloads(force = false) {
   const list = document.querySelector("#download-list");
-  const empty = document.querySelector("#empty");
   const visible = visibleDownloads();
   const signature = JSON.stringify({
     locale,
@@ -675,7 +664,6 @@ function renderDownloads(force = false) {
   lastDownloadRenderSignature = signature;
   list.replaceChildren();
   list.hidden = visible.length === 0;
-  empty.hidden = visible.length !== 0;
   for (const task of visible) {
     const row = document.createElement("article");
     row.className = "download-row";
@@ -1256,7 +1244,7 @@ async function showTorrentInspection(source) {
   }
   document.querySelector("#torrent-inspection").hidden = false;
 }
-document.querySelectorAll("#add,#empty-add").forEach(
+document.querySelectorAll("#add").forEach(
   (button) =>
     (button.onclick = () => {
       document.querySelector("#analysis").hidden = true;
