@@ -1,0 +1,49 @@
+name: Installed extension browser regression
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: extension-browser-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned browser test tooling
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Materialize exact 0.3.102 baseline
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/adm-baseline"
+          git archive a744da7f4565f04c9e8df82f519ffe69e01a8cb5 browser-extension | tar -x -C "$RUNNER_TEMP/adm-baseline"
+          mkdir -p test-results
+      - name: Click rendered popup controls
+        shell: bash
+        run: |
+          set -o pipefail
+          python tests/popup-dom-smoke.py 2>&1 | tee test-results/popup-dom.txt
+      - name: Test installed extension with synthetic page and real Chrome APIs
+        shell: bash
+        run: |
+          set -o pipefail
+          python tests/extension-browser-smoke.py --baseline "$RUNNER_TEMP/adm-baseline/browser-extension" 2>&1 | tee test-results/installed-extension.txt
+      - name: Upload synthetic test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installed-extension-regression-results
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 14
