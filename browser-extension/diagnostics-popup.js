@@ -2,8 +2,8 @@
   const D = globalThis.ApocalipseDiagnostics;
   const labels = {
     en: ['Diagnostic v3', 'Capture this tab (5 min)', 'Mark problem now', 'Stop capture', 'Idle', 'Capturing', 'Pending', 'Dropped', 'Delivery errors', 'Wait for Pending = 0 before exporting from ADM.'],
-    pt_BR: ['Diagnostico v3', 'Capturar esta aba (5 min)', 'Marcar problema agora', 'Encerrar captura', 'Inativo', 'Capturando', 'Pendentes', 'Descartados', 'Falhas de envio', 'Antes de exportar no ADM, confira Pendentes = 0.'],
-    zh_CN: ['Diagnostic v3', 'Capture tab (5 min)', 'Mark problem', 'Stop', 'Idle', 'Capturing', 'Pending', 'Dropped', 'Delivery errors', 'Wait for Pending = 0 before exporting from ADM.'],
+    pt_BR: ['Diagnóstico v3', 'Capturar esta aba (5 min)', 'Marcar problema agora', 'Encerrar captura', 'Inativo', 'Capturando', 'Pendentes', 'Descartados', 'Falhas de envio', 'Antes de exportar no ADM, confira Pendentes = 0.'],
+    zh_CN: ['诊断 v3', '采集此标签页（5分钟）', '标记问题', '停止采集', '未采集', '正在采集', '待发送', '已丢弃', '发送失败', '请等待待发送数量为0后再从ADM导出。'],
   };
   const root = document.createElement('section'); root.id = 'diagnostic-v3';
   const heading = document.createElement('b'), controls = document.createElement('div'), status = document.createElement('p');

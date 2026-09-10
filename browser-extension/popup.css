@@ -47,3 +47,8 @@ article button { min-width: 92px; height: 36px; padding: 0 12px; border: 0; bord
 #diagnostic-v3 div { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
 #diagnostic-v3 button { padding: 7px; cursor: pointer; }
 #diagnostic-v3 p { margin: 7px 0 0; font-size: 11px; overflow-wrap: anywhere; }
+
+#diagnostic-v3 button { border: 1px solid #29404e; border-radius: 7px; padding: 8px 10px; background: #182e3a; color: #e9faff; cursor: pointer; }
+#diagnostic-v3 button:hover { background: #204758; }
+#diagnostic-v3 button:disabled { opacity: .6; cursor: wait; }
+#diagnostic-v3 button:focus-visible { outline: 2px solid #39e6ff; outline-offset: 2px; }

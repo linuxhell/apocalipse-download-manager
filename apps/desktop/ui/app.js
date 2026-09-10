@@ -537,8 +537,8 @@ function applyAppearance(settings = readAppearance()) {
   document.documentElement.style.setProperty("--corner-radius", settings.roundedEnabled ? `${radius}px` : "0px");
 }
 applyAppearance();
-Object.assign(catalogs["pt-BR"], { markProblem: "Marcar problema agora", copyDiagnosticReport: "Copiar relatorio para IA", diagnosticHint: "Na extensao, ative a captura da aba afetada, reproduza o erro, marque o problema e exporte o diagnostico." });
-Object.assign(catalogs["zh-CN"], { markProblem: "Mark problem", copyDiagnosticReport: "Copy AI report", diagnosticHint: "Enable capture in the extension, reproduce, mark, then export." });
+Object.assign(catalogs["pt-BR"], { markProblem: "Marcar problema agora", copyDiagnosticReport: "Copiar relatório para IA", diagnosticHint: "Na extensão, ative a captura da aba afetada, reproduza o erro, marque o problema e exporte o diagnóstico." });
+Object.assign(catalogs["zh-CN"], { markProblem: "标记问题", copyDiagnosticReport: "复制 AI 诊断报告", diagnosticHint: "在扩展中启用标签页采集，重现问题并标记，然后导出诊断。" });
 let pendingReferer = null;
 let pendingDuration = null;
 let pendingTitle = null;

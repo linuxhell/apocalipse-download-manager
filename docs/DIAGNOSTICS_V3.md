@@ -36,7 +36,7 @@ Page-world probes are explicitly untrusted observations. In-memory browser cache
 
 `node --test tests/*.test.cjs` exercises original routing regressions plus privacy canaries, worker recreation/offline delivery, sender metadata, tab scope/expiry, action identity, and an observed-but-rejected CDN response without changing routing.
 
-Rust tests in `diagnostics_v3.rs` cover secret scrubbing, bounded retention, ID validation, severity, persistence, duplicate batches and generated report entries. The existing portable validation workflow builds test artifacts only. Chromium smoke tests additionally check actual extension loading, controls and collection.
+Rust tests in `diagnostics_v3.rs` cover secret scrubbing, bounded retention, ID validation, severity, persistence, duplicate batches and generated report entries. The existing portable validation workflow builds test artifacts only. A Chromium DOM fixture with mocked Chrome APIs checked start/mark/stop controls, enabled and disabled rows, and correlated handoff IDs. Installed-extension testing is blocked by the administrator policy of the execution environment. This is not a test of the logged-in TikTok feed or Windows VLC.
 
 ## Remaining work deliberately outside this patch
 

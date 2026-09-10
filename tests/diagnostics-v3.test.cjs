@@ -143,3 +143,10 @@ test('the complete manifest includes diagnostics before each isolated content ch
   }
   for (const script of manifest.content_scripts.flatMap(e => e.js)) assert.doesNotThrow(() => read(script));
 });
+
+test('numeric credentials are scrubbed while measurement and presence fields remain useful', async () => {
+  const h = harness(); await h.D.ready;
+  const result = await h.D.safe({ token: 98123456, nested: { password: 98765432 }, bytes: 1234, hasToken: true });
+  assert.equal(result.token, '[redacted]'); assert.equal(result.nested.password, '[redacted]');
+  assert.equal(result.bytes, 1234); assert.equal(result.hasToken, true);
+});

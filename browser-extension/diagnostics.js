@@ -29,8 +29,8 @@
   async function safe(value, key = '', depth = 0) {
     if (depth > 5) return '[depth-limit]';
     if (value == null || typeof value === 'boolean') return value;
-    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
     if (sensitive.test(key)) return '[redacted]';
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
     if (Array.isArray(value)) return Promise.all(value.slice(0, 24).map(item => safe(item, key, depth + 1)));
     if (typeof value === 'object') {
       const output = {};

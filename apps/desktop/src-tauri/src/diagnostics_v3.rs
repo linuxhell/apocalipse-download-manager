@@ -158,11 +158,14 @@ fn safe(value: &Value, key: &str, depth: usize) -> Value {
     if depth > 7 {
         return json!("[depth-limit]");
     }
-    if value.is_boolean() || value.is_number() || value.is_null() {
+    if value.is_boolean() || value.is_null() {
         return value.clone();
     }
     if sensitive(key) {
         return json!("[redacted]");
+    }
+    if value.is_number() {
+        return value.clone();
     }
     match value {
         Value::String(text) => {
@@ -571,6 +574,16 @@ mod tests {
         }
         assert!(result.contains("cdn.example"));
         assert!(result.contains("resourceId"));
+    }
+    #[test]
+    fn numeric_secrets_are_redacted_but_measurements_are_preserved() {
+        let value =
+            json!({"token": 98123456, "password": 98765432, "bytes": 1234, "hasToken": true});
+        let result = safe(&value, "", 0);
+        assert_eq!(result["token"], json!("[redacted]"));
+        assert_eq!(result["password"], json!("[redacted]"));
+        assert_eq!(result["bytes"], json!(1234));
+        assert_eq!(result["hasToken"], json!(true));
     }
     #[test]
     fn unresolved_is_warning_and_identifiers_are_validated() {
