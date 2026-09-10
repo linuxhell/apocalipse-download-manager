@@ -5343,10 +5343,11 @@ fn read_clipboard_link(
     {
         return Ok(None);
     }
-    let value = app
-        .clipboard()
-        .read_text()
-        .map_err(|error| error.to_string())?;
+    // An empty or temporarily unavailable text clipboard is the normal idle
+    // state of the optional monitor, not an application error.
+    let Ok(value) = app.clipboard().read_text() else {
+        return Ok(None);
+    };
     let value = value.trim();
     Ok(classify_url(value).map(|_| value.to_owned()))
 }
