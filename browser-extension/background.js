@@ -660,8 +660,14 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     sourcePageUrl(sender).then((pageUrl) => reply({ pageUrl })).catch(() => reply({ pageUrl: null }));
     return true;
   }
-  if (message?.type === "APOCALIPSE_HLS_ANALYZE") {
-    analyzeHls(message.urls, message.duration).then(reply).catch((error) => reply({ error: String(error) }));
+  if (message?.type === "APOCALIPSE_SELECT_HLS") {
+    analyzeHls(message.urls, message.duration ?? message.expectedDuration)
+      .then((items) => reply(items.find((item) => item.recommended) || null))
+      .catch((error) => reply({ error: String(error) }));
+    return true;
+  }
+  if (message?.type === "APOCALIPSE_ANALYZE_HLS" || message?.type === "APOCALIPSE_HLS_ANALYZE") {
+    analyzeHls(message.urls, message.duration ?? message.expectedDuration).then(reply).catch((error) => reply({ error: String(error) }));
     return true;
   }
 });
