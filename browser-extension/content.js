@@ -434,6 +434,10 @@
     }
     return collected;
   };
+  // Snapshot of already-discovered media, without HEAD/probe/bridge delays.
+  globalThis.ADM_MEDIA_SCAN = {
+    snapshot: () => ({ pageUrl: location.href, media: collect(), version: chrome.runtime.getManifest().version }),
+  };
   const downloadLabel = () => {
     const value = (navigator.language || "en").toLowerCase();
     return value.startsWith("zh") ? "下载" : value.startsWith("pt") ? "Baixar" : "Download";
@@ -703,7 +707,20 @@
       button.title = "Apocalipse Download Manager";
       button.hidden = !canDownload;
       let recordButton = null;
+      button.addEventListener("pointerdown", event => event.stopPropagation());
       button.addEventListener("click", async (event) => {
+        if (isTikTokPage && element.tagName === "VIDEO") {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (globalThis.ADM_TIKTOK_DOWNLOAD?.handle) {
+            await globalThis.ADM_TIKTOK_DOWNLOAD.handle(button, element, event);
+          } else {
+            button.textContent = "!";
+            button.title = "ADM: recarregue a pagina para ativar o manipulador TikTok.";
+            void globalThis.ADM_DIAG?.emit("overlay.handler_missing", { reason: "tiktok_handler_unavailable" }, null, "ERROR");
+          }
+          return;
+        }
         const actionId = globalThis.ADM_DIAG?.begin("overlay.click", { ...globalThis.ADM_DIAG.player(element), handler: "generic" }) || crypto.randomUUID();
         const trace = (name, mode, detail = {}) => traceDiagnostic(name, mode, detail, actionId);
         event.preventDefault();
@@ -715,15 +732,6 @@
         button.textContent = "…";
         trace("overlay_download_clicked", "download", { tag: element.tagName, facebook: isFacebookVideo, tiktokPage: isTikTokPage, tiktokPermalink: isTikTokVideo, overlays: activeOverlays.size });
         const visibleFacebookUrl = isFacebookVideo && isFacebookMediaUrl(location.href) ? location.href : null;
-        let enteredTikTokFullscreen = false;
-        if (isTikTokPage && !tikTokUrlFor(element) && document.fullscreenElement !== element && element.requestFullscreen) {
-          try {
-            void globalThis.ADM_DIAG?.emit("overlay.fullscreen_fallback", { reason: "legacy_identity_fallback" }, actionId, "WARN");
-            await element.requestFullscreen();
-            enteredTikTokFullscreen = true;
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          } catch {}
-        }
         const resolved = visibleFacebookUrl || (isFacebookVideo ? await revealFacebookUrl(element) : tikTokUrlFor(element) || await resolveDownloadUrl(element));
         // The Reel/post permalink represents the complete video. A recent CDN
         // response can be only one DASH track (even when labelled video/mp4).
@@ -750,7 +758,7 @@
           button.textContent = "!";
           button.title = "O vídeo mudou. Clique novamente no vídeo atual.";
           setTimeout(() => { button.textContent = originalText; }, 2500);
-          if (enteredTikTokFullscreen && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+
           return;
         }
         // Bind the overlay to this exact player. Never use an arbitrary recent
@@ -814,7 +822,7 @@
           button.textContent = "⚠";
           button.title = "Abra o vídeo ou use os três pontos e Copiar link";
           setTimeout(() => { button.textContent = originalText; }, 2500);
-          if (enteredTikTokFullscreen && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+
           return;
         }
         if (/^blob:/i.test(String(currentUrl || ""))) {
@@ -866,7 +874,7 @@
           button.textContent = failed ? "⚠" : "✓";
           if (failed) button.title = result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable";
           setTimeout(() => { button.textContent = originalText; }, 1500);
-          if (enteredTikTokFullscreen && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+
         });
       });
       if (element.tagName === "VIDEO") {
@@ -1029,6 +1037,11 @@
         reply({ started: false, error: String(error) });
       });
       return true;
+    }
+    if (message?.type === "APOCALIPSE_SCAN_FAST") {
+      try { reply(globalThis.ADM_MEDIA_SCAN.snapshot()); }
+      catch (error) { reply({ media: [], error: "scan_failed", errorName: error?.name || "Error" }); }
+      return;
     }
     if (message?.type !== "APOCALIPSE_SCAN") return;
     const scanTrace = globalThis.ADM_DIAG?.begin("popup.scan_started", { stage: "content" });

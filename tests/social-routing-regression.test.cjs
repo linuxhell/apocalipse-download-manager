@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const content = readFileSync(join(__dirname, '../browser-extension/content.js'), 'utf8');
 const tiktok = readFileSync(join(__dirname, '../browser-extension/tiktok-media-fix.js'), 'utf8');
 
-// Run the scripts in manifest order, including TikTok's document-capture listener.
+// Run the direct TikTok owner in manifest order; optionally reset resolver state.
 // Browser APIs are mocked; installed click handlers and outgoing payloads are real.
 function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.com/video/a.mp4', permalink = null, network = [], shipped = false, readableBlob = false, onMediaQuery = null } = {}) {
   const sent = [], fetched = [], appended = [], clickListeners = [];
@@ -80,9 +80,10 @@ function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.co
   });
   context.window = context; context.top = context;
   vm.runInContext(readFileSync(join(__dirname, '../browser-extension/tiktok-identity.js'), 'utf8'), context);
+  if (location.hostname.endsWith('tiktok.com')) vm.runInContext(tiktok, context);
   vm.runInContext(content.replace(/\}\)\(\);\s*$/, 'globalThis.testHooks = { installOverlays, collect };\n})();'), context);
-  if (shipped) vm.runInContext(tiktok, context);
   context.testHooks.installOverlays();
+  if (shipped) vm.runInContext(readFileSync(join(__dirname, '../browser-extension/tiktok-identity.js'), 'utf8'), context);
   const button = appended.find(node => node.className === 'apocalipse-media-download');
   assert.ok(button, 'the actual overlay must be installed');
   return {
@@ -113,7 +114,7 @@ const pageA = 'https://www.tiktok.com/@synthetic/video/123456789';
 const pageB = 'https://www.tiktok.com/@synthetic/video/987654321';
 
 for (const shipped of [false, true]) {
-  const route = shipped ? 'shipped TikTok capture listener' : 'generic overlay';
+  const route = shipped ? 'direct TikTok after resolver reinjection' : 'direct TikTok overlay';
   test(`${route}: an isolated social video is marked incomplete`, async () => {
     const p = page({ shipped, source: videoA, network: [track(videoA)] });
     await p.click();

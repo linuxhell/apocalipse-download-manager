@@ -49,3 +49,26 @@ article button { min-width: 92px; height: 36px; padding: 0 12px; border: 0; bord
 .diag-controls button:disabled {opacity:.5;cursor:default;}
 .diag-controls p {font-size:11px;margin:4px 0;}
 .diag-controls small {display:block;margin-top:6px;}
+
+/* Keep all actions inside the real browser popup, including 150% display scale. */
+[hidden] { display: none !important; }
+body { width: 640px; max-width: 100vw; max-height: 600px; display: flex; flex-direction: column; overflow: auto; }
+header { padding: 10px 12px; flex-shrink: 0; }
+main { height: auto; min-height: 120px; flex: 1 1 230px; }
+article { grid-template-columns: 20px 96px minmax(0,1fr) 126px; gap: 8px; padding: 8px; }
+article > div { min-width: 0; }
+article .preview, article img, article .preview img, .audio-icon { width: 96px; height: 60px; }
+article b { white-space: normal; overflow-wrap: anywhere; max-height: 3em; }
+.row-actions { width: 126px; min-width: 0; }
+article button, .row-actions .external-preview { width: 126px; min-width: 0; max-width: 100%; cursor: pointer; }
+button:not(:disabled), select, input[type=checkbox] { cursor: pointer; }
+.popup-recovery { display: flex; gap: 8px; align-items: center; padding: 6px 12px; flex-wrap: wrap; }
+.popup-recovery button, #refresh-media { border: 1px solid #54717e; border-radius: 6px; background: #18222e; color: #dffaff; padding: 6px 8px; }
+#refresh-media { align-self: flex-end; margin: 0 12px 6px; }
+#popup-notice { padding: 7px 12px; margin: 0; color: #f4d18b; font-size: 12px; }
+#extension-report-text { box-sizing: border-box; width: 100%; min-height: 100px; }
+@media (max-width: 480px) {
+  article { grid-template-columns: 20px minmax(0,1fr) 110px; }
+  article .preview, .audio-icon { display: none; }
+  .row-actions, article button, .row-actions .external-preview { width: 110px; }
+}

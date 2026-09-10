@@ -1,6 +1,5 @@
 (() => {
   globalThis.ADM_DIAG?.register("tiktok-media-fix.js");
-  const videoForButton = button => globalThis.ApocalipseTikTokIdentity?.videoFor(button) || null;
   const permalinkFor = video => globalThis.ApocalipseTikTokIdentity?.resolve(video) || null;
 
   const directVideoUrl = (value) => {
@@ -15,14 +14,28 @@
     } catch { return null; }
   };
 
-  document.addEventListener("click", async (event) => {
-    const button = event.target?.closest?.(".apocalipse-media-download:not(.apocalipse-media-record)");
-    if (!button) return;
-    const video = videoForButton(button);
-    if (!video) {
-      void globalThis.ADM_DIAG?.emit("overlay.binding_missing", { reason: "no_video_for_button", identityAvailable: Boolean(globalThis.ApocalipseTikTokIdentity) }, null, "WARN");
-      return;
-    }
+  const request = message => new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (value, error) => {
+      if (done) return; done = true; clearTimeout(timer);
+      error ? reject(new Error(error)) : resolve(value);
+    };
+    const timer = setTimeout(() => finish(null, "extension_response_timeout"), 6000);
+    try {
+      chrome.runtime.sendMessage(message, result => {
+        const error = chrome.runtime.lastError;
+        finish(result, error ? "extension_channel_unavailable" : !result ? "extension_no_response" : null);
+      });
+    } catch { finish(null, "extension_context_unavailable"); }
+  });
+  const busy = new WeakSet();
+  async function handleDownload(button, video, event) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!video?.isConnected || busy.has(button)) return;
+    busy.add(button);
+    const reset = button.textContent;
+    try {
     const actionId = globalThis.ADM_DIAG?.begin("overlay.click", { ...globalThis.ADM_DIAG.player(video), handler: "tiktok" }) || crypto.randomUUID();
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -44,7 +57,7 @@
     // A permalink is a complete extractor task, never a hint for selecting a
     // possibly audio-only/video-only CDN response from the same tab.
     const captured = !url
-      ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null)
+      ? await request({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null)
       : null;
     const capturedMedia = Array.isArray(captured?.media) ? captured.media : [];
     if (!video.isConnected || clickSource !== String(video.currentSrc || video.src || "") || clickPage !== location.href) {
@@ -106,10 +119,10 @@
     if (!selectedUrl) {
       const language = (await chrome.storage.local.get({ language: "en" })).language;
       const notice = language === "pt_BR"
-        ? "Há recursos de vídeo disponíveis na extensão. Escolha o arquivo."
+        ? "Não foi possível vincular este player ao reel. Abra o popup para verificar a captura."
         : language === "zh_CN"
           ? "扩展中有可用的视频资源。请选择文件。"
-          : "Video resources are available in the extension. Choose a file.";
+          : "Could not bind this player to its reel. Open the popup to inspect capture.";
       button.textContent = "!";
       button.title = notice;
       const previousNotice = document.querySelector("#apocalipse-media-picker-notice");
@@ -133,7 +146,7 @@
       setTimeout(() => { button.textContent = original; }, 2500);
       return;
     }
-    chrome.runtime.sendMessage({
+    const result = await request({
       type: "APOCALIPSE_DOWNLOAD",
       item: {
         traceId: actionId,
@@ -148,14 +161,26 @@
         title: document.title,
         thumbnail: video.poster || "",
       },
-    }, (result) => {
-      const failed = chrome.runtime.lastError || !result?.ok;
+    });
+    {
+      const failed = !result?.ok;
       void globalThis.ADM_DIAG?.emit("overlay.handoff_reply", { ok: !failed, errorRef: result?.error || "" }, actionId, failed ? "ERROR" : "INFO");
       button.textContent = failed ? "⚠" : "✓";
       button.title = failed
-        ? result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable"
+        ? result?.error || "Apocalipse unavailable"
         : "Enviado ao Apocalipse";
       setTimeout(() => { button.textContent = original; }, 1800);
-    });
-  }, true);
+    }
+    } catch (error) {
+      button.textContent = "!";
+      button.title = "ADM: falha ao identificar/enviar o video. Abra o diagnostico da extensao.";
+      void globalThis.ADM_DIAG?.emit("overlay.handler_error", { errorName: error?.name || "Error" }, null, "ERROR");
+    } finally {
+      busy.delete(button);
+      if (button.textContent === "\u2026") button.textContent = reset;
+    }
+  }
+  // Called by the actual button with its captured <video>, not a delegated
+  // document listener or a second WeakMap whose lifecycle may differ.
+  globalThis.ADM_TIKTOK_DOWNLOAD = { handle: handleDownload };
 })();

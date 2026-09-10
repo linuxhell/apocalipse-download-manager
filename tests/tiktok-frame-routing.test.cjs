@@ -20,7 +20,11 @@ test('TikTok uses one deterministic isolated-world chain in every frame', () => 
 
 test('TikTok fixer claims overlay click before legacy button handler', () => {
   const source = fs.readFileSync(path.join(root, 'tiktok-media-fix.js'), 'utf8');
-  assert.match(source, /document\.addEventListener\("click",\s*async \(event\) => \{/);
+  assert.match(source, /async function handleDownload\(button, video, event\)/);
+  assert.match(source, /ADM_TIKTOK_DOWNLOAD/);
+  const content = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
+  assert.match(content, /ADM_TIKTOK_DOWNLOAD\.handle\(button, element, event\)/);
+  assert.doesNotMatch(content, /requestFullscreen|enteredTikTokFullscreen/);
   assert.match(source, /event\.stopImmediatePropagation\(\)/);
   assert.match(source, /tiktok_overlay_handler_claimed/);
 });
@@ -39,6 +43,6 @@ test('popup discovers the visible TikTok reel across all frames', () => {
   assert.ok(manifest.permissions.includes('scripting'));
   assert.match(html, /popup-tiktok\.js/);
   assert.match(source, /target:\s*\{\s*tabId,\s*allFrames:\s*true\s*\}/);
-  assert.match(source, /pageExtractor:\s*true/);
-  assert.match(source, /extractorUrl:\s*best\.url/);
+  assert.match(source, /ADM_MEDIA_SCAN\.snapshot\(\)/);
+  assert.doesNotMatch(source, /visibleScore|anchors\[0\]|best\.url/);
 });

@@ -61,13 +61,14 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
   });
   context.window = context; context.top = context;
   vm.runInContext(readFileSync(join(__dirname, '../browser-extension/tiktok-identity.js'), 'utf8'), context);
+  if (location.hostname.endsWith('tiktok.com')) vm.runInContext(readFileSync(join(__dirname, '../browser-extension/tiktok-media-fix.js'), 'utf8'), context);
   vm.runInContext(script.replace(/\}\)\(\);\s*$/, 'globalThis.testHooks = { installOverlays, collect };\n})();'), context);
   context.testHooks.installOverlays();
   const button = appended.find(node => node.className === 'apocalipse-media-download');
   assert.ok(button, 'the actual overlay must be installed');
   return {
     sent, fetched, location, video,
-    click: () => button.click({ preventDefault() {}, stopPropagation() {} }),
+    click: () => button.click({ preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {} }),
     scan: () => context.testHooks.collect(),
     downloads: () => sent.filter(message => message.type === 'APOCALIPSE_DOWNLOAD'),
   };

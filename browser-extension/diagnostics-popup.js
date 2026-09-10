@@ -16,26 +16,31 @@
   async function status() {
     if (busy) return;
     try {
-      const result = await chrome.runtime.sendMessage({ type: 'ADM_DIAG_STATUS' });
+      const result = await ADM_POPUP.runtime({ type: 'ADM_DIAG_STATUS' }, 5000);
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const active = Boolean(result?.active && result.tabId === tab?.id && result.expiresAt > Date.now());
       root.querySelector('small').textContent = result?.error ? text().failed : `${active ? text().active : text().inactive} | v${chrome.runtime.getManifest().version}`;
       root.querySelector('[data-action="mark"]').disabled = !active;
       root.querySelector('[data-action="stop"]').disabled = !active;
       root.querySelector('[data-action="start"]').disabled = active;
-    } catch { root.querySelector('small').textContent = text().failed; }
+    } catch {
+      root.querySelector('small').textContent = text().failed;
+      root.querySelector('[data-action="start"]').disabled = false;
+      root.querySelector('[data-action="mark"]').disabled = true;
+      root.querySelector('[data-action="stop"]').disabled = true;
+    }
   }
   root.addEventListener('click', async event => {
     const button = event.target.closest('button[data-action]'); if (!button || busy) return;
     busy = true; root.querySelectorAll('button').forEach(b => { b.disabled = true; });
     try {
-      const result = await chrome.runtime.sendMessage({ type: 'ADM_DIAG_CONTROL', action: button.dataset.action });
+      const result = await ADM_POPUP.runtime({ type: 'ADM_DIAG_CONTROL', action: button.dataset.action }, 12000);
       if (result?.error) throw new Error(result.error);
       await globalThis.ADM_DIAG?.refresh();
       if (button.dataset.action === 'start' && typeof render === 'function') render();
       await globalThis.ADM_DIAG?.flush();
     } catch { root.querySelector('small').textContent = text().failed; }
-    finally { busy = false; await status(); }
+    finally { busy = false; root.querySelector('[data-action="start"]').disabled = false; await status(); }
   });
   chrome.storage.local.get({ language: 'en' }).then(value => { language = value.language; translate(); void status(); });
   chrome.storage.onChanged.addListener((changes, area) => {
