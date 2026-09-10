@@ -4,7 +4,11 @@
 
 <h1 align="center">Apocalipse Download Manager</h1>
 
-<p align="center"><strong>Open-source download manager and browser media detector for Windows, Linux and macOS.</strong></p>
+<p align="center">
+  <strong>Open-source download manager and browser media detector for Windows, Linux and macOS.</strong><br>
+  <strong>Gerenciador de downloads livre com detecção de mídia para Windows, Linux e macOS.</strong><br>
+  <strong>适用于 Windows、Linux 和 macOS 的开源下载管理器及浏览器媒体检测工具。</strong>
+</p>
 
 <p align="center">
   <a href="https://github.com/linuxhell/apocalipse-download-manager/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/linuxhell/apocalipse-download-manager?style=flat-square"></a>
@@ -19,6 +23,11 @@
 </p>
 
 <p align="center"><a href="#english">English</a> · <a href="#português-do-brasil">Português do Brasil</a> · <a href="#简体中文">简体中文</a></p>
+
+> [!TIP]
+> **Does Apocalipse help you? [Donate via PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL) to keep the project alive.**<br>
+> **O Apocalipse ajuda você? [Faça uma doação pelo PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL) para manter o projeto vivo.**<br>
+> **Apocalipse 对您有帮助吗？[通过 PayPal 捐赠](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL)，帮助这个项目持续发展。**
 
 <a id="english"></a>
 
