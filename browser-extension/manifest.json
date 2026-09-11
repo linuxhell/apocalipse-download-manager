@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.129",
+  "version": "0.3.130",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -114,7 +114,8 @@
         "https://*.tiktok.com/*"
       ],
       "js": [
-        "social-player-resolution.js"
+        "social-player-resolution.js",
+        "social-player-resolution-v2.js"
       ],
       "run_at": "document_start",
       "all_frames": false
@@ -135,5 +136,5 @@
       "48": "icons/alien-48.png"
     }
   },
-  "version_name": "0.3.129 test - resolve visible social players on demand"
+  "version_name": "0.3.130 test - strict social permalink resolution diagnostics"
 }

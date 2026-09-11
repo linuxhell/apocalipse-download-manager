@@ -80,22 +80,54 @@
     return item;
   };
 
-  const resolveItem = async item => {
-    if (!resolvable(item)) return null;
+  const resolveItem = async (item, traceId = null) => {
+    if (!resolvable(item)) return { item: null, failureStage: 'popup_validation', reason: 'item_not_resolvable' };
+    let current = item;
+    let bindingSource = 'none';
+    if (item.playerId) {
+      const scan = await chrome.tabs.sendMessage(activeMediaTab.id, { type: 'APOCALIPSE_SCAN' }, { frameId: 0 }).catch(() => null);
+      const fresh = Array.isArray(scan?.media)
+        ? scan.media.find(candidate => candidate?.kind === 'video' && candidate.playerId === item.playerId && !candidate.retained)
+        : null;
+      if (!fresh) {
+        void globalThis.ADM_DIAG?.emit?.('popup.player_binding_validation', {
+          result: 'rejected', reason: 'player_id_stale', bindingSource: 'player_id_scan', playerId: item.playerId,
+        }, traceId, 'WARN');
+        return { item: null, failureStage: 'player_binding', reason: 'player_id_stale', platform: 'unknown' };
+      }
+      current = { ...item, ...fresh, thumbnail: fresh.thumbnail || item.thumbnail || '' };
+      bindingSource = 'player_id_scan';
+      void globalThis.ADM_DIAG?.emit?.('popup.player_binding_validation', {
+        result: 'matched', reason: fresh.visualOnly ? 'player_id_live_visual' : 'player_id_live_canonical',
+        bindingSource, playerId: item.playerId, visualOnly: Boolean(fresh.visualOnly), pageExtractor: Boolean(fresh.pageExtractor),
+        url: fresh.url || '',
+      }, traceId);
+      if (!fresh.visualOnly && fresh.pageExtractor && /^https?:/i.test(fresh.url || '')) {
+        return { item: rememberResolved(item, current), failureStage: 'none', reason: 'player_id_scan_canonical',
+          platform: 'unknown', bindingSource };
+      }
+    }
     const result = await chrome.tabs.sendMessage(activeMediaTab.id, {
-      type: 'APOCALIPSE_RESOLVE_VISIBLE_SOCIAL_MEDIA',
+      type: 'APOCALIPSE_RESOLVE_VISIBLE_SOCIAL_MEDIA_V2',
+      traceId,
       request: {
-        pageUrl: item.playerPageUrl || activePageUrl,
-        rect: item.rect,
-        viewport: item.viewport || null,
-        duration: item.duration || null,
-        thumbnail: item.thumbnail || '',
+        pageUrl: current.playerPageUrl || activePageUrl,
+        playerId: current.playerId || item.playerId || null,
+        playerBindingValidated: bindingSource === 'player_id_scan',
+        rect: current.rect || item.rect,
+        viewport: current.viewport || item.viewport || null,
+        duration: current.duration || item.duration || null,
+        thumbnail: current.thumbnail || item.thumbnail || '',
       },
     }, { frameId: 0 }).catch(() => null);
-    if (!result?.ok || !result.item?.url) return null;
-    return rememberResolved(item, result.item);
+    if (!result?.ok || !result.item?.url) return {
+      item: null, failureStage: result?.failureStage || 'content_message',
+      reason: result?.reason || (result ? 'media_identity_unresolved' : 'content_message_failed'),
+      platform: result?.platform || 'unknown', bindingSource,
+    };
+    return { item: rememberResolved(item, result.item), failureStage: 'none', reason: 'resolved',
+      platform: result.platform || 'unknown', bindingSource };
   };
-
   const forwardClick = (item, className) => {
     const items = visibleItems();
     const index = items.findIndex(value => value.url === item.url);
@@ -113,10 +145,18 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     button.disabled = true;
-    const className = button.classList.contains('external-preview') ? '.external-preview' : '.download-item';
-    const traceId = globalThis.ADM_DIAG?.begin?.('popup.player_identity_click', { url: item.url, action: className }) || null;
-    const resolved = await resolveItem(item);
-    void globalThis.ADM_DIAG?.emit?.('popup.player_identity_result', { resolved: Boolean(resolved), url: resolved?.url || '' }, traceId, resolved ? 'INFO' : 'WARN');
+    const isPreview = button.classList.contains('external-preview');
+    const className = isPreview ? '.external-preview' : '.download-item';
+    const action = isPreview ? 'preview' : 'download';
+    const traceId = globalThis.ADM_DIAG?.begin?.('popup.player_identity_click', {
+      url: item.url, action, stage: 'popup_click', playerBound: Boolean(item.playerBound),
+      retained: Boolean(item.retained), recommended: Boolean(item.recommended),
+    }) || null;
+    const outcome = await resolveItem(item, traceId);
+    const resolved = outcome.item;
+    void globalThis.ADM_DIAG?.emit?.('popup.player_identity_result', { resolved: Boolean(resolved),
+      action, failureStage: outcome.failureStage || 'none', reason: outcome.reason || 'unknown',
+      platform: outcome.platform || 'unknown', url: resolved?.url || '' }, traceId, resolved ? 'INFO' : 'WARN');
     if (!resolved) { showFailure(); button.disabled = false; syncRows(); return; }
     forwardClick(resolved, className);
   }, true);
