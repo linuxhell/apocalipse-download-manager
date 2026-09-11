@@ -726,6 +726,10 @@
         const capturedSocialMedia = socialVideo && !socialPageUrl
           ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null)
           : null;
+        const inspectedSocialMedia = capturedSocialMedia?.media?.length
+          ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_INSPECT_MEDIA_TRACKS", media: capturedSocialMedia.media }).catch(() => null)
+          : null;
+        const socialTrackInfo = new Map((inspectedSocialMedia?.media || []).map((item) => [item.url, item]));
         if (socialVideo && (!element.isConnected || clickSource !== String(element.currentSrc || element.src || "")
           || clickPage !== location.href)) {
           trace("overlay_download_player_changed", "download", { facebook: isFacebookVideo, tiktokPage: isTikTokPage });
@@ -736,17 +740,31 @@
         }
         // Bind the overlay to this exact player. Never use an arbitrary recent
         // response from the tab: feeds may keep several videos buffered.
-        const browserVideoItem = capturedSocialMedia?.media?.find((item) =>
+        let browserVideoItem = capturedSocialMedia?.media?.find((item) =>
           /^https?:/i.test(item.url || "")
           && !/^audio\//i.test(item.contentType || "")
           && sameMediaResource(item.url, liveHttpUrl)) || null;
+        if (!browserVideoItem && liveBlobUrl && Number.isFinite(element.duration) && element.duration > 0) {
+          const durationMatches = (capturedSocialMedia?.media || [])
+            .map((item) => ({ item, info: socialTrackInfo.get(item.url) }))
+            .filter(({ info }) => (info?.kind === "video" || info?.kind === "muxed") && Number.isFinite(info.duration))
+            .map((entry) => ({ ...entry, delta: Math.abs(entry.info.duration - element.duration) }))
+            .filter(({ delta }) => delta <= 1.5)
+            .sort((left, right) => left.delta - right.delta || (right.item.capturedAt || 0) - (left.item.capturedAt || 0));
+          if (durationMatches[0] && !(durationMatches[1] && Math.abs(durationMatches[0].delta - durationMatches[1].delta) < 0.05)) {
+            browserVideoItem = durationMatches[0].item;
+          }
+        }
         const browserAudioCandidates = (capturedSocialMedia?.media || [])
-          .filter((item) => /^https?:/i.test(item.url || "") && /^audio\//i.test(item.contentType || "")
+          .filter((item) => /^https?:/i.test(item.url || "")
+            && (socialTrackInfo.get(item.url)?.kind === "audio" || /^audio\//i.test(item.contentType || ""))
             && Number.isFinite(item.capturedAt) && item.capturedAt > 0
             && Number.isFinite(browserVideoItem?.capturedAt) && browserVideoItem.capturedAt > 0
             && (item.frameId === browserVideoItem.frameId || (item.frameId == null && browserVideoItem.frameId == null)))
           .filter((audio) => !(capturedSocialMedia?.media || []).some((other) =>
-            /^video\//i.test(other.contentType || "") && Number.isFinite(other.capturedAt) && other.capturedAt > 0
+            (socialTrackInfo.get(other.url)?.kind === "video" || socialTrackInfo.get(other.url)?.kind === "muxed"
+              || (!socialTrackInfo.get(other.url)?.kind && /^video\//i.test(other.contentType || "")))
+            && Number.isFinite(other.capturedAt) && other.capturedAt > 0
             && (other.frameId === audio.frameId || (other.frameId == null && audio.frameId == null))
             && !sameMediaResource(other.url, browserVideoItem.url)
             && Math.abs(other.capturedAt - audio.capturedAt) <= Math.abs(browserVideoItem.capturedAt - audio.capturedAt)))
@@ -761,7 +779,7 @@
           ? closestAudioItem
           : null;
         const browserVideoMedia = browserVideoItem?.url || null;
-        const browserAudioMedia = browserAudioItem?.url || null;
+        const browserAudioMedia = socialTrackInfo.get(browserVideoItem?.url)?.kind === "muxed" ? null : browserAudioItem?.url || null;
 
         // For a real <video>, the source feeding the player is more authoritative
         // than location.href. Try readable blob first; for MSE blobs, fall through
