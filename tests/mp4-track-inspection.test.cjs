@@ -37,3 +37,8 @@ test('MP4 inspector distinguishes video, audio and complete muxed resources', ()
   assert.deepEqual(JSON.parse(JSON.stringify(audio)), { kind: 'audio', duration: 30 });
   assert.deepEqual(JSON.parse(JSON.stringify(muxed)), { kind: 'muxed', duration: 44 });
 });
+
+test('media inspection fetch preserves the original signed URL', () => {
+  assert.match(source, /fetch\(item\.url, \{ credentials: "include"/);
+  assert.doesNotMatch(source, /fetch\(key, \{ credentials: "include"/);
+});
