@@ -124,6 +124,17 @@
       },
     }).catch(() => {});
     if (!selectedUrl) {
+      const recordButton = button[Symbol.for("apocalipse.recordButton")];
+      const canCaptureExactStream = recordButton && (video.captureStream || video.webkitCaptureStream)
+        && globalThis.MediaRecorder;
+      if (canCaptureExactStream) {
+        void globalThis.ADM_DIAG?.emit("overlay.stream_capture", { reason: "tiktok_blob_without_complete_resource",
+          ...globalThis.ADM_DIAG.player(video) }, actionId, "INFO");
+        button.textContent = "●";
+        recordButton.click();
+        setTimeout(() => { button.textContent = original; }, 1800);
+        return;
+      }
       const language = (await chrome.storage.local.get({ language: "en" })).language;
       const notice = language === "pt_BR"
         ? "Há recursos de vídeo disponíveis na extensão. Escolha o arquivo."
