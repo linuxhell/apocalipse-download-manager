@@ -68,3 +68,19 @@ test("five readable light themes are available", () => {
   assert.match(desktopCss, /\.remove-options button:hover[\s\S]*color-mix\(in srgb, var\(--accent\) 14%, var\(--surface\)\)/);
   assert.match(desktopCss, /\.remove-options button\.danger:hover[\s\S]*color-mix\(in srgb, #ff5364 12%, var\(--surface\)\)/);
 });
+
+test("HLS uses the selected destination for process and temporary files", () => {
+  assert.match(desktop, /command\.current_dir\(directory\)/);
+  assert.match(desktop, /\.arg\("--tmp-dir"\)\s*\.arg\(directory\)/);
+});
+
+test("failed thumbnails restore the compact icon without covering progress", () => {
+  assert.match(ui, /icon\.classList\.remove\("has-thumbnail"\)/);
+  assert.match(desktopCss, /\.download-icon\s*\{[\s\S]*width:\s*32px;[\s\S]*height:\s*32px;/);
+});
+
+test("download destinations and task copy follow the active theme palette", () => {
+  assert.match(desktopCss, /\.destination-select\s*\{[\s\S]*color:\s*var\(--text\)/);
+  assert.match(desktopCss, /\.destination-row\.unavailable \.destination-select span\s*\{\s*color:\s*var\(--muted\)/);
+  assert.match(desktopCss, /\.download-info strong\s*\{[\s\S]*color:\s*color-mix/);
+});

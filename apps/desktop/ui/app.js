@@ -694,6 +694,7 @@ function renderDownloads(force = false) {
       thumbnail.onerror = () => {
         failedThumbnailUrls.add(task.thumbnail);
         icon.replaceChildren(document.createTextNode("⇩"));
+        icon.classList.remove("has-thumbnail");
       };
       icon.replaceChildren(thumbnail);
       icon.classList.add("has-thumbnail");

@@ -2448,6 +2448,11 @@ async fn run_external_download(
                 command
             } else {
                 let mut command = tokio::process::Command::new(&tools.2);
+                // N_m3u8DL-RE creates its segment workspace relative to the
+                // process directory unless an explicit temporary directory is
+                // supplied. A GUI application launched on Windows can inherit
+                // C:\Windows\System32, where regular users cannot write.
+                command.current_dir(directory);
                 if let Some(proxy_url) = proxy_url.as_deref() {
                     command.arg("--custom-proxy").arg(proxy_url);
                 }
@@ -2459,6 +2464,8 @@ async fn run_external_download(
                 command
                     .arg(&task.source)
                     .arg("--save-dir")
+                    .arg(directory)
+                    .arg("--tmp-dir")
                     .arg(directory)
                     .args([
                         "--save-name",
