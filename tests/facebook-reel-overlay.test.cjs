@@ -6,6 +6,12 @@ const { test } = require('node:test');
 const vm = require('node:vm');
 const script = readFileSync(process.env.ADM_CONTENT_SCRIPT || join(__dirname, '../browser-extension/content.js'), 'utf8');
 
+test('Facebook srcObject download falls back to the exact combined player stream', () => {
+  assert.match(script, /overlay_download_stream_capture/);
+  assert.match(script, /isFacebookVideo && element\.srcObject && canRecord && recordButton/);
+  assert.match(script, /recordButton\.click\(\)/);
+});
+
 // Execute the real content script and its installed click handler. Only browser
 // APIs/DOM geometry are mocked; URL selection and the outgoing payload are real.
 function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false } = {}) {
