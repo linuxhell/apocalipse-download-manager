@@ -47,6 +47,10 @@
       ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null)
       : null;
     const capturedMedia = Array.isArray(captured?.media) ? captured.media : [];
+    const inspected = !url && capturedMedia.length
+      ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_INSPECT_MEDIA_TRACKS", media: capturedMedia }).catch(() => null)
+      : null;
+    const inspections = new Map((inspected?.media || []).map((item) => [item.url, item]));
     if (!video.isConnected || clickSource !== String(video.currentSrc || video.src || "") || clickPage !== location.href) {
       void globalThis.ADM_DIAG?.emit("overlay.player_changed", { reason: "player_changed_during_lookup" }, actionId, "WARN");
       button.textContent = "!";
@@ -67,8 +71,23 @@
     // Never select a lone buffered response or an unrelated item in global
     // React state: neither establishes which video the user clicked.
     const liveHttpUrl = directVideoUrl(clickSource);
-    const videoItem = liveHttpUrl ? capturedMedia.find((item) =>
+    let videoItem = liveHttpUrl ? capturedMedia.find((item) =>
       /^video\//i.test(item.contentType || "") && resourceKey(item.url) === resourceKey(liveHttpUrl)) : null;
+    // TikTok's feed uses a blob: MediaSource, so currentSrc cannot identify the
+    // underlying request. Match the bound player's exact duration against the
+    // MP4 metadata instead. A tie or a loose match remains intentionally
+    // unresolved, preventing a buffered neighbouring card from being reused.
+    if (!videoItem && /^blob:/i.test(clickSource) && Number.isFinite(video.duration) && video.duration > 0) {
+      const durationMatches = capturedMedia
+        .map((item) => ({ item, info: inspections.get(item.url) }))
+        .filter(({ info }) => (info?.kind === "video" || info?.kind === "muxed") && Number.isFinite(info.duration))
+        .map((entry) => ({ ...entry, delta: Math.abs(entry.info.duration - video.duration) }))
+        .filter(({ delta }) => delta <= 1.5)
+        .sort((left, right) => left.delta - right.delta || (right.item.capturedAt || 0) - (left.item.capturedAt || 0));
+      if (durationMatches[0] && !(durationMatches[1] && Math.abs(durationMatches[0].delta - durationMatches[1].delta) < 0.05)) {
+        videoItem = durationMatches[0].item;
+      }
+    }
     const audioCandidates = videoItem && Number.isFinite(videoItem.capturedAt) && videoItem.capturedAt > 0
       ? capturedMedia.filter((item) => /^https?:/i.test(item.url || "") && /^audio\//i.test(item.contentType || "")
         && Number.isFinite(item.capturedAt) && item.capturedAt > 0
@@ -85,8 +104,9 @@
     void globalThis.ADM_DIAG?.emit("capture.overlay_inventory", { candidates: capturedMedia.length, selected: Boolean(selectedUrl), url: selectedUrl || "", matchedPlayer: Boolean(videoItem), pageExtractor: Boolean(url) }, actionId);
     const tiedAudio = audioCandidates.length > 1
       && Math.abs(audioCandidates[0].capturedAt - videoItem.capturedAt) === Math.abs(audioCandidates[1].capturedAt - videoItem.capturedAt);
-    const audioUrl = url || tiedAudio ? null : audioCandidates[0]?.url || null;
-    const ambiguousSocialTrack = Boolean(!url && !audioUrl && selectedUrl);
+    const selectedTrackKind = videoItem ? inspections.get(videoItem.url)?.kind : null;
+    const audioUrl = url || tiedAudio || selectedTrackKind === "muxed" ? null : audioCandidates[0]?.url || null;
+    const ambiguousSocialTrack = Boolean(!url && !audioUrl && selectedUrl && selectedTrackKind !== "muxed");
     chrome.runtime.sendMessage({
       type: "APOCALIPSE_CAPTURE_TRACE",
       eventName: "tiktok_browser_media_selection",
@@ -95,7 +115,7 @@
       pageUrl: location.href,
       at: Date.now(),
       detail: {
-        selection: url ? "complete_page_extractor" : videoItem ? "matched_player_media" : liveHttpUrl ? "player_http_media" : "media_picker_required",
+        selection: url ? "complete_page_extractor" : videoItem ? (selectedTrackKind === "muxed" ? "matched_muxed_duration" : "matched_player_media") : liveHttpUrl ? "player_http_media" : "media_picker_required",
         selectedVideoId: url?.match(/\/video\/(\d+)/i)?.[1] || "none",
         browserCapturedMedia: Boolean(videoItem),
         browserCandidates: capturedMedia.length,
@@ -104,6 +124,17 @@
       },
     }).catch(() => {});
     if (!selectedUrl) {
+      const recordButton = button[Symbol.for("apocalipse.recordButton")];
+      const canCaptureExactStream = recordButton && (video.captureStream || video.webkitCaptureStream)
+        && globalThis.MediaRecorder;
+      if (canCaptureExactStream) {
+        void globalThis.ADM_DIAG?.emit("overlay.stream_capture", { reason: "tiktok_blob_without_complete_resource",
+          ...globalThis.ADM_DIAG.player(video) }, actionId, "INFO");
+        button.textContent = "●";
+        recordButton.click();
+        setTimeout(() => { button.textContent = original; }, 1800);
+        return;
+      }
       const language = (await chrome.storage.local.get({ language: "en" })).language;
       const notice = language === "pt_BR"
         ? "Há recursos de vídeo disponíveis na extensão. Escolha o arquivo."

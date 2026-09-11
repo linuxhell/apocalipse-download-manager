@@ -1,5 +1,11 @@
 globalThis.ADM_DIAG?.register("popup.js");
-let media = [], selected = "video", locale = "en", activePageUrl = "";
+let media = [], selected = "video", locale = "en", activePageUrl = "", interfaceTheme = "void";
+const popupThemes = new Set(["void","inferno","toxic","synthwave","royal","crimson","arctic","obsidian","monochrome","midnight","forest","graphite","deepsea","eclipse","hazard","cyberstorm","ultraviolet","emeraldgold","scarletice","coppernavy","solarizednight","pearlblue","whiteaurora","goldenivory","crystalrose","polarmint"]);
+const normalizeDesktopLanguage = (language) => language === "pt-BR" ? "pt_BR" : language === "zh-CN" ? "zh_CN" : ["en","pt_BR","zh_CN"].includes(language) ? language : "en";
+const applyPopupTheme = (theme) => {
+  interfaceTheme = popupThemes.has(theme) ? theme : "void";
+  document.documentElement.dataset.theme = interfaceTheme;
+};
 const selectedUrls = new Set();
 const SOCIAL_TRACK_PAIR_WINDOW_MS = 8_000;
 const isSocialPage = (url) => {
@@ -10,7 +16,7 @@ const pairSocialTracks = (items, pageUrl) => {
   const audio = items.filter((item) => item.kind === "audio" && item.networkCaptured);
   const pairedAudio = new Set();
   const result = items.map((item) => {
-    if (item.kind !== "video" || item.pageExtractor || item.audioUrl || /\.(?:m3u8|mpd)(?:$|[?#])/i.test(item.url)) return item;
+    if (item.kind !== "video" || item.pageExtractor || item.audioUrl || item.muxed || /\.(?:m3u8|mpd)(?:$|[?#])/i.test(item.url)) return item;
     const source = item.networkCaptured
       ? item
       : items.find((candidate) => candidate.networkCaptured && candidate.kind === "video" && candidate.url === item.url);
@@ -98,7 +104,7 @@ const directBridgeHealth = async (token) => {
     if (!response.ok) throw new Error(`bridge_http_${response.status}`);
     const payload = await response.json().catch(() => ({}));
     if (payload?.ok === false) throw new Error("bridge_health_failed");
-    return true;
+    return payload;
   } finally { clearTimeout(timeout); }
 };
 const workerBridgeStatus = (timeoutMs = 1800) => new Promise((resolve) => {
@@ -317,7 +323,7 @@ document.querySelector("#download-selected").onclick = async () => {
   render();
 };
 chrome.storage.local.get({ language: "en" }, ({ language }) => {
-  locale = language;
+  locale = normalizeDesktopLanguage(language);
   document.querySelector("#language").value = locale;
   translate();
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -336,8 +342,14 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
       const scanned = error ? [] : (response?.media || []);
       void globalThis.ADM_DIAG?.emit("popup.frame0_reply", { ok: !error, count: scanned.length, errorRef: error?.message || "" }, null, error ? "WARN" : "INFO");
       const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA", tabId: tab.id }).catch(() => null);
+      const inspected = captured?.media?.length
+        ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_INSPECT_MEDIA_TRACKS", media: captured.media }).catch(() => null)
+        : null;
+      const trackInfo = new Map((inspected?.media || []).map((item) => [item.url, item]));
       const network = (captured?.media || []).map((item) => {
-        const video = networkMediaKind(item) === "video";
+        const inspectedKind = trackInfo.get(item.url)?.kind;
+        const video = inspectedKind === "video" || inspectedKind === "muxed"
+          || (inspectedKind !== "audio" && networkMediaKind(item) === "video");
         return {
           url: item.url,
           contentType: item.contentType || null,
@@ -347,6 +359,8 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
           title: (() => { try { return new URL(item.url).hostname.includes("tiktok") ? `TikTok — ${t("capturedResource")}` : t("capturedResource"); } catch { return t("capturedResource"); } })(),
           capturedAt: item.capturedAt,
           frameId: item.frameId,
+          muxed: inspectedKind === "muxed",
+          duration: trackInfo.get(item.url)?.duration || null,
           networkCaptured: true,
         };
       });
@@ -363,11 +377,18 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
     });
   });
 });
+chrome.storage.local.get({ desktopTheme: "void" }, ({ desktopTheme }) => applyPopupTheme(desktopTheme));
 chrome.storage.local.get({ pairingToken: "" }, async ({ pairingToken }) => {
   document.querySelector("#pairing-token").value = pairingToken;
   if (!pairingToken) { setBridgeStatus(false); return; }
   try {
-    await directBridgeHealth(pairingToken);
+    const appearance = await directBridgeHealth(pairingToken);
+    if (appearance.language) locale = normalizeDesktopLanguage(appearance.language);
+    if (appearance.theme) applyPopupTheme(appearance.theme);
+    await chrome.storage.local.set({ language: locale, desktopTheme: interfaceTheme });
+    document.querySelector("#language").value = locale;
+    translate();
+    render();
     setBridgeStatus(true);
     const worker = await workerSelfTest();
     if (!worker?.ok) await showWorkerWarning(worker);
@@ -395,7 +416,17 @@ setInterval(async () => {
   const { pairingToken = "" } = await chrome.storage.local.get({ pairingToken: "" });
   if (!pairingToken) { setBridgeStatus(false); return; }
   try {
-    await directBridgeHealth(pairingToken);
+    const appearance = await directBridgeHealth(pairingToken);
+    const nextLocale = appearance.language ? normalizeDesktopLanguage(appearance.language) : locale;
+    const nextTheme = popupThemes.has(appearance.theme) ? appearance.theme : interfaceTheme;
+    if (nextLocale !== locale || nextTheme !== interfaceTheme) {
+      locale = nextLocale;
+      applyPopupTheme(nextTheme);
+      await chrome.storage.local.set({ language: locale, desktopTheme: interfaceTheme });
+      document.querySelector("#language").value = locale;
+      translate();
+      render();
+    }
     setBridgeStatus(true);
   } catch (error) {
     setBridgeStatus(false);
@@ -407,7 +438,13 @@ document.querySelector("#connect").onclick = async () => {
   const button = document.querySelector("#connect");
   button.disabled = true;
   try {
-    await directBridgeHealth(token);
+    const appearance = await directBridgeHealth(token);
+    if (appearance.language) locale = normalizeDesktopLanguage(appearance.language);
+    if (appearance.theme) applyPopupTheme(appearance.theme);
+    await chrome.storage.local.set({ language: locale, desktopTheme: interfaceTheme });
+    document.querySelector("#language").value = locale;
+    translate();
+    render();
     await chrome.storage.local.set({ pairingToken: token });
     setBridgeStatus(true);
     // Wake/synchronize the worker, but never make the button depend on it.
@@ -425,9 +462,19 @@ document.querySelector("#connect").onclick = async () => {
 };
 document.querySelector("#language").onchange = (event) => {
   locale = event.target.value;
-  chrome.storage.local.set({ language: locale });
   translate();
   render();
+  chrome.storage.local.set({ language: locale }, () => {
+    chrome.tabs.query({}, (tabs) => {
+      for (const tab of tabs) {
+        if (!tab.id || !/^https?:/i.test(tab.url || "")) continue;
+        chrome.tabs.sendMessage(tab.id, {
+          type: "APOCALIPSE_LANGUAGE_CHANGED",
+          language: locale,
+        }, () => void chrome.runtime.lastError);
+      }
+    });
+  });
 };
 document.querySelector("#settings-toggle").onclick = () => {
   const panel = document.querySelector("#compact-settings");

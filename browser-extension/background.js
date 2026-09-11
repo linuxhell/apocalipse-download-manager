@@ -13,8 +13,88 @@ let diagnosticOutbox = [];
 const recentFileResponses = [];
 const recentMediaResponses = [];
 const mediaPickerContexts = new Map();
+const inspectedMediaTracks = new Map();
 const ASSISTED_PREFIX = "assisted-download:";
 const DIRECT_PREFIX = "direct-download:";
+
+function mp4TrackInfo(bytes) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || 0);
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const types = new Set();
+  let duration = null;
+  const text = (offset, size = 4) => String.fromCharCode(...data.subarray(offset, offset + size));
+  const walk = (start, end, depth = 0) => {
+    for (let offset = start; offset + 8 <= end;) {
+      let size = view.getUint32(offset);
+      const type = text(offset + 4);
+      let header = 8;
+      if (size === 1 && offset + 16 <= end) {
+        const large = view.getBigUint64(offset + 8);
+        if (large > BigInt(Number.MAX_SAFE_INTEGER)) break;
+        size = Number(large); header = 16;
+      } else if (size === 0) size = end - offset;
+      if (size < header || offset + size > end) break;
+      const body = offset + header;
+      if (type === "hdlr" && body + 12 <= offset + size) {
+        const handler = text(body + 8);
+        if (handler === "vide" || handler === "soun") types.add(handler);
+      } else if (type === "mvhd" && body + 20 <= offset + size) {
+        const version = data[body];
+        const base = body + (version === 1 ? 20 : 12);
+        if (base + (version === 1 ? 12 : 8) <= offset + size) {
+          const scale = view.getUint32(base);
+          const raw = version === 1 ? Number(view.getBigUint64(base + 4)) : view.getUint32(base + 4);
+          if (scale > 0 && Number.isFinite(raw)) duration = raw / scale;
+        }
+      }
+      if (depth < 8 && ["moov", "trak", "mdia"].includes(type)) walk(body, offset + size, depth + 1);
+      offset += size;
+    }
+  };
+  walk(0, data.byteLength);
+  return { kind: types.has("vide") && types.has("soun") ? "muxed" : types.has("soun") ? "audio" : types.has("vide") ? "video" : "unknown", duration };
+}
+
+function mediaStartUrl(value) {
+  const url = new URL(value);
+  for (const name of [...url.searchParams.keys()]) {
+    if (/^(?:bytestart|byteend|range|start|end)$/i.test(name)) url.searchParams.delete(name);
+  }
+  return url.href;
+}
+
+async function inspectMediaTrack(item) {
+  const key = mediaStartUrl(item.url);
+  const cached = inspectedMediaTracks.get(key);
+  if (cached && Date.now() - cached.at < 120_000) return cached.value;
+  let value = { kind: /^audio\//i.test(item.contentType || "") ? "audio" : "unknown", duration: null };
+  try {
+    // Keep every signed query parameter exactly as captured. TikTok includes
+    // range fields in the CDN signature; removing them invalidates the URL and
+    // made inspection return "unknown" even though popup playback succeeded.
+    const response = await fetch(item.url, { credentials: "include", redirect: "follow", headers: { Range: "bytes=0-262143" } });
+    if (response.ok || response.status === 206) {
+      const reader = response.body?.getReader();
+      const chunks = [];
+      let length = 0;
+      if (reader) {
+        while (length < 262_144) {
+          const { done, value: chunk } = await reader.read();
+          if (done) break;
+          const kept = chunk.subarray(0, 262_144 - length);
+          chunks.push(kept); length += kept.byteLength;
+        }
+        await reader.cancel().catch(() => {});
+      }
+      const prefix = new Uint8Array(length);
+      let offset = 0;
+      for (const chunk of chunks) { prefix.set(chunk, offset); offset += chunk.byteLength; }
+      value = mp4TrackInfo(prefix);
+    }
+  } catch {}
+  inspectedMediaTracks.set(key, { at: Date.now(), value });
+  return value;
+}
 
 function responseHeader(headers, name) {
   return (headers || []).find((header) => header.name?.toLowerCase() === name)?.value || "";
@@ -428,6 +508,18 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     reply({ media: media.map((item) => ({ ...item, ageMs: Date.now() - item.capturedAt })) });
     return;
   }
+  if (message?.type === "APOCALIPSE_INSPECT_MEDIA_TRACKS") {
+    Promise.all((message.media || []).slice(0, 16).map(async (item) => ({
+      url: item.url,
+      ...(await inspectMediaTrack(item)),
+    }))).then((media) => {
+      const kinds = media.reduce((counts, item) => ({ ...counts, [item.kind]: (counts[item.kind] || 0) + 1 }), {});
+      void globalThis.ADM_DIAG_WORKER?.emit("capture.media_tracks_inspected", { count: media.length, kinds,
+        withDuration: media.filter((item) => Number.isFinite(item.duration)).length }, null, "INFO", sender.tab?.id);
+      reply({ media });
+    }).catch((error) => reply({ media: [], error: String(error) }));
+    return true;
+  }
   if (message?.type === "APOCALIPSE_OPEN_MEDIA_PICKER") {
     if (sender.tab?.id && message.context) {
       mediaPickerContexts.set(sender.tab.id, { ...message.context, capturedAt: Date.now() });
@@ -634,6 +726,20 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     bridgeRequest("/v1/health")
       .then(() => reply({ connected: true }))
       .catch((error) => reply({ connected: false, error: String(error) }));
+    return true;
+  }
+  if (message?.type === "APOCALIPSE_SYNC_DESKTOP_APPEARANCE") {
+    bridgeRequest("/v1/health")
+      .then(async (result) => {
+        const stored = await chrome.storage.local.get({ language: "en", desktopTheme: "void" });
+        const language = result?.language === "pt-BR" ? "pt_BR" : result?.language === "zh-CN" ? "zh_CN" : result?.language === "en" ? "en" : stored.language;
+        const theme = typeof result?.theme === "string" ? result.theme : stored.desktopTheme;
+        if (stored.language !== language || stored.desktopTheme !== theme) {
+          await chrome.storage.local.set({ language, desktopTheme: theme });
+        }
+        reply({ language, theme });
+      })
+      .catch((error) => reply({ error: String(error) }));
     return true;
   }
   if (message?.type === "APOCALIPSE_BLOB_BEGIN") {

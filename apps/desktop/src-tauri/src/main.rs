@@ -122,10 +122,16 @@ struct UserSettings {
     link_password: String,
     #[serde(default = "default_language")]
     language: String,
+    #[serde(default = "default_theme")]
+    theme: String,
 }
 
 fn default_language() -> String {
     "en".to_owned()
+}
+
+fn default_theme() -> String {
+    "void".to_owned()
 }
 
 fn tray_labels(language: &str) -> (&'static str, &'static str) {
@@ -181,6 +187,7 @@ impl Default for UserSettings {
             associations: HashMap::new(),
             link_password: default_link_password(),
             language: default_language(),
+            theme: default_theme(),
         }
     }
 }
@@ -884,6 +891,9 @@ struct BlobUpload {
     received: u64,
     total: Option<u64>,
     recording: bool,
+    speed_sample_at: Instant,
+    speed_sample_bytes: u64,
+    smoothed_speed: u64,
 }
 
 #[derive(Deserialize)]
@@ -3090,6 +3100,52 @@ fn set_application_language(state: State<'_, AppState>, language: String) -> Res
         "INFO",
         "application.language_changed",
         &format!("language={language}"),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+fn set_application_theme(state: State<'_, AppState>, theme: String) -> Result<(), String> {
+    const THEMES: &[&str] = &[
+        "void",
+        "inferno",
+        "toxic",
+        "synthwave",
+        "royal",
+        "crimson",
+        "arctic",
+        "obsidian",
+        "monochrome",
+        "midnight",
+        "forest",
+        "graphite",
+        "deepsea",
+        "eclipse",
+        "hazard",
+        "cyberstorm",
+        "ultraviolet",
+        "emeraldgold",
+        "scarletice",
+        "coppernavy",
+        "solarizednight",
+        "pearlblue",
+        "whiteaurora",
+        "goldenivory",
+        "crystalrose",
+        "polarmint",
+    ];
+    if !THEMES.contains(&theme.as_str()) {
+        return Err("unsupported_theme".to_owned());
+    }
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.theme = theme.clone();
+    save_settings(&state, &settings)?;
+    drop(settings);
+    diagnostic_log(
+        &state,
+        "INFO",
+        "application.theme_changed",
+        &format!("theme={theme}"),
     );
     Ok(())
 }
@@ -5948,6 +6004,9 @@ fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid:
                 received: 0,
                 total: (!request.streaming).then_some(request.total),
                 recording: request.recording,
+                speed_sample_at: Instant::now(),
+                speed_sample_bytes: 0,
+                smoothed_speed: 0,
             },
         );
     diagnostic_log(
@@ -5965,7 +6024,7 @@ fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid:
 fn append_blob_chunk(app: &tauri::AppHandle, request: BlobChunk) -> Result<(), String> {
     let data = decode_hex(&request.data)?;
     let state = app.state::<AppState>();
-    let (task_id, received, total) = {
+    let (task_id, received, total, download_speed) = {
         let mut uploads = state
             .blob_uploads
             .lock()
@@ -5985,12 +6044,39 @@ fn append_blob_chunk(app: &tauri::AppHandle, request: BlobChunk) -> Result<(), S
             .and_then(|mut file| file.write_all(&data))
             .map_err(|error| error.to_string())?;
         upload.received += data.len() as u64;
-        (upload.task_id, upload.received, upload.total)
+        let elapsed = upload.speed_sample_at.elapsed();
+        if elapsed >= Duration::from_millis(200) {
+            let bytes = upload.received.saturating_sub(upload.speed_sample_bytes);
+            let instantaneous = (bytes as f64 / elapsed.as_secs_f64()) as u64;
+            upload.smoothed_speed = if upload.smoothed_speed == 0 {
+                instantaneous
+            } else {
+                (instantaneous as f64 * 0.65 + upload.smoothed_speed as f64 * 0.35) as u64
+            };
+            upload.speed_sample_at = Instant::now();
+            upload.speed_sample_bytes = upload.received;
+        }
+        (
+            upload.task_id,
+            upload.received,
+            upload.total,
+            upload.smoothed_speed,
+        )
     };
     update_task(app, task_id, false, |task| {
         task.received = received;
         task.progress_percent = total.map(|total| received as f64 * 100.0 / total as f64);
+        task.download_speed = Some(download_speed);
     });
+    let _ = app.emit(
+        "blob-upload-progress",
+        serde_json::json!({
+            "taskId": task_id,
+            "received": received,
+            "total": total,
+            "downloadSpeed": download_speed,
+        }),
+    );
     Ok(())
 }
 
@@ -6010,6 +6096,7 @@ fn finish_blob_upload(app: &tauri::AppHandle, request: BlobFinish) -> Result<(),
         task.received = upload.received;
         task.total = Some(upload.received);
         task.progress_percent = Some(100.0);
+        task.download_speed = Some(0);
         task.state = DownloadState::Completed;
         task.completed_at = Some(epoch_seconds());
     });
@@ -6137,7 +6224,18 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             "bridge.health",
             "extension heartbeat authenticated",
         );
-        bridge_response(&mut stream, "200 OK", origin, "{\"ok\":true}");
+        let (language, theme) = state
+            .settings
+            .lock()
+            .ok()
+            .map(|settings| (settings.language.clone(), settings.theme.clone()))
+            .unwrap_or_else(|| (default_language(), default_theme()));
+        bridge_response(
+            &mut stream,
+            "200 OK",
+            origin,
+            &serde_json::json!({ "ok": true, "language": language, "theme": theme }).to_string(),
+        );
     } else if first.starts_with("GET /v1/activate ") {
         diagnostic_log(
             &state,
@@ -7166,6 +7264,7 @@ fn main() {
             record_diagnostics_ui,
             record_ui_diagnostic,
             set_application_language,
+            set_application_theme,
             get_log_editor,
             set_log_editor,
             open_log_external,

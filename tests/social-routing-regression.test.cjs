@@ -10,7 +10,7 @@ const tiktok = readFileSync(join(__dirname, '../browser-extension/tiktok-media-f
 
 // Run the scripts in manifest order, including TikTok's document-capture listener.
 // Browser APIs are mocked; installed click handlers and outgoing payloads are real.
-function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.com/video/a.mp4', permalink = null, network = [], shipped = false, readableBlob = false, onMediaQuery = null } = {}) {
+function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.com/video/a.mp4', sourceObject = null, permalink = null, network = [], inspections = [], shipped = false, readableBlob = false, onMediaQuery = null } = {}) {
   const sent = [], fetched = [], appended = [], clickListeners = [];
   const location = new URL(url);
   const state = { permalink, network };
@@ -22,7 +22,7 @@ function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.co
     querySelector: selector => selector.includes('a[href') ? anchors()[0] || null : null,
   };
   const video = {
-    tagName: 'VIDEO', dataset: {}, isConnected: true, currentSrc: source, src: source,
+    tagName: 'VIDEO', dataset: {}, isConnected: true, currentSrc: source, src: source, srcObject: sourceObject,
     title: 'Synthetic current video', poster: 'https://images.example/poster.jpg', duration: 30,
     parentElement: post, innerHTML: '', getBoundingClientRect: () => rect,
     getAttribute: () => null,
@@ -70,6 +70,7 @@ function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.co
           sent.push(message);
           if (message.type === 'APOCALIPSE_RECENT_TAB_MEDIA') onMediaQuery?.(video, state);
           const result = message.type === 'APOCALIPSE_RECENT_TAB_MEDIA' ? { media: state.network }
+            : message.type === 'APOCALIPSE_INSPECT_MEDIA_TRACKS' ? { media: inspections }
             : message.type === 'APOCALIPSE_BLOB_BEGIN' ? { uploadId: 'synthetic-upload' }
               : { ok: true, target: 'desktop' };
           if (callback) callback(result);
@@ -185,6 +186,25 @@ test('the shipped TikTok interceptor resolves each new card permalink', async ()
   assert.deepEqual(p.downloads().map(item => item.url), [pageA, pageB]);
 });
 
+test('TikTok blob feed selects the unique complete MP4 with the bound player duration', async () => {
+  const current = track(videoA, 'video/mp4', 5000);
+  const other = track(videoB, 'video/mp4', 6000);
+  const p = page({ shipped: true, source: 'blob:https://www.tiktok.com/current', network: [other, current],
+    inspections: [{ url: videoB, kind: 'muxed', duration: 44 }, { url: videoA, kind: 'muxed', duration: 30 }] });
+  await p.click();
+  assert.equal(p.downloads().length, 1);
+  assert.equal(p.downloads()[0].url, videoA);
+  assert.equal(p.downloads()[0].audioUrl, null);
+  assert.equal(p.downloads()[0].ambiguousSocialTrack, false);
+});
+
+test('TikTok blob feed refuses tied duration matches from buffered cards', async () => {
+  const p = page({ shipped: true, source: 'blob:https://www.tiktok.com/current', network: [track(videoA), track(videoB)],
+    inspections: [{ url: videoA, kind: 'muxed', duration: 30 }, { url: videoB, kind: 'muxed', duration: 30.02 }] });
+  await p.click();
+  assert.equal(p.downloads().length, 0);
+});
+
 test('a vanished TikTok permalink cannot fall back to the button creation-time link', async () => {
   const p = page({ permalink: pageA, source: videoA, network: [track(videoA)] });
   await p.click();
@@ -199,6 +219,30 @@ test('Facebook Home queries tracks for the current player without requiring a pa
   const video = 'https://video.fbcdn.net/current.mp4';
   const audio = 'https://audio.fbcdn.net/current.mp4';
   const p = page({ url: 'https://www.facebook.com/', source: video, network: [track(video), track(audio, 'audio/mp4', 1001)] });
+  await p.click();
+  assert.equal(p.downloads()[0].url, video);
+  assert.equal(p.downloads()[0].audioUrl, audio);
+  assert.equal(p.downloads()[0].ambiguousSocialTrack, false);
+});
+
+test('Facebook sponsored blob player identifies video and mislabeled audio MP4 tracks', async () => {
+  const video = 'https://video.fbcdn.net/current.mp4';
+  const audio = 'https://video.fbcdn.net/current-audio.mp4';
+  const p = page({ url: 'https://www.facebook.com/', source: 'blob:https://www.facebook.com/current',
+    network: [track(video, 'video/mp4', 1000), track(audio, 'video/mp4', 1001)],
+    inspections: [{ url: video, kind: 'video', duration: 30 }, { url: audio, kind: 'audio', duration: 30 }] });
+  await p.click();
+  assert.equal(p.downloads()[0].url, video);
+  assert.equal(p.downloads()[0].audioUrl, audio);
+  assert.equal(p.downloads()[0].ambiguousSocialTrack, false);
+});
+
+test('Facebook sponsored srcObject player uses the same duration-bound track selection', async () => {
+  const video = 'https://video.fbcdn.net/src-object-video.mp4';
+  const audio = 'https://video.fbcdn.net/src-object-audio.mp4';
+  const p = page({ url: 'https://www.facebook.com/', source: '', sourceObject: {},
+    network: [track(video, 'video/mp4', 1000), track(audio, 'video/mp4', 1001)],
+    inspections: [{ url: video, kind: 'video', duration: 30 }, { url: audio, kind: 'audio', duration: 30 }] });
   await p.click();
   assert.equal(p.downloads()[0].url, video);
   assert.equal(p.downloads()[0].audioUrl, audio);
@@ -260,4 +304,9 @@ test('popup does not flag complete HLS and DASH manifests as isolated social tra
     const result = popupContext.pairTracks([{ url: `https://cdn.example/master.${extension}`, kind: 'video' }], 'https://www.facebook.com/');
     assert.notEqual(result[0].ambiguousSocialTrack, true);
   }
+});
+test('popup keeps a muxed TikTok MP4 complete without inventing an audio pair', () => {
+  const result = popupContext.pairTracks([{ ...popupTrack(videoA, 'video', 1000), muxed: true }], 'https://www.tiktok.com/');
+  assert.equal(result[0].ambiguousSocialTrack, undefined);
+  assert.equal(result[0].audioUrl, undefined);
 });

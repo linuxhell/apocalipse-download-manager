@@ -6,6 +6,12 @@ const { test } = require('node:test');
 const vm = require('node:vm');
 const script = readFileSync(process.env.ADM_CONTENT_SCRIPT || join(__dirname, '../browser-extension/content.js'), 'utf8');
 
+test('Facebook srcObject download falls back to the exact combined player stream', () => {
+  assert.match(script, /overlay_download_stream_capture/);
+  assert.match(script, /isFacebookVideo && element\.srcObject && canRecord && recordButton/);
+  assert.match(script, /recordButton\.click\(\)/);
+});
+
 // Execute the real content script and its installed click handler. Only browser
 // APIs/DOM geometry are mocked; URL selection and the outgoing payload are real.
 function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false } = {}) {
@@ -186,4 +192,34 @@ test('YouTube page extraction and ordinary direct HTTP downloads are unchanged',
     await p.click();
     assert.equal(p.downloads()[0].item.url, expected);
   }
+});
+
+test('YouTube exposes yt-dlp Download without a redundant recording button', () => {
+  assert.match(script, /const usesExtractorOnlyDownload = isYouTubeVideo;/);
+  assert.match(script, /if \(element\.tagName === "VIDEO" && canRecord && !usesExtractorOnlyDownload\)/);
+});
+
+test('recording follows player pauses without writing dead timeline gaps', () => {
+  assert.match(script, /recording_paused_with_player/);
+  assert.match(script, /recorder\.pause\(\)/);
+  assert.match(script, /recording_resumed_with_player/);
+  assert.match(script, /recorder\.resume\(\)/);
+  assert.match(script, /recorder && recorder\.state !== "inactive"/);
+});
+
+test('recording keeps the source player alive and stops at its real end', () => {
+  assert.match(script, /playbackWatch = setInterval/);
+  assert.match(script, /resumeRecorderOnRealProgress/);
+  assert.match(script, /element\.addEventListener\("timeupdate", resumeRecorderOnRealProgress\)/);
+  assert.match(script, /currentTime <= pausedAtMediaTime \+ 0\.04/);
+  assert.match(script, /currentTime >= duration - 0\.25/);
+  assert.match(script, /recording_reached_media_end/);
+  assert.match(script, /if \(playbackWatch\) clearInterval\(playbackWatch\)/);
+});
+
+test('recording seals each segment and resumes only after real media progress', () => {
+  assert.match(script, /recorder\.requestData\?\.\(\)/);
+  assert.match(script, /pausedAtMediaTime = Number\(element\.currentTime\)/);
+  assert.match(script, /recorder\.state !== "paused" \|\| element\.paused/);
+  assert.match(script, /recorder\.resume\(\)/);
 });
