@@ -5,6 +5,13 @@ const path = require('node:path');
 
 const root = path.join(__dirname, '..', 'browser-extension');
 
+test('TikTok blob button falls back to its exact bound player stream', () => {
+  const source = fs.readFileSync(path.join(root, 'tiktok-media-fix.js'), 'utf8');
+  assert.match(source, /Symbol\.for\("apocalipse\.recordButton"\)/);
+  assert.match(source, /tiktok_blob_without_complete_resource/);
+  assert.match(source, /recordButton\.click\(\)/);
+});
+
 test('TikTok uses one deterministic isolated-world chain in every frame', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
   const tiktok = manifest.content_scripts.find((item) => Array.isArray(item.js)
