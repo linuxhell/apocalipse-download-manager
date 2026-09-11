@@ -52,6 +52,7 @@ test("desktop package and interface versions cannot diverge", () => {
   assert.ok(packageVersion, "workspace package version is missing");
   assert.equal(tauri.version, packageVersion);
   assert.match(ui, /invoke\("get_app_version"\)/);
+  assert.ok(ui.indexOf("const invoke =") < ui.indexOf('invoke("set_application_theme"'), "theme sync must run only after the desktop bridge is initialized");
 });
 
 test("five readable light themes are available", () => {

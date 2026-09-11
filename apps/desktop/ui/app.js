@@ -510,7 +510,6 @@ const applyTheme = (theme) => {
   document.documentElement.dataset.theme = valid.includes(theme) ? theme : "void";
 };
 applyTheme(localStorage.getItem("apocalipse.theme") || "void");
-invoke("set_application_theme", { theme: localStorage.getItem("apocalipse.theme") || "void" }).catch(console.error);
 const appearanceDefaults = { transparencyEnabled: false, transparencyLevel: 30, roundedEnabled: true, cornerRadius: 10, interfaceSize: "normal" };
 function readAppearance() {
   try { return { ...appearanceDefaults, ...JSON.parse(localStorage.getItem("apocalipse.appearance") || "{}") }; }
@@ -570,6 +569,7 @@ const invoke = (command, args = {}) => {
     throw error;
   });
 };
+invoke("set_application_theme", { theme: localStorage.getItem("apocalipse.theme") || "void" }).catch(console.error);
 invoke("get_app_version").then((version) => {
   document.querySelector("#app-version").textContent = `v${version}`;
 }).catch(() => {});
