@@ -335,6 +335,11 @@ test('popup never assigns the viewport thumbnail to an anonymous CDN response', 
   assert.match(popup, /item\.recommended\s*&&\s*!item\.networkCaptured\s*&&\s*!item\.thumbnail/);
   assert.doesNotMatch(popup, /sort\(\(left, right\).*capturedAt/);
 });
+test('popup disables Preview for a generic social homepage extractor', () => {
+  const popup = readFileSync(join(__dirname, '../browser-extension/popup.js'), 'utf8');
+  assert.match(popup, /const socialExtractor = pageExtractor/);
+  assert.match(popup, /if \(!specific\) return null/);
+});
 test('popup does not flag complete HLS and DASH manifests as isolated social tracks', () => {
   for (const extension of ['m3u8', 'mpd']) {
     const result = popupContext.pairTracks([{ url: `https://cdn.example/master.${extension}`, kind: 'video' }], 'https://www.facebook.com/');

@@ -227,6 +227,19 @@ function previewRequestFor(item, pageUrl) {
   try { parsed = new URL(url); } catch { return null; }
   if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) return null;
   const pageExtractor = Boolean(item.extractorUrl || item.pageExtractor);
+  // A social homepage identifies the feed, not one video. The desktop cannot
+  // preview it safely and correctly rejects it as preview_specific_video_required.
+  const socialExtractor = pageExtractor
+    && /(^|\.)(?:facebook|tiktok|instagram)\.com$/i.test(parsed.hostname);
+  if (socialExtractor) {
+    const specific = /(^|\.)facebook\.com$/i.test(parsed.hostname)
+      ? (/^\/(?:watch|reel|reels|videos|share\/v)\b/i.test(parsed.pathname)
+        || parsed.searchParams.has("v") || parsed.searchParams.has("story_fbid"))
+      : /(^|\.)tiktok\.com$/i.test(parsed.hostname)
+        ? /^\/@[^/]+\/video\/\d+/i.test(parsed.pathname)
+        : /^\/(?:reel|reels|p)\/[^/]+/i.test(parsed.pathname);
+    if (!specific) return null;
+  }
   return { type: "APOCALIPSE_PREVIEW_MEDIA", url, pageUrl,
     audioUrl: pageExtractor ? null : item.audioUrl || null,
     mediaKind: item.kind, pageExtractor,
@@ -301,7 +314,7 @@ const render = () => {
     void globalThis.ADM_DIAG?.emit("popup.row_state", { url: item.url, kind: item.kind,
       thumbnail: Boolean(item.thumbnail), thumbnailSource: /^data:/i.test(item.thumbnail || "") ? "captured_data" : item.thumbnail ? "dom_url" : "none",
       previewEnabled: Boolean(previewRequest), downloadEnabled: true,
-      reason: item.ambiguousSocialTrack ? "manual_selection_available" : previewRequest ? "valid_selection" : "invalid_preview_source" });
+      reason: previewRequest ? (item.ambiguousSocialTrack ? "manual_selection_available" : "valid_selection") : "invalid_preview_source" });
     previewButton.title = previewRequest ? t("externalPreview") : t("incompleteTrack");
     previewButton.onclick = () => {
       if (!previewRequest) return;
