@@ -69,7 +69,10 @@ async function inspectMediaTrack(item) {
   if (cached && Date.now() - cached.at < 120_000) return cached.value;
   let value = { kind: /^audio\//i.test(item.contentType || "") ? "audio" : "unknown", duration: null };
   try {
-    const response = await fetch(key, { credentials: "include", redirect: "follow", headers: { Range: "bytes=0-262143" } });
+    // Keep every signed query parameter exactly as captured. TikTok includes
+    // range fields in the CDN signature; removing them invalidates the URL and
+    // made inspection return "unknown" even though popup playback succeeded.
+    const response = await fetch(item.url, { credentials: "include", redirect: "follow", headers: { Range: "bytes=0-262143" } });
     if (response.ok || response.status === 206) {
       const reader = response.body?.getReader();
       const chunks = [];
@@ -509,7 +512,12 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     Promise.all((message.media || []).slice(0, 16).map(async (item) => ({
       url: item.url,
       ...(await inspectMediaTrack(item)),
-    }))).then((media) => reply({ media })).catch((error) => reply({ media: [], error: String(error) }));
+    }))).then((media) => {
+      const kinds = media.reduce((counts, item) => ({ ...counts, [item.kind]: (counts[item.kind] || 0) + 1 }), {});
+      void globalThis.ADM_DIAG_WORKER?.emit("capture.media_tracks_inspected", { count: media.length, kinds,
+        withDuration: media.filter((item) => Number.isFinite(item.duration)).length }, null, "INFO", sender.tab?.id);
+      reply({ media });
+    }).catch((error) => reply({ media: [], error: String(error) }));
     return true;
   }
   if (message?.type === "APOCALIPSE_OPEN_MEDIA_PICKER") {
