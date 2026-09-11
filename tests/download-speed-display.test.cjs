@@ -115,6 +115,9 @@ test("feed thumbnails come from the exact visual player region before page metad
   assert.match(content, /const socialCardUrl = \(value\) =>/);
   assert.match(content, /const cardThumbnailFor = \(anchor\) =>/);
   assert.match(content, /Social feeds commonly expose the permalink and cover image before they/);
+  assert.match(content, /const playerContext = \(element\) =>/);
+  assert.match(content, /playerBound:\s*true/);
+  assert.match(content, /visualOnly:\s*true/);
 });
 
 test("Facebook photo permalinks never leak into the Videos tab", () => {

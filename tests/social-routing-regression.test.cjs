@@ -308,6 +308,18 @@ test('a visual social video suppresses unrelated CDN fragments globally', () => 
     assert.deepEqual(JSON.parse(JSON.stringify(result)), [visual]);
   }
 });
+test('a bound Blob player suppresses orphan CDN fragments without guessing their identity', () => {
+  const player = { url: 'https://www.tiktok.com/#apocalipse-player-1', kind: 'video',
+    playerBound: true, visualOnly: true, recommended: true,
+    rect: { left: 20, top: 40, width: 480, height: 560 } };
+  const result = popupContext.mergeDetected([player], [
+    popupTrack(videoA, 'video', 1000), popupTrack(videoB, 'video', 2000),
+  ], 'https://www.tiktok.com/');
+  assert.equal(result.length, 1);
+  assert.equal(result[0].url, player.url);
+  assert.equal(result[0].playerBound, true);
+  assert.equal(result[0].visualOnly, true);
+});
 test('a generic social Blob player resolves one CDN track only by unique duration', () => {
   const hint = { url: 'https://www.facebook.com/', kind: 'video', duration: 30,
     thumbnail: 'https://img.example/current.jpg', title: 'Visible card' };
@@ -332,8 +344,15 @@ test('duration fallback refuses tied social CDN tracks', () => {
 });
 test('popup never assigns the viewport thumbnail to an anonymous CDN response', () => {
   const popup = readFileSync(join(__dirname, '../browser-extension/popup.js'), 'utf8');
-  assert.match(popup, /item\.recommended\s*&&\s*!item\.networkCaptured\s*&&\s*!item\.thumbnail/);
+  assert.match(popup, /item\.playerBound\s*&&\s*item\.recommended\s*&&\s*!item\.networkCaptured\s*&&\s*!item\.thumbnail\s*&&\s*item\.rect/);
   assert.doesNotMatch(popup, /sort\(\(left, right\).*capturedAt/);
+});
+test('popup crops thumbnails using the exact bound player geometry', () => {
+  const popup = readFileSync(join(__dirname, '../browser-extension/popup.js'), 'utf8');
+  assert.match(popup, /rect:\s*visibleVideo\.rect/);
+  assert.match(popup, /viewport:\s*visibleVideo\.viewport/);
+  assert.match(popup, /if \(item\.visualOnly\) return null/);
+  assert.match(popup, /button\.disabled = Boolean\(item\.visualOnly\)/);
 });
 test('popup disables Preview for a generic social homepage extractor', () => {
   const popup = readFileSync(join(__dirname, '../browser-extension/popup.js'), 'utf8');

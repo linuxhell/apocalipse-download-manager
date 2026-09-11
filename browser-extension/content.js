@@ -187,6 +187,33 @@
     }
   };
   const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
+  const playerIds = new WeakMap();
+  let playerIdCounter = 0;
+  const playerIdentity = (element) => {
+    let id = playerIds.get(element);
+    if (!id) {
+      playerIdCounter += 1;
+      id = `player-${playerIdCounter}`;
+      playerIds.set(element, id);
+    }
+    return id;
+  };
+  const playerContext = (element) => {
+    const rect = element?.getBoundingClientRect?.();
+    if (!rect || rect.width < 80 || rect.height < 45) return {};
+    const visible = rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight
+      && rect.left < (Number(globalThis.innerWidth) || document.documentElement?.clientWidth || rect.right);
+    return {
+      playerBound: true,
+      playerId: playerIdentity(element),
+      recommended: visible,
+      rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      viewport: {
+        width: Number(globalThis.innerWidth) || document.documentElement?.clientWidth || rect.right,
+        height: Number(globalThis.innerHeight) || document.documentElement?.clientHeight || rect.bottom,
+      },
+    };
+  };
   const cssImageUrl = (value) => {
     const match = String(value || "").match(/url\(["']?([^"')]+)["']?\)/i);
     return match ? absolute(match[1]) : "";
@@ -282,6 +309,11 @@
         || /\/(?:permalink|story)\.php$/i.test(parsed.pathname)
         || parsed.searchParams.has("fbid")
         || parsed.searchParams.has("story_fbid");
+    } catch { return false; }
+  };
+  const isSocialMediaPage = (url) => {
+    try {
+      return /(^|\.)(?:facebook|tiktok|instagram)\.com$/i.test(new URL(url, location.href).hostname);
     } catch { return false; }
   };
   const isTikTokVideoUrl = (url) => {
@@ -475,23 +507,40 @@
       });
     };
     document.querySelectorAll("video").forEach((element) => {
-      const facebookUrl = facebookUrlFor(element);
+      const candidateFacebookUrl = facebookUrlFor(element);
+      const facebookUrl = isFacebookMediaUrl(candidateFacebookUrl) ? candidateFacebookUrl : null;
+      const tikTokUrl = tikTokUrlFor(element);
+      const context = playerContext(element);
       if (facebookUrl) {
         add(facebookUrl, "video", element, undefined, {
           pageExtractor: true,
           previewUrl: absolute(element.currentSrc || element.src),
-          recommended: true,
+          ...context,
+        });
+      } else if (tikTokUrl) {
+        add(tikTokUrl, "video", element, undefined, {
+          pageExtractor: true,
+          previewUrl: absolute(element.currentSrc || element.src),
+          ...context,
         });
       } else {
-        add(element.currentSrc || element.src, "video", element);
-        element.querySelectorAll("source").forEach((source) => add(source.src, "video", element));
+        const source = absolute(element.currentSrc || element.src);
+        if (/^https?:/i.test(source || "")) {
+          add(source, "video", element, undefined, context);
+          element.querySelectorAll("source").forEach((child) => add(child.src, "video", element, undefined, context));
+        } else if (isSocialMediaPage(location.href)) {
+          // A Blob/MSE player is still a real visual item. Preserve its stable
+          // element identity and geometry instead of replacing it with every
+          // anonymous CDN request observed in the tab.
+          const identity = new URL(location.href);
+          identity.hash = `apocalipse-${context.playerId || playerIdentity(element)}`;
+          add(identity.href, "video", element, undefined, {
+            ...context,
+            visualOnly: true,
+            pageExtractor: true,
+          });
+        }
       }
-      const tikTokUrl = tikTokUrlFor(element);
-      if (tikTokUrl) add(tikTokUrl, "video", element, undefined, {
-        pageExtractor: true,
-        previewUrl: absolute(element.currentSrc || element.src),
-        recommended: true,
-      });
     });
     // Social feeds commonly expose the permalink and cover image before they
     // create a <video>. Treat that card as a video candidate so its thumbnail
@@ -1252,6 +1301,7 @@
       }
       return Promise.all(selectedItems.map(async (item) => {
       try {
+        if (item.visualOnly) return item;
         return { ...item, ...(await chrome.runtime.sendMessage({ type: "APOCALIPSE_PROBE", url: item.url })) };
       } catch {
         return item;

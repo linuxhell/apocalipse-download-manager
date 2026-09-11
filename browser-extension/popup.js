@@ -49,7 +49,7 @@ const networkMediaKind = (item) => {
 const mergeDetectedMedia = (scanned, network, pageUrl) => {
   const unique = new Map();
   const visualVideos = scanned.filter((item) => item?.kind === "video"
-    && (item.pageExtractor || item.recommended));
+    && (item.playerBound || item.pageExtractor || item.recommended));
   // Once a social card/player has supplied an identifiable video, its direct
   // CDN requests are implementation details. Keep them available only when
   // they describe the exact same URL so size/type metadata can be merged.
@@ -223,6 +223,7 @@ const loadThumbnail = (image, item) => {
 // Preview and Download start from the SAME row identity. previewUrl is only a
 // thumbnail/player hint and can be a partial track, blob, or a generic feed URL.
 function previewRequestFor(item, pageUrl) {
+  if (item.visualOnly) return null;
   const url = item.extractorUrl || item.url;
   let parsed;
   try { parsed = new URL(url); } catch { return null; }
@@ -271,7 +272,7 @@ const render = () => {
     audio: media.filter(v => v.kind === "audio").length, images: media.filter(v => v.kind === "image").length,
     thumbnails: matches.filter(v => Boolean(v.thumbnail)).length,
     displayed: matches.length, disabled: matches.filter(v => v.ambiguousSocialTrack).length, kind: selected });
-  const selectable = matches;
+  const selectable = matches.filter((item) => !item.visualOnly);
   const updateBulk = () => {
     const chosen = selectable.filter((item) => selectedUrls.has(item.url)).length;
     document.querySelector("#download-selected").disabled = chosen === 0;
@@ -291,7 +292,7 @@ const render = () => {
     const preview = row.querySelector(".preview");
     const metadata = row.querySelector("small");
     const checkbox = row.querySelector(".media-select");
-    checkbox.disabled = false;
+    checkbox.disabled = Boolean(item.visualOnly);
     checkbox.checked = selectedUrls.has(item.url);
     checkbox.onchange = () => { checkbox.checked ? selectedUrls.add(item.url) : selectedUrls.delete(item.url); updateBulk(); };
     const audio = row.querySelector(".audio-icon");
@@ -341,7 +342,7 @@ const render = () => {
     };
     const button = row.querySelector(".download-item");
     button.textContent = t("download");
-    button.disabled = false;
+    button.disabled = Boolean(item.visualOnly);
     button.onclick = () => {
       const traceId = globalThis.ADM_DIAG?.begin("popup.download_clicked", { url: item.url, kind: item.kind }) || crypto.randomUUID();
       return chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { ...manualMediaSelection(item), traceId } }, (result) => {
@@ -414,10 +415,15 @@ async function refreshMediaInventory(tab, initial = false) {
     media = nextMedia;
     mediaFingerprint = nextFingerprint;
     for (const url of [...selectedUrls]) if (!media.some((item) => item.url === url)) selectedUrls.delete(url);
-    const visibleVideo = media.find((item) => item.kind === "video"
-      && item.recommended && !item.networkCaptured && !item.thumbnail);
-    if (visibleVideo) {
-      const capturedThumbnail = await chrome.runtime.sendMessage({ type: "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL", tabId: tab.id }).catch(() => null);
+    const visiblePlayers = media.filter((item) => item.kind === "video"
+      && item.playerBound && item.recommended && !item.networkCaptured && !item.thumbnail && item.rect);
+    for (const visibleVideo of visiblePlayers) {
+      const capturedThumbnail = await chrome.runtime.sendMessage({
+        type: "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL",
+        tabId: tab.id,
+        rect: visibleVideo.rect,
+        viewport: visibleVideo.viewport,
+      }).catch(() => null);
       if (capturedThumbnail?.dataUrl) visibleVideo.thumbnail = capturedThumbnail.dataUrl;
     }
     void globalThis.ADM_DIAG?.emit("popup.merged_inventory", { domCount: scanned.length,
