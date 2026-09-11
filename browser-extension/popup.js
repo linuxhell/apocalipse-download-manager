@@ -406,9 +406,11 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
         };
       });
       media = mergeDetectedMedia(scanned, network, tab.url);
-      const visibleVideo = media.find((item) => item.kind === "video" && item.recommended && !item.thumbnail)
-        || [...media].filter((item) => item.kind === "video" && !item.thumbnail)
-          .sort((left, right) => (right.capturedAt || 0) - (left.capturedAt || 0))[0];
+      // A viewport screenshot belongs only to a video whose DOM/player binding
+      // was proven. Attaching it to the newest anonymous CDN response can show
+      // one feed card while Preview opens another one.
+      const visibleVideo = media.find((item) => item.kind === "video"
+        && item.recommended && !item.networkCaptured && !item.thumbnail);
       if (visibleVideo) {
         const capturedThumbnail = await chrome.runtime.sendMessage({
           type: "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL",

@@ -330,6 +330,11 @@ test('duration fallback refuses tied social CDN tracks', () => {
   assert.ok(result.length > 1);
   assert.equal(result.find((item) => item.url === hint.url).ambiguousSocialTrack, true);
 });
+test('popup never assigns the viewport thumbnail to an anonymous CDN response', () => {
+  const popup = readFileSync(join(__dirname, '../browser-extension/popup.js'), 'utf8');
+  assert.match(popup, /item\.recommended\s*&&\s*!item\.networkCaptured\s*&&\s*!item\.thumbnail/);
+  assert.doesNotMatch(popup, /sort\(\(left, right\).*capturedAt/);
+});
 test('popup does not flag complete HLS and DASH manifests as isolated social tracks', () => {
   for (const extension of ['m3u8', 'mpd']) {
     const result = popupContext.pairTracks([{ url: `https://cdn.example/master.${extension}`, kind: 'video' }], 'https://www.facebook.com/');
