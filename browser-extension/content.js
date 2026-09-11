@@ -809,6 +809,19 @@
             && !/\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp)(?:[?#]|$)/i.test(currentUrl))
         );
         if (!currentUrl || (isFacebookVideo && !facebookPlayableUrl)) {
+          // Sponsored Facebook players can expose only a MediaStream through
+          // srcObject while their network traffic consists of short, separate
+          // fragments. Capture the exact combined stream instead of guessing a
+          // fragment or a neighbouring post.
+          if (isFacebookVideo && element.srcObject && canRecord && recordButton) {
+            trace("overlay_download_stream_capture", "download", { reason: "facebook_srcobject_without_complete_resource",
+              duration: Number.isFinite(element.duration) ? element.duration : null });
+            button.textContent = "●";
+            button.title = recordingLabels().record;
+            recordButton.click();
+            setTimeout(() => { button.textContent = originalText; button.title = "Apocalipse Download Manager"; }, 1800);
+            return;
+          }
           trace("overlay_download_unresolved", "download", { liveBlob: Boolean(liveBlobUrl), liveHttp: Boolean(liveHttpUrl), networkMedia: Boolean(networkMediaUrl), facebook: isFacebookVideo });
           button.textContent = "⚠";
           button.title = "Abra o vídeo ou use os três pontos e Copiar link";
