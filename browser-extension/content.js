@@ -910,6 +910,7 @@
         let startedAt = 0;
         let clockTimer = null;
         let stopPoll = null;
+        let playbackWatch = null;
         refreshRecordLabels = () => {
           const labels = recordingLabels();
           if (recordPhase === "recording") record.textContent = `${labels.stop} · ${clockLabel((Date.now() - startedAt) / 1000)}`;
@@ -950,18 +951,32 @@
             let uploadQueue = Promise.resolve();
             let uploadError = null;
             recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+            let lastResumeFailureAt = 0;
+            const resumePlayerForRecording = () => {
+              if (!recorder || recorder.state === "inactive" || !element.paused || element.ended) return;
+              element.play().catch((error) => {
+                const now = Date.now();
+                if (now - lastResumeFailureAt >= 5000) {
+                  lastResumeFailureAt = now;
+                  trace("recording_player_resume_failed", "record", { currentTime: element.currentTime, error: String(error) });
+                }
+              });
+            };
             const syncRecorderWithPlayer = () => {
               if (!recorder || recorder.state === "inactive") return;
               if (element.paused && recorder.state === "recording") {
                 recorder.pause();
                 trace("recording_paused_with_player", "record", { currentTime: element.currentTime });
+                resumePlayerForRecording();
               } else if (!element.paused && recorder.state === "paused") {
                 recorder.resume();
                 trace("recording_resumed_with_player", "record", { currentTime: element.currentTime });
               }
             };
+            const resumeAfterVisibilityChange = () => resumePlayerForRecording();
             element.addEventListener("pause", syncRecorderWithPlayer);
             element.addEventListener("play", syncRecorderWithPlayer);
+            document.addEventListener("visibilitychange", resumeAfterVisibilityChange);
             stream.getTracks().forEach((track) => track.addEventListener("ended", () => {
               trace("recording_track_ended", "record", { kind: track.kind, readyState: track.readyState });
             }, { once: true }));
@@ -972,8 +987,10 @@
             recorder.onstop = async () => {
               if (clockTimer) clearInterval(clockTimer);
               if (stopPoll) clearInterval(stopPoll);
+              if (playbackWatch) clearInterval(playbackWatch);
               element.removeEventListener("pause", syncRecorderWithPlayer);
               element.removeEventListener("play", syncRecorderWithPlayer);
+              document.removeEventListener("visibilitychange", resumeAfterVisibilityChange);
               stream.getTracks().forEach((track) => track.stop());
               element.loop = previousLoop;
               recordPhase = "uploading";
@@ -1007,6 +1024,17 @@
             clockTimer = setInterval(() => {
               if (recorder && recorder.state !== "inactive") refreshRecordLabels();
             }, 1000);
+            playbackWatch = setInterval(() => {
+              if (!recorder || recorder.state === "inactive") return;
+              const duration = Number(element.duration);
+              const currentTime = Number(element.currentTime);
+              if (Number.isFinite(duration) && duration > 0 && Number.isFinite(currentTime) && currentTime >= duration - 0.25) {
+                trace("recording_reached_media_end", "record", { currentTime, duration });
+                recorder.stop();
+                return;
+              }
+              resumePlayerForRecording();
+            }, 750);
             stopPoll = setInterval(async () => {
               if (!recorder || recorder.state === "inactive") return;
               const status = await chrome.runtime.sendMessage({ type: "APOCALIPSE_BLOB_STATUS", request: { uploadId: begin.uploadId } }).catch(() => null);

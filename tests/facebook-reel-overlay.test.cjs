@@ -206,3 +206,14 @@ test('recording follows player pauses without writing dead timeline gaps', () =>
   assert.match(script, /recorder\.resume\(\)/);
   assert.match(script, /recorder && recorder\.state !== "inactive"/);
 });
+
+test('recording keeps the source player alive and stops at its real end', () => {
+  assert.match(script, /playbackWatch = setInterval/);
+  assert.match(script, /resumePlayerForRecording/);
+  assert.match(script, /element\.play\(\)\.catch/);
+  assert.match(script, /document\.addEventListener\("visibilitychange", resumeAfterVisibilityChange\)/);
+  assert.match(script, /document\.removeEventListener\("visibilitychange", resumeAfterVisibilityChange\)/);
+  assert.match(script, /currentTime >= duration - 0\.25/);
+  assert.match(script, /recording_reached_media_end/);
+  assert.match(script, /if \(playbackWatch\) clearInterval\(playbackWatch\)/);
+});
