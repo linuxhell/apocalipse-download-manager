@@ -236,3 +236,10 @@ jobs:
           (cd dist && sha256sum apocalipse-*) > dist/SHA256SUMS.txt
           gh release upload "$tag" dist/* --clobber
           gh release edit "$tag" --draft=false
+
+          # Remove the explicitly superseded public release only after the new
+          # release has been fully uploaded and published.
+          old_tag="v0.4.32"
+          if [[ "$old_tag" != "$tag" ]] && gh release view "$old_tag" >/dev/null 2>&1; then
+            gh release delete "$old_tag" --cleanup-tag --yes
+          fi
