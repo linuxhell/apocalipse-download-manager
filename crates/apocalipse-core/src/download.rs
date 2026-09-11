@@ -117,7 +117,11 @@ struct SourceProbe {
     elapsed: Duration,
 }
 
-fn same_download_identity(primary: &SourceProbe, candidate: &SourceProbe, advertised: bool) -> bool {
+fn same_download_identity(
+    primary: &SourceProbe,
+    candidate: &SourceProbe,
+    advertised: bool,
+) -> bool {
     if primary.total.is_some() && candidate.total.is_some() && primary.total != candidate.total {
         return false;
     }
@@ -315,7 +319,9 @@ impl DownloadEngine {
         }
         let mut verified = Vec::new();
         while let Some(Some((url, probe, server_advertised))) = probes.next().await {
-            if url == request.url || same_download_identity(primary_identity, &probe, server_advertised) {
+            if url == request.url
+                || same_download_identity(primary_identity, &probe, server_advertised)
+            {
                 verified.push((url, probe.elapsed));
             }
         }
@@ -331,7 +337,9 @@ impl DownloadEngine {
         let response = apply_headers(self.client.head(&request.url), &request.headers)
             .send()
             .await;
-        let Ok(response) = response else { return Vec::new() };
+        let Ok(response) = response else {
+            return Vec::new();
+        };
         response
             .headers()
             .get_all(header::LINK)
@@ -345,9 +353,18 @@ impl DownloadEngine {
                     || lower.contains("rel=\"mirror\"")
                     || lower.contains("rel=mirror")
             })
-            .filter_map(|part| part.split_once('<')?.1.split_once('>').map(|value| value.0.trim()))
+            .filter_map(|part| {
+                part.split_once('<')?
+                    .1
+                    .split_once('>')
+                    .map(|value| value.0.trim())
+            })
             .filter_map(|value| reqwest::Url::parse(&request.url).ok()?.join(value).ok())
-            .filter(|url| matches!(url.scheme(), "http" | "https") && url.username().is_empty() && url.password().is_none())
+            .filter(|url| {
+                matches!(url.scheme(), "http" | "https")
+                    && url.username().is_empty()
+                    && url.password().is_none()
+            })
             .map(|url| url.to_string())
             .take(10)
             .collect()
@@ -371,9 +388,15 @@ impl DownloadEngine {
             .or_else(|| response.content_length());
         Some(SourceProbe {
             total,
-            etag: headers.get(header::ETAG).and_then(|value| value.to_str().ok()).map(str::to_owned),
-            digest: headers.get("digest").or_else(|| headers.get("content-md5"))
-                .and_then(|value| value.to_str().ok()).map(str::to_owned),
+            etag: headers
+                .get(header::ETAG)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
+            digest: headers
+                .get("digest")
+                .or_else(|| headers.get("content-md5"))
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
             elapsed: started.elapsed(),
         })
     }

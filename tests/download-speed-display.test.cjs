@@ -109,6 +109,12 @@ test("feed thumbnails come from the exact visual player region before page metad
   assert.match(content, /Social feeds commonly expose the permalink and cover image before they/);
 });
 
+test("Facebook photo permalinks never leak into the Videos tab", () => {
+  const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");
+  assert.match(content, /\/\\\/\(\?:photo\|photos\)\(\?:\\\.php\|\\\/\|\$\)\/i/);
+  assert.match(content, /Facebook uses `fbid` for both photos and videos/);
+});
+
 test("a closed browser becomes disconnected after the initial extension wait", () => {
   assert.match(ui, /bridgeDisconnected:\s*"Extension disconnected"/);
   assert.match(ui, /bridgeDisconnected:\s*"Extensão desconectada"/);

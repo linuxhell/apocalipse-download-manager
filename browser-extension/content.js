@@ -274,6 +274,10 @@
       const parsed = new URL(url, location.href);
       if (!/(^|\.)facebook\.com$/i.test(parsed.hostname)) return false;
       if (/\/(?:watch\/hashtag|hashtag)(?:\/|$)/i.test(parsed.pathname)) return false;
+      // Facebook uses `fbid` for both photos and videos. A photo permalink must
+      // stay in the Images tab; otherwise the popup offers the video player for
+      // a JPEG and the desktop correctly rejects it as a non-video page.
+      if (/\/(?:photo|photos)(?:\.php|\/|$)/i.test(parsed.pathname)) return false;
       return /(?:^|\/)(?:reel|reels|watch|videos|posts|share)(?:\/|$)/i.test(parsed.pathname)
         || /\/(?:permalink|story)\.php$/i.test(parsed.pathname)
         || parsed.searchParams.has("fbid")
