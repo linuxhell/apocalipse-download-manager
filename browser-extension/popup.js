@@ -10,7 +10,7 @@ const pairSocialTracks = (items, pageUrl) => {
   const audio = items.filter((item) => item.kind === "audio" && item.networkCaptured);
   const pairedAudio = new Set();
   const result = items.map((item) => {
-    if (item.kind !== "video" || item.pageExtractor || item.audioUrl || /\.(?:m3u8|mpd)(?:$|[?#])/i.test(item.url)) return item;
+    if (item.kind !== "video" || item.pageExtractor || item.audioUrl || item.muxed || /\.(?:m3u8|mpd)(?:$|[?#])/i.test(item.url)) return item;
     const source = item.networkCaptured
       ? item
       : items.find((candidate) => candidate.networkCaptured && candidate.kind === "video" && candidate.url === item.url);
@@ -336,8 +336,14 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
       const scanned = error ? [] : (response?.media || []);
       void globalThis.ADM_DIAG?.emit("popup.frame0_reply", { ok: !error, count: scanned.length, errorRef: error?.message || "" }, null, error ? "WARN" : "INFO");
       const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA", tabId: tab.id }).catch(() => null);
+      const inspected = captured?.media?.length
+        ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_INSPECT_MEDIA_TRACKS", media: captured.media }).catch(() => null)
+        : null;
+      const trackInfo = new Map((inspected?.media || []).map((item) => [item.url, item]));
       const network = (captured?.media || []).map((item) => {
-        const video = networkMediaKind(item) === "video";
+        const inspectedKind = trackInfo.get(item.url)?.kind;
+        const video = inspectedKind === "video" || inspectedKind === "muxed"
+          || (inspectedKind !== "audio" && networkMediaKind(item) === "video");
         return {
           url: item.url,
           contentType: item.contentType || null,
@@ -347,6 +353,8 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
           title: (() => { try { return new URL(item.url).hostname.includes("tiktok") ? `TikTok — ${t("capturedResource")}` : t("capturedResource"); } catch { return t("capturedResource"); } })(),
           capturedAt: item.capturedAt,
           frameId: item.frameId,
+          muxed: inspectedKind === "muxed",
+          duration: trackInfo.get(item.url)?.duration || null,
           networkCaptured: true,
         };
       });
