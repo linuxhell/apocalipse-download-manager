@@ -6003,7 +6003,12 @@ fn append_blob_chunk(app: &tauri::AppHandle, request: BlobChunk) -> Result<(), S
             upload.speed_sample_at = Instant::now();
             upload.speed_sample_bytes = upload.received;
         }
-        (upload.task_id, upload.received, upload.total, upload.smoothed_speed)
+        (
+            upload.task_id,
+            upload.received,
+            upload.total,
+            upload.smoothed_speed,
+        )
     };
     update_task(app, task_id, false, |task| {
         task.received = received;
