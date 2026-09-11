@@ -308,17 +308,32 @@ test('a visual social video suppresses unrelated CDN fragments globally', () => 
     assert.deepEqual(JSON.parse(JSON.stringify(result)), [visual]);
   }
 });
-test('a bound Blob player suppresses orphan CDN fragments without guessing their identity', () => {
+test('a bound Blob player keeps captured tracks available when identity is unresolved', () => {
   const player = { url: 'https://www.tiktok.com/#apocalipse-player-1', kind: 'video',
     playerBound: true, visualOnly: true, recommended: true,
     rect: { left: 20, top: 40, width: 480, height: 560 } };
   const result = popupContext.mergeDetected([player], [
     popupTrack(videoA, 'video', 1000), popupTrack(videoB, 'video', 2000),
   ], 'https://www.tiktok.com/');
-  assert.equal(result.length, 1);
-  assert.equal(result[0].url, player.url);
-  assert.equal(result[0].playerBound, true);
-  assert.equal(result[0].visualOnly, true);
+  assert.equal(result.length, 3);
+  assert.ok(result.some((item) => item.url === player.url && item.visualOnly));
+  assert.ok(result.some((item) => item.url === videoA && item.ambiguousSocialTrack));
+  assert.ok(result.some((item) => item.url === videoB && item.ambiguousSocialTrack));
+});
+test('a visualOnly Blob player resolves the unique captured MP4 with the same duration', () => {
+  for (const pageUrl of ['https://www.tiktok.com/', 'https://www.facebook.com/']) {
+    const player = { url: `${pageUrl}#apocalipse-player-1`, kind: 'video', duration: 30,
+      thumbnail: 'data:image/png;base64,current', title: 'Current visible video',
+      playerBound: true, visualOnly: true, recommended: true };
+    const current = { ...popupTrack(videoA, 'video', 1000), duration: 30, muxed: true };
+    const buffered = { ...popupTrack(videoB, 'video', 2000), duration: 42, muxed: true };
+    const result = popupContext.mergeDetected([player], [buffered, current], pageUrl);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].url, videoA);
+    assert.equal(result[0].title, player.title);
+    assert.equal(result[0].thumbnail, player.thumbnail);
+    assert.equal(result[0].ambiguousSocialTrack, false);
+  }
 });
 test('a generic social Blob player resolves one CDN track only by unique duration', () => {
   const hint = { url: 'https://www.facebook.com/', kind: 'video', duration: 30,
