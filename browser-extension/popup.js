@@ -1,5 +1,6 @@
 globalThis.ADM_DIAG?.register("popup.js");
 let media = [], selected = "video", locale = "en", activePageUrl = "", interfaceTheme = "void";
+let activeMediaTab = null, mediaRefreshRunning = false, mediaFingerprint = "";
 const popupThemes = new Set(["void","inferno","toxic","synthwave","royal","crimson","arctic","obsidian","monochrome","midnight","forest","graphite","deepsea","eclipse","hazard","cyberstorm","ultraviolet","emeraldgold","scarletice","coppernavy","solarizednight","pearlblue","whiteaurora","goldenivory","crystalrose","polarmint"]);
 const normalizeDesktopLanguage = (language) => language === "pt-BR" ? "pt_BR" : language === "zh-CN" ? "zh_CN" : ["en","pt_BR","zh_CN"].includes(language) ? language : "en";
 const applyPopupTheme = (theme) => {
@@ -376,73 +377,79 @@ document.querySelector("#download-selected").onclick = async () => {
   else showBridgeError(result?.error || "unavailable");
   render();
 };
+
+const scanTopFrame = (tabId) => new Promise((resolve) => {
+  chrome.tabs.sendMessage(tabId, { type: "APOCALIPSE_SCAN" }, { frameId: 0 }, (response) => {
+    const error = chrome.runtime.lastError;
+    resolve({ scanned: error ? [] : (response?.media || []), error });
+  });
+});
+
+async function refreshMediaInventory(tab, initial = false) {
+  if (mediaRefreshRunning || !tab?.id || !/^https?:/i.test(tab.url || "")) return;
+  mediaRefreshRunning = true;
+  try {
+    activePageUrl = tab.url;
+    const { scanned, error } = await scanTopFrame(tab.id);
+    void globalThis.ADM_DIAG?.emit("popup.frame0_reply", { ok: !error, count: scanned.length,
+      errorRef: error?.message || "", liveRefresh: !initial }, null, error ? "WARN" : "INFO");
+    const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA", tabId: tab.id }).catch(() => null);
+    const inspected = captured?.media?.length
+      ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_INSPECT_MEDIA_TRACKS", media: captured.media }).catch(() => null)
+      : null;
+    const trackInfo = new Map((inspected?.media || []).map((item) => [item.url, item]));
+    const network = (captured?.media || []).map((item) => {
+      const inspectedKind = trackInfo.get(item.url)?.kind;
+      const video = inspectedKind === "video" || inspectedKind === "muxed"
+        || (inspectedKind !== "audio" && networkMediaKind(item) === "video");
+      return { url: item.url, contentType: item.contentType || null, kind: video ? "video" : "audio",
+        size: item.contentLength || null, ext: video ? "mp4" : "audio",
+        title: (() => { try { return new URL(item.url).hostname.includes("tiktok") ? `TikTok — ${t("capturedResource")}` : t("capturedResource"); } catch { return t("capturedResource"); } })(),
+        capturedAt: item.capturedAt, frameId: item.frameId, muxed: inspectedKind === "muxed",
+        duration: trackInfo.get(item.url)?.duration || null, networkCaptured: true };
+    });
+    const nextMedia = mergeDetectedMedia(scanned, network, tab.url);
+    const nextFingerprint = JSON.stringify(nextMedia.map((item) => [item.url, item.kind, item.thumbnail || "", item.duration || 0]));
+    if (!initial && nextFingerprint === mediaFingerprint) return;
+    media = nextMedia;
+    mediaFingerprint = nextFingerprint;
+    for (const url of [...selectedUrls]) if (!media.some((item) => item.url === url)) selectedUrls.delete(url);
+    const visibleVideo = media.find((item) => item.kind === "video"
+      && item.recommended && !item.networkCaptured && !item.thumbnail);
+    if (visibleVideo) {
+      const capturedThumbnail = await chrome.runtime.sendMessage({ type: "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL", tabId: tab.id }).catch(() => null);
+      if (capturedThumbnail?.dataUrl) visibleVideo.thumbnail = capturedThumbnail.dataUrl;
+    }
+    void globalThis.ADM_DIAG?.emit("popup.merged_inventory", { domCount: scanned.length,
+      networkCount: network.length, mergedCount: media.length, liveRefresh: !initial });
+    const picker = await chrome.runtime.sendMessage({ type: "APOCALIPSE_MEDIA_PICKER_CONTEXT", tabId: tab.id }).catch(() => null);
+    const requested = document.querySelector("#requested-media");
+    if (picker?.context) {
+      requested.hidden = false;
+      requested.querySelector("b").textContent = picker.context.title || t("capturedResource");
+      loadThumbnail(requested.querySelector("img"), picker.context);
+    } else requested.hidden = true;
+    render();
+  } finally { mediaRefreshRunning = false; }
+}
+
 chrome.storage.local.get({ language: "en" }, ({ language }) => {
   locale = normalizeDesktopLanguage(language);
   document.querySelector("#language").value = locale;
   translate();
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    const tab = tabs[0];
+    const tab = tabs[0]; activeMediaTab = tab || null;
     activePageUrl = tab?.url || "";
     if (!tab?.id || !/^https?:/i.test(tab.url || "")) {
       media = [];
       render();
       return;
     }
-    // Social sites contain many cross-origin iframes. Without an explicit
-    // frame, Chrome may return the empty scan from an advertisement/player
-    // iframe instead of the visible page.
-    chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_SCAN" }, { frameId: 0 }, async (response) => {
-      const error = chrome.runtime.lastError;
-      const scanned = error ? [] : (response?.media || []);
-      void globalThis.ADM_DIAG?.emit("popup.frame0_reply", { ok: !error, count: scanned.length, errorRef: error?.message || "" }, null, error ? "WARN" : "INFO");
-      const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA", tabId: tab.id }).catch(() => null);
-      const inspected = captured?.media?.length
-        ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_INSPECT_MEDIA_TRACKS", media: captured.media }).catch(() => null)
-        : null;
-      const trackInfo = new Map((inspected?.media || []).map((item) => [item.url, item]));
-      const network = (captured?.media || []).map((item) => {
-        const inspectedKind = trackInfo.get(item.url)?.kind;
-        const video = inspectedKind === "video" || inspectedKind === "muxed"
-          || (inspectedKind !== "audio" && networkMediaKind(item) === "video");
-        return {
-          url: item.url,
-          contentType: item.contentType || null,
-          kind: video ? "video" : "audio",
-          size: item.contentLength || null,
-          ext: video ? "mp4" : "audio",
-          title: (() => { try { return new URL(item.url).hostname.includes("tiktok") ? `TikTok — ${t("capturedResource")}` : t("capturedResource"); } catch { return t("capturedResource"); } })(),
-          capturedAt: item.capturedAt,
-          frameId: item.frameId,
-          muxed: inspectedKind === "muxed",
-          duration: trackInfo.get(item.url)?.duration || null,
-          networkCaptured: true,
-        };
-      });
-      media = mergeDetectedMedia(scanned, network, tab.url);
-      // A viewport screenshot belongs only to a video whose DOM/player binding
-      // was proven. Attaching it to the newest anonymous CDN response can show
-      // one feed card while Preview opens another one.
-      const visibleVideo = media.find((item) => item.kind === "video"
-        && item.recommended && !item.networkCaptured && !item.thumbnail);
-      if (visibleVideo) {
-        const capturedThumbnail = await chrome.runtime.sendMessage({
-          type: "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL",
-          tabId: tab.id,
-        }).catch(() => null);
-        if (capturedThumbnail?.dataUrl) visibleVideo.thumbnail = capturedThumbnail.dataUrl;
-      }
-      void globalThis.ADM_DIAG?.emit("popup.merged_inventory", { domCount: scanned.length, networkCount: network.length, mergedCount: media.length });
-      const picker = await chrome.runtime.sendMessage({ type: "APOCALIPSE_MEDIA_PICKER_CONTEXT", tabId: tab.id }).catch(() => null);
-      const requested = document.querySelector("#requested-media");
-      if (picker?.context) {
-        requested.hidden = false;
-        requested.querySelector("b").textContent = picker.context.title || t("capturedResource");
-        loadThumbnail(requested.querySelector("img"), picker.context);
-      } else requested.hidden = true;
-      render();
-    });
+    void refreshMediaInventory(tab, true);
   });
 });
+// Keep all three media tabs synchronized while a feed changes under the popup.
+setInterval(() => { if (activeMediaTab) void refreshMediaInventory(activeMediaTab); }, 1500);
 chrome.storage.local.get({ desktopTheme: "void" }, ({ desktopTheme }) => applyPopupTheme(desktopTheme));
 chrome.storage.local.get({ pairingToken: "" }, async ({ pairingToken }) => {
   document.querySelector("#pairing-token").value = pairingToken;

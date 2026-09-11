@@ -340,6 +340,12 @@ test('popup disables Preview for a generic social homepage extractor', () => {
   assert.match(popup, /const socialExtractor = pageExtractor/);
   assert.match(popup, /if \(!specific\) return null/);
 });
+test('popup refreshes video, audio and image inventory while it remains open', () => {
+  const popup = readFileSync(join(__dirname, '../browser-extension/popup.js'), 'utf8');
+  assert.match(popup, /async function refreshMediaInventory/);
+  assert.match(popup, /setInterval\(\(\) => \{ if \(activeMediaTab\)/);
+  assert.match(popup, /1500\)/);
+});
 test('popup does not flag complete HLS and DASH manifests as isolated social tracks', () => {
   for (const extension of ['m3u8', 'mpd']) {
     const result = popupContext.pairTracks([{ url: `https://cdn.example/master.${extension}`, kind: 'video' }], 'https://www.facebook.com/');
