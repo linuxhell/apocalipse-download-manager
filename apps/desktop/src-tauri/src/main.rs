@@ -7039,7 +7039,9 @@ async fn remove_downloads(
                     classify_url(&task.source),
                     Some(DownloadKind::Torrent | DownloadKind::Magnet)
                 ) && path == task.destination;
-                remove_path_with_retry(&path, torrent_root).await?;
+                let hls_workspace = matches!(classify_url(&task.source), Some(DownloadKind::Hls))
+                    && hls_workspace_path(task).as_ref() == Some(&path);
+                remove_path_with_retry(&path, torrent_root || hls_workspace).await?;
             }
         }
     }
@@ -7088,7 +7090,23 @@ fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
             }
         }
     }
+    if matches!(classify_url(&task.source), Some(DownloadKind::Hls)) {
+        if let Some(workspace) = hls_workspace_path(task) {
+            if !paths.contains(&workspace) {
+                paths.push(workspace);
+            }
+        }
+    }
     paths
+}
+
+fn hls_workspace_path(task: &DownloadTask) -> Option<PathBuf> {
+    let parent = task.destination.parent()?;
+    let stem = task.destination.file_stem()?;
+    if stem.is_empty() {
+        return None;
+    }
+    Some(parent.join(stem))
 }
 
 async fn remove_path_with_retry(path: &Path, allow_directory: bool) -> Result<(), String> {
@@ -7681,6 +7699,11 @@ mod tests {
         let paths = download_paths(&task);
         assert!(paths.contains(&PathBuf::from("C:/Downloads/157651625.mp4")));
         assert!(paths.contains(&partial_path(&task.destination)));
+        assert!(paths.contains(&PathBuf::from("C:/Downloads/157651625")));
+        assert_eq!(
+            hls_workspace_path(&task),
+            Some(PathBuf::from("C:/Downloads/157651625"))
+        );
     }
 
     #[tokio::test]

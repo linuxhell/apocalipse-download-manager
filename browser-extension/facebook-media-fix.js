@@ -67,7 +67,22 @@
       : "";
   };
 
-  document.addEventListener("click", (event) => {
+  const capturedThumbnailFor = async (video) => {
+    const thumbnail = thumbnailFor(video);
+    if (thumbnail) return thumbnail;
+    const rect = video?.getBoundingClientRect?.();
+    if (!rect || rect.width < 80 || rect.height < 45 || rect.bottom <= 0 || rect.top >= innerHeight) return "";
+    try {
+      const result = await chrome.runtime.sendMessage({
+        type: "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL",
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        viewport: { width: innerWidth, height: innerHeight },
+      });
+      return result?.dataUrl || "";
+    } catch { return ""; }
+  };
+
+  document.addEventListener("click", async (event) => {
     const button = event.target?.closest?.(".apocalipse-media-download:not(.apocalipse-media-record)");
     if (!button) return;
     const video = videoForButton(button);
@@ -79,6 +94,7 @@
     const original = button.textContent;
     button.textContent = "…";
     const id = new URL(url).pathname.match(/\/(?:reel|reels|videos|posts)\/([^/?#]+)/i)?.[1] || "video";
+    const thumbnail = await capturedThumbnailFor(video);
     chrome.runtime.sendMessage({
       type: "APOCALIPSE_DOWNLOAD",
       item: {
@@ -88,7 +104,7 @@
         userAgent: navigator.userAgent,
         kind: "video",
         title: `Facebook-${id}`,
-        thumbnail: thumbnailFor(video),
+        thumbnail,
       },
     }, (result) => {
       const failed = chrome.runtime.lastError || !result?.ok;

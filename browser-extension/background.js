@@ -40,6 +40,48 @@ const portableThumbnail = async (value) => {
   try { return await fetchThumbnailDataUrl(value); }
   catch { return value; }
 };
+
+const blobDataUrl = async (blob) => {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return `data:${blob.type || "image/jpeg"};base64,${btoa(binary)}`;
+};
+
+const captureVisibleThumbnail = async (sender, requestedRect = null, viewport = null, requestedTabId = null) => {
+  const tab = sender?.tab || (Number.isInteger(requestedTabId) ? await chrome.tabs.get(requestedTabId) : null);
+  if (!tab || !chrome.tabs?.captureVisibleTab) throw new Error("thumbnail_capture_unavailable");
+  const captured = await new Promise((resolve, reject) => {
+    chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 55 }, (dataUrl) => {
+      const error = chrome.runtime.lastError;
+      if (error || !dataUrl) reject(new Error(error?.message || "thumbnail_capture_failed"));
+      else resolve(dataUrl);
+    });
+  });
+  if (!requestedRect || typeof OffscreenCanvas === "undefined" || typeof createImageBitmap !== "function") return captured;
+  try {
+    const bitmap = await createImageBitmap(await (await fetch(captured)).blob());
+    const viewportWidth = Math.max(1, Number(viewport?.width) || bitmap.width);
+    const viewportHeight = Math.max(1, Number(viewport?.height) || bitmap.height);
+    const scaleX = bitmap.width / viewportWidth;
+    const scaleY = bitmap.height / viewportHeight;
+    const x = Math.max(0, Math.floor(Number(requestedRect.left || 0) * scaleX));
+    const y = Math.max(0, Math.floor(Number(requestedRect.top || 0) * scaleY));
+    const width = Math.min(bitmap.width - x, Math.max(1, Math.floor(Number(requestedRect.width || viewportWidth) * scaleX)));
+    const height = Math.min(bitmap.height - y, Math.max(1, Math.floor(Number(requestedRect.height || viewportHeight) * scaleY)));
+    if (width < 80 || height < 45) return captured;
+    const outputWidth = Math.min(480, width);
+    const outputHeight = Math.max(1, Math.round(height * outputWidth / width));
+    const canvas = new OffscreenCanvas(outputWidth, outputHeight);
+    canvas.getContext("2d").drawImage(bitmap, x, y, width, height, 0, 0, outputWidth, outputHeight);
+    bitmap.close?.();
+    return await blobDataUrl(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.72 }));
+  } catch {
+    return captured;
+  }
+};
 const mediaPickerContexts = new Map();
 const inspectedMediaTracks = new Map();
 const ASSISTED_PREFIX = "assisted-download:";
@@ -520,6 +562,12 @@ chrome.downloads.onChanged.addListener((delta) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.type === "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL") {
+    captureVisibleThumbnail(sender, message.rect, message.viewport, message.tabId)
+      .then((dataUrl) => reply({ dataUrl }))
+      .catch((error) => reply({ error: String(error) }));
+    return true;
+  }
   if (globalThis.ADM_DIAG_WORKER?.message(message, sender, reply)) return true;
   if (message?.type === "APOCALIPSE_WORKER_PING") {
     reply({ ok: true, version: chrome.runtime.getManifest().version });

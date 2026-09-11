@@ -365,6 +365,16 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
         };
       });
       media = mergeDetectedMedia(scanned, network, tab.url);
+      const visibleVideo = media.find((item) => item.kind === "video" && item.recommended && !item.thumbnail)
+        || [...media].filter((item) => item.kind === "video" && !item.thumbnail)
+          .sort((left, right) => (right.capturedAt || 0) - (left.capturedAt || 0))[0];
+      if (visibleVideo) {
+        const capturedThumbnail = await chrome.runtime.sendMessage({
+          type: "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL",
+          tabId: tab.id,
+        }).catch(() => null);
+        if (capturedThumbnail?.dataUrl) visibleVideo.thumbnail = capturedThumbnail.dataUrl;
+      }
       void globalThis.ADM_DIAG?.emit("popup.merged_inventory", { domCount: scanned.length, networkCount: network.length, mergedCount: media.length });
       const picker = await chrome.runtime.sendMessage({ type: "APOCALIPSE_MEDIA_PICKER_CONTEXT", tabId: tab.id }).catch(() => null);
       const requested = document.querySelector("#requested-media");

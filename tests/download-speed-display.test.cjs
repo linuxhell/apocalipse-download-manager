@@ -87,10 +87,15 @@ test("task state and action controls use the active theme instead of dark consta
 
 test("protected thumbnails are cached for the desktop handoff", () => {
   const worker = fs.readFileSync(path.join(root, "browser-extension/background.js"), "utf8");
+  const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");
   assert.match(worker, /const fetchThumbnailDataUrl = async/);
   assert.match(worker, /const thumbnail = await portableThumbnail\(item\.thumbnail\)/);
   assert.match(worker, /thumbnailDataCache/);
   assert.match(desktop, /value\.len\(\) <= 600_000/);
+  assert.match(worker, /APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL/);
+  assert.match(worker, /chrome\.tabs\.captureVisibleTab/);
+  assert.match(worker, /new OffscreenCanvas/);
+  assert.match(content, /const captureThumbnailFor = async/);
 });
 
 test("feed thumbnails come from the exact visual player region before page metadata", () => {
@@ -112,4 +117,9 @@ test("download destinations and task copy follow the active theme palette", () =
   assert.match(desktopCss, /\.destination-select\s*\{[\s\S]*color:\s*var\(--text\)/);
   assert.match(desktopCss, /\.destination-row\.unavailable \.destination-select span\s*\{\s*color:\s*var\(--muted\)/);
   assert.match(desktopCss, /\.download-info strong\s*\{[\s\S]*color:\s*color-mix/);
+});
+
+test("paused HLS cleanup includes its isolated segment workspace", () => {
+  assert.match(desktop, /fn hls_workspace_path\(task: &DownloadTask\)/);
+  assert.match(desktop, /torrent_root \|\| hls_workspace/);
 });

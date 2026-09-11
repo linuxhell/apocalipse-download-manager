@@ -255,6 +255,20 @@
     if (element?.tagName === "IMG") return element.currentSrc || element.src || "";
     return pageThumbnail(element);
   };
+  const captureThumbnailFor = async (element, kind = "video") => {
+    const existing = thumbnailFor(element, kind);
+    if (existing) return existing;
+    const rect = element?.getBoundingClientRect?.();
+    if (!rect || rect.width < 80 || rect.height < 45 || rect.bottom <= 0 || rect.top >= innerHeight) return "";
+    try {
+      const result = await chrome.runtime.sendMessage({
+        type: "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL",
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        viewport: { width: innerWidth, height: innerHeight },
+      });
+      return result?.dataUrl || "";
+    } catch { return ""; }
+  };
   const isFacebookMediaUrl = (url) => {
     try {
       const parsed = new URL(url, location.href);
@@ -934,7 +948,8 @@
           facebookPageExtractorPreferred: Boolean(facebookPageUrl),
           candidate: currentUrl,
         });
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail: thumbnailFor(element, "video") } }, (result) => {
+        const thumbnail = await captureThumbnailFor(element, "video");
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail } }, (result) => {
           const failed = chrome.runtime.lastError || !result?.ok;
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";
