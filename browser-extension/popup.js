@@ -67,7 +67,29 @@ const mergeDetectedMedia = (scanned, network, pageUrl) => {
       capturedAt: item.capturedAt, frameId: item.frameId, networkCaptured: true,
     });
   }
-  return pairSocialTracks([...unique.values()], pageUrl);
+  const paired = pairSocialTracks([...unique.values()], pageUrl);
+  if (!isSocialPage(pageUrl) || hasSocialPageItems) return paired;
+
+  // Some feeds temporarily expose only a generic page identity for the visible
+  // Blob player. In that state, select a CDN track only when its inspected
+  // duration uniquely matches the visual player. This collapses dozens of
+  // fragments without guessing by recency or attaching another card's media.
+  const hints = scanned.filter((item) => item?.kind === "video" && item.thumbnail
+    && Number.isFinite(item.duration) && item.duration > 0);
+  const claimed = new Set();
+  const resolved = [];
+  for (const hint of hints) {
+    const candidates = paired.filter((item) => item.kind === "video" && item.networkCaptured
+      && !claimed.has(item.url) && Number.isFinite(item.duration)
+      && Math.abs(item.duration - hint.duration) <= 0.75);
+    if (candidates.length !== 1) continue;
+    const match = candidates[0];
+    claimed.add(match.url);
+    resolved.push({ ...match, title: hint.title || match.title, thumbnail: hint.thumbnail,
+      recommended: true, ambiguousSocialTrack: false });
+  }
+  if (!resolved.length) return paired;
+  return [...paired.filter((item) => item.kind === "image"), ...resolved];
 };
 const messages = {
   en: { extension: "Extension", settings: "Settings", mediaIntelligence: "Media intelligence", video: "Videos", audio: "Music", images: "Images", logs: "Logs", download: "Download", externalPreview: "Preview", incompleteTrack: "Incomplete track", empty: "No media detected in this tab.", unknownSize: "Size unavailable", connected: "Connected", disconnected: "Disconnected", pairingToken: "Pairing token", connect: "Connect", recommended: "Recommended", capturedResource: "Captured media resource", requestedMedia: "You tried to download", selectAll: "Select all", downloadSelected: "Download selected", forceShortcut: "Force Apocalipse", bypassShortcut: "Bypass Apocalipse" },

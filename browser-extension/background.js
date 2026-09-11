@@ -13,6 +13,7 @@ let diagnosticOutbox = [];
 const recentFileResponses = [];
 const recentMediaResponses = [];
 const thumbnailDataCache = new Map();
+const tabNavigationEpochs = new Map();
 
 const fetchThumbnailDataUrl = async (value) => {
   const url = String(value || "");
@@ -84,6 +85,20 @@ const captureVisibleThumbnail = async (sender, requestedRect = null, viewport = 
 };
 const mediaPickerContexts = new Map();
 const inspectedMediaTracks = new Map();
+
+function resetTabMedia(tabId, url = "") {
+  if (!Number.isInteger(tabId) || tabId < 0) return;
+  const previous = recentMediaResponses.length;
+  for (let index = recentMediaResponses.length - 1; index >= 0; index -= 1) {
+    if (recentMediaResponses[index].tabId === tabId) recentMediaResponses.splice(index, 1);
+  }
+  mediaPickerContexts.delete(tabId);
+  tabNavigationEpochs.set(tabId, { startedAt: Date.now(), url });
+  void globalThis.ADM_DIAG_WORKER?.emit("capture.tab_media_reset", {
+    removed: previous - recentMediaResponses.length,
+    reason: "top_level_navigation",
+  }, null, "INFO", tabId);
+}
 const ASSISTED_PREFIX = "assisted-download:";
 const DIRECT_PREFIX = "direct-download:";
 
@@ -199,6 +214,17 @@ if (chrome.webRequest?.onResponseStarted) {
     recentFileResponses.splice(0, Math.max(0, recentFileResponses.length - 50));
   }, { urls: ["http://*/*", "https://*/*"] }, ["responseHeaders"]);
 }
+
+// A tab id survives navigation, so isolate captures by top-level document.
+if (chrome.webRequest?.onBeforeRequest) {
+  chrome.webRequest.onBeforeRequest.addListener((details) => {
+    if (details.type === "main_frame") resetTabMedia(details.tabId, details.url);
+  }, { urls: ["http://*/*", "https://*/*"], types: ["main_frame"] });
+}
+chrome.tabs?.onRemoved?.addListener((tabId) => {
+  resetTabMedia(tabId);
+  tabNavigationEpochs.delete(tabId);
+});
 
 async function bridgeRequest(path, options = {}, suppliedToken = null) {
   const { pairingToken = "" } = suppliedToken === null ? await chrome.storage.local.get({ pairingToken: "" }) : { pairingToken: suppliedToken };
@@ -576,11 +602,14 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "APOCALIPSE_RECENT_TAB_MEDIA") {
     const tabId = Number.isInteger(message.tabId) ? message.tabId : sender.tab?.id;
     const cutoff = Date.now() - 120_000;
+    const navigationStartedAt = tabNavigationEpochs.get(tabId)?.startedAt || 0;
     const media = recentMediaResponses
-      .filter((item) => item.tabId === tabId && item.capturedAt >= cutoff)
+      .filter((item) => item.tabId === tabId && item.capturedAt >= cutoff
+        && item.capturedAt >= navigationStartedAt)
       .sort((left, right) => right.capturedAt - left.capturedAt)
       .slice(0, 30);
-    void globalThis.ADM_DIAG_WORKER?.emit("capture.worker_inventory", { count: media.length, retained: recentMediaResponses.length, cutoffMs: 120000 }, null, "INFO", tabId);
+    void globalThis.ADM_DIAG_WORKER?.emit("capture.worker_inventory", { count: media.length,
+      retained: recentMediaResponses.length, cutoffMs: 120000, navigationStartedAt }, null, "INFO", tabId);
     reply({ media: media.map((item) => ({ ...item, ageMs: Date.now() - item.capturedAt })) });
     return;
   }

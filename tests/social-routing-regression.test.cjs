@@ -308,6 +308,28 @@ test('a visual social video suppresses unrelated CDN fragments globally', () => 
     assert.deepEqual(JSON.parse(JSON.stringify(result)), [visual]);
   }
 });
+test('a generic social Blob player resolves one CDN track only by unique duration', () => {
+  const hint = { url: 'https://www.facebook.com/', kind: 'video', duration: 30,
+    thumbnail: 'https://img.example/current.jpg', title: 'Visible card' };
+  const current = { ...popupTrack(videoA, 'video', 1000), duration: 30, muxed: true };
+  const other = { ...popupTrack(videoB, 'video', 2000), duration: 42, muxed: true };
+  const result = popupContext.mergeDetected([hint], [current, other], 'https://www.facebook.com/');
+  assert.equal(result.length, 1);
+  assert.equal(result[0].url, videoA);
+  assert.equal(result[0].thumbnail, hint.thumbnail);
+  assert.equal(result[0].ambiguousSocialTrack, false);
+});
+
+test('duration fallback refuses tied social CDN tracks', () => {
+  const hint = { url: 'https://www.facebook.com/', kind: 'video', duration: 30,
+    thumbnail: 'https://img.example/current.jpg' };
+  const result = popupContext.mergeDetected([hint], [
+    { ...popupTrack(videoA, 'video', 1000), duration: 30, muxed: true },
+    { ...popupTrack(videoB, 'video', 2000), duration: 30.2, muxed: true },
+  ], 'https://www.facebook.com/');
+  assert.ok(result.length > 1);
+  assert.equal(result.find((item) => item.url === hint.url).ambiguousSocialTrack, true);
+});
 test('popup does not flag complete HLS and DASH manifests as isolated social tracks', () => {
   for (const extension of ['m3u8', 'mpd']) {
     const result = popupContext.pairTracks([{ url: `https://cdn.example/master.${extension}`, kind: 'video' }], 'https://www.facebook.com/');
