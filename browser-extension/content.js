@@ -882,6 +882,7 @@
       if (element.tagName === "VIDEO") {
         const record = document.createElement("button");
         recordButton = record;
+        try { button[Symbol.for("apocalipse.recordButton")] = record; } catch {}
         record.type = "button";
         record.className = "apocalipse-media-download apocalipse-media-record";
         const labels = recordingLabels();
