@@ -1997,8 +1997,7 @@ async fn download_with_mirrors(
     mirrors: Vec<String>,
     events: mpsc::Sender<DownloadEvent>,
 ) -> anyhow::Result<()> {
-    let mut sources = vec![request.url.clone()];
-    sources.extend(mirrors);
+    let sources = engine.verified_sources(&request, &mirrors).await;
     let mut last_error = None;
     for source in sources {
         let mut attempt = request.clone();

@@ -126,3 +126,12 @@ test("paused HLS cleanup includes its isolated segment workspace", () => {
   assert.match(desktop, /fn hls_workspace_path\(task: &DownloadTask\)/);
   assert.match(desktop, /torrent_root \|\| hls_workspace/);
 });
+
+test("automatic mirrors are server-advertised, identity-checked and latency-ranked", () => {
+  const core = fs.readFileSync(path.join(root, "crates/apocalipse-core/src/download.rs"), "utf8");
+  assert.match(core, /pub async fn verified_sources/);
+  assert.match(core, /rel=\\"duplicate\\"/);
+  assert.match(core, /same_download_identity/);
+  assert.match(core, /verified\.sort_by_key\(\|\(_, elapsed\)\| \*elapsed\)/);
+  assert.match(desktop, /engine\.verified_sources\(&request, &mirrors\)\.await/);
+});
