@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.124",
+  "version": "0.3.125",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -121,5 +121,6 @@
       "32": "icons/alien-32.png",
       "48": "icons/alien-48.png"
     }
-  }
+  },
+  "version_name": "0.3.125 local - thumbnail catalog candidate"
 }

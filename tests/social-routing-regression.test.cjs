@@ -320,7 +320,7 @@ test('a bound Blob player keeps captured tracks available when identity is unres
   assert.ok(result.some((item) => item.url === videoA && item.ambiguousSocialTrack));
   assert.ok(result.some((item) => item.url === videoB && item.ambiguousSocialTrack));
 });
-test('a visualOnly Blob player resolves the unique captured MP4 with the same duration', () => {
+test('a visualOnly Blob player cannot identify a captured MP4 by duration alone', () => {
   for (const pageUrl of ['https://www.tiktok.com/', 'https://www.facebook.com/']) {
     const player = { url: `${pageUrl}#apocalipse-player-1`, kind: 'video', duration: 30,
       thumbnail: 'data:image/png;base64,current', title: 'Current visible video',
@@ -328,23 +328,24 @@ test('a visualOnly Blob player resolves the unique captured MP4 with the same du
     const current = { ...popupTrack(videoA, 'video', 1000), duration: 30, muxed: true };
     const buffered = { ...popupTrack(videoB, 'video', 2000), duration: 42, muxed: true };
     const result = popupContext.mergeDetected([player], [buffered, current], pageUrl);
-    assert.equal(result.length, 1);
-    assert.equal(result[0].url, videoA);
-    assert.equal(result[0].title, player.title);
-    assert.equal(result[0].thumbnail, player.thumbnail);
-    assert.equal(result[0].ambiguousSocialTrack, false);
+    assert.equal(result.length, 3);
+    assert.ok(result.find(item => item.url === player.url).visualOnly);
+    for (const item of result.filter(item => item.networkCaptured)) {
+      assert.equal(item.thumbnail, undefined);
+      assert.notEqual(item.title, player.title);
+    }
   }
 });
-test('a generic social Blob player resolves one CDN track only by unique duration', () => {
+test('a generic social Blob player does not lend its thumbnail to a duration match', () => {
   const hint = { url: 'https://www.facebook.com/', kind: 'video', duration: 30,
     thumbnail: 'https://img.example/current.jpg', title: 'Visible card' };
   const current = { ...popupTrack(videoA, 'video', 1000), duration: 30, muxed: true };
   const other = { ...popupTrack(videoB, 'video', 2000), duration: 42, muxed: true };
   const result = popupContext.mergeDetected([hint], [current, other], 'https://www.facebook.com/');
-  assert.equal(result.length, 1);
-  assert.equal(result[0].url, videoA);
-  assert.equal(result[0].thumbnail, hint.thumbnail);
-  assert.equal(result[0].ambiguousSocialTrack, false);
+  assert.equal(result.length, 3);
+  assert.equal(result.find(item => item.url === hint.url).thumbnail, hint.thumbnail);
+  assert.equal(result.find(item => item.url === videoA).thumbnail, undefined);
+  assert.equal(result.find(item => item.url === videoB).thumbnail, undefined);
 });
 
 test('duration fallback refuses tied social CDN tracks', () => {

@@ -51,9 +51,9 @@ const mergeDetectedMedia = (scanned, network, pageUrl) => {
   // A visualOnly row is only the identity/geometry of a Blob or MediaStream
   // player. It is not a downloadable page extractor and must not hide the
   // captured MP4 tracks needed to resolve that player. Keeping it out of this
-  // gate also makes the duration-based resolver below reachable.
+  // gate prevents historical rows from hiding a newly visible unresolved player.
   const visualVideos = scanned.filter((item) => item?.kind === "video"
-    && !item.visualOnly && (item.playerBound || item.pageExtractor || item.recommended));
+    && !item.visualOnly && !item.retained && (item.playerBound || item.pageExtractor || item.recommended));
   // Once a social card/player has supplied an identifiable video, its direct
   // CDN requests are implementation details. Keep them available only when
   // they describe the exact same URL so size/type metadata can be merged.
@@ -72,29 +72,11 @@ const mergeDetectedMedia = (scanned, network, pageUrl) => {
       capturedAt: item.capturedAt, frameId: item.frameId, networkCaptured: true,
     });
   }
-  const paired = pairSocialTracks([...unique.values()], pageUrl);
-  if (!isSocialPage(pageUrl) || hasSocialPageItems) return paired;
-
-  // Some feeds temporarily expose only a generic page identity for the visible
-  // Blob player. In that state, select a CDN track only when its inspected
-  // duration uniquely matches the visual player. This collapses dozens of
-  // fragments without guessing by recency or attaching another card's media.
-  const hints = scanned.filter((item) => item?.kind === "video" && item.thumbnail
-    && Number.isFinite(item.duration) && item.duration > 0);
-  const claimed = new Set();
-  const resolved = [];
-  for (const hint of hints) {
-    const candidates = paired.filter((item) => item.kind === "video" && item.networkCaptured
-      && !claimed.has(item.url) && Number.isFinite(item.duration)
-      && Math.abs(item.duration - hint.duration) <= 0.75);
-    if (candidates.length !== 1) continue;
-    const match = candidates[0];
-    claimed.add(match.url);
-    resolved.push({ ...match, title: hint.title || match.title, thumbnail: hint.thumbnail,
-      recommended: true, ambiguousSocialTrack: false });
-  }
-  if (!resolved.length) return paired;
-  return [...paired.filter((item) => item.kind === "image"), ...resolved];
+  // Duration is useful metadata, but never proof of file identity. A single
+  // buffered response with the same duration may still belong to another card.
+  // Anonymous resources remain available for explicit selection, without
+  // borrowing a visual player's title or thumbnail.
+  return pairSocialTracks([...unique.values()], pageUrl);
 };
 const messages = {
   en: { extension: "Extension", settings: "Settings", mediaIntelligence: "Media intelligence", video: "Videos", audio: "Music", images: "Images", logs: "Logs", download: "Download", externalPreview: "Preview", incompleteTrack: "Incomplete track", empty: "No media detected in this tab.", unknownSize: "Size unavailable", connected: "Connected", disconnected: "Disconnected", pairingToken: "Pairing token", connect: "Connect", recommended: "Recommended", capturedResource: "Captured media resource", requestedMedia: "You tried to download", selectAll: "Select all", downloadSelected: "Download selected", forceShortcut: "Force Apocalipse", bypassShortcut: "Bypass Apocalipse" },
@@ -218,6 +200,17 @@ const loadThumbnail = (image, item) => {
     chrome.runtime.sendMessage({ type: "APOCALIPSE_FETCH_THUMBNAIL", url: source }, (result) => {
       const fetched = !chrome.runtime.lastError && Boolean(result?.dataUrl);
       image.src = fetched ? result.dataUrl : fallback;
+      if (!fetched && activeMediaTab?.id && item.playerBound && !item.retained && item.playerId) {
+        chrome.tabs.sendMessage(activeMediaTab.id, {
+          type: "APOCALIPSE_CAPTURE_PLAYER_THUMBNAIL", playerId: item.playerId,
+          url: item.url, pageUrl: item.playerPageUrl, rejectedSource: source,
+        }, { frameId: 0 }).then(captured => {
+          if (captured?.dataUrl) {
+            item.thumbnail = captured.dataUrl;
+            image.src = captured.dataUrl;
+          }
+        }).catch(() => {});
+      }
       void globalThis.ADM_DIAG?.emit(fetched ? "thumbnail.fetch_succeeded" : "thumbnail.fallback", {
         kind: item.kind, reason: fetched ? "protected_source_cached" : "fetch_failed", url: item.url,
       }, null, fetched ? "INFO" : "WARN");
@@ -264,6 +257,8 @@ function manualMediaSelection(item) {
 
 const render = () => {
   const root = document.querySelector("#items");
+  const scroller = document.querySelector("main") || root;
+  const previousScrollTop = scroller.scrollTop;
   root.textContent = "";
   const logs = selected === "logs";
   document.querySelector("#logs-panel").hidden = !logs;
@@ -319,7 +314,7 @@ const render = () => {
     previewButton.disabled = !previewRequest;
     void globalThis.ADM_DIAG?.emit("popup.row_state", { url: item.url, kind: item.kind,
       thumbnail: Boolean(item.thumbnail), thumbnailSource: /^data:/i.test(item.thumbnail || "") ? "captured_data" : item.thumbnail ? "dom_url" : "none",
-      previewEnabled: Boolean(previewRequest), downloadEnabled: true,
+      previewEnabled: Boolean(previewRequest), downloadEnabled: !item.visualOnly,
       reason: previewRequest ? (item.ambiguousSocialTrack ? "manual_selection_available" : "valid_selection") : "invalid_preview_source" });
     previewButton.title = previewRequest ? t("externalPreview") : t("incompleteTrack");
     previewButton.onclick = () => {
@@ -359,6 +354,7 @@ const render = () => {
     root.append(row);
   }
   updateBulk();
+  scroller.scrollTop = previousScrollTop;
 };
 document.querySelectorAll("nav button").forEach((button) => {
   button.onclick = () => {
@@ -394,6 +390,8 @@ async function refreshMediaInventory(tab, initial = false) {
   if (mediaRefreshRunning || !tab?.id || !/^https?:/i.test(tab.url || "")) return;
   mediaRefreshRunning = true;
   try {
+    tab = await chrome.tabs.get(tab.id).catch(() => null);
+    if (!tab || !/^https?:/i.test(tab.url || "")) return;
     activePageUrl = tab.url;
     const { scanned, error } = await scanTopFrame(tab.id);
     void globalThis.ADM_DIAG?.emit("popup.frame0_reply", { ok: !error, count: scanned.length,
@@ -414,22 +412,25 @@ async function refreshMediaInventory(tab, initial = false) {
         duration: trackInfo.get(item.url)?.duration || null, networkCaptured: true };
     });
     const nextMedia = mergeDetectedMedia(scanned, network, tab.url);
-    const nextFingerprint = JSON.stringify(nextMedia.map((item) => [item.url, item.kind, item.thumbnail || "", item.duration || 0]));
+    const visiblePlayers = nextMedia.filter((item) => item.kind === "video"
+      && item.playerBound && item.recommended && !item.networkCaptured && !item.thumbnail && item.rect);
+    for (const visibleVideo of visiblePlayers) {
+      const capturedThumbnail = await chrome.tabs.sendMessage(tab.id, {
+        type: "APOCALIPSE_CAPTURE_PLAYER_THUMBNAIL",
+        playerId: visibleVideo.playerId,
+        url: visibleVideo.url,
+        pageUrl: visibleVideo.playerPageUrl,
+        rect: visibleVideo.rect,
+        viewport: visibleVideo.viewport,
+      }, { frameId: 0 }).catch(() => null);
+      if (capturedThumbnail?.dataUrl) visibleVideo.thumbnail = capturedThumbnail.dataUrl;
+    }
+    const nextFingerprint = JSON.stringify(nextMedia.map((item) => [item.url, item.kind, item.thumbnail || "", item.duration || 0,
+      item.playerId || "", item.title || "", item.size || 0, Boolean(item.retained), Boolean(item.visualOnly)]));
     if (!initial && nextFingerprint === mediaFingerprint) return;
     media = nextMedia;
     mediaFingerprint = nextFingerprint;
     for (const url of [...selectedUrls]) if (!media.some((item) => item.url === url)) selectedUrls.delete(url);
-    const visiblePlayers = media.filter((item) => item.kind === "video"
-      && item.playerBound && item.recommended && !item.networkCaptured && !item.thumbnail && item.rect);
-    for (const visibleVideo of visiblePlayers) {
-      const capturedThumbnail = await chrome.runtime.sendMessage({
-        type: "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL",
-        tabId: tab.id,
-        rect: visibleVideo.rect,
-        viewport: visibleVideo.viewport,
-      }).catch(() => null);
-      if (capturedThumbnail?.dataUrl) visibleVideo.thumbnail = capturedThumbnail.dataUrl;
-    }
     void globalThis.ADM_DIAG?.emit("popup.merged_inventory", { domCount: scanned.length,
       networkCount: network.length, mergedCount: media.length, liveRefresh: !initial });
     const picker = await chrome.runtime.sendMessage({ type: "APOCALIPSE_MEDIA_PICKER_CONTEXT", tabId: tab.id }).catch(() => null);

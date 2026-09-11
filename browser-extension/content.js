@@ -51,6 +51,9 @@
     forcePressed: false,
   }).catch(() => {}));
   const absolute = (value) => {
+    // Missing src/poster values are not relative links: new URL("", base)
+    // resolves to the page and would invent both a media URL and a thumbnail.
+    if (typeof value !== "string" || !value.trim()) return null;
     try { return new URL(value, location.href).href; } catch { return null; }
   };
   // Intercept ChatGPT Library links before Chrome creates its own download dialog.
@@ -187,16 +190,57 @@
     }
   };
   const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
+  // Scoped to this document: closing the popup does not destroy the catalog.
+  // A new document (including another site) creates a fresh isolated catalog.
+  const mediaCatalog = new Map();
+  const MAX_CATALOG_ITEMS = 300;
+  const MAX_CATALOG_THUMBNAIL_BYTES = 6 * 1024 * 1024;
+  const rememberMedia = (items) => {
+    const live = new Set();
+    for (const item of items) {
+      if (item.visualOnly) continue; // A DOM player is not a durable file identity.
+      const key = `${item.kind}:${item.url}`;
+      live.add(key);
+      const previous = mediaCatalog.get(key);
+      mediaCatalog.set(key, { ...previous, ...item,
+        thumbnail: item.thumbnail || previous?.thumbnail || "" });
+    }
+    while (mediaCatalog.size > MAX_CATALOG_ITEMS) mediaCatalog.delete(mediaCatalog.keys().next().value);
+    let bytes = 0;
+    for (const [key, item] of [...mediaCatalog.entries()].reverse()) {
+      if (!item.thumbnail?.startsWith("data:")) continue;
+      bytes += item.thumbnail.length;
+      if (bytes > MAX_CATALOG_THUMBNAIL_BYTES) mediaCatalog.set(key, { ...item, thumbnail: "" });
+    }
+    return [...mediaCatalog.entries()].map(([key, item]) => live.has(key)
+      ? { ...item, retained: false }
+      : { ...item, retained: true, recommended: false, playerBound: false, rect: null, viewport: null })
+      .concat(items.filter(item => item.visualOnly));
+  };
   const playerIds = new WeakMap();
+  const playerThumbnails = new WeakMap();
   let playerIdCounter = 0;
   const playerIdentity = (element) => {
-    let id = playerIds.get(element);
-    if (!id) {
+    const source = String(element?.currentSrc || element?.src || "");
+    const stream = element?.srcObject || null;
+    const pageUrl = location.href;
+    let state = playerIds.get(element);
+    if (!state || state.source !== source || state.stream !== stream || state.pageUrl !== pageUrl || state.invalidated) {
       playerIdCounter += 1;
-      id = `player-${playerIdCounter}`;
-      playerIds.set(element, id);
+      const watching = state?.watching;
+      const blockedThumbnail = state && (state.source !== source || state.stream !== stream || state.pageUrl !== pageUrl)
+        ? state.lastThumbnail || state.blockedThumbnail : state?.blockedThumbnail;
+      state = { id: `player-${playerIdCounter}`, source, stream, pageUrl, watching: true, blockedThumbnail };
+      playerIds.set(element, state);
+      playerThumbnails.delete(element);
+      if (!watching) for (const event of ["emptied", "loadstart", "loadedmetadata"]) {
+        element?.addEventListener?.(event, () => {
+          const current = playerIds.get(element);
+          if (current) current.invalidated = true;
+        });
+      }
     }
-    return id;
+    return state.id;
   };
   const playerContext = (element) => {
     const rect = element?.getBoundingClientRect?.();
@@ -206,6 +250,7 @@
     return {
       playerBound: true,
       playerId: playerIdentity(element),
+      playerPageUrl: location.href,
       recommended: visible,
       rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
       viewport: {
@@ -246,6 +291,8 @@
     return best?.source || "";
   };
   const pageThumbnail = (element) => {
+    if (element) playerIdentity(element);
+    const state = element && playerIds.get(element);
     const candidates = [
       element?.poster,
       element?.getAttribute?.("poster"),
@@ -253,7 +300,14 @@
     ];
     // Page-level metadata is safe only when the document has one player. On a
     // feed it commonly describes the site or the first card, not this video.
-    if (document.querySelectorAll("video").length <= 1) candidates.push(
+    // One visible player is not proof that page-wide artwork belongs to it:
+    // virtualized feeds reuse that one element. Require an exact media URL.
+    const source = absolute(element?.currentSrc || element?.src);
+    const pageVideo = ["og:video", "og:video:url", "og:video:secure_url"]
+      .map(name => absolute(document.querySelector(`meta[property="${name}"]`)?.content));
+    const pageBound = Boolean(source && /^https?:/i.test(source) && pageVideo.includes(source)
+      && document.querySelectorAll("video").length === 1);
+    if (pageBound) candidates.push(
       document.querySelector('meta[property="og:image:secure_url"]')?.content,
       document.querySelector('meta[property="og:image"]')?.content,
       document.querySelector('meta[name="twitter:image"]')?.content,
@@ -267,33 +321,83 @@
         const nodes = Array.isArray(data) ? data : [data];
         for (const node of nodes) {
           const value = Array.isArray(node?.thumbnailUrl) ? node.thumbnailUrl[0] : node?.thumbnailUrl;
-          if (value) candidates.push(value);
+          const type = Array.isArray(node?.["@type"]) ? node["@type"] : [node?.["@type"]];
+          if (value && type.includes("VideoObject") && source
+            && absolute(node?.contentUrl) === source) candidates.push(value);
         }
       } catch {}
     }
     for (const candidate of candidates) {
       const url = absolute(candidate);
-      if (url && /^https?:/i.test(url)) return url;
+      if (url && /^https?:/i.test(url) && url !== state?.blockedThumbnail) {
+        if (state) state.lastThumbnail = url;
+        return url;
+      }
     }
     return "";
   };
   const thumbnailFor = (element, kind) => {
     if (kind === "audio") return "";
     if (element?.tagName === "IMG") return element.currentSrc || element.src || "";
+    if (element) {
+      const id = playerIdentity(element);
+      const cached = playerThumbnails.get(element);
+      if (cached?.id === id && cached.dataUrl) return cached.dataUrl;
+    }
     return pageThumbnail(element);
   };
-  const captureThumbnailFor = async (element, kind = "video") => {
+  const playerSnapshot = (element) => {
+    const rect = element?.getBoundingClientRect?.();
+    return { id: playerIdentity(element), source: String(element?.currentSrc || element?.src || ""),
+      stream: element?.srcObject, poster: element?.poster, pageUrl: location.href,
+      width: Number(globalThis.innerWidth), height: Number(globalThis.innerHeight),
+      rect: rect && [rect.left, rect.top, rect.width, rect.height] };
+  };
+  const samePlayerSnapshot = (element, before) => {
+    if (element?.isConnected === false) return false;
+    const after = playerSnapshot(element);
+    return before.id === after.id && before.source === after.source && before.stream === after.stream
+      && before.poster === after.poster && before.pageUrl === after.pageUrl
+      && before.width === after.width && before.height === after.height
+      && before.rect?.every((value, index) => Math.abs(value - after.rect?.[index]) < 1);
+  };
+  const captureThumbnailFor = async (element, kind = "video", rejectedSource = null) => {
+    const snapshot = playerSnapshot(element);
+    const cached = playerThumbnails.get(element);
+    if (cached?.id === snapshot.id && cached.dataUrl) return cached.dataUrl;
     const existing = thumbnailFor(element, kind);
-    if (existing) return existing;
+    if (existing && existing !== rejectedSource) return existing;
     const rect = element?.getBoundingClientRect?.();
     if (!rect || rect.width < 80 || rect.height < 45 || rect.bottom <= 0 || rect.top >= innerHeight) return "";
+    // Drawing the exact video is preferable to a viewport screenshot. Cross-origin
+    // canvas restrictions can prevent it; those restrictions are never bypassed.
+    try {
+      if (element.readyState >= 2 && element.videoWidth > 0 && element.videoHeight > 0) {
+        const canvas = document.createElement("canvas");
+        const scale = Math.min(1, 320 / element.videoWidth, 320 / element.videoHeight);
+        canvas.width = Math.max(1, Math.round(element.videoWidth * scale));
+        canvas.height = Math.max(1, Math.round(element.videoHeight * scale));
+        canvas.getContext("2d").drawImage(element, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+        if (samePlayerSnapshot(element, snapshot) && dataUrl.startsWith("data:image/jpeg")) {
+          playerThumbnails.set(element, { id: snapshot.id, dataUrl });
+          return dataUrl;
+        }
+      }
+    } catch {}
     try {
       const result = await chrome.runtime.sendMessage({
         type: "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL",
         rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
         viewport: { width: innerWidth, height: innerHeight },
       });
-      return result?.dataUrl || "";
+      if (!samePlayerSnapshot(element, snapshot)) {
+        void globalThis.ADM_DIAG?.emit("thumbnail.stale_capture_rejected", { reason: "player_or_viewport_changed" });
+        return "";
+      }
+      const dataUrl = result?.dataUrl || "";
+      if (dataUrl) playerThumbnails.set(element, { id: snapshot.id, dataUrl });
+      return dataUrl;
     } catch { return ""; }
   };
   const isFacebookMediaUrl = (url) => {
@@ -527,8 +631,10 @@
         const source = absolute(element.currentSrc || element.src);
         if (/^https?:/i.test(source || "")) {
           add(source, "video", element, undefined, context);
-          element.querySelectorAll("source").forEach((child) => add(child.src, "video", element, undefined, context));
-        } else if (isSocialMediaPage(location.href)) {
+          element.querySelectorAll("source").forEach((child) => {
+            if (absolute(child.src) !== source) add(child.src, "video", null, "");
+          });
+        } else if (source?.startsWith("blob:") || element.srcObject) {
           // A Blob/MSE player is still a real visual item. Preserve its stable
           // element identity and geometry instead of replacing it with every
           // anonymous CDN request observed in the tab.
@@ -576,15 +682,12 @@
     });
     document.querySelectorAll("img").forEach((element) => add(element.currentSrc || element.src, "image", element));
     performance.getEntriesByType("resource").forEach((entry) => {
-      if (/\.m3u8(?:$|[?#])/i.test(entry.name)) add(entry.name, "video", document.querySelector("video"));
+      if (/\.m3u8(?:$|[?#])/i.test(entry.name) && !items.has(`video:${entry.name}`)) {
+        add(entry.name, "video", null, "");
+      }
     });
     const collected = [...items.values()];
-    if (collected.some((item) => item.kind === "video" && item.pageExtractor
-      && /(^|\.)(?:facebook|tiktok)\.com$/i.test(location.hostname))) {
-      return collected.filter((item) => item.kind !== "audio"
-        && (item.kind !== "video" || item.pageExtractor));
-    }
-    return collected;
+    return rememberMedia(collected);
   };
   const downloadLabel = () => {
     const value = String(interfaceLanguage || "en").toLowerCase();
@@ -1253,10 +1356,23 @@
   refreshOverlayLanguages = () => {
     for (const overlay of activeOverlays.values()) overlay.refreshLabels?.();
   };
+  let catalogTimer = null;
+  const scheduleCatalog = () => {
+    // Throttle rather than indefinitely debounce a continuously mutating feed.
+    if (catalogTimer !== null) return;
+    catalogTimer = setTimeout(() => {
+      catalogTimer = null;
+      if (document.visibilityState === "hidden") return;
+      collect();
+    }, 350);
+  };
   const scheduleOverlays = () => {
     clearTimeout(overlayTimer);
     overlayTimer = setTimeout(installOverlays, 250);
+    scheduleCatalog();
   };
+  addEventListener("scroll", scheduleCatalog, { passive: true, capture: true });
+  for (const event of ["loadedmetadata", "load", "emptied"]) document.addEventListener(event, scheduleCatalog, true);
   const style = document.createElement("style");
   style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:2px solid var(--apocalipse-accent,#25d9ef)!important;border-radius:8px!important;padding:8px 11px!important;background:#111a20f2!important;color:#fff!important;font:700 13px system-ui!important;box-shadow:0 3px 12px #0008!important;backdrop-filter:blur(5px)!important;cursor:pointer!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download:hover{background:#15262ef8!important;box-shadow:0 3px 14px var(--apocalipse-accent,#25d9ef)!important}.apocalipse-media-download:disabled{cursor:wait!important;opacity:.85!important}.apocalipse-media-record{color:#fff!important;background:#35151cf2!important}.apocalipse-media-record:hover{background:#4a1922f8!important}";
   document.documentElement.append(style);
@@ -1286,6 +1402,21 @@
       });
       return true;
     }
+    if (message?.type === "APOCALIPSE_CAPTURE_PLAYER_THUMBNAIL") {
+      const element = [...document.querySelectorAll("video")]
+        .find(video => playerIdentity(video) === message.playerId);
+      const current = element && collect().find(item => item.playerId === message.playerId
+        && item.url === message.url && !item.retained);
+      if (!current || (message.pageUrl && message.pageUrl !== location.href)) {
+        reply({ dataUrl: "", error: "stale_player_binding" });
+        return;
+      }
+      const snapshot = playerSnapshot(element);
+      captureThumbnailFor(element, "video", message.rejectedSource).then(dataUrl => {
+        reply({ dataUrl: samePlayerSnapshot(element, snapshot) ? dataUrl : "" });
+      }).catch(() => reply({ dataUrl: "" }));
+      return true;
+    }
     if (message?.type !== "APOCALIPSE_SCAN") return;
     const scanTrace = globalThis.ADM_DIAG?.begin("popup.scan_started", { stage: "content" });
     const found = collect();
@@ -1301,7 +1432,7 @@
       }
       return Promise.all(selectedItems.map(async (item) => {
       try {
-        if (item.visualOnly) return item;
+        if (item.visualOnly || item.retained) return item;
         return { ...item, ...(await chrome.runtime.sendMessage({ type: "APOCALIPSE_PROBE", url: item.url })) };
       } catch {
         return item;

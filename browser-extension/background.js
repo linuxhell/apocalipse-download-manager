@@ -51,36 +51,66 @@ const blobDataUrl = async (blob) => {
   return `data:${blob.type || "image/jpeg"};base64,${btoa(binary)}`;
 };
 
+let thumbnailActivationSerial = 0;
+let lastThumbnailCaptureAt = 0;
+let thumbnailCaptureBusy = false;
+chrome.tabs?.onActivated?.addListener(() => { thumbnailActivationSerial += 1; });
+
 const captureVisibleThumbnail = async (sender, requestedRect = null, viewport = null, requestedTabId = null) => {
   const tab = sender?.tab || (Number.isInteger(requestedTabId) ? await chrome.tabs.get(requestedTabId) : null);
   if (!tab || !chrome.tabs?.captureVisibleTab) throw new Error("thumbnail_capture_unavailable");
-  const captured = await new Promise((resolve, reject) => {
-    chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 55 }, (dataUrl) => {
-      const error = chrome.runtime.lastError;
-      if (error || !dataUrl) reject(new Error(error?.message || "thumbnail_capture_failed"));
-      else resolve(dataUrl);
-    });
-  });
-  if (!requestedRect || typeof OffscreenCanvas === "undefined" || typeof createImageBitmap !== "function") return captured;
+  // A child frame's local rectangle is not a top-level screenshot rectangle.
+  // The content script can still draw that exact video to a readable canvas.
+  if (sender?.frameId > 0) throw new Error("thumbnail_frame_coordinates_unverified");
+  if (!requestedRect || typeof OffscreenCanvas === "undefined" || typeof createImageBitmap !== "function") {
+    throw new Error("thumbnail_crop_unavailable");
+  }
+  const { left, top, width, height } = requestedRect;
+  const viewportWidth = viewport?.width, viewportHeight = viewport?.height;
+  if (![left, top, width, height, viewportWidth, viewportHeight].every(Number.isFinite)
+    || width < 80 || height < 45 || viewportWidth <= 0 || viewportHeight <= 0
+    || left < 0 || top < 0 || left + width > viewportWidth || top + height > viewportHeight) {
+    throw new Error("thumbnail_crop_not_fully_visible");
+  }
+  const serial = thumbnailActivationSerial;
+  const navigation = tabNavigationEpochs.get(tab.id);
+  const requireCurrentTab = async () => {
+    const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+    if (active?.id !== tab.id || thumbnailActivationSerial !== serial
+      || tabNavigationEpochs.get(tab.id) !== navigation) throw new Error("thumbnail_tab_changed");
+  };
+  await requireCurrentTab();
+  if (thumbnailCaptureBusy || Date.now() - lastThumbnailCaptureAt < 600) throw new Error("thumbnail_capture_throttled");
+  thumbnailCaptureBusy = true;
+  lastThumbnailCaptureAt = Date.now();
+  let bitmap;
   try {
-    const bitmap = await createImageBitmap(await (await fetch(captured)).blob());
-    const viewportWidth = Math.max(1, Number(viewport?.width) || bitmap.width);
-    const viewportHeight = Math.max(1, Number(viewport?.height) || bitmap.height);
-    const scaleX = bitmap.width / viewportWidth;
-    const scaleY = bitmap.height / viewportHeight;
-    const x = Math.max(0, Math.floor(Number(requestedRect.left || 0) * scaleX));
-    const y = Math.max(0, Math.floor(Number(requestedRect.top || 0) * scaleY));
-    const width = Math.min(bitmap.width - x, Math.max(1, Math.floor(Number(requestedRect.width || viewportWidth) * scaleX)));
-    const height = Math.min(bitmap.height - y, Math.max(1, Math.floor(Number(requestedRect.height || viewportHeight) * scaleY)));
-    if (width < 80 || height < 45) return captured;
-    const outputWidth = Math.min(480, width);
-    const outputHeight = Math.max(1, Math.round(height * outputWidth / width));
+    const captured = await new Promise((resolve, reject) => {
+      chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 55 }, (dataUrl) => {
+        const error = chrome.runtime.lastError;
+        if (error || !dataUrl) reject(new Error(error?.message || "thumbnail_capture_failed"));
+        else resolve(dataUrl);
+      });
+    });
+    await requireCurrentTab();
+    bitmap = await createImageBitmap(await (await fetch(captured)).blob());
+    const scaleX = bitmap.width / viewportWidth, scaleY = bitmap.height / viewportHeight;
+    const x = Math.floor(left * scaleX), y = Math.floor(top * scaleY);
+    const cropWidth = Math.min(bitmap.width - x, Math.floor(width * scaleX));
+    const cropHeight = Math.min(bitmap.height - y, Math.floor(height * scaleY));
+    if (cropWidth < 1 || cropHeight < 1) throw new Error("thumbnail_crop_empty");
+    const outputScale = Math.min(1, 320 / cropWidth, 320 / cropHeight);
+    const outputWidth = Math.max(1, Math.round(cropWidth * outputScale));
+    const outputHeight = Math.max(1, Math.round(cropHeight * outputScale));
     const canvas = new OffscreenCanvas(outputWidth, outputHeight);
-    canvas.getContext("2d").drawImage(bitmap, x, y, width, height, 0, 0, outputWidth, outputHeight);
-    bitmap.close?.();
-    return await blobDataUrl(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.72 }));
-  } catch {
-    return captured;
+    canvas.getContext("2d").drawImage(bitmap, x, y, cropWidth, cropHeight, 0, 0, outputWidth, outputHeight);
+    const result = await blobDataUrl(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 }));
+    await requireCurrentTab();
+    return result;
+  } finally {
+    // Never substitute a full-page screenshot when a crop fails.
+    bitmap?.close?.();
+    thumbnailCaptureBusy = false;
   }
 };
 const mediaPickerContexts = new Map();
