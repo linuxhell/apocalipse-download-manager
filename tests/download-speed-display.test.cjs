@@ -104,6 +104,9 @@ test("feed thumbnails come from the exact visual player region before page metad
   assert.match(content, /if \(videos\.length > 1\) break/);
   assert.match(content, /if \(overlap < 0\.45\) continue/);
   assert.match(content, /element\?\.getAttribute\?\.\("poster"\),\s*visualThumbnailFor\(element\)/);
+  assert.match(content, /const socialCardUrl = \(value\) =>/);
+  assert.match(content, /const cardThumbnailFor = \(anchor\) =>/);
+  assert.match(content, /Social feeds commonly expose the permalink and cover image before they/);
 });
 
 test("a closed browser becomes disconnected after the initial extension wait", () => {

@@ -286,6 +286,30 @@
       return /(^|\.)tiktok\.com$/i.test(parsed.hostname) && /\/@[^/]+\/video\/\d+/i.test(parsed.pathname);
     } catch { return false; }
   };
+  const socialCardUrl = (value) => {
+    const url = absolute(value);
+    if (!url) return null;
+    if (isFacebookMediaUrl(url) || isTikTokVideoUrl(url)) return url;
+    try {
+      const parsed = new URL(url);
+      return /(^|\.)instagram\.com$/i.test(parsed.hostname)
+        && /\/(?:reel|reels|p)\/[^/?#]+/i.test(parsed.pathname)
+        ? parsed.href : null;
+    } catch { return null; }
+  };
+  const cardThumbnailFor = (anchor) => {
+    let container = anchor;
+    for (let depth = 0; container && depth < 8; depth += 1, container = container.parentElement) {
+      const images = [...(container.querySelectorAll?.("img") || [])]
+        .map((image) => ({ image, rect: image.getBoundingClientRect?.() }))
+        .filter(({ image, rect }) => rect && rect.width >= 120 && rect.height >= 90
+          && /^https?:/i.test(image.currentSrc || image.src || image.getAttribute?.("data-src") || ""))
+        .sort((left, right) => right.rect.width * right.rect.height - left.rect.width * left.rect.height);
+      if (images[0]) return images[0].image.currentSrc || images[0].image.src || images[0].image.getAttribute("data-src") || "";
+      if (container.matches?.("article,[role=article],[data-e2e*=feed-item]")) break;
+    }
+    return "";
+  };
   const tikTokUrlFor = (element) => globalThis.ApocalipseTikTokIdentity?.resolve(element) || null;
   const facebookUrlFor = (element) => {
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
@@ -463,6 +487,21 @@
         pageExtractor: true,
         previewUrl: absolute(element.currentSrc || element.src),
         recommended: true,
+      });
+    });
+    // Social feeds commonly expose the permalink and cover image before they
+    // create a <video>. Treat that card as a video candidate so its thumbnail
+    // is available without starting playback.
+    document.querySelectorAll("a[href]").forEach((anchor) => {
+      const url = socialCardUrl(anchor.href);
+      if (!url || items.has(`video:${url}`)) return;
+      const thumbnail = cardThumbnailFor(anchor);
+      if (!thumbnail) return;
+      const rect = anchor.getBoundingClientRect?.();
+      add(url, "video", anchor, thumbnail, {
+        pageExtractor: true,
+        recommended: Boolean(rect && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight),
+        title: anchor.getAttribute("aria-label") || anchor.closest?.("article,[role=article]")?.innerText?.trim()?.slice(0, 240) || document.title,
       });
     });
     const facebookPageUrl = facebookUrlFor(document.querySelector("video"));
