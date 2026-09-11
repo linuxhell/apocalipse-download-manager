@@ -505,7 +505,7 @@ const catalogs = {
 };
 
 let locale = localStorage.getItem("apocalipse.language") || "en";
-const valid = ["void", "inferno", "toxic", "synthwave", "royal", "crimson", "arctic", "obsidian", "monochrome", "midnight", "forest", "graphite", "deepsea", "eclipse", "hazard", "cyberstorm", "ultraviolet", "emeraldgold", "scarletice", "coppernavy", "solarizednight"];
+const valid = ["void", "inferno", "toxic", "synthwave", "royal", "crimson", "arctic", "obsidian", "monochrome", "midnight", "forest", "graphite", "deepsea", "eclipse", "hazard", "cyberstorm", "ultraviolet", "emeraldgold", "scarletice", "coppernavy", "solarizednight", "pearlblue", "whiteaurora", "goldenivory", "crystalrose", "polarmint"];
 const applyTheme = (theme) => {
   document.documentElement.dataset.theme = valid.includes(theme) ? theme : "void";
 };
@@ -2053,6 +2053,20 @@ async function consumeBridgeDownload() {
 }
 setInterval(consumeBridgeDownload, 400);
 window.__TAURI__?.event?.listen?.("bridge-download-ready", consumeBridgeDownload).catch(console.error);
+window.__TAURI__?.event?.listen?.("blob-upload-progress", (event) => {
+  const progress = event.payload || {};
+  const task = downloads.find((item) => item.id === progress.taskId);
+  if (!task) {
+    refreshDownloads();
+    return;
+  }
+  task.received = Number(progress.received) || 0;
+  task.total = progress.total ?? task.total;
+  task.download_speed = Number(progress.downloadSpeed) || 0;
+  if (task.total) task.progress_percent = task.received * 100 / task.total;
+  updateSpeeds(downloads);
+  renderDownloads(true);
+}).catch(console.error);
 window.__TAURI__?.event?.listen?.("media-preview-error", (event) => {
   const prefix = locale === "pt-BR" ? "Falha na pr\u00e9-visualiza\u00e7\u00e3o. Consulte Logs para os detalhes."
     : locale === "zh-CN" ? "\u9884\u89c8\u5931\u8d25\u3002\u8bf7\u67e5\u770b\u65e5\u5fd7\u3002" : "Preview failed. See Logs for details.";

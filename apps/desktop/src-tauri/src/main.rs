@@ -6015,6 +6015,15 @@ fn append_blob_chunk(app: &tauri::AppHandle, request: BlobChunk) -> Result<(), S
         task.progress_percent = total.map(|total| received as f64 * 100.0 / total as f64);
         task.download_speed = Some(download_speed);
     });
+    let _ = app.emit(
+        "blob-upload-progress",
+        serde_json::json!({
+            "taskId": task_id,
+            "received": received,
+            "total": total,
+            "downloadSpeed": download_speed,
+        }),
+    );
     Ok(())
 }
 

@@ -433,9 +433,19 @@ document.querySelector("#connect").onclick = async () => {
 };
 document.querySelector("#language").onchange = (event) => {
   locale = event.target.value;
-  chrome.storage.local.set({ language: locale });
   translate();
   render();
+  chrome.storage.local.set({ language: locale }, () => {
+    chrome.tabs.query({}, (tabs) => {
+      for (const tab of tabs) {
+        if (!tab.id || !/^https?:/i.test(tab.url || "")) continue;
+        chrome.tabs.sendMessage(tab.id, {
+          type: "APOCALIPSE_LANGUAGE_CHANGED",
+          language: locale,
+        }, () => void chrome.runtime.lastError);
+      }
+    });
+  });
 };
 document.querySelector("#settings-toggle").onclick = () => {
   const panel = document.querySelector("#compact-settings");

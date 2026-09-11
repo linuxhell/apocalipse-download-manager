@@ -13,6 +13,8 @@ const cargo = fs.readFileSync(path.join(root, "Cargo.toml"), "utf8");
 const tauri = JSON.parse(
   fs.readFileSync(path.join(root, "apps/desktop/src-tauri/tauri.conf.json"), "utf8"),
 );
+const desktopHtml = fs.readFileSync(path.join(root, "apps/desktop/ui/index.html"), "utf8");
+const desktopCss = fs.readFileSync(path.join(root, "apps/desktop/ui/styles.css"), "utf8");
 
 test("active downloads keep the engine-reported speed visible", () => {
   assert.match(
@@ -29,6 +31,9 @@ test("streamed browser recordings publish a global core speed", () => {
   assert.match(desktop, /speed_sample_at: Instant/);
   assert.match(desktop, /task\.download_speed = Some\(download_speed\)/);
   assert.match(desktop, /instantaneous as f64 \* 0\.65/);
+  assert.match(desktop, /"blob-upload-progress"/);
+  assert.match(ui, /listen\?\.\("blob-upload-progress"/);
+  assert.match(ui, /renderDownloads\(true\)/);
 });
 
 test("quiet clipboard polling does not flood diagnostics", () => {
@@ -47,4 +52,12 @@ test("desktop package and interface versions cannot diverge", () => {
   assert.ok(packageVersion, "workspace package version is missing");
   assert.equal(tauri.version, packageVersion);
   assert.match(ui, /invoke\("get_app_version"\)/);
+});
+
+test("five readable light themes are available", () => {
+  for (const theme of ["pearlblue", "whiteaurora", "goldenivory", "crystalrose", "polarmint"]) {
+    assert.match(desktopHtml, new RegExp(`value="${theme}"`));
+    assert.match(desktopCss, new RegExp(`data-theme="${theme}"`));
+  }
+  assert.match(desktopCss, /color-scheme:light/);
 });

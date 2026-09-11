@@ -198,3 +198,11 @@ test('YouTube exposes yt-dlp Download without a redundant recording button', () 
   assert.match(script, /const usesExtractorOnlyDownload = isYouTubeVideo;/);
   assert.match(script, /if \(element\.tagName === "VIDEO" && canRecord && !usesExtractorOnlyDownload\)/);
 });
+
+test('recording follows player pauses without writing dead timeline gaps', () => {
+  assert.match(script, /recording_paused_with_player/);
+  assert.match(script, /recorder\.pause\(\)/);
+  assert.match(script, /recording_resumed_with_player/);
+  assert.match(script, /recorder\.resume\(\)/);
+  assert.match(script, /recorder && recorder\.state !== "inactive"/);
+});

@@ -12,6 +12,15 @@ test('TikTok blob button falls back to its exact bound player stream', () => {
   assert.match(source, /recordButton\.click\(\)/);
 });
 
+test('language changes are broadcast to existing page overlay buttons', () => {
+  const content = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
+  const popup = fs.readFileSync(path.join(root, 'popup.js'), 'utf8');
+  assert.match(content, /APOCALIPSE_LANGUAGE_CHANGED/);
+  assert.match(content, /refreshOverlayLanguages\(\)/);
+  assert.match(popup, /chrome\.tabs\.sendMessage\(tab\.id/);
+  assert.match(popup, /language: locale/);
+});
+
 test('TikTok uses one deterministic isolated-world chain in every frame', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
   const tiktok = manifest.content_scripts.find((item) => Array.isArray(item.js)

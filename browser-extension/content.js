@@ -17,6 +17,11 @@
       refreshOverlayLanguages();
     }
   });
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type !== "APOCALIPSE_LANGUAGE_CHANGED") return;
+    interfaceLanguage = message.language || "en";
+    refreshOverlayLanguages();
+  });
   const modifierPressed = (event, key) => ({ Alt: event.altKey, Shift: event.shiftKey, Control: event.ctrlKey }[key] || false);
   const sendShortcutState = (event) => chrome.runtime.sendMessage({
     type: "APOCALIPSE_SHORTCUT_STATE",
@@ -917,7 +922,7 @@
         record.addEventListener("click", async (event) => {
           event.preventDefault();
           event.stopPropagation();
-          if (recorder?.state === "recording") {
+          if (recorder && recorder.state !== "inactive") {
             trace("recording_stop_clicked", "record", { elapsedMs: Date.now() - startedAt });
             recorder.stop();
             record.disabled = true;
@@ -945,6 +950,21 @@
             let uploadQueue = Promise.resolve();
             let uploadError = null;
             recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+            const syncRecorderWithPlayer = () => {
+              if (!recorder || recorder.state === "inactive") return;
+              if (element.paused && recorder.state === "recording") {
+                recorder.pause();
+                trace("recording_paused_with_player", "record", { currentTime: element.currentTime });
+              } else if (!element.paused && recorder.state === "paused") {
+                recorder.resume();
+                trace("recording_resumed_with_player", "record", { currentTime: element.currentTime });
+              }
+            };
+            element.addEventListener("pause", syncRecorderWithPlayer);
+            element.addEventListener("play", syncRecorderWithPlayer);
+            stream.getTracks().forEach((track) => track.addEventListener("ended", () => {
+              trace("recording_track_ended", "record", { kind: track.kind, readyState: track.readyState });
+            }, { once: true }));
             recorder.ondataavailable = ({ data }) => {
               if (!data.size || uploadError) return;
               uploadQueue = uploadQueue.then(() => appendBlob(begin.uploadId, data)).catch((error) => { uploadError = error; });
@@ -952,6 +972,8 @@
             recorder.onstop = async () => {
               if (clockTimer) clearInterval(clockTimer);
               if (stopPoll) clearInterval(stopPoll);
+              element.removeEventListener("pause", syncRecorderWithPlayer);
+              element.removeEventListener("play", syncRecorderWithPlayer);
               stream.getTracks().forEach((track) => track.stop());
               element.loop = previousLoop;
               recordPhase = "uploading";
@@ -975,7 +997,7 @@
               }
             };
             element.addEventListener("ended", () => {
-              if (recorder?.state === "recording") recorder.stop();
+              if (recorder && recorder.state !== "inactive") recorder.stop();
             }, { once: true });
             recorder.start(1000);
             await element.play();
@@ -983,12 +1005,12 @@
             recordPhase = "recording";
             refreshRecordLabels();
             clockTimer = setInterval(() => {
-              if (recorder?.state === "recording") refreshRecordLabels();
+              if (recorder && recorder.state !== "inactive") refreshRecordLabels();
             }, 1000);
             stopPoll = setInterval(async () => {
-              if (recorder?.state !== "recording") return;
+              if (!recorder || recorder.state === "inactive") return;
               const status = await chrome.runtime.sendMessage({ type: "APOCALIPSE_BLOB_STATUS", request: { uploadId: begin.uploadId } }).catch(() => null);
-              if (status?.stop && recorder?.state === "recording") recorder.stop();
+              if (status?.stop && recorder && recorder.state !== "inactive") recorder.stop();
             }, 1000);
           } catch (error) {
             trace("recording_start_failed", "record", { error: String(error) });
