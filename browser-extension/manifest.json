@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.130",
+  "version": "0.3.131",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -115,7 +115,11 @@
       ],
       "js": [
         "social-player-resolution.js",
-        "social-player-resolution-v2.js"
+        "social-player-resolution-v2.js",
+        "social-home-feed-v3-core.js",
+        "social-home-feed-v3-facebook.js",
+        "social-home-feed-v3-tiktok.js",
+        "social-home-feed-resolution-v3.js"
       ],
       "run_at": "document_start",
       "all_frames": false
@@ -136,5 +140,5 @@
       "48": "icons/alien-48.png"
     }
   },
-  "version_name": "0.3.130 test - strict social permalink resolution diagnostics"
+  "version_name": "0.3.131 test - Home feed exact social identity"
 }

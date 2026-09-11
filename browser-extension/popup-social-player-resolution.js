@@ -108,7 +108,7 @@
       }
     }
     const result = await chrome.tabs.sendMessage(activeMediaTab.id, {
-      type: 'APOCALIPSE_RESOLVE_VISIBLE_SOCIAL_MEDIA_V2',
+      type: 'APOCALIPSE_RESOLVE_VISIBLE_SOCIAL_MEDIA_V3',
       traceId,
       request: {
         pageUrl: current.playerPageUrl || activePageUrl,

@@ -1,0 +1,16 @@
+// 0.3.131 shared Home-feed identity helpers.
+(() => {
+  if (globalThis.ADM_SOCIAL_HOME_FEED_V3_CORE) return;
+  const rect=e=>{try{return e?.getBoundingClientRect?.()||null}catch{return null}};
+  const vis=e=>{if(!e||e.isConnected===false||e.hidden||e.getAttribute?.('aria-hidden')==='true')return false;const r=rect(e);if(!r||r.width<6||r.height<6||r.bottom<=0||r.right<=0||r.top>=innerHeight||r.left>=innerWidth)return false;let s;try{s=getComputedStyle(e)}catch{}return s?.display!=='none'&&s?.visibility!=='hidden'&&s?.visibility!=='collapse'&&Number.parseFloat(s?.opacity??'1')>.01};
+  const videoVis=e=>{const r=rect(e);return vis(e)&&r.width>=40&&r.height>=20};
+  const dist=(a,b)=>!a||!b?Infinity:Math.abs(a.left-b.left)+Math.abs(a.top-b.top)+Math.abs(a.width-b.width)+Math.abs(a.height-b.height);
+  const center=r=>({x:r.left+r.width/2,y:r.top+r.height/2});
+  const ev=e=>[e?.getAttribute?.('data-e2e'),e?.getAttribute?.('data-testid'),e?.getAttribute?.('aria-label'),e?.getAttribute?.('aria-haspopup'),e?.getAttribute?.('title'),e?.getAttribute?.('data-tooltip-content'),String(e?.textContent||'').trim().replace(/\s+/g,' ').slice(0,120)].filter(Boolean).join(' ');
+  const clickTarget=e=>e?.closest?.('button,[role="button"],[role="menuitem"],a,[tabindex]')||e;
+  const scope=video=>{const nodes=[];let hiddenPreloads=0,visibleCompetitors=0;for(let n=video,d=0;n&&d<48;n=n.parentElement,d++){if(n===document.body||n===document.documentElement||/^(BODY|HTML)$/.test(n.tagName||''))break;const vs=[...(n.querySelectorAll?.('video')||[])];hiddenPreloads=Math.max(hiddenPreloads,vs.filter(v=>v!==video&&!videoVis(v)).length);const rivals=vs.filter(v=>v!==video&&videoVis(v));if(rivals.length){visibleCompetitors=Math.max(visibleCompetitors,rivals.length);break}nodes.push(n)}return{nodes,hiddenPreloads,visibleCompetitors}};
+  const controls=(video,selector,strong='')=>{const s=scope(video),raw=[];for(const n of s.nodes){if(n.matches?.(selector))raw.push(n);for(const e of n.querySelectorAll?.(selector)||[])raw.push(e)}if(strong)for(const e of document.querySelectorAll?.(strong)||[])raw.push(e);const map=new Map;for(const e of raw){const t=clickTarget(e);if(!t)continue;const text=`${ev(e)} ${ev(t)}`.trim(),p=map.get(t);p?p.text+=` ${text}`:map.set(t,{target:t,raw:e,text})}return{s,items:[...map.values()]}};
+  const wait=ms=>new Promise(r=>setTimeout(r,ms));
+  const stable=async(video,fn)=>{const page=location.href,src=String(video.currentSrc||video.src||''),r=rect(video);let changed=false,mark=()=>{changed=true};for(const e of['emptied','loadstart','loadedmetadata'])video.addEventListener?.(e,mark,true);try{const value=await fn(),delta=dist(r,rect(video)),reason=changed?'player_lifecycle_changed':!video.isConnected?'player_disconnected':location.href!==page?'page_changed_during_lookup':String(video.currentSrc||video.src||'')!==src?'player_source_changed':delta>12?'player_geometry_changed':!videoVis(video)?'player_became_invisible':'player_stable';return{value,ok:reason==='player_stable',reason,delta}}finally{for(const e of['emptied','loadstart','loadedmetadata'])video.removeEventListener?.(e,mark,true)}};
+  globalThis.ADM_SOCIAL_HOME_FEED_V3_CORE={rect,vis,videoVis,center,ev,scope,controls,wait,stable};
+})();
