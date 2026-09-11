@@ -1,4 +1,4 @@
-// 0.3.127 test guard: keep one logical media row per social post/reel and
+// 0.3.128 test guard: keep one logical media row per social post/reel and
 // suppress anonymous adaptive CDN tracks from the popup without touching the
 // download engine. Real DOM audio/images remain visible in their own tabs.
 (() => {
@@ -59,10 +59,7 @@
     for (const item of source) {
       if (!item?.url) continue;
       const social = socialHost(pageUrl) || socialHost(item.url) || socialHost(item.extractorUrl || '') || socialHost(item.playerPageUrl || '');
-      // An unresolved visual player with no proven thumbnail is not a media row.
       if (social && item.kind === 'video' && item.visualOnly && !item.thumbnail) continue;
-      // A social extractor URL without a thumbnail is kept internal until the
-      // next refresh proves its visual identity; showing it would be an alien.
       if (social && item.kind === 'video' && item.pageExtractor && !item.thumbnail && !item.visualOnly) continue;
       const identity = itemIdentity(item);
       const key = `${item.kind || 'unknown'}:${identity || item.url}`;
@@ -111,41 +108,59 @@
   const originalTabsSend = chrome.tabs.sendMessage.bind(chrome.tabs);
   const originalRuntimeSend = chrome.runtime.sendMessage.bind(chrome.runtime);
 
+  const rememberScan = async (tabId, response) => {
+    let pageUrl = '';
+    try { pageUrl = (await chrome.tabs.get(tabId))?.url || ''; } catch {}
+    const scanned = cleanScanned(response?.media || [], pageUrl);
+    tabStates.set(tabId, { pageUrl, scanned, at: Date.now() });
+    return response ? { ...response, media: scanned } : response;
+  };
+
   chrome.tabs.sendMessage = function(tabId, message, options, callback) {
     let sendOptions = options, done = callback;
     if (typeof options === 'function') { done = options; sendOptions = undefined; }
-    if (message?.type !== 'APOCALIPSE_SCAN' || typeof done !== 'function') {
+    const isScan = message?.type === 'APOCALIPSE_SCAN';
+    if (!isScan) {
       return sendOptions === undefined
         ? originalTabsSend(tabId, message, done)
         : originalTabsSend(tabId, message, sendOptions, done);
     }
-    const wrapped = response => {
-      const finish = pageUrl => {
-        const scanned = cleanScanned(response?.media || [], pageUrl || '');
-        tabStates.set(tabId, { pageUrl: pageUrl || '', scanned, at: Date.now() });
-        done(response ? { ...response, media: scanned } : response);
-      };
-      try {
-        const maybe = chrome.tabs.get(tabId);
-        if (maybe?.then) maybe.then(tab => finish(tab?.url || '')).catch(() => finish(''));
-        else finish('');
-      } catch { finish(''); }
-    };
-    return sendOptions === undefined
-      ? originalTabsSend(tabId, message, wrapped)
-      : originalTabsSend(tabId, message, sendOptions, wrapped);
+    if (typeof done === 'function') {
+      const wrapped = response => { void rememberScan(tabId, response).then(done); };
+      return sendOptions === undefined
+        ? originalTabsSend(tabId, message, wrapped)
+        : originalTabsSend(tabId, message, sendOptions, wrapped);
+    }
+    const pending = sendOptions === undefined
+      ? originalTabsSend(tabId, message)
+      : originalTabsSend(tabId, message, sendOptions);
+    return pending?.then ? pending.then(response => rememberScan(tabId, response)) : pending;
+  };
+
+  const filterRecentResponse = (message, response) => {
+    const state = tabStates.get(message?.tabId);
+    if (!response?.media || !state) return response;
+    const filtered = filterNetwork(response.media, state);
+    if (filtered.length !== response.media.length) {
+      void globalThis.ADM_DIAG?.emit('popup.guard_network_filtered', {
+        before: response.media.length,
+        after: filtered.length,
+        removed: response.media.length - filtered.length,
+        social: socialHost(state.pageUrl || ''),
+      });
+    }
+    return { ...response, media: filtered };
   };
 
   chrome.runtime.sendMessage = function(message, callback) {
-    if (message?.type !== 'APOCALIPSE_RECENT_TAB_MEDIA' || typeof callback !== 'function') {
-      return originalRuntimeSend(message, callback);
+    const isRecent = message?.type === 'APOCALIPSE_RECENT_TAB_MEDIA';
+    if (!isRecent) return originalRuntimeSend(message, callback);
+    if (typeof callback === 'function') {
+      return originalRuntimeSend(message, response => callback(filterRecentResponse(message, response)));
     }
-    return originalRuntimeSend(message, response => {
-      const state = tabStates.get(message.tabId);
-      if (!response?.media || !state) return callback(response);
-      callback({ ...response, media: filterNetwork(response.media, state) });
-    });
+    const pending = originalRuntimeSend(message);
+    return pending?.then ? pending.then(response => filterRecentResponse(message, response)) : pending;
   };
 
-  globalThis.ADM_POPUP_MEDIA_GUARD = { cleanScanned, filterNetwork, socialIdentity };
+  globalThis.ADM_POPUP_MEDIA_GUARD = { cleanScanned, filterNetwork, socialIdentity, tabStates };
 })();
