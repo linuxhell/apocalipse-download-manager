@@ -193,3 +193,8 @@ test('YouTube page extraction and ordinary direct HTTP downloads are unchanged',
     assert.equal(p.downloads()[0].item.url, expected);
   }
 });
+
+test('YouTube exposes yt-dlp Download without a redundant recording button', () => {
+  assert.match(script, /const usesExtractorOnlyDownload = isYouTubeVideo;/);
+  assert.match(script, /if \(element\.tagName === "VIDEO" && canRecord && !usesExtractorOnlyDownload\)/);
+});
