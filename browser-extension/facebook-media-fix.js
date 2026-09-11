@@ -47,9 +47,25 @@
     return null;
   };
 
-  const thumbnailFor = (video) => video?.poster
-    || document.querySelector('meta[property="og:image"]')?.content
-    || "";
+  const thumbnailFor = (video) => {
+    if (video?.poster) return video.poster;
+    const target = video?.getBoundingClientRect?.();
+    let container = video?.parentElement;
+    for (let depth = 0; target && container && depth < 10; depth += 1, container = container.parentElement) {
+      if (container.querySelectorAll?.("video").length > 1) break;
+      for (const image of container.querySelectorAll?.("img") || []) {
+        const rect = image.getBoundingClientRect();
+        const width = Math.max(0, Math.min(target.right, rect.right) - Math.max(target.left, rect.left));
+        const height = Math.max(0, Math.min(target.bottom, rect.bottom) - Math.max(target.top, rect.top));
+        const overlap = width * height / Math.min(Math.max(1, target.width * target.height), Math.max(1, rect.width * rect.height));
+        const source = image.currentSrc || image.src || image.getAttribute("data-src") || "";
+        if (overlap >= 0.45 && /^https?:/i.test(source)) return source;
+      }
+    }
+    return document.querySelectorAll("video").length <= 1
+      ? document.querySelector('meta[property="og:image"]')?.content || ""
+      : "";
+  };
 
   document.addEventListener("click", (event) => {
     const button = event.target?.closest?.(".apocalipse-media-download:not(.apocalipse-media-record)");

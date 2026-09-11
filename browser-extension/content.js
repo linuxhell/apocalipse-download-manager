@@ -187,18 +187,54 @@
     }
   };
   const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
+  const cssImageUrl = (value) => {
+    const match = String(value || "").match(/url\(["']?([^"')]+)["']?\)/i);
+    return match ? absolute(match[1]) : "";
+  };
+  const visualThumbnailFor = (element) => {
+    if (!element?.getBoundingClientRect) return "";
+    const target = element.getBoundingClientRect();
+    const targetArea = Math.max(1, target.width * target.height);
+    let best = null;
+    let container = element.parentElement;
+    for (let depth = 0; container && depth < 10; depth += 1, container = container.parentElement) {
+      const videos = [...(container.querySelectorAll?.("video") || [])];
+      if (videos.length > 1) break;
+      const nodes = [container, ...(container.querySelectorAll?.("img") || [])];
+      for (const node of nodes) {
+        const rect = node.getBoundingClientRect?.();
+        if (!rect || rect.width < 80 || rect.height < 45) continue;
+        const overlapWidth = Math.max(0, Math.min(target.right, rect.right) - Math.max(target.left, rect.left));
+        const overlapHeight = Math.max(0, Math.min(target.bottom, rect.bottom) - Math.max(target.top, rect.top));
+        const overlap = overlapWidth * overlapHeight / Math.min(targetArea, Math.max(1, rect.width * rect.height));
+        if (overlap < 0.45) continue;
+        const source = node.tagName === "IMG"
+          ? absolute(node.currentSrc || node.src || node.getAttribute?.("data-src"))
+          : cssImageUrl(globalThis.getComputedStyle?.(node)?.backgroundImage);
+        if (!source || !/^https?:/i.test(source)) continue;
+        const score = overlap * 100 - depth * 2 + (node.tagName === "IMG" ? 5 : 0);
+        if (!best || score > best.score) best = { source, score };
+      }
+    }
+    return best?.source || "";
+  };
   const pageThumbnail = (element) => {
     const candidates = [
       element?.poster,
       element?.getAttribute?.("poster"),
+      visualThumbnailFor(element),
+    ];
+    // Page-level metadata is safe only when the document has one player. On a
+    // feed it commonly describes the site or the first card, not this video.
+    if (document.querySelectorAll("video").length <= 1) candidates.push(
       document.querySelector('meta[property="og:image:secure_url"]')?.content,
       document.querySelector('meta[property="og:image"]')?.content,
       document.querySelector('meta[name="twitter:image"]')?.content,
       document.querySelector('meta[name="twitter:image:src"]')?.content,
       document.querySelector('link[rel="image_src"]')?.href,
-      element?.closest?.("figure,article,[class*=player],[class*=video]")?.querySelector?.("img")?.currentSrc,
-    ];
+    );
     for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+      if (document.querySelectorAll("video").length > 1) break;
       try {
         const data = JSON.parse(script.textContent || "null");
         const nodes = Array.isArray(data) ? data : [data];

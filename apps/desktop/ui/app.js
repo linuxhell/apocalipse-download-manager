@@ -137,6 +137,7 @@ const catalogs = {
     regenerate: "Regenerate",
     bridgeConnected: "Extension connected",
     bridgeWaiting: "Waiting for extension",
+    bridgeDisconnected: "Extension disconnected",
     recentLocations: "Download locations",
     clearLocations: "Clear download locations",
     defaultLocation: "Default",
@@ -305,6 +306,7 @@ const catalogs = {
     regenerate: "Gerar outro",
     bridgeConnected: "Extensão conectada",
     bridgeWaiting: "Aguardando extensão",
+    bridgeDisconnected: "Extensão desconectada",
     recentLocations: "Locais de download",
     clearLocations: "Limpar caminhos de download",
     defaultLocation: "Padrão",
@@ -472,6 +474,7 @@ const catalogs = {
     regenerate: "重新生成",
     bridgeConnected: "扩展已连接",
     bridgeWaiting: "正在等待扩展",
+    bridgeDisconnected: "扩展已断开连接",
     recentLocations: "下载位置",
     clearLocations: "清除下载路径",
     defaultLocation: "默认",
@@ -2088,13 +2091,19 @@ window.__TAURI__?.event?.listen?.("recording-completed", async (event) => {
     if (!exportDialog.open) exportDialog.showModal();
   } catch (error) { console.error(error); }
 }).catch(console.error);
+const bridgeStatusStartedAt = Date.now();
+let bridgeEverConnected = false;
 async function refreshBridgeStatus() {
   try {
     const status = await invoke("get_bridge_pairing");
     const root = document.querySelector("footer > span:first-child");
     root.classList.toggle("bridge-waiting", !status.connected);
     root.classList.toggle("bridge-connected", status.connected);
-    root.querySelector("b").textContent = status.connected ? t("bridgeConnected") : t("bridgeWaiting");
+    if (status.connected) bridgeEverConnected = true;
+    const initiallyWaiting = !bridgeEverConnected && Date.now() - bridgeStatusStartedAt < 6000;
+    root.querySelector("b").textContent = status.connected
+      ? t("bridgeConnected")
+      : t(initiallyWaiting ? "bridgeWaiting" : "bridgeDisconnected");
   } catch (error) {
     console.error(error);
   }

@@ -4535,7 +4535,7 @@ fn enqueue_download_impl(
             (!value.trim().is_empty()).then(|| value.trim().to_owned())
         });
         task.thumbnail = context.thumbnail.filter(|value| {
-            value.len() <= 8192
+            value.len() <= 600_000
                 && (value.starts_with("https://")
                     || value.starts_with("http://")
                     || value.starts_with("data:image/"))

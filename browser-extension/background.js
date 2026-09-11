@@ -12,6 +12,34 @@ let lastShortcutMode = "normal";
 let diagnosticOutbox = [];
 const recentFileResponses = [];
 const recentMediaResponses = [];
+const thumbnailDataCache = new Map();
+
+const fetchThumbnailDataUrl = async (value) => {
+  const url = String(value || "");
+  if (url.startsWith("data:image/")) return url;
+  if (!/^https?:/i.test(url)) throw new Error("invalid_thumbnail_url");
+  if (thumbnailDataCache.has(url)) return thumbnailDataCache.get(url);
+  const response = await fetch(url, { credentials: "include", cache: "force-cache" });
+  if (!response.ok) throw new Error(`thumbnail_http_${response.status}`);
+  const blob = await response.blob();
+  if (!/^image\//i.test(blob.type)) throw new Error("thumbnail_not_image");
+  if (blob.size > 384 * 1024) throw new Error("thumbnail_too_large");
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  const dataUrl = `data:${blob.type};base64,${btoa(binary)}`;
+  thumbnailDataCache.set(url, dataUrl);
+  if (thumbnailDataCache.size > 80) thumbnailDataCache.delete(thumbnailDataCache.keys().next().value);
+  return dataUrl;
+};
+
+const portableThumbnail = async (value) => {
+  if (!value) return null;
+  try { return await fetchThumbnailDataUrl(value); }
+  catch { return value; }
+};
 const mediaPickerContexts = new Map();
 const inspectedMediaTracks = new Map();
 const ASSISTED_PREFIX = "assisted-download:";
@@ -591,19 +619,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
   if (message?.type === "APOCALIPSE_FETCH_THUMBNAIL") {
     (async () => {
-      const url = String(message.url || "");
-      if (!/^https?:/i.test(url)) throw new Error("invalid_thumbnail_url");
-      const response = await fetch(url, { credentials: "include", cache: "force-cache" });
-      if (!response.ok) throw new Error(`thumbnail_http_${response.status}`);
-      const blob = await response.blob();
-      if (!/^image\//i.test(blob.type)) throw new Error("thumbnail_not_image");
-      if (blob.size > 3 * 1024 * 1024) throw new Error("thumbnail_too_large");
-      const bytes = new Uint8Array(await blob.arrayBuffer());
-      let binary = "";
-      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-      }
-      reply({ dataUrl: `data:${blob.type};base64,${btoa(binary)}` });
+      reply({ dataUrl: await fetchThumbnailDataUrl(message.url) });
     })().catch((error) => reply({ error: String(error) }));
     return true;
   }
@@ -626,6 +642,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         throw new Error("incomplete_social_media_track");
       }
       const cookieHeader = await cookieHeaderFor([downloadUrl, item.audioUrl]);
+      const thumbnail = await portableThumbnail(item.thumbnail);
       return bridgeRequest("/v1/download", {
       method: "POST",
       body: JSON.stringify({
@@ -635,7 +652,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         fileName: mediaDownloadFileName(item),
         pageUrl,
         title: item.title || null,
-        thumbnail: item.thumbnail || null,
+        thumbnail,
         mediaKind: item.kind || null,
         ambiguousSocialTrack: Boolean(item.ambiguousSocialTrack),
         expectedSize: Number.isFinite(item.size) ? item.size : null,
@@ -670,6 +687,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       const taskIds = [];
       for (const item of items) {
         if (item.ambiguousSocialTrack && !item.audioUrl && !item.extractorUrl) continue;
+        const thumbnail = await portableThumbnail(item.thumbnail);
         const result = await bridgeRequest("/v1/download", {
           method: "POST",
           body: JSON.stringify({
@@ -679,7 +697,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
             fileName: mediaDownloadFileName(item),
             pageUrl,
             title: item.title || null,
-            thumbnail: item.thumbnail || null,
+            thumbnail,
             mediaKind: item.kind || null,
             ambiguousSocialTrack: Boolean(item.ambiguousSocialTrack),
             expectedSize: Number.isFinite(item.size) ? item.size : null,

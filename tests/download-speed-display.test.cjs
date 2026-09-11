@@ -85,6 +85,29 @@ test("task state and action controls use the active theme instead of dark consta
   assert.match(desktopCss, /\.task-action\s*\{[\s\S]*background:\s*var\(--surface-2\)/);
 });
 
+test("protected thumbnails are cached for the desktop handoff", () => {
+  const worker = fs.readFileSync(path.join(root, "browser-extension/background.js"), "utf8");
+  assert.match(worker, /const fetchThumbnailDataUrl = async/);
+  assert.match(worker, /const thumbnail = await portableThumbnail\(item\.thumbnail\)/);
+  assert.match(worker, /thumbnailDataCache/);
+  assert.match(desktop, /value\.len\(\) <= 600_000/);
+});
+
+test("feed thumbnails come from the exact visual player region before page metadata", () => {
+  const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");
+  assert.match(content, /const visualThumbnailFor = \(element\) =>/);
+  assert.match(content, /if \(videos\.length > 1\) break/);
+  assert.match(content, /if \(overlap < 0\.45\) continue/);
+  assert.match(content, /element\?\.getAttribute\?\.\("poster"\),\s*visualThumbnailFor\(element\)/);
+});
+
+test("a closed browser becomes disconnected after the initial extension wait", () => {
+  assert.match(ui, /bridgeDisconnected:\s*"Extension disconnected"/);
+  assert.match(ui, /bridgeDisconnected:\s*"Extensão desconectada"/);
+  assert.match(ui, /bridgeDisconnected:\s*"扩展已断开连接"/);
+  assert.match(ui, /Date\.now\(\) - bridgeStatusStartedAt < 6000/);
+});
+
 test("download destinations and task copy follow the active theme palette", () => {
   assert.match(desktopCss, /\.destination-select\s*\{[\s\S]*color:\s*var\(--text\)/);
   assert.match(desktopCss, /\.destination-row\.unavailable \.destination-select span\s*\{\s*color:\s*var\(--muted\)/);
