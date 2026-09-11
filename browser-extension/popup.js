@@ -518,3 +518,49 @@ setInterval(async () => {
 }, 5000);
 document.querySelector("#connect").onclick = async () => {
   const token = document.querySelector("#pairing-token").value.trim();
+  const button = document.querySelector("#connect");
+  button.disabled = true;
+  try {
+    const appearance = await directBridgeHealth(token);
+    if (appearance.language) locale = normalizeDesktopLanguage(appearance.language);
+    if (appearance.theme) applyPopupTheme(appearance.theme);
+    await chrome.storage.local.set({ language: locale, desktopTheme: interfaceTheme });
+    document.querySelector("#language").value = locale;
+    translate();
+    render();
+    await chrome.storage.local.set({ pairingToken: token });
+    setBridgeStatus(true);
+    // Wake/synchronize the worker, but never make the button depend on it.
+    const worker = await workerSelfTest();
+    if (!worker?.ok) {
+      try { chrome.runtime.sendMessage({ type: "APOCALIPSE_PAIR", token }, () => void chrome.runtime.lastError); } catch {}
+      await showWorkerWarning(worker);
+    }
+  } catch (error) {
+    setBridgeStatus(false);
+    showBridgeError(String(error));
+  } finally {
+    button.disabled = false;
+  }
+};
+document.querySelector("#language").onchange = (event) => {
+  locale = event.target.value;
+  translate();
+  render();
+  chrome.storage.local.set({ language: locale }, () => {
+    chrome.tabs.query({}, (tabs) => {
+      for (const tab of tabs) {
+        if (!tab.id || !/^https?:/i.test(tab.url || "")) continue;
+        chrome.tabs.sendMessage(tab.id, {
+          type: "APOCALIPSE_LANGUAGE_CHANGED",
+          language: locale,
+        }, () => void chrome.runtime.lastError);
+      }
+    });
+  });
+};
+document.querySelector("#settings-toggle").onclick = () => {
+  const panel = document.querySelector("#compact-settings");
+  panel.hidden = !panel.hidden;
+  document.querySelector("#settings-toggle").setAttribute("aria-expanded", String(!panel.hidden));
+};
