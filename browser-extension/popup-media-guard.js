@@ -1,4 +1,4 @@
-// 0.3.128 test guard: keep one logical media row per social post/reel and
+// 0.3.129 test guard: keep one logical media row per social post/reel and
 // suppress anonymous adaptive CDN tracks from the popup without touching the
 // download engine. Real DOM audio/images remain visible in their own tabs.
 (() => {
@@ -59,7 +59,10 @@
     for (const item of source) {
       if (!item?.url) continue;
       const social = socialHost(pageUrl) || socialHost(item.url) || socialHost(item.extractorUrl || '') || socialHost(item.playerPageUrl || '');
-      if (social && item.kind === 'video' && item.visualOnly && !item.thumbnail) continue;
+      // Keep only the exact currently visible unresolved social player. Hidden
+      // preload players are implementation details and must not become rows.
+      if (social && item.kind === 'video' && item.visualOnly
+        && (!item.thumbnail || !item.playerBound || !item.recommended || item.retained)) continue;
       if (social && item.kind === 'video' && item.pageExtractor && !item.thumbnail && !item.visualOnly) continue;
       const identity = itemIdentity(item);
       const key = `${item.kind || 'unknown'}:${identity || item.url}`;
