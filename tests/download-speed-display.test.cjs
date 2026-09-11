@@ -76,7 +76,13 @@ test("HLS uses the selected destination for process and temporary files", () => 
 
 test("failed thumbnails restore the compact icon without covering progress", () => {
   assert.match(ui, /icon\.classList\.remove\("has-thumbnail"\)/);
+  assert.doesNotMatch(ui, /else if \(task\.thumbnail\)\s*\{\s*icon\.classList\.add\("has-thumbnail"\)/);
   assert.match(desktopCss, /\.download-icon\s*\{[\s\S]*width:\s*32px;[\s\S]*height:\s*32px;/);
+});
+
+test("task state and action controls use the active theme instead of dark constants", () => {
+  assert.match(desktopCss, /\.download-state\s*\{[\s\S]*background:\s*color-mix\(in srgb, var\(--accent\) 10%, var\(--surface\)\)/);
+  assert.match(desktopCss, /\.task-action\s*\{[\s\S]*background:\s*var\(--surface-2\)/);
 });
 
 test("download destinations and task copy follow the active theme palette", () => {

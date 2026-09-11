@@ -698,8 +698,6 @@ function renderDownloads(force = false) {
       };
       icon.replaceChildren(thumbnail);
       icon.classList.add("has-thumbnail");
-    } else if (task.thumbnail) {
-      icon.classList.add("has-thumbnail");
     }
     const info = Object.assign(document.createElement("div"), {
       className: "download-info",

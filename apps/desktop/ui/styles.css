@@ -861,9 +861,9 @@ footer .bridge-connected i {
   line-height: 1.35;
 }
 .download-state {
-  color: #6eeeff;
-  background: #102b34;
-  border: 1px solid #1a4855;
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
   padding: 5px 9px;
   border-radius: 99px;
   font-size: 10px;
@@ -879,19 +879,20 @@ footer .bridge-connected i {
   gap: 5px;
 }
 .task-action {
-  border: 0;
+  border: 1px solid var(--line);
   border-radius: 6px;
   min-height: 30px;
   padding: 6px 11px;
-  background: #162832;
-  color: #9ac8d2;
+  background: var(--surface-2);
+  color: color-mix(in srgb, var(--text) 78%, var(--muted));
   font-size: 11px;
   font-weight: 650;
   cursor: pointer;
 }
 .task-action:hover {
-  color: #e5fbff;
-  background: #1d3c48;
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
 }
 .history-search { min-width: 150px; max-width: 240px; flex: 1 1 180px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--input); color: var(--text); }
 .advanced-download { margin: 12px 0; padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
@@ -938,7 +939,7 @@ footer .bridge-connected i {
 
 /* Theme layer: surfaces and foreground colors move as a set to preserve contrast. */
 body, dialog { color: var(--text); }
-.brand strong, header p, .cyan, .tabs button.active, .download-state { color: var(--accent); }
+.brand strong, header p, .cyan, .tabs button.active { color: var(--accent); }
 .actions select, dialog, .panel, .engine, .setting-toggle, .pairing-settings,
 .transfer-settings, .tool-settings, .media-inspection, .destination-history {
   background: var(--surface);
