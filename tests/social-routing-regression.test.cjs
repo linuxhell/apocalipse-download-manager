@@ -10,7 +10,7 @@ const tiktok = readFileSync(join(__dirname, '../browser-extension/tiktok-media-f
 
 // Run the scripts in manifest order, including TikTok's document-capture listener.
 // Browser APIs are mocked; installed click handlers and outgoing payloads are real.
-function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.com/video/a.mp4', permalink = null, network = [], inspections = [], shipped = false, readableBlob = false, onMediaQuery = null } = {}) {
+function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.com/video/a.mp4', sourceObject = null, permalink = null, network = [], inspections = [], shipped = false, readableBlob = false, onMediaQuery = null } = {}) {
   const sent = [], fetched = [], appended = [], clickListeners = [];
   const location = new URL(url);
   const state = { permalink, network };
@@ -22,7 +22,7 @@ function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.co
     querySelector: selector => selector.includes('a[href') ? anchors()[0] || null : null,
   };
   const video = {
-    tagName: 'VIDEO', dataset: {}, isConnected: true, currentSrc: source, src: source,
+    tagName: 'VIDEO', dataset: {}, isConnected: true, currentSrc: source, src: source, srcObject: sourceObject,
     title: 'Synthetic current video', poster: 'https://images.example/poster.jpg', duration: 30,
     parentElement: post, innerHTML: '', getBoundingClientRect: () => rect,
     getAttribute: () => null,
@@ -229,6 +229,18 @@ test('Facebook sponsored blob player identifies video and mislabeled audio MP4 t
   const video = 'https://video.fbcdn.net/current.mp4';
   const audio = 'https://video.fbcdn.net/current-audio.mp4';
   const p = page({ url: 'https://www.facebook.com/', source: 'blob:https://www.facebook.com/current',
+    network: [track(video, 'video/mp4', 1000), track(audio, 'video/mp4', 1001)],
+    inspections: [{ url: video, kind: 'video', duration: 30 }, { url: audio, kind: 'audio', duration: 30 }] });
+  await p.click();
+  assert.equal(p.downloads()[0].url, video);
+  assert.equal(p.downloads()[0].audioUrl, audio);
+  assert.equal(p.downloads()[0].ambiguousSocialTrack, false);
+});
+
+test('Facebook sponsored srcObject player uses the same duration-bound track selection', async () => {
+  const video = 'https://video.fbcdn.net/src-object-video.mp4';
+  const audio = 'https://video.fbcdn.net/src-object-audio.mp4';
+  const p = page({ url: 'https://www.facebook.com/', source: '', sourceObject: {},
     network: [track(video, 'video/mp4', 1000), track(audio, 'video/mp4', 1001)],
     inspections: [{ url: video, kind: 'video', duration: 30 }, { url: audio, kind: 'audio', duration: 30 }] });
   await p.click();
