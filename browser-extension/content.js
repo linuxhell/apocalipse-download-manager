@@ -1,13 +1,21 @@
 (() => {
   globalThis.ADM_DIAG?.register("content.js");
   let shortcutKeys = { force: "Shift", bypass: "Alt" };
-  chrome.storage.local.get({ forceShortcut: "Shift", bypassShortcut: "Alt" }, (value) => {
+  let interfaceLanguage = "en";
+  let refreshOverlayLanguages = () => {};
+  chrome.storage.local.get({ forceShortcut: "Shift", bypassShortcut: "Alt", language: "en" }, (value) => {
     shortcutKeys = { force: value.forceShortcut, bypass: value.bypassShortcut };
+    interfaceLanguage = value.language || "en";
+    refreshOverlayLanguages();
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes.forceShortcut) shortcutKeys.force = changes.forceShortcut.newValue;
     if (changes.bypassShortcut) shortcutKeys.bypass = changes.bypassShortcut.newValue;
+    if (changes.language) {
+      interfaceLanguage = changes.language.newValue || "en";
+      refreshOverlayLanguages();
+    }
   });
   const modifierPressed = (event, key) => ({ Alt: event.altKey, Shift: event.shiftKey, Control: event.ctrlKey }[key] || false);
   const sendShortcutState = (event) => chrome.runtime.sendMessage({
@@ -426,11 +434,11 @@
     return collected;
   };
   const downloadLabel = () => {
-    const value = (navigator.language || "en").toLowerCase();
+    const value = String(interfaceLanguage || "en").toLowerCase();
     return value.startsWith("zh") ? "下载" : value.startsWith("pt") ? "Baixar" : "Download";
   };
   const recordingLabels = () => {
-    const value = (navigator.language || "en").toLowerCase();
+    const value = String(interfaceLanguage || "en").toLowerCase();
     if (value.startsWith("zh")) return { record: "● 录制", stop: "■ 停止并保存", uploading: "正在发送…", done: "已保存", unavailable: "此视频无法由浏览器录制" };
     if (value.startsWith("pt")) return { record: "● Gravar", stop: "■ Parar e salvar", uploading: "Enviando…", done: "Gravação salva", unavailable: "Este vídeo não permite gravação pelo navegador" };
     return { record: "● Record", stop: "■ Stop and save", uploading: "Uploading…", done: "Recording saved", unavailable: "This video cannot be recorded by the browser" };
@@ -673,6 +681,9 @@
     document.querySelectorAll("video,audio").forEach((element) => {
       if (element.dataset.apocalipseButton) return;
       const isYouTubeVideo = element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch";
+      // Extractor-first pages already have a complete, higher-quality download
+      // route. Recording would only duplicate yt-dlp with a less reliable path.
+      const usesExtractorOnlyDownload = isYouTubeVideo;
       const isFacebookVideo = element.tagName === "VIDEO" && /(^|\.)facebook\.com$/i.test(location.hostname);
       if (isFacebookReelsPage && isFacebookVideo && element !== activeFacebookReel) return;
       if (isInstagramReelsPage && element.tagName === "VIDEO" && element !== activeInstagramReel) return;
@@ -694,12 +705,13 @@
       button.title = "Apocalipse Download Manager";
       button.hidden = !canDownload;
       let recordButton = null;
+      let refreshRecordLabels = () => {};
       button.addEventListener("click", async (event) => {
         const actionId = globalThis.ADM_DIAG?.begin("overlay.click", { ...globalThis.ADM_DIAG.player(element), handler: "generic" }) || crypto.randomUUID();
         const trace = (name, mode, detail = {}) => traceDiagnostic(name, mode, detail, actionId);
         event.preventDefault();
         event.stopPropagation();
-        const originalText = button.textContent;
+        const restoreDownloadLabel = () => { button.textContent = `⇩ ${downloadLabel()}`; };
         const clickSource = String(element.currentSrc || element.src || "");
         const clickPage = location.href;
         const socialVideo = isFacebookVideo || (isTikTokPage && element.tagName === "VIDEO");
@@ -735,7 +747,7 @@
           trace("overlay_download_player_changed", "download", { facebook: isFacebookVideo, tiktokPage: isTikTokPage });
           button.textContent = "!";
           button.title = "O vídeo mudou. Clique novamente no vídeo atual.";
-          setTimeout(() => { button.textContent = originalText; }, 2500);
+          setTimeout(restoreDownloadLabel, 2500);
           return;
         }
         // Bind the overlay to this exact player. Never use an arbitrary recent
@@ -790,7 +802,7 @@
             await uploadBlobUrl(liveBlobUrl, fallbackName);
             button.textContent = "✓";
             button.title = "Enviado ao Apocalipse";
-            setTimeout(() => { button.textContent = originalText; }, 1500);
+            setTimeout(restoreDownloadLabel, 1500);
             return;
           } catch (error) {
             console.debug("Apocalipse live blob is MSE/unreadable; trying network media", error);
@@ -819,13 +831,13 @@
             button.textContent = "●";
             button.title = recordingLabels().record;
             recordButton.click();
-            setTimeout(() => { button.textContent = originalText; button.title = "Apocalipse Download Manager"; }, 1800);
+            setTimeout(() => { restoreDownloadLabel(); button.title = "Apocalipse Download Manager"; }, 1800);
             return;
           }
           trace("overlay_download_unresolved", "download", { liveBlob: Boolean(liveBlobUrl), liveHttp: Boolean(liveHttpUrl), networkMedia: Boolean(networkMediaUrl), facebook: isFacebookVideo });
           button.textContent = "⚠";
           button.title = "Abra o vídeo ou use os três pontos e Copiar link";
-          setTimeout(() => { button.textContent = originalText; }, 2500);
+          setTimeout(restoreDownloadLabel, 2500);
           return;
         }
         if (/^blob:/i.test(String(currentUrl || ""))) {
@@ -833,7 +845,7 @@
             await uploadBlobUrl(currentUrl);
             button.textContent = "✓";
             button.title = "Enviado ao Apocalipse";
-            setTimeout(() => { button.textContent = originalText; }, 1500);
+            setTimeout(restoreDownloadLabel, 1500);
             return;
           } catch (error) {
             console.debug("Apocalipse direct blob failed", error);
@@ -876,23 +888,32 @@
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";
           if (failed) button.title = result?.error || chrome.runtime.lastError?.message || "Apocalipse unavailable";
-          setTimeout(() => { button.textContent = originalText; }, 1500);
+          setTimeout(restoreDownloadLabel, 1500);
         });
       });
-      if (element.tagName === "VIDEO") {
+      if (element.tagName === "VIDEO" && canRecord && !usesExtractorOnlyDownload) {
         const record = document.createElement("button");
         recordButton = record;
         try { button[Symbol.for("apocalipse.recordButton")] = record; } catch {}
         record.type = "button";
         record.className = "apocalipse-media-download apocalipse-media-record";
-        const labels = recordingLabels();
-        record.textContent = labels.record;
-        record.title = labels.record;
+        record.textContent = recordingLabels().record;
+        record.title = recordingLabels().record;
         let recorder = null;
+        let recordPhase = "idle";
         let previousLoop = false;
         let startedAt = 0;
         let clockTimer = null;
         let stopPoll = null;
+        refreshRecordLabels = () => {
+          const labels = recordingLabels();
+          if (recordPhase === "recording") record.textContent = `${labels.stop} · ${clockLabel((Date.now() - startedAt) / 1000)}`;
+          else if (recordPhase === "uploading") record.textContent = labels.uploading;
+          else if (recordPhase === "done") record.textContent = `✓ ${labels.done}`;
+          else if (recordPhase === "error") record.textContent = "⚠";
+          else record.textContent = labels.record;
+          record.title = recordPhase === "error" ? labels.unavailable : labels.record;
+        };
         record.addEventListener("click", async (event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -900,7 +921,8 @@
             trace("recording_stop_clicked", "record", { elapsedMs: Date.now() - startedAt });
             recorder.stop();
             record.disabled = true;
-            record.textContent = labels.uploading;
+            recordPhase = "uploading";
+            refreshRecordLabels();
             return;
           }
           try {
@@ -932,21 +954,24 @@
               if (stopPoll) clearInterval(stopPoll);
               stream.getTracks().forEach((track) => track.stop());
               element.loop = previousLoop;
-              record.textContent = labels.uploading;
+              recordPhase = "uploading";
+              refreshRecordLabels();
               try {
                 await uploadQueue;
                 if (uploadError) throw uploadError;
                 const result = await chrome.runtime.sendMessage({ type: "APOCALIPSE_BLOB_END", request: { uploadId: begin.uploadId } });
                 if (result?.error) throw new Error(result.error);
-                record.textContent = `✓ ${labels.done}`;
+                recordPhase = "done";
+                refreshRecordLabels();
                 trace("recording_completed", "record", { uploadId: begin.uploadId, elapsedMs: Date.now() - startedAt });
               } catch (error) {
                 trace("recording_upload_failed", "record", { uploadId: begin.uploadId, error: String(error) });
                 console.error("Apocalipse recorder upload", error);
-                record.textContent = "⚠";
+                recordPhase = "error";
+                refreshRecordLabels();
               } finally {
                 recorder = null;
-                setTimeout(() => { record.disabled = false; record.textContent = labels.record; }, 2200);
+                setTimeout(() => { record.disabled = false; recordPhase = "idle"; refreshRecordLabels(); }, 2200);
               }
             };
             element.addEventListener("ended", () => {
@@ -955,9 +980,10 @@
             recorder.start(1000);
             await element.play();
             startedAt = Date.now();
-            record.textContent = `${labels.stop} · 00:00`;
+            recordPhase = "recording";
+            refreshRecordLabels();
             clockTimer = setInterval(() => {
-              if (recorder?.state === "recording") record.textContent = `${labels.stop} · ${clockLabel((Date.now() - startedAt) / 1000)}`;
+              if (recorder?.state === "recording") refreshRecordLabels();
             }, 1000);
             stopPoll = setInterval(async () => {
               if (recorder?.state !== "recording") return;
@@ -967,9 +993,9 @@
           } catch (error) {
             trace("recording_start_failed", "record", { error: String(error) });
             console.error("Apocalipse recorder", error);
-            record.textContent = "⚠";
-            record.title = labels.unavailable;
-            setTimeout(() => { record.textContent = labels.record; }, 2000);
+            recordPhase = "error";
+            refreshRecordLabels();
+            setTimeout(() => { recordPhase = "idle"; refreshRecordLabels(); }, 2000);
           }
         });
       }
@@ -1009,7 +1035,11 @@
         delete element.dataset.apocalipseButton;
         activeOverlays.delete(element);
       };
-      activeOverlays.set(element, { element, pageUrl: location.href, cleanup: cleanupOverlay });
+      const refreshOverlayLanguage = () => {
+        if (button.textContent.startsWith("⇩")) button.textContent = `⇩ ${downloadLabel()}`;
+        if (recordButton) refreshRecordLabels();
+      };
+      activeOverlays.set(element, { element, pageUrl: location.href, cleanup: cleanupOverlay, refreshLabels: refreshOverlayLanguage });
       const duplicateButtons = document.querySelectorAll(".apocalipse-media-download").length - activeOverlays.size * 2;
       trace("overlay_installed", "overlay", { tag: element.tagName, canDownload, canRecord, active: activeOverlays.size, duplicateDelta: duplicateButtons });
       position();
@@ -1017,6 +1047,9 @@
       addEventListener("resize", position, { passive: true });
       if (isYouTubeVideo) positionTimer = setInterval(position, 1000);
     });
+  };
+  refreshOverlayLanguages = () => {
+    for (const overlay of activeOverlays.values()) overlay.refreshLabels?.();
   };
   const scheduleOverlays = () => {
     clearTimeout(overlayTimer);

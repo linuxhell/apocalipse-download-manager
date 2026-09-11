@@ -25,6 +25,12 @@ test("active downloads keep the engine-reported speed visible", () => {
   );
 });
 
+test("streamed browser recordings publish a global core speed", () => {
+  assert.match(desktop, /speed_sample_at: Instant/);
+  assert.match(desktop, /task\.download_speed = Some\(download_speed\)/);
+  assert.match(desktop, /instantaneous as f64 \* 0\.65/);
+});
+
 test("quiet clipboard polling does not flood diagnostics", () => {
   assert.match(
     ui,
