@@ -744,7 +744,7 @@
           /^https?:/i.test(item.url || "")
           && !/^audio\//i.test(item.contentType || "")
           && sameMediaResource(item.url, liveHttpUrl)) || null;
-        if (!browserVideoItem && liveBlobUrl && Number.isFinite(element.duration) && element.duration > 0) {
+        if (!browserVideoItem && (liveBlobUrl || element.srcObject) && Number.isFinite(element.duration) && element.duration > 0) {
           const durationMatches = (capturedSocialMedia?.media || [])
             .map((item) => ({ item, info: socialTrackInfo.get(item.url) }))
             .filter(({ info }) => (info?.kind === "video" || info?.kind === "muxed") && Number.isFinite(info.duration))
