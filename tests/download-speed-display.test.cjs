@@ -65,4 +65,6 @@ test("five readable light themes are available", () => {
   assert.match(desktopCss, /\.logs-panel,\.link-panel>div,\.diagnostics-panel/);
   assert.match(desktop, /"theme": theme/);
   assert.match(ui, /invoke\("set_application_theme"/);
+  assert.match(desktopCss, /\.remove-options button:hover[\s\S]*color-mix\(in srgb, var\(--accent\) 14%, var\(--surface\)\)/);
+  assert.match(desktopCss, /\.remove-options button\.danger:hover[\s\S]*color-mix\(in srgb, #ff5364 12%, var\(--surface\)\)/);
 });

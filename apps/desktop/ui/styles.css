@@ -912,13 +912,18 @@ footer .bridge-connected i {
   cursor: pointer;
 }
 .remove-options button:hover {
-  border-color: #2a6676;
-  background: #13242c;
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--text);
 }
 .remove-options button.danger:hover {
-  border-color: #9c4d4d;
-  background: #29191b;
+  border-color: color-mix(in srgb, #ff5364 65%, var(--line));
+  background: color-mix(in srgb, #ff5364 12%, var(--surface));
+  color: var(--text);
 }
+.remove-options button:hover b { color: color-mix(in srgb, var(--accent) 72%, var(--text)); }
+.remove-options button.danger:hover b { color: color-mix(in srgb, #e8384d 72%, var(--text)); }
+.remove-options button:hover small { color: var(--muted); }
 .remove-options b,
 .remove-options small {
   display: block;
