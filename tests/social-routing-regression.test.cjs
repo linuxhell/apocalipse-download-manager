@@ -291,12 +291,21 @@ test('popup keeps capture metadata when DOM and network report the same video', 
   assert.equal(result[0].title, 'Current card');
 });
 test('popup hides incidental CDN tracks for both social-page extractors', () => {
-  for (const url of ['https://www.tiktok.com/', 'https://www.facebook.com/']) {
+  for (const url of ['https://www.tiktok.com/', 'https://www.facebook.com/', 'https://www.instagram.com/']) {
     const result = popupContext.mergeDetected([{ url: pageA, kind: 'video', pageExtractor: true }], [
       popupTrack(videoA, 'video', 1000), popupTrack(audioA, 'audio', 1001),
     ], url);
     assert.equal(result.length, 1);
     assert.equal(result[0].pageExtractor, true);
+  }
+});
+test('a visual social video suppresses unrelated CDN fragments globally', () => {
+  for (const url of ['https://www.tiktok.com/', 'https://www.facebook.com/', 'https://www.instagram.com/']) {
+    const visual = { url: pageA, kind: 'video', thumbnail: 'https://img.example/current.jpg', pageExtractor: true };
+    const result = popupContext.mergeDetected([visual], [
+      popupTrack(videoA, 'video', 1000), popupTrack(audioA, 'audio', 1001),
+    ], url);
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), [visual]);
   }
 });
 test('popup does not flag complete HLS and DASH manifests as isolated social tracks', () => {

@@ -11,6 +11,9 @@ const SOCIAL_TRACK_PAIR_WINDOW_MS = 8_000;
 const isSocialPage = (url) => {
   try { return /(^|\.)(?:facebook|tiktok)\.com$/i.test(new URL(url).hostname); } catch { return false; }
 };
+const isSocialMediaPage = (url) => {
+  try { return /(^|\.)(?:facebook|tiktok|instagram)\.com$/i.test(new URL(url).hostname); } catch { return false; }
+};
 const pairSocialTracks = (items, pageUrl) => {
   if (!isSocialPage(pageUrl)) return items;
   const audio = items.filter((item) => item.kind === "audio" && item.networkCaptured);
@@ -44,10 +47,17 @@ const networkMediaKind = (item) => {
 };
 const mergeDetectedMedia = (scanned, network, pageUrl) => {
   const unique = new Map();
-  const hasSocialPageItems = isSocialPage(pageUrl) && scanned.some((item) => item?.kind === "video" && item.pageExtractor);
+  const visualVideos = scanned.filter((item) => item?.kind === "video"
+    && (item.pageExtractor || item.recommended));
+  // Once a social card/player has supplied an identifiable video, its direct
+  // CDN requests are implementation details. Keep them available only when
+  // they describe the exact same URL so size/type metadata can be merged.
+  const hasSocialPageItems = isSocialMediaPage(pageUrl) && visualVideos.length > 0;
+  const visualUrls = new Set(visualVideos.map((item) => item.url));
   for (const item of [...scanned, ...network]) {
     if (!item?.url) continue;
-    if (hasSocialPageItems && item.networkCaptured && (item.kind === "video" || item.kind === "audio")) continue;
+    if (hasSocialPageItems && item.networkCaptured && (item.kind === "video" || item.kind === "audio")
+      && !visualUrls.has(item.url)) continue;
     const previous = unique.get(item.url);
     if (!previous) unique.set(item.url, item);
     else if (item.networkCaptured) unique.set(item.url, {
@@ -170,13 +180,20 @@ const loadThumbnail = (image, item) => {
   const source = item.thumbnail || (item.kind === "image" ? item.url : "");
   if (!source) {
     image.src = fallback;
+    void globalThis.ADM_DIAG?.emit("thumbnail.fallback", { kind: item.kind, reason: "missing_source", url: item.url });
     return;
   }
   image.src = source;
+  void globalThis.ADM_DIAG?.emit("thumbnail.source_selected", { kind: item.kind,
+    source: /^data:/i.test(source) ? "captured_data" : source === item.url ? "media_url" : "dom_url", url: item.url });
   image.onerror = () => {
     image.onerror = null;
     chrome.runtime.sendMessage({ type: "APOCALIPSE_FETCH_THUMBNAIL", url: source }, (result) => {
-      image.src = !chrome.runtime.lastError && result?.dataUrl ? result.dataUrl : fallback;
+      const fetched = !chrome.runtime.lastError && Boolean(result?.dataUrl);
+      image.src = fetched ? result.dataUrl : fallback;
+      void globalThis.ADM_DIAG?.emit(fetched ? "thumbnail.fetch_succeeded" : "thumbnail.fallback", {
+        kind: item.kind, reason: fetched ? "protected_source_cached" : "fetch_failed", url: item.url,
+      }, null, fetched ? "INFO" : "WARN");
     });
   };
 };
@@ -216,6 +233,7 @@ const render = () => {
   const matches = media.filter((item) => item.kind === selected);
   void globalThis.ADM_DIAG?.emit("popup.render", { videos: media.filter(v => v.kind === "video").length,
     audio: media.filter(v => v.kind === "audio").length, images: media.filter(v => v.kind === "image").length,
+    thumbnails: matches.filter(v => Boolean(v.thumbnail)).length,
     displayed: matches.length, disabled: matches.filter(v => v.ambiguousSocialTrack).length, kind: selected });
   const selectable = matches;
   const updateBulk = () => {
@@ -259,6 +277,7 @@ const render = () => {
     const previewRequest = previewRequestFor(item, activePageUrl);
     previewButton.disabled = !previewRequest;
     void globalThis.ADM_DIAG?.emit("popup.row_state", { url: item.url, kind: item.kind,
+      thumbnail: Boolean(item.thumbnail), thumbnailSource: /^data:/i.test(item.thumbnail || "") ? "captured_data" : item.thumbnail ? "dom_url" : "none",
       previewEnabled: Boolean(previewRequest), downloadEnabled: true,
       reason: item.ambiguousSocialTrack ? "manual_selection_available" : previewRequest ? "valid_selection" : "invalid_preview_source" });
     previewButton.title = previewRequest ? t("externalPreview") : t("incompleteTrack");

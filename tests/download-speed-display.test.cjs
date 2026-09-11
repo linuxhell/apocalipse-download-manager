@@ -98,6 +98,14 @@ test("protected thumbnails are cached for the desktop handoff", () => {
   assert.match(content, /const captureThumbnailFor = async/);
 });
 
+test("thumbnail diagnostics distinguish DOM, captured, fetched and fallback sources", () => {
+  const popup = fs.readFileSync(path.join(root, "browser-extension/popup.js"), "utf8");
+  assert.match(popup, /thumbnail\.source_selected/);
+  assert.match(popup, /thumbnail\.fetch_succeeded/);
+  assert.match(popup, /thumbnail\.fallback/);
+  assert.match(popup, /thumbnails:\s*matches\.filter/);
+});
+
 test("feed thumbnails come from the exact visual player region before page metadata", () => {
   const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");
   assert.match(content, /const visualThumbnailFor = \(element\) =>/);
