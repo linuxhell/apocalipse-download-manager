@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.125",
+  "version": "0.3.127",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -122,5 +122,5 @@
       "48": "icons/alien-48.png"
     }
   },
-  "version_name": "0.3.125 local - thumbnail catalog candidate"
+  "version_name": "0.3.127 test - popup logical media guard"
 }
