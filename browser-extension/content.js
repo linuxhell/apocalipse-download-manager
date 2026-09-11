@@ -2,10 +2,12 @@
   globalThis.ADM_DIAG?.register("content.js");
   let shortcutKeys = { force: "Shift", bypass: "Alt" };
   let interfaceLanguage = "en";
+  let interfaceTheme = "void";
   let refreshOverlayLanguages = () => {};
-  chrome.storage.local.get({ forceShortcut: "Shift", bypassShortcut: "Alt", language: "en" }, (value) => {
+  chrome.storage.local.get({ forceShortcut: "Shift", bypassShortcut: "Alt", language: "en", desktopTheme: "void" }, (value) => {
     shortcutKeys = { force: value.forceShortcut, bypass: value.bypassShortcut };
     interfaceLanguage = value.language || "en";
+    interfaceTheme = value.desktopTheme || "void";
     refreshOverlayLanguages();
   });
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -14,6 +16,10 @@
     if (changes.bypassShortcut) shortcutKeys.bypass = changes.bypassShortcut.newValue;
     if (changes.language) {
       interfaceLanguage = changes.language.newValue || "en";
+      refreshOverlayLanguages();
+    }
+    if (changes.desktopTheme) {
+      interfaceTheme = changes.desktopTheme.newValue || "void";
       refreshOverlayLanguages();
     }
   });
@@ -447,6 +453,10 @@
     if (value.startsWith("zh")) return { record: "● 录制", stop: "■ 停止并保存", uploading: "正在发送…", done: "已保存", unavailable: "此视频无法由浏览器录制" };
     if (value.startsWith("pt")) return { record: "● Gravar", stop: "■ Parar e salvar", uploading: "Enviando…", done: "Gravação salva", unavailable: "Este vídeo não permite gravação pelo navegador" };
     return { record: "● Record", stop: "■ Stop and save", uploading: "Uploading…", done: "Recording saved", unavailable: "This video cannot be recorded by the browser" };
+  };
+  const overlayThemeColors = () => {
+    const accents = { inferno:"#ff6a20",toxic:"#82f23d",synthwave:"#ff4fca",royal:"#9c83ff",crimson:"#ff4775",arctic:"#65e8ff",obsidian:"#59e3d1",monochrome:"#f1f1f1",midnight:"#4e9dff",forest:"#55cf8a",graphite:"#b3c7d6",deepsea:"#22c7c9",eclipse:"#b86cff",hazard:"#fca311",cyberstorm:"#94d2bd",ultraviolet:"#d05cff",emeraldgold:"#51e79b",scarletice:"#ff496c",coppernavy:"#f4a261",solarizednight:"#e7b84b",pearlblue:"#258fd1",whiteaurora:"#18a7b8",goldenivory:"#d69524",crystalrose:"#d75c91",polarmint:"#2da875",void:"#25d9ef" };
+    return accents[interfaceTheme] || accents.void;
   };
   const clockLabel = (seconds) => {
     const value = Math.max(0, Math.floor(seconds));
@@ -951,32 +961,30 @@
             let uploadQueue = Promise.resolve();
             let uploadError = null;
             recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-            let lastResumeFailureAt = 0;
-            const resumePlayerForRecording = () => {
-              if (!recorder || recorder.state === "inactive" || !element.paused || element.ended) return;
-              element.play().catch((error) => {
-                const now = Date.now();
-                if (now - lastResumeFailureAt >= 5000) {
-                  lastResumeFailureAt = now;
-                  trace("recording_player_resume_failed", "record", { currentTime: element.currentTime, error: String(error) });
-                }
-              });
-            };
+            let pausedAtMediaTime = null;
             const syncRecorderWithPlayer = () => {
               if (!recorder || recorder.state === "inactive") return;
               if (element.paused && recorder.state === "recording") {
+                recorder.requestData?.();
                 recorder.pause();
+                pausedAtMediaTime = Number(element.currentTime) || 0;
                 trace("recording_paused_with_player", "record", { currentTime: element.currentTime });
-                resumePlayerForRecording();
-              } else if (!element.paused && recorder.state === "paused") {
-                recorder.resume();
-                trace("recording_resumed_with_player", "record", { currentTime: element.currentTime });
               }
             };
-            const resumeAfterVisibilityChange = () => resumePlayerForRecording();
+            const resumeRecorderOnRealProgress = () => {
+              if (!recorder || recorder.state !== "paused" || element.paused) return;
+              const currentTime = Number(element.currentTime);
+              if (!Number.isFinite(currentTime) || pausedAtMediaTime == null || currentTime <= pausedAtMediaTime + 0.04) return;
+              try {
+                recorder.resume();
+                pausedAtMediaTime = null;
+                trace("recording_resumed_with_player", "record", { currentTime: element.currentTime });
+              } catch (error) {
+                trace("recording_resume_failed", "record", { currentTime, error: String(error) });
+              }
+            };
             element.addEventListener("pause", syncRecorderWithPlayer);
-            element.addEventListener("play", syncRecorderWithPlayer);
-            document.addEventListener("visibilitychange", resumeAfterVisibilityChange);
+            element.addEventListener("timeupdate", resumeRecorderOnRealProgress);
             stream.getTracks().forEach((track) => track.addEventListener("ended", () => {
               trace("recording_track_ended", "record", { kind: track.kind, readyState: track.readyState });
             }, { once: true }));
@@ -989,8 +997,7 @@
               if (stopPoll) clearInterval(stopPoll);
               if (playbackWatch) clearInterval(playbackWatch);
               element.removeEventListener("pause", syncRecorderWithPlayer);
-              element.removeEventListener("play", syncRecorderWithPlayer);
-              document.removeEventListener("visibilitychange", resumeAfterVisibilityChange);
+              element.removeEventListener("timeupdate", resumeRecorderOnRealProgress);
               stream.getTracks().forEach((track) => track.stop());
               element.loop = previousLoop;
               recordPhase = "uploading";
@@ -1033,7 +1040,7 @@
                 recorder.stop();
                 return;
               }
-              resumePlayerForRecording();
+              resumeRecorderOnRealProgress();
             }, 750);
             stopPoll = setInterval(async () => {
               if (!recorder || recorder.state === "inactive") return;
@@ -1087,7 +1094,9 @@
       };
       const refreshOverlayLanguage = () => {
         if (button.textContent.startsWith("⇩")) button.textContent = `⇩ ${downloadLabel()}`;
+        button.style.setProperty("--apocalipse-accent", overlayThemeColors());
         if (recordButton) refreshRecordLabels();
+        recordButton?.style.setProperty("--apocalipse-accent", overlayThemeColors());
       };
       activeOverlays.set(element, { element, pageUrl: location.href, cleanup: cleanupOverlay, refreshLabels: refreshOverlayLanguage });
       const duplicateButtons = document.querySelectorAll(".apocalipse-media-download").length - activeOverlays.size * 2;
@@ -1106,11 +1115,21 @@
     overlayTimer = setTimeout(installOverlays, 250);
   };
   const style = document.createElement("style");
-  style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:1px solid #4c6470!important;border-radius:8px!important;padding:8px 11px!important;background:#111a20e8!important;color:#f3fbff!important;font:700 13px system-ui!important;box-shadow:0 3px 12px #0008!important;backdrop-filter:blur(5px)!important;cursor:pointer!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download:hover{border-color:#31d9ee!important;background:#15262eef!important;box-shadow:0 3px 14px #00cce755!important}.apocalipse-media-download:disabled{cursor:wait!important;opacity:.85!important}.apocalipse-media-record{border-color:#c94a5e!important;color:#ffd8de!important;background:#35151ce8!important}.apocalipse-media-record:hover{border-color:#ff6078!important;background:#4a1922ef!important;box-shadow:0 3px 14px #ff405555!important}";
+  style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:2px solid var(--apocalipse-accent,#25d9ef)!important;border-radius:8px!important;padding:8px 11px!important;background:#111a20f2!important;color:#fff!important;font:700 13px system-ui!important;box-shadow:0 3px 12px #0008!important;backdrop-filter:blur(5px)!important;cursor:pointer!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download:hover{background:#15262ef8!important;box-shadow:0 3px 14px var(--apocalipse-accent,#25d9ef)!important}.apocalipse-media-download:disabled{cursor:wait!important;opacity:.85!important}.apocalipse-media-record{color:#fff!important;background:#35151cf2!important}.apocalipse-media-record:hover{background:#4a1922f8!important}";
   document.documentElement.append(style);
   new MutationObserver(scheduleOverlays).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "poster"] });
   scheduleOverlays();
   setInterval(scheduleOverlays, 2000);
+  setInterval(() => {
+    if (!activeOverlays.size) return;
+    chrome.runtime.sendMessage({ type: "APOCALIPSE_SYNC_DESKTOP_APPEARANCE" }).then((result) => {
+      if (!result?.language) return;
+      const changed = result.language !== interfaceLanguage || result.theme !== interfaceTheme;
+      interfaceLanguage = result.language;
+      interfaceTheme = result.theme || "void";
+      if (changed) refreshOverlayLanguages();
+    }).catch(() => {});
+  }, 2000);
   chrome.runtime.onMessage.addListener((message, _sender, reply) => {
     if (message?.type === "APOCALIPSE_UPLOAD_BLOB" && /^blob:/i.test(message.url || "")) {
       (async () => {

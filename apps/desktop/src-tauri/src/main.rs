@@ -122,10 +122,16 @@ struct UserSettings {
     link_password: String,
     #[serde(default = "default_language")]
     language: String,
+    #[serde(default = "default_theme")]
+    theme: String,
 }
 
 fn default_language() -> String {
     "en".to_owned()
+}
+
+fn default_theme() -> String {
+    "void".to_owned()
 }
 
 fn tray_labels(language: &str) -> (&'static str, &'static str) {
@@ -181,6 +187,7 @@ impl Default for UserSettings {
             associations: HashMap::new(),
             link_password: default_link_password(),
             language: default_language(),
+            theme: default_theme(),
         }
     }
 }
@@ -3093,6 +3100,52 @@ fn set_application_language(state: State<'_, AppState>, language: String) -> Res
         "INFO",
         "application.language_changed",
         &format!("language={language}"),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+fn set_application_theme(state: State<'_, AppState>, theme: String) -> Result<(), String> {
+    const THEMES: &[&str] = &[
+        "void",
+        "inferno",
+        "toxic",
+        "synthwave",
+        "royal",
+        "crimson",
+        "arctic",
+        "obsidian",
+        "monochrome",
+        "midnight",
+        "forest",
+        "graphite",
+        "deepsea",
+        "eclipse",
+        "hazard",
+        "cyberstorm",
+        "ultraviolet",
+        "emeraldgold",
+        "scarletice",
+        "coppernavy",
+        "solarizednight",
+        "pearlblue",
+        "whiteaurora",
+        "goldenivory",
+        "crystalrose",
+        "polarmint",
+    ];
+    if !THEMES.contains(&theme.as_str()) {
+        return Err("unsupported_theme".to_owned());
+    }
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.theme = theme.clone();
+    save_settings(&state, &settings)?;
+    drop(settings);
+    diagnostic_log(
+        &state,
+        "INFO",
+        "application.theme_changed",
+        &format!("theme={theme}"),
     );
     Ok(())
 }
@@ -6171,7 +6224,18 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             "bridge.health",
             "extension heartbeat authenticated",
         );
-        bridge_response(&mut stream, "200 OK", origin, "{\"ok\":true}");
+        let (language, theme) = state
+            .settings
+            .lock()
+            .ok()
+            .map(|settings| (settings.language.clone(), settings.theme.clone()))
+            .unwrap_or_else(|| (default_language(), default_theme()));
+        bridge_response(
+            &mut stream,
+            "200 OK",
+            origin,
+            &serde_json::json!({ "ok": true, "language": language, "theme": theme }).to_string(),
+        );
     } else if first.starts_with("GET /v1/activate ") {
         diagnostic_log(
             &state,
@@ -7200,6 +7264,7 @@ fn main() {
             record_diagnostics_ui,
             record_ui_diagnostic,
             set_application_language,
+            set_application_theme,
             get_log_editor,
             set_log_editor,
             open_log_external,

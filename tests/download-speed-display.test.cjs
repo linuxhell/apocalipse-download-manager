@@ -60,4 +60,8 @@ test("five readable light themes are available", () => {
     assert.match(desktopCss, new RegExp(`data-theme="${theme}"`));
   }
   assert.match(desktopCss, /color-scheme:light/);
+  assert.match(desktopCss, /--panel:#fff/);
+  assert.match(desktopCss, /\.logs-panel,\.link-panel>div,\.diagnostics-panel/);
+  assert.match(desktop, /"theme": theme/);
+  assert.match(ui, /invoke\("set_application_theme"/);
 });

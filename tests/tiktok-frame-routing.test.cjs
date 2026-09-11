@@ -19,6 +19,10 @@ test('language changes are broadcast to existing page overlay buttons', () => {
   assert.match(content, /refreshOverlayLanguages\(\)/);
   assert.match(popup, /chrome\.tabs\.sendMessage\(tab\.id/);
   assert.match(popup, /language: locale/);
+  assert.match(content, /APOCALIPSE_SYNC_DESKTOP_APPEARANCE/);
+  assert.match(popup, /normalizeDesktopLanguage/);
+  assert.match(popup, /applyPopupTheme/);
+  assert.match(popup, /desktopTheme/);
 });
 
 test('TikTok uses one deterministic isolated-world chain in every frame', () => {

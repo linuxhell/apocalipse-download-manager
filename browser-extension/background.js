@@ -728,6 +728,20 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       .catch((error) => reply({ connected: false, error: String(error) }));
     return true;
   }
+  if (message?.type === "APOCALIPSE_SYNC_DESKTOP_APPEARANCE") {
+    bridgeRequest("/v1/health")
+      .then(async (result) => {
+        const stored = await chrome.storage.local.get({ language: "en", desktopTheme: "void" });
+        const language = result?.language === "pt-BR" ? "pt_BR" : result?.language === "zh-CN" ? "zh_CN" : result?.language === "en" ? "en" : stored.language;
+        const theme = typeof result?.theme === "string" ? result.theme : stored.desktopTheme;
+        if (stored.language !== language || stored.desktopTheme !== theme) {
+          await chrome.storage.local.set({ language, desktopTheme: theme });
+        }
+        reply({ language, theme });
+      })
+      .catch((error) => reply({ error: String(error) }));
+    return true;
+  }
   if (message?.type === "APOCALIPSE_BLOB_BEGIN") {
     bridgeRequest("/v1/blob/begin", { method: "POST", body: JSON.stringify(message.request) }).then(reply)
       .catch((error) => reply({ error: String(error) }));
