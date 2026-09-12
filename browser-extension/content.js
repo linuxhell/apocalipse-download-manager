@@ -210,6 +210,8 @@
       return markerRect.right >= playerRect.left - 80 && markerRect.left <= playerRect.right + 80
         && markerY >= playerRect.top - 320 && markerY <= playerRect.top + 120;
     };
+    const exactPost = element.closest?.('[role="article"],article');
+    if (!exactPost) return false;
     for (let node = element, depth = 0; node && depth < 24; node = node.parentElement, depth += 1) {
       if (node === document.body || node === document.documentElement) break;
       const videos = [...(node.querySelectorAll?.('video') || [])];
@@ -223,7 +225,7 @@
           return text.length <= 80 && label.test(text) && closeToPlayer(candidate);
         });
       if (textual) return true;
-      if (node.matches?.('[role="article"],article')) break;
+      if (node === exactPost) break;
     }
     return false;
   };

@@ -68,6 +68,7 @@
     }
     return false;
   };
+  const networkRecords = [];
   const records = (roots, followFiberParents = false) => {
     const found = [], queue = [...roots], seen = new WeakSet();
     for (let cursor = 0; cursor < queue.length && cursor < 14000; cursor++) {
@@ -78,7 +79,12 @@
       const id = typeof rawId === 'number' && !Number.isSafeInteger(rawId) ? '' : String(rawId);
       const author = value.author?.uniqueId || value.author?.unique_id || value.authorInfo?.uniqueId;
       const url = /^\d+$/.test(id) && author ? validUrl(`https://www.tiktok.com/@${author}/video/${id}`) : null;
-      if (url) found.push({ id, url, media: value.video || value.videoInfo || null });
+      if (url) {
+        const media = value.video || value.videoInfo || null;
+        found.push({ id, url, media,
+          duration: Number(media?.duration || value.duration || 0),
+          width: Number(media?.width || 0), height: Number(media?.height || 0) });
+      }
       // Parent Fiber links are used only by the caller that requires one unique
       // identity. The normal fallback remains confined to the clicked card.
       for (const [key, child] of Object.entries(value)) {
@@ -87,6 +93,57 @@
       }
     }
     return found;
+  };
+  const rememberNetworkPayload = payload => {
+    for (const record of records([payload])) {
+      const previous = networkRecords.findIndex(item => item.id === record.id);
+      if (previous >= 0) networkRecords.splice(previous, 1);
+      networkRecords.push({ ...record, seenAt: Date.now() });
+    }
+    while (networkRecords.length > 240) networkRecords.shift();
+  };
+  const inspectResponse = response => {
+    try {
+      const type = String(response?.headers?.get?.('content-type') || '');
+      if (!/json/i.test(type)) return;
+      void response.clone().json().then(rememberNetworkPayload).catch(() => {});
+    } catch {}
+  };
+  // TikTok's current feed can render only Blob players and omit every permalink
+  // and React item prop from the DOM. Preserve the identities from the site's
+  // own feed response before that information is discarded by the renderer.
+  if (typeof globalThis.fetch === 'function' && !globalThis.__apocalipseTikTokFetchIdentity) {
+    globalThis.__apocalipseTikTokFetchIdentity = true;
+    const nativeFetch = globalThis.fetch;
+    globalThis.fetch = async function(...args) {
+      const response = await nativeFetch.apply(this, args);
+      inspectResponse(response);
+      return response;
+    };
+  }
+  if (typeof globalThis.XMLHttpRequest === 'function' && !globalThis.__apocalipseTikTokXhrIdentity) {
+    globalThis.__apocalipseTikTokXhrIdentity = true;
+    const nativeOpen = globalThis.XMLHttpRequest.prototype.open;
+    globalThis.XMLHttpRequest.prototype.open = function(...args) {
+      this.addEventListener?.('load', () => {
+        try {
+          const payload = this.responseType === 'json' ? this.response
+            : JSON.parse(String(this.responseText || ''));
+          rememberNetworkPayload(payload);
+        } catch {}
+      }, { once: true });
+      return nativeOpen.apply(this, args);
+    };
+  }
+  const networkCandidateFor = video => {
+    const duration = Number(video?.duration || 0), width = Number(video?.videoWidth || 0), height = Number(video?.videoHeight || 0);
+    const fresh = networkRecords.filter(record => Date.now() - record.seenAt < 10 * 60 * 1000);
+    const sized = fresh.filter(record => record.width > 0 && record.height > 0
+      && ((record.width === width && record.height === height) || (record.width === height && record.height === width)));
+    const matched = (sized.length ? sized : fresh).filter(record => record.duration > 0 && duration > 0
+      && Math.abs(record.duration - duration) < 1.25);
+    const url = unique(matched.map(record => record.url));
+    return { url, inspected: fresh.length, matched: matched.length };
   };
   const frameAncestorUrl = () => {
     if (typeof window === 'undefined') return null;
@@ -161,6 +218,9 @@
       matched = records(globalRoots).filter(record => containsSource(record.media, source));
     }
     if (matched.length) return explain(video, "matched_media_source", unique(matched.map(record => record.url)));
+    const network = networkCandidateFor(video);
+    if (network.url) return explain(video, "matched_feed_response", network.url,
+      { networkRecordCount: network.inspected, networkMatchCount: network.matched });
     if (explicitIds.size === 1) {
       const id = [...explicitIds][0];
       return unique([...anchors, ...scopedRecords.map(record => record.url)].filter(url => url?.endsWith(`/video/${id}`)));
@@ -187,6 +247,7 @@
       parentRecordCount: parentRecords.length, parentDistinctIds: parentIds.length,
       explicitIdCount: explicitIds.size, anchorCount: anchors.filter(Boolean).length,
       sourceIdentityPresent: Boolean(source),
+      networkRecordCount: network.inspected, networkMatchCount: network.matched,
     });
     const sourceIdentity = mediaKey(video.currentSrc || video.src || '') || String(video.currentSrc || video.src || '');
     const previous = pageBindings.get(video);

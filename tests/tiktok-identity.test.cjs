@@ -19,11 +19,13 @@ class Element {
     ]);
   }
 }
-function fixture(url = 'https://www.tiktok.com/') {
+function fixture(url = 'https://www.tiktok.com/', networkPayload = null) {
   const html = new Element('html'), body = new Element('body'); body.parentElement = html;
   const scripts = [];
   const document = { body, documentElement: html, querySelectorAll: selector => selector.startsWith('script') ? scripts : body.querySelectorAll(selector) };
-  const context = vm.createContext({ URL, location: new URL(url), document });
+  const context = vm.createContext({ URL, location: new URL(url), document,
+    ...(networkPayload ? { fetch: async () => ({ headers: { get: () => 'application/json' },
+      clone: () => ({ json: async () => networkPayload }) }) } : {}) });
   vm.runInContext(script, context);
   const card = (id, source, tag = 'article') => {
     const video = new Element('video'); video.currentSrc = video.src = source;
@@ -102,6 +104,28 @@ test('unresolved TikTok identity reports safe structure counts without page cont
   assert.match(script, /parentDistinctIds/);
   assert.match(script, /explicitIdCount/);
   assert.match(script, /sourceIdentityPresent/);
+  assert.match(script, /networkRecordCount/);
+});
+
+test('TikTok preserves item identities from feed responses before Blob rendering discards them', () => {
+  assert.match(script, /rememberNetworkPayload/);
+  assert.match(script, /matched_feed_response/);
+  assert.match(script, /__apocalipseTikTokFetchIdentity/);
+  assert.match(script, /__apocalipseTikTokXhrIdentity/);
+});
+
+test('a unique TikTok feed-response duration and size resolves the current Blob player', async () => {
+  const payload = { itemList: [
+    { id: '777', author: { uniqueId: 'right' }, video: { duration: 9, width: 1080, height: 1920 } },
+    { id: '888', author: { uniqueId: 'other' }, video: { duration: 20, width: 1080, height: 1920 } },
+  ] };
+  const f = fixture('https://www.tiktok.com/', payload);
+  await f.context.fetch('https://www.tiktok.com/api/recommend/item_list/');
+  await Promise.resolve();
+  const current = f.card('111', 'blob:current', 'div');
+  current.root.children = [current.video]; current.video.duration = 9;
+  current.video.videoWidth = 1080; current.video.videoHeight = 1920;
+  assert.equal(f.api.resolveLocal(current.video, false), 'https://www.tiktok.com/@right/video/777');
 });
 test('buttons keep their exact video reference, not the nearest player geometry', () => {
   const f = fixture(); const a = f.card('111', 'blob:a'), b = f.card('222', 'blob:b');
