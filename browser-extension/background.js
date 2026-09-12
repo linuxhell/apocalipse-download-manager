@@ -655,7 +655,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return;
   }
   if (message?.type === "APOCALIPSE_PREVIEW_IDENTITY_BEGIN") {
-    bridgeRequest("/v1/clipboard-suppress", { method: "POST", body: "{}" })
+    bridgeRequest("/v1/clipboard-suppress", { method: "POST", body: JSON.stringify({ traceId: message.traceId || null }) })
       .then(result => reply(result))
       .catch(error => reply({ ok: false, error: String(error) }));
     return true;

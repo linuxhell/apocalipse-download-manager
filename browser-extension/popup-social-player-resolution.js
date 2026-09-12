@@ -103,6 +103,7 @@
   };
   const readClipboardCanonical = async (platform, before, traceId, candidate = '') => {
     let text = '';
+    let source = 'none';
     for (let attempt = 0; attempt < 12; attempt += 1) {
       if (attempt) await new Promise(resolve => setTimeout(resolve, 80));
       try { text = await navigator.clipboard.readText(); } catch {
@@ -112,9 +113,14 @@
       if (text && (!before || text !== before)) break;
     }
     let url = platform === 'facebook' ? await facebookClipboardUrl(text) : platform === 'tiktok' ? await tiktokClipboardUrl(text) : null;
-    if (!url && candidate) url = platform === 'facebook' ? await facebookClipboardUrl(candidate) : platform === 'tiktok' ? await tiktokClipboardUrl(candidate) : null;
+    if (url) source = 'clipboard';
+    if (!url && candidate) {
+      url = platform === 'facebook' ? await facebookClipboardUrl(candidate) : platform === 'tiktok' ? await tiktokClipboardUrl(candidate) : null;
+      if (url) source = 'menu_candidate_redirect';
+    }
     void globalThis.ADM_DIAG?.emit?.('popup.clipboard_identity', { platform, result: url ? 'resolved' : 'rejected',
-      reason: url ? 'extension_clipboard_canonical' : text === before ? 'extension_clipboard_unchanged' : 'extension_clipboard_not_canonical', url: url || '' }, traceId, url ? 'INFO' : 'WARN');
+      reason: url ? `extension_${source}_canonical` : text === before ? 'extension_clipboard_unchanged' : 'extension_clipboard_not_canonical',
+      identitySource: source, clipboardChanged: Boolean(text && text !== before), candidatePresent: Boolean(candidate), url: url || '' }, traceId, url ? 'INFO' : 'WARN');
     return url;
   };
   const dispatchResolvedAction = async (item, action, traceId) => {
@@ -262,7 +268,10 @@
     // Copy Link is an internal identity probe. Tell ADM to ignore the temporary
     // clipboard change so a Preview can never open the save-location dialog.
     if (action === 'preview') {
-      await chrome.runtime.sendMessage({ type: 'APOCALIPSE_PREVIEW_IDENTITY_BEGIN', traceId, actionIntent: 'preview' }).catch(() => null);
+      const guard = await chrome.runtime.sendMessage({ type: 'APOCALIPSE_PREVIEW_IDENTITY_BEGIN', traceId, actionIntent: 'preview' }).catch(() => null);
+      void globalThis.ADM_DIAG?.emit?.('popup.preview_identity_guard', {
+        actionIntent: 'preview', clipboardMonitorSuppressed: Boolean(guard?.ok), durationMs: guard?.ok ? 4000 : 0,
+      }, traceId, guard?.ok ? 'INFO' : 'WARN');
     }
     let clipboardBefore = '';
     try { clipboardBefore = await navigator.clipboard.readText(); } catch {}
