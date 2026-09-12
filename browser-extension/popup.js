@@ -386,6 +386,28 @@ const scanTopFrame = (tabId) => new Promise((resolve) => {
   });
 });
 
+const recoverUpdatedTabScripts = async (tab) => {
+  if (!chrome.scripting?.executeScript || !tab?.id || !/^https?:/i.test(tab.url || "")) return false;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      files: ["diagnostics-core.js", "diagnostics.js", "tiktok-identity.js", "content.js"],
+    });
+    if (/(^|\.)facebook\.com$|(^|\.)tiktok\.com$/i.test(new URL(tab.url).hostname)) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, frameIds: [0] },
+        files: ["social-player-resolution.js", "social-player-resolution-v2.js", "social-home-feed-v3-core.js",
+          "social-home-feed-v3-facebook.js", "social-home-feed-v3-tiktok.js", "social-home-feed-resolution-v3.js"],
+      });
+    }
+    void globalThis.ADM_DIAG?.emit("popup.tab_scripts_recovered", { host: new URL(tab.url).hostname, result: "recovered" });
+    return true;
+  } catch (error) {
+    void globalThis.ADM_DIAG?.emit("popup.tab_scripts_recovery_failed", { errorRef: String(error), result: "failed" }, null, "WARN");
+    return false;
+  }
+};
+
 async function refreshMediaInventory(tab, initial = false) {
   if (mediaRefreshRunning || !tab?.id || !/^https?:/i.test(tab.url || "")) return;
   mediaRefreshRunning = true;
@@ -393,7 +415,10 @@ async function refreshMediaInventory(tab, initial = false) {
     tab = await chrome.tabs.get(tab.id).catch(() => null);
     if (!tab || !/^https?:/i.test(tab.url || "")) return;
     activePageUrl = tab.url;
-    const { scanned, error } = await scanTopFrame(tab.id);
+    let { scanned, error } = await scanTopFrame(tab.id);
+    if (error && await recoverUpdatedTabScripts(tab)) {
+      ({ scanned, error } = await scanTopFrame(tab.id));
+    }
     void globalThis.ADM_DIAG?.emit("popup.frame0_reply", { ok: !error, count: scanned.length,
       errorRef: error?.message || "", liveRefresh: !initial }, null, error ? "WARN" : "INFO");
     const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA", tabId: tab.id }).catch(() => null);

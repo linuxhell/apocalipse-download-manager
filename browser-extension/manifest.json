@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.134",
+  "version": "0.3.135",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -140,5 +140,5 @@
       "48": "icons/alien-48.png"
     }
   },
-  "version_name": "0.3.134 test - Bound thumbnails and renew preview clipboard guard"
+  "version_name": "0.3.135 test - Recover capture after extension update"
 }
