@@ -24,7 +24,7 @@ function node({tag='DIV', r=rect(), parent=null, attrs={}, videos=[], click=null
 test('0.3.151 manifest version is exact', () => {
   const manifest = JSON.parse(src('manifest.json'));
   assert.equal(manifest.version, '0.3.151');
-  assert.match(manifest.version_name, /Read exact TikTok Share control identity/);
+  assert.match(manifest.version_name, /Preview waits for the real TikTok Copy click/);
 });
 
 test('0.3.132 resolved Preview and Download are dispatched explicitly, never synthetic re-click', () => {
