@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.135",
+  "version": "0.3.136",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -140,5 +140,5 @@
       "48": "icons/alien-48.png"
     }
   },
-  "version_name": "0.3.135 test - Recover capture after extension update"
+  "version_name": "0.3.136 test - Hide recording-only Facebook players"
 }

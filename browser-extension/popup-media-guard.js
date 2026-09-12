@@ -58,6 +58,9 @@
     const logical = new Map();
     for (const item of source) {
       if (!item?.url) continue;
+      // Recording-only players stay available through the button placed over
+      // the page, but must not become false Preview/Download rows.
+      if (item.kind === 'video' && item.recordingOnly) continue;
       const social = socialHost(pageUrl) || socialHost(item.url) || socialHost(item.extractorUrl || '') || socialHost(item.playerPageUrl || '');
       // Keep only the exact currently visible unresolved social player. Hidden
       // preload players are implementation details and must not become rows.

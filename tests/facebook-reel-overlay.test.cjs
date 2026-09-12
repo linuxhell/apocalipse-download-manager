@@ -199,6 +199,10 @@ test('YouTube exposes yt-dlp Download without a redundant recording button', () 
   assert.match(script, /if \(element\.tagName === "VIDEO" && canRecord && !usesExtractorOnlyDownload\)/);
 });
 
+test('Facebook srcObject players are marked as recording-only for the popup', () => {
+  assert.match(script, /recordingOnly:\s*Boolean\(element\.srcObject/);
+});
+
 test('recording follows player pauses without writing dead timeline gaps', () => {
   assert.match(script, /recording_paused_with_player/);
   assert.match(script, /recorder\.pause\(\)/);

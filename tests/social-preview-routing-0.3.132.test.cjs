@@ -21,10 +21,10 @@ function node({tag='DIV', r=rect(), parent=null, attrs={}, videos=[], click=null
   };
 }
 
-test('0.3.135 manifest version is exact', () => {
+test('0.3.136 manifest version is exact', () => {
   const manifest = JSON.parse(src('manifest.json'));
-  assert.equal(manifest.version, '0.3.135');
-  assert.match(manifest.version_name, /Recover capture after extension update/);
+  assert.equal(manifest.version, '0.3.136');
+  assert.match(manifest.version_name, /Hide recording-only Facebook players/);
 });
 
 test('0.3.132 resolved Preview and Download are dispatched explicitly, never synthetic re-click', () => {

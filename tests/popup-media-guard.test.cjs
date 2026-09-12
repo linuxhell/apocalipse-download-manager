@@ -81,3 +81,13 @@ test('Promise scan path removes unresolved visual-only alien rows', async () => 
   assert.equal(scan.media.length, 1);
   assert.equal(scan.media[0].url, reel.url);
 });
+
+test('Facebook recording-only sponsored players never become popup rows', () => {
+  const { context } = makeContext({ pageUrl: 'https://www.facebook.com/' });
+  const rows = context.ADM_POPUP_MEDIA_GUARD.cleanScanned([
+    { url: 'https://www.facebook.com/#apocalipse-sponsored', kind: 'video', visualOnly: true,
+      recordingOnly: true, playerBound: true, recommended: true, thumbnail: 'frame' },
+    { url: 'https://www.facebook.com/reel/456', kind: 'video', pageExtractor: true, thumbnail: 'cover' },
+  ], 'https://www.facebook.com/');
+  assert.deepEqual(Array.from(rows, item => item.url), ['https://www.facebook.com/reel/456']);
+});

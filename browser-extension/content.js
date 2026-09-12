@@ -644,6 +644,9 @@
             ...context,
             visualOnly: true,
             pageExtractor: true,
+            // Facebook srcObject players are exported by the on-page recorder.
+            // They have no durable media identity for popup Preview/Download.
+            recordingOnly: Boolean(element.srcObject && /(^|\.)facebook\.com$/i.test(location.hostname)),
           });
         }
       }
