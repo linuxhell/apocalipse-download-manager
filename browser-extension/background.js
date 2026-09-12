@@ -389,7 +389,8 @@ function mediaDownloadFileName(item) {
   const pathExt = url.pathname.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
   const itemExt = String(item.ext || "").toLowerCase();
   const ext = fromMime(item.contentType) || hints.map(([, value]) => fromMime(value)).find(Boolean)
-    || (known.has(pathExt) ? pathExt : null) || (known.has(itemExt) ? itemExt : null);
+    || (known.has(pathExt) ? pathExt : null) || (known.has(itemExt) ? itemExt : null)
+    || (item.kind === "image" ? "jpg" : null);
   if (!ext) return supplied || null;
   const fallback = item.kind === "video" ? "video" : item.kind === "audio" ? "audio" : "download";
   let stem = (supplied && supplied.toLowerCase() !== "download" ? supplied : String(item.title || fallback))
