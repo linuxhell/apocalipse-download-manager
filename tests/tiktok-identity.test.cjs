@@ -119,6 +119,12 @@ test('TikTok Copy handler exposes only a canonical permalink for one explicitly 
   assert.match(script, /marked\.length === 1/);
   assert.match(script, /setAttribute\(copyResultAttribute, permalink\)/);
   assert.match(script, /Reflect\.apply\(nativeWriteText, this, arguments\)/);
+  assert.match(script, /__apocalipseTikTokLegacyCopyIdentity/);
+  assert.match(script, /scanLegacyCopySelection/);
+  assert.match(script, /Document\?\.prototype\?\.execCommand/);
+  assert.match(script, /HTMLInputElement/);
+  assert.match(script, /HTMLTextAreaElement/);
+  assert.match(script, /queueMicrotask\(scanLegacyCopySelection\)/);
 });
 
 test('duration and size alone never identify the current Blob player', async () => {

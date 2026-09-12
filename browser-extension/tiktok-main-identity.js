@@ -25,19 +25,68 @@
   const copyResultAttribute = 'data-apocalipse-tiktok-copy-result';
   const clipboard = globalThis.navigator?.clipboard;
   const nativeWriteText = clipboard?.writeText;
+  const markedCopyPlayer = () => {
+    try {
+      const marked = [...document.querySelectorAll(`video[${copyProbeAttribute}]`)].filter(video => video.isConnected);
+      return marked.length === 1 ? marked[0] : null;
+    } catch { return null; }
+  };
+  const captureMarkedPermalink = value => {
+    const player = markedCopyPlayer();
+    const permalink = player && validUrl(value);
+    if (permalink) player.setAttribute(copyResultAttribute, permalink);
+    return permalink;
+  };
+  const scanLegacyCopySelection = () => {
+    try {
+      if (!markedCopyPlayer()) return null;
+      const active = document.activeElement;
+      if (captureMarkedPermalink(active?.value)) return true;
+      if (captureMarkedPermalink(globalThis.getSelection?.()?.toString?.())) return true;
+      for (const field of document.querySelectorAll('input,textarea')) {
+        if (captureMarkedPermalink(field.value)) return true;
+      }
+    } catch {}
+    return null;
+  };
   if (typeof nativeWriteText === 'function' && !globalThis.__apocalipseTikTokClipboardWriteIdentity) {
     globalThis.__apocalipseTikTokClipboardWriteIdentity = true;
     const wrappedWriteText = function(value) {
       try {
         const permalink = validUrl(value);
-        const marked = [...document.querySelectorAll(`video[${copyProbeAttribute}]`)]
-          .filter(video => video.isConnected);
-        if (permalink && marked.length === 1) marked[0].setAttribute(copyResultAttribute, permalink);
+        if (permalink) captureMarkedPermalink(permalink);
       } catch {}
       return Reflect.apply(nativeWriteText, this, arguments);
     };
     try { Object.defineProperty(clipboard, 'writeText', { configurable: true, writable: true, value: wrappedWriteText }); }
     catch { try { clipboard.writeText = wrappedWriteText; } catch {} }
+  }
+  // TikTok currently falls back to a temporary hidden field plus execCommand
+  // for synthetic Copy clicks. Observe that exact selected permalink before
+  // the browser rejects the untrusted clipboard operation.
+  if (!globalThis.__apocalipseTikTokLegacyCopyIdentity) {
+    globalThis.__apocalipseTikTokLegacyCopyIdentity = true;
+    const nativeExecCommand = globalThis.Document?.prototype?.execCommand;
+    if (typeof nativeExecCommand === 'function') {
+      globalThis.Document.prototype.execCommand = function(command, ...args) {
+        if (String(command).toLowerCase() === 'copy') scanLegacyCopySelection();
+        const result = Reflect.apply(nativeExecCommand, this, [command, ...args]);
+        if (String(command).toLowerCase() === 'copy') scanLegacyCopySelection();
+        return result;
+      };
+    }
+    for (const Constructor of [globalThis.HTMLInputElement, globalThis.HTMLTextAreaElement]) {
+      const nativeSelect = Constructor?.prototype?.select;
+      if (typeof nativeSelect !== 'function') continue;
+      Constructor.prototype.select = function(...args) {
+        captureMarkedPermalink(this.value);
+        return Reflect.apply(nativeSelect, this, args);
+      };
+    }
+    document.addEventListener?.('copy', () => {
+      scanLegacyCopySelection();
+      queueMicrotask(scanLegacyCopySelection);
+    }, true);
   }
   const mediaKey = (value) => {
     try {
