@@ -189,7 +189,7 @@
     return item;
   };
 
-  const resolveItem = async (item, traceId = null, clipboardBefore = '') => {
+  const resolveItem = async (item, traceId = null, clipboardBefore = '', actionIntent = null) => {
     if (!resolvable(item)) return { item: null, failureStage: 'popup_validation', reason: 'item_not_resolvable' };
     let current = item;
     let bindingSource = 'none';
@@ -228,6 +228,7 @@
         duration: current.duration || item.duration || null,
         previewUrl: current.previewUrl || item.previewUrl || null,
         thumbnail: current.thumbnail || item.thumbnail || '',
+        actionIntent,
       },
     }, { frameId: 0 }).catch(() => null);
     if (result?.needsClipboard) {
@@ -275,7 +276,7 @@
     }
     let clipboardBefore = '';
     try { clipboardBefore = await navigator.clipboard.readText(); } catch {}
-    const outcome = await resolveItem(item, traceId, clipboardBefore);
+    const outcome = await resolveItem(item, traceId, clipboardBefore, action);
     const resolved = outcome.item;
     // Renew from the actual clipboard change so slow menus or polling cannot
     // outlive the guard started before asynchronous identity discovery.
@@ -288,7 +289,15 @@
     void globalThis.ADM_DIAG?.emit?.('popup.player_identity_result', { resolved: Boolean(resolved),
       action, actionIntent: action, failureStage: outcome.failureStage || 'none', reason: outcome.reason || 'unknown',
       platform: outcome.platform || 'unknown', url: resolved?.url || '' }, traceId, resolved ? 'INFO' : 'WARN');
-    if (!resolved) { showFailure(); button.disabled = false; syncRows(); return; }
+    if (!resolved) {
+      if (outcome.reason === 'tiktok_trusted_copy_required') {
+        const label = document.querySelector('#bridge-label');
+        if (label) { label.removeAttribute('data-i18n'); label.textContent = locale === 'pt_BR'
+          ? 'Clique no botão azul Copy no TikTok para abrir no VLC.'
+          : 'Click the blue Copy button in TikTok to open in VLC.'; }
+      } else showFailure();
+      button.disabled = false; syncRows(); return;
+    }
     const result = await dispatchResolvedAction(resolved, action, traceId);
     if (!result?.ok) { button.disabled = false; syncRows(); }
   }, true);

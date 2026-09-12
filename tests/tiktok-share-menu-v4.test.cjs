@@ -28,9 +28,18 @@ test('TikTok share V4 reads exact item identity from fresh framework data', () =
   assert.match(source, /data-apocalipse-tiktok-share-main-result/);
 });
 
-test('TikTok share V4 always dismisses the dialog it opened', () => {
+test('TikTok share V4 keeps the dialog open for the real Copy click during Preview', () => {
   assert.match(source, /const dismiss = fresh =>/);
   assert.match(source, /setTimeout\(\(\) => dismiss\(fresh\), 100\)/);
   assert.match(source, /key: 'Escape'/);
   assert.match(source, /topRight\.click/);
+  assert.match(source, /context\.actionIntent === 'preview'/);
+  assert.match(source, /tiktok_trusted_copy_required/);
+  assert.match(source, /event\.isTrusted/);
+  assert.match(source, /event\.composedPath\(\)\.includes\(pending\.copy\)/);
+  assert.match(source, /type: 'APOCALIPSE_PREVIEW_MEDIA'/);
+  assert.match(source, /actionIntent: 'preview'/);
+  assert.doesNotMatch(source.match(/const armTrustedCopy[\s\S]*?T\.menu =/)[0], /APOCALIPSE_DOWNLOAD/);
+  const previewBranch = source.match(/if \(context\.actionIntent === 'preview'\)[\s\S]*?const probeAttribute/)[0];
+  assert.doesNotMatch(previewBranch, /copy\.click\(\)/);
 });

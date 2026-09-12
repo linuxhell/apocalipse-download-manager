@@ -7,6 +7,7 @@
   if (!C || !T || T.menuV4) return;
   const audit = detail => void globalThis.ADM_DIAG?.emit?.('identity.tiktok_share_probe', detail,
     null, detail.resolved ? 'INFO' : 'WARN');
+  let pendingTrustedCopy = null;
 
   const canonical = value => {
     try {
@@ -100,7 +101,65 @@
     }
   };
 
-  T.menu = async video => {
+  const removeHint = () => document.getElementById('apocalipse-tiktok-copy-hint')?.remove();
+  const showHint = () => {
+    removeHint();
+    const hint = document.createElement('div');
+    hint.id = 'apocalipse-tiktok-copy-hint';
+    hint.textContent = 'Clique no botão azul Copy para abrir este vídeo no VLC.';
+    Object.assign(hint.style, { position: 'fixed', zIndex: '2147483647', left: '50%', top: '18px',
+      transform: 'translateX(-50%)', padding: '11px 18px', borderRadius: '9px', color: '#fff',
+      background: '#087dbb', font: '600 15px system-ui, sans-serif', boxShadow: '0 3px 14px #0008' });
+    (document.body || document.documentElement).appendChild(hint);
+  };
+  const armTrustedCopy = async (copy, video, context = {}) => {
+    if (pendingTrustedCopy?.timer) clearTimeout(pendingTrustedCopy.timer);
+    removeHint();
+    const source = String(video.currentSrc || video.src || '');
+    const pending = { copy, video, source, traceId: context.traceId || null,
+      thumbnail: context.thumbnail || '', expiresAt: Date.now() + 15000, timer: null };
+    pending.timer = setTimeout(() => {
+      if (pendingTrustedCopy === pending) pendingTrustedCopy = null;
+      removeHint();
+      audit({ resolved: false, reason: 'trusted_copy_expired', actionIntent: 'preview' });
+    }, 15000);
+    pendingTrustedCopy = pending;
+    showHint();
+    audit({ resolved: false, reason: 'trusted_copy_armed', actionIntent: 'preview', copyCandidates: 1 });
+  };
+  document.addEventListener('click', event => {
+    const pending = pendingTrustedCopy;
+    if (!pending || !event.isTrusted || Date.now() > pending.expiresAt
+      || !event.composedPath().includes(pending.copy)) return;
+    pendingTrustedCopy = null;
+    clearTimeout(pending.timer);
+    removeHint();
+    void (async () => {
+      await chrome.runtime.sendMessage({ type: 'APOCALIPSE_PREVIEW_IDENTITY_BEGIN',
+        traceId: pending.traceId, actionIntent: 'preview' }).catch(() => null);
+      let url = null;
+      for (let attempt = 0; attempt < 30 && !url; attempt += 1) {
+        await C.wait(100);
+        let text = '';
+        try { text = await navigator.clipboard.readText(); } catch {}
+        url = canonical(text);
+      }
+      const currentSource = String(pending.video.currentSrc || pending.video.src || '');
+      if (!url || !pending.video.isConnected || currentSource !== pending.source) {
+        audit({ resolved: false, reason: url ? 'trusted_copy_player_changed' : 'trusted_copy_clipboard_unresolved',
+          actionIntent: 'preview', sourceUnchanged: currentSource === pending.source });
+        return;
+      }
+      try { globalThis.ApocalipseTikTokIdentity?.learn?.(pending.video, url); } catch {}
+      const result = await chrome.runtime.sendMessage({ type: 'APOCALIPSE_PREVIEW_MEDIA', url,
+        pageUrl: location.href, pageExtractor: true, mediaKind: 'video', actionIntent: 'preview',
+        traceId: pending.traceId, thumbnail: pending.thumbnail }).catch(error => ({ ok: false, error: String(error) }));
+      audit({ resolved: Boolean(result?.ok), reason: result?.ok ? 'trusted_copy_preview_dispatched' : 'trusted_copy_preview_failed',
+        actionIntent: 'preview', url });
+    })();
+  }, true);
+
+  T.menu = async (video, context = {}) => {
     const videoRect = C.rect(video);
     if (!videoRect) return { url: null, reason: 'tiktok_player_rect_missing', source: 'menu_copy_link' };
     const controls = C.controls(video,
@@ -164,6 +223,11 @@
         frameworkValuesInspected: found.inspected, copyCandidates: 1, dismissalMethod });
       return { ...base, url: mainWorldIdentity, reason: 'tiktok_share_main_world_control_identity',
         freshItemsSeen: fresh.length, frameworkValuesInspected: found.inspected, copyCandidates: 1, dismissalMethod };
+    }
+    if (context.actionIntent === 'preview') {
+      await armTrustedCopy(copy, video, context);
+      return { ...base, url: null, reason: 'tiktok_trusted_copy_required', freshItemsSeen: fresh.length,
+        frameworkValuesInspected: found.inspected, copyCandidates: 1, trustedCopyRequired: true };
     }
     const probeAttribute = 'data-apocalipse-tiktok-copy-probe';
     const resultAttribute = 'data-apocalipse-tiktok-copy-result';
