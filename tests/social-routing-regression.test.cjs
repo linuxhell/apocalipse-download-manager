@@ -16,9 +16,13 @@ function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.co
   const state = { permalink, network };
   const rect = { left: 20, top: 40, right: 500, bottom: 600, width: 480, height: 560 };
   const anchors = () => state.permalink ? [{ href: state.permalink, getBoundingClientRect: () => rect }] : [];
+  const sponsoredMarker = { innerText: 'Patrocinado',
+    getBoundingClientRect: () => ({ left: 30, right: 140, top: 10, bottom: 30, width: 110, height: 20 }) };
   const post = {
     parentElement: null, innerHTML: '', innerText: sponsored ? 'Synthetic author · Patrocinado' : 'Synthetic author · Reel normal', getBoundingClientRect: () => rect,
-    querySelectorAll: selector => selector.includes('a[href') ? anchors() : [],
+    querySelectorAll: selector => selector.includes('aria-label*="Patrocinado"') && sponsored ? [sponsoredMarker]
+      : selector.includes('span,a') && sponsored ? [sponsoredMarker]
+      : selector.includes('a[href') ? anchors() : [],
     querySelector: selector => selector.includes('aria-label*="Patrocinado"') && sponsored ? { ariaLabel: 'Patrocinado' }
       : selector.includes('a[href') ? anchors()[0] || null : null,
   };

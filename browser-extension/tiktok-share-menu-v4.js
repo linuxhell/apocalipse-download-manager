@@ -5,6 +5,8 @@
   const C = globalThis.ADM_SOCIAL_HOME_FEED_V3_CORE;
   const T = globalThis.ADM_SOCIAL_HOME_FEED_V3_TT;
   if (!C || !T || T.menuV4) return;
+  const audit = detail => void globalThis.ADM_DIAG?.emit?.('identity.tiktok_share_probe', detail,
+    null, detail.resolved ? 'INFO' : 'WARN');
 
   const canonical = value => {
     try {
@@ -59,7 +61,7 @@
   const dismiss = fresh => {
     const close = [...document.querySelectorAll('[data-e2e*="close"],[data-testid*="close"],[aria-label],[title],button')]
       .find(node => C.vis(node) && /^(?:close|fechar|关闭|關閉|cerrar)$/i.test(String(node.getAttribute?.('aria-label') || node.title || node.textContent || '').trim()));
-    if (close) C.clickTarget(close)?.click?.();
+    if (close) { C.clickTarget(close)?.click?.(); return 'labeled_close'; }
     else {
       const candidates = [...new Set((fresh || []).map(C.clickTarget))].filter(C.vis);
       const topRight = candidates.map(node => ({ node, rect: C.rect(node) })).filter(entry => entry.rect)
@@ -69,6 +71,7 @@
         target.dispatchEvent?.(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
         target.dispatchEvent?.(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
       }
+      return topRight ? 'geometry_and_escape' : 'escape_only';
     }
   };
 
@@ -105,23 +108,31 @@
       const dialog = visibleNew.map(node => node.closest?.('[role="dialog"],[data-e2e*="share"],[data-testid*="share"]')).find(Boolean);
       fresh = dialog ? [...dialog.querySelectorAll('*')].filter(C.vis) : visibleNew;
       found = identityFromNodes(fresh);
-      copy = fresh.map(node => ({ node: C.clickTarget(node), text: `${C.ev(node)} ${C.ev(C.clickTarget(node))}` }))
-        .find(entry => copyRe.test(entry.text))?.node;
+      const copies = fresh.map(node => ({ node: C.clickTarget(node), text: `${C.ev(node)} ${C.ev(C.clickTarget(node))}` }))
+        .filter(entry => copyRe.test(entry.text));
+      copy = copies[0]?.node;
     }
     if (found.url) {
-      dismiss(fresh);
+      const dismissalMethod = dismiss(fresh);
+      audit({ resolved: true, reason: 'framework_identity', freshItemsSeen: fresh.length,
+        frameworkValuesInspected: found.inspected, copyCandidates: 0, dismissalMethod });
       return { ...base, url: found.url, reason: 'tiktok_share_dialog_framework_identity',
-        freshItemsSeen: fresh.length, frameworkValuesInspected: found.inspected };
+        freshItemsSeen: fresh.length, frameworkValuesInspected: found.inspected, dismissalMethod };
     }
     if (!copy) {
-      dismiss(fresh);
+      const dismissalMethod = dismiss(fresh);
+      audit({ resolved: false, reason: 'copy_not_found', freshItemsSeen: fresh.length,
+        frameworkValuesInspected: found.inspected, copyCandidates: 0, dismissalMethod });
       return { ...base, url: null, reason: 'tiktok_copy_link_item_not_found', freshItemsSeen: fresh.length,
-        frameworkValuesInspected: found.inspected };
+        frameworkValuesInspected: found.inspected, copyCandidates: 0, dismissalMethod };
     }
     copy.click();
     setTimeout(() => dismiss(fresh), 600);
+    audit({ resolved: false, reason: 'copy_clicked', freshItemsSeen: fresh.length,
+      frameworkValuesInspected: found.inspected, copyCandidates: 1,
+      dismissalMethod: 'delayed_after_copy', clipboardCandidatePresent: Boolean(found.candidate) });
     return { ...base, url: null, reason: 'tiktok_copy_link_clicked', freshItemsSeen: fresh.length,
-      frameworkValuesInspected: found.inspected, clipboardRequested: true,
+      frameworkValuesInspected: found.inspected, copyCandidates: 1, dismissalMethod: 'delayed_after_copy', clipboardRequested: true,
       clipboardCandidate: found.candidate || null };
   };
   T.menuV4 = true;

@@ -3,7 +3,10 @@
 (() => {
   globalThis.ADM_DIAG?.register("tiktok-identity.js");
   const reasons = new WeakMap();
-  const explain = (video, reason, value) => { reasons.set(video, { reason, resolved: Boolean(value) }); return value; };
+  const explain = (video, reason, value, detail = {}) => {
+    reasons.set(video, { reason, resolved: Boolean(value), ...detail });
+    return value;
+  };
   const buttons = new WeakMap(), pageBindings = new WeakMap(), resolvedBindings = new WeakMap();
   const boundVideoProperty = Symbol.for('apocalipse.tiktok.boundVideo');
   const validUrl = (value) => {
@@ -65,7 +68,7 @@
     }
     return false;
   };
-  const records = (roots) => {
+  const records = (roots, followFiberParents = false) => {
     const found = [], queue = [...roots], seen = new WeakSet();
     for (let cursor = 0; cursor < queue.length && cursor < 14000; cursor++) {
       const value = queue[cursor];
@@ -76,9 +79,11 @@
       const author = value.author?.uniqueId || value.author?.unique_id || value.authorInfo?.uniqueId;
       const url = /^\d+$/.test(id) && author ? validUrl(`https://www.tiktok.com/@${author}/video/${id}`) : null;
       if (url) found.push({ id, url, media: value.video || value.videoInfo || null });
-      // Fiber return/sibling links escape the clicked card. Do not traverse them.
+      // Parent Fiber links are used only by the caller that requires one unique
+      // identity. The normal fallback remains confined to the clicked card.
       for (const [key, child] of Object.entries(value)) {
-        if (!['return', 'sibling', '_owner', 'alternate', 'stateNode'].includes(key) && child && typeof child === 'object') queue.push(child);
+        if (!['sibling', '_owner', 'alternate', 'stateNode'].includes(key)
+          && (followFiberParents || key !== 'return') && child && typeof child === 'object') queue.push(child);
       }
     }
     return found;
@@ -144,6 +149,7 @@
       }
     }
     const scopedRecords = records(roots);
+    const parentRecords = records(roots, true);
     const source = mediaKey(video.currentSrc || video.src || '');
     let matched = scopedRecords.filter(record => containsSource(record.media, source));
     if (!matched.length && source) {
@@ -167,13 +173,21 @@
       const scoped = unique(scopedRecords.map(record => record.url));
       if (scopedRecords.length) return explain(video, "scoped_framework_records", scoped);
     }
+    const parentIds = [...new Set(parentRecords.map(record => record.id).filter(Boolean))];
+    const parentScoped = unique(parentRecords.map(record => record.url));
+    if (parentScoped) return explain(video, "unique_parent_framework_record", parentScoped);
     const framed = frameAncestorUrl();
     if (framed) return explain(video, "parent_frame_candidate", framed);
     // Dedicated pages with one player remain supported. Never use the address
     // bar for a multi-player feed whose URL can lag behind scrolling.
     const videos = [...document.querySelectorAll('video')];
     const page = validUrl(location.href);
-    if (!allowPage || !page || videos.length !== 1 || videos[0] !== video) return explain(video, "no_bound_permalink", null);
+    if (!allowPage || !page || videos.length !== 1 || videos[0] !== video) return explain(video, "no_bound_permalink", null, {
+      scopeCount: scopes.length, scopedRecordCount: scopedRecords.length,
+      parentRecordCount: parentRecords.length, parentDistinctIds: parentIds.length,
+      explicitIdCount: explicitIds.size, anchorCount: anchors.filter(Boolean).length,
+      sourceIdentityPresent: Boolean(source),
+    });
     const sourceIdentity = mediaKey(video.currentSrc || video.src || '') || String(video.currentSrc || video.src || '');
     const previous = pageBindings.get(video);
     if (previous?.page === page && previous.source !== sourceIdentity) return null;

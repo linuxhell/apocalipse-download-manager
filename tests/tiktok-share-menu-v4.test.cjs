@@ -10,6 +10,8 @@ test('TikTok share V4 reads exact item identity from fresh framework data', () =
   assert.match(source, /value\.video \|\| value\.videoInfo/);
   assert.match(source, /value\.author\?\.uniqueId/);
   assert.match(source, /frameworkValuesInspected/);
+  assert.match(source, /identity\.tiktok_share_probe/);
+  assert.match(source, /clipboardCandidatePresent/);
   assert.match(source, /key !== 'stateNode'/);
   assert.match(source, /dialog\.querySelectorAll\('\*'\)/);
   assert.match(source, /C\.ev\(node\).*C\.ev\(C\.clickTarget\(node\)\)/);

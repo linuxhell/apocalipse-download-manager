@@ -203,14 +203,26 @@
       'a[href*="ad_id="]', 'a[href*="/ads/"]', 'a[href*="ads/about"]',
     ].join(',');
     const label = /(?:^|[\s·•|])(?:Sponsored|Patrocinado|Patrocinada|Publicidad|Gesponsert|Sponsorisé|Sponsorizzato|赞助内容|贊助內容)(?:$|[\s·•|])/iu;
+    const closeToPlayer = marker => {
+      const playerRect = element?.getBoundingClientRect?.(), markerRect = marker?.getBoundingClientRect?.();
+      if (!playerRect || !markerRect) return false;
+      const markerY = markerRect.top + markerRect.height / 2;
+      return markerRect.right >= playerRect.left - 80 && markerRect.left <= playerRect.right + 80
+        && markerY >= playerRect.top - 320 && markerY <= playerRect.top + 120;
+    };
     for (let node = element, depth = 0; node && depth < 24; node = node.parentElement, depth += 1) {
       if (node === document.body || node === document.documentElement) break;
       const videos = [...(node.querySelectorAll?.('video') || [])];
       if (String(element?.tagName || '').toUpperCase() === 'VIDEO'
         ? videos.some(video => video !== element) : videos.length > 1) break;
-      if (node.querySelector?.(markerSelector)) return true;
-      const text = String(node.innerText || node.textContent || "").replace(/\s+/g, " ").trim();
-      if (label.test(text)) return true;
+      const explicit = [...(node.querySelectorAll?.(markerSelector) || [])].find(closeToPlayer);
+      if (explicit) return true;
+      const textual = [...(node.querySelectorAll?.('span,a,[role="button"],[aria-label]') || [])]
+        .find(candidate => {
+          const text = String(candidate.innerText || candidate.textContent || candidate.getAttribute?.('aria-label') || '').replace(/\s+/g, ' ').trim();
+          return text.length <= 80 && label.test(text) && closeToPlayer(candidate);
+        });
+      if (textual) return true;
       if (node.matches?.('[role="article"],article')) break;
     }
     return false;

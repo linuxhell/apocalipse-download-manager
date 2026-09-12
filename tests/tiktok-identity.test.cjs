@@ -88,6 +88,21 @@ test('MAIN-world framework props bound to the card are resolved without climbing
     return: { id: '111', author: { uniqueId: 'wrong' } } };
   assert.equal(f.api.resolveLocal(a.video, false), 'https://www.tiktok.com/@current/video/222');
 });
+
+test('a unique parent Fiber identity is accepted when the current TikTok layout has no card marker', () => {
+  const f = fixture();
+  const video = new Element('video'); video.currentSrc = video.src = 'blob:current';
+  const wrapper = new Element('div', {}, [video]); wrapper.parentElement = f.body; f.body.children.push(wrapper);
+  wrapper.__reactFiber$test = { return: { id: '333', author: { uniqueId: 'parent' }, video: {} } };
+  assert.equal(f.api.resolveLocal(video, false), 'https://www.tiktok.com/@parent/video/333');
+});
+
+test('unresolved TikTok identity reports safe structure counts without page content', () => {
+  assert.match(script, /parentRecordCount/);
+  assert.match(script, /parentDistinctIds/);
+  assert.match(script, /explicitIdCount/);
+  assert.match(script, /sourceIdentityPresent/);
+});
 test('buttons keep their exact video reference, not the nearest player geometry', () => {
   const f = fixture(); const a = f.card('111', 'blob:a'), b = f.card('222', 'blob:b');
   const button = {}; f.api.bind(button, b.video);
