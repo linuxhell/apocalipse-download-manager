@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.140",
+  "version": "0.3.141",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -141,5 +141,5 @@
       "48": "icons/alien-48.png"
     }
   },
-  "version_name": "0.3.140 test - Match nested Facebook ads and TikTok Copy control"
+  "version_name": "0.3.141 test - Restore late video Download and recording tracks"
 }

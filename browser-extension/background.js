@@ -229,13 +229,17 @@ if (chrome.webRequest?.onResponseStarted) {
     const disposition = responseHeader(details.responseHeaders, "content-disposition").toLowerCase();
     const looksLikeFile = disposition.includes("attachment")
       || (!contentType.includes("text/html") && /(?:application\/(?:octet-stream|x-rar|zip)|binary)/i.test(contentType));
-    const isSocialTabMedia = /(?:^|\.)(?:tiktok\.com|tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com|facebook\.com|fbcdn\.net|fbsbx\.com|instagram\.com|cdninstagram\.com)$/i
-      .test((() => { try { return new URL(details.url).hostname; } catch { return ""; } })())
-      && (/^(?:video|audio)\//i.test(contentType)
-        || /(?:\/video\/tos\/|\/aweme\/v1\/play\/|mime_type=video|\.mp4(?:$|[?]))/i.test(details.url));
-    void globalThis.ADM_DIAG_WORKER?.network(details, isSocialTabMedia,
-      isSocialTabMedia ? "accepted_by_capture_filter" : /^(?:video|audio)\//i.test(contentType) ? "host_not_in_capture_filter" : "not_classified_as_media");
-    if (isSocialTabMedia) {
+    const requestHost = (() => { try { return new URL(details.url).hostname.toLowerCase(); } catch { return ""; } })();
+    const initiatorHost = (() => { try { return new URL(details.initiator || "").hostname.toLowerCase(); } catch { return ""; } })();
+    const siteKey = host => host.split('.').slice(-2).join('.');
+    const socialHost = /(?:^|\.)(?:tiktok\.com|tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com|facebook\.com|fbcdn\.net|fbsbx\.com|instagram\.com|cdninstagram\.com)$/i.test(requestHost);
+    const sameSiteHost = Boolean(requestHost && initiatorHost && siteKey(requestHost) === siteKey(initiatorHost));
+    const mediaResponse = /^(?:video|audio)\//i.test(contentType)
+      || /(?:\/video\/tos\/|\/aweme\/v1\/play\/|mime_type=video|\.mp4(?:$|[?]))/i.test(details.url);
+    const capturedMedia = mediaResponse && (socialHost || sameSiteHost);
+    void globalThis.ADM_DIAG_WORKER?.network(details, capturedMedia,
+      capturedMedia ? "accepted_by_capture_filter" : mediaResponse ? "host_not_in_capture_filter" : "not_classified_as_media");
+    if (capturedMedia) {
       recentMediaResponses.push({
         tabId: details.tabId,
         frameId: details.frameId,

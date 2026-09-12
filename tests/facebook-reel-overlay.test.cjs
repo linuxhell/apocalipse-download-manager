@@ -232,6 +232,13 @@ test('recording keeps the source player alive and stops at its real end', () => 
   assert.match(script, /if \(playbackWatch\) clearInterval\(playbackWatch\)/);
 });
 
+test('late direct video sources reveal Download and recording waits for real tracks', () => {
+  assert.match(script, /const downloadReady = \(\) =>/);
+  assert.match(script, /const liveCanDownload = canDownload \|\| downloadReady\(\)/);
+  assert.match(script, /await element\.play\(\);\s*const stream = capture\(\)/);
+  assert.match(script, /capture_stream_has_no_tracks/);
+});
+
 test('recording seals each segment and resumes only after real media progress', () => {
   assert.match(script, /recorder\.requestData\?\.\(\)/);
   assert.match(script, /pausedAtMediaTime = Number\(element\.currentTime\)/);

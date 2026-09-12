@@ -985,6 +985,8 @@
       const isTikTokVideo = Boolean(tikTokUrl);
       const url = isFacebookVideo ? facebookUrlFor(element) || location.href : tikTokUrl || downloadUrlFor(element);
       const liveMediaUrl = element.currentSrc || element.src || "";
+      const downloadReady = () => Boolean((downloadUrlFor(element) && /^https?:/.test(downloadUrlFor(element)))
+        || /^blob:/i.test(String(element.currentSrc || element.src || '')));
       const canDownload = Boolean((url && /^https?:/.test(url)) || /^blob:/i.test(liveMediaUrl));
       const canRecord = element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
         && Boolean(element.captureStream || element.webkitCaptureStream);
@@ -1227,7 +1229,12 @@
             if (Number.isFinite(element.duration)) element.currentTime = 0;
             previousLoop = element.loop;
             element.loop = false;
+            await element.play();
             const stream = capture();
+            for (let attempt = 0; attempt < 20 && !stream.getTracks().length; attempt += 1) {
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            if (!stream.getTracks().length) throw new Error("capture_stream_has_no_tracks");
             const mimeType = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
               .find((type) => MediaRecorder.isTypeSupported(type)) || "";
             const safeTitle = (document.title || "recording").replace(/[<>:\"/\\|?*]+/g, "_").slice(0, 120);
@@ -1303,7 +1310,6 @@
               if (recorder && recorder.state !== "inactive") recorder.stop();
             }, { once: true });
             recorder.start(1000);
-            await element.play();
             startedAt = Date.now();
             recordPhase = "recording";
             refreshRecordLabels();
@@ -1350,9 +1356,10 @@
         const top = rect.top + scrollY + 10;
         button.style.left = `${left}px`;
         button.style.top = `${Math.max(6, top)}px`;
-        button.hidden = !canDownload || rect.width < 100 || rect.height < 55;
+        const liveCanDownload = canDownload || downloadReady();
+        button.hidden = !liveCanDownload || rect.width < 100 || rect.height < 55;
         if (recordButton) {
-          const recordLeft = canDownload && !button.hidden
+          const recordLeft = liveCanDownload && !button.hidden
             ? left + button.offsetWidth + 8
             : left;
           recordButton.style.left = `${recordLeft}px`;
