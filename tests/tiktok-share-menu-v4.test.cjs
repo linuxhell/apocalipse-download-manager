@@ -18,6 +18,11 @@ test('TikTok share V4 reads exact item identity from fresh framework data', () =
   assert.match(source, /tiktok_copy_handler_identity/);
   assert.match(source, /data-apocalipse-tiktok-copy-probe/);
   assert.match(source, /data-apocalipse-tiktok-copy-result/);
+  assert.match(source, /tiktok_share_dialog_dom_identity/);
+  assert.match(source, /start\?\.value/);
+  assert.match(source, /data-clipboard-text/);
+  assert.match(source, /input,textarea/);
+  assert.match(source, /markup\.length <= 250000/);
 });
 
 test('TikTok share V4 always dismisses the dialog it opened', () => {

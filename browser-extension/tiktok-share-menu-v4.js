@@ -26,9 +26,34 @@
     }
     return null;
   };
+  const permalinkIn = value => {
+    const text = String(value || '').replaceAll('\\/', '/');
+    const whole = canonical(text);
+    if (whole) return whole;
+    for (const raw of text.match(/https?:\/\/(?:www\.)?tiktok\.com\/@[A-Za-z0-9._-]+\/video\/\d+(?:[/?#][^\s<>"']*)?/ig) || []) {
+      const url = canonical(raw);
+      if (url) return url;
+    }
+    return null;
+  };
   const identityFromNodes = nodes => {
     const roots = [];
     for (const start of nodes) {
+      // The current share panel can keep its exact URL in a hidden input or a
+      // data attribute instead of React props. Inspect only URL-bearing values;
+      // never export labels, captions, messages or arbitrary field contents.
+      for (const value of [start?.href, start?.value,
+        start?.getAttribute?.('href'), start?.getAttribute?.('value'),
+        start?.getAttribute?.('data-url'), start?.getAttribute?.('data-share-url'),
+        start?.getAttribute?.('data-clipboard-text')]) {
+        const url = permalinkIn(value);
+        if (url) return { url, candidate: null, inspected: 0, domIdentity: true };
+      }
+      const markup = String(start?.outerHTML || '');
+      if (markup.length <= 250000) {
+        const url = permalinkIn(markup);
+        if (url) return { url, candidate: null, inspected: 0, domIdentity: true };
+      }
       for (let node = start, depth = 0; node && depth < 10; node = node.parentElement, depth += 1) {
         for (const key of Object.getOwnPropertyNames(node)) {
           if (/^__(?:reactProps|reactFiber|vue)/i.test(key)) roots.push(node[key]);
@@ -40,8 +65,8 @@
     for (let cursor = 0; cursor < queue.length && cursor < 20000; cursor += 1) {
       const value = queue[cursor];
       if (typeof value === 'string') {
-        const direct = canonical(value) || value.match(/https?:\/\/(?:www\.)?tiktok\.com\/@[A-Za-z0-9._-]+\/video\/\d+/i)?.[0];
-        if (direct && canonical(direct)) return { url: canonical(direct), candidate, inspected: cursor + 1 };
+        const direct = permalinkIn(value);
+        if (direct) return { url: direct, candidate, inspected: cursor + 1 };
         candidate ||= shortLink(value);
         continue;
       }
@@ -97,7 +122,7 @@
       geometryMatchedControls: band.length, extendedScopeNodes: controls.s.nodes.length };
     if (!share) return { ...base, url: null, reason: 'tiktok_share_button_not_found' };
 
-    const selector = '[data-e2e],[data-testid],[aria-label],[title],button,[role="button"],[role="menuitem"],a';
+    const selector = '[data-e2e],[data-testid],[aria-label],[title],button,[role="button"],[role="menuitem"],a,input,textarea';
     const before = new Set([...document.querySelectorAll(selector)].filter(C.vis));
     share.click();
     let fresh = [], copy = null, found = { url: null, candidate: null, inspected: 0 };
@@ -114,9 +139,9 @@
     }
     if (found.url) {
       const dismissalMethod = dismiss(fresh);
-      audit({ resolved: true, reason: 'framework_identity', freshItemsSeen: fresh.length,
+      audit({ resolved: true, reason: found.domIdentity ? 'dialog_dom_identity' : 'framework_identity', freshItemsSeen: fresh.length,
         frameworkValuesInspected: found.inspected, copyCandidates: 0, dismissalMethod });
-      return { ...base, url: found.url, reason: 'tiktok_share_dialog_framework_identity',
+      return { ...base, url: found.url, reason: found.domIdentity ? 'tiktok_share_dialog_dom_identity' : 'tiktok_share_dialog_framework_identity',
         freshItemsSeen: fresh.length, frameworkValuesInspected: found.inspected, dismissalMethod };
     }
     if (!copy) {
