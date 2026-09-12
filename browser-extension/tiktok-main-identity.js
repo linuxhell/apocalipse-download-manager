@@ -25,11 +25,22 @@
       return `${url.hostname}${url.pathname}`;
     } catch { return null; }
   };
+  const videoVisible = (video) => {
+    if (!video?.isConnected || video.hidden || video.getAttribute?.('aria-hidden') === 'true') return false;
+    let rect; try { rect = video.getBoundingClientRect?.(); } catch { return false; }
+    if (!rect || rect.width < 40 || rect.height < 20 || rect.bottom <= 0 || rect.right <= 0
+      || rect.top >= (globalThis.innerHeight || 0) || rect.left >= (globalThis.innerWidth || 0)) return false;
+    let style; try { style = globalThis.getComputedStyle?.(video); } catch {}
+    return style?.display !== 'none' && style?.visibility !== 'hidden' && Number.parseFloat(style?.opacity ?? '1') > 0.01;
+  };
   const scopesFor = (video) => {
     const scopes = [];
     for (let node = video, depth = 0; node && depth < 18; node = node.parentElement, depth++) {
       if (node === document.body || node === document.documentElement || /^(BODY|HTML)$/.test(node.tagName || '')) break;
-      if ([...(node.querySelectorAll?.('video') || [])].some(other => other !== video)) break;
+      // TikTok keeps the next item as a hidden/preloaded <video>. Only another
+      // actually visible player is a boundary; hidden preload players must not
+      // prevent us from reaching the current card/framework identity.
+      if ([...(node.querySelectorAll?.('video') || [])].some(other => other !== video && videoVisible(other))) break;
       scopes.push(node);
       if (node !== video && node.matches?.('article,[data-e2e="recommend-list-item-container"],[data-e2e="feed-video"]')) break;
     }
@@ -90,7 +101,7 @@
         if (node === parentDocument.body || node === parentDocument.documentElement) break;
         const siblingFrames = [...(node.querySelectorAll?.('iframe') || [])]
           .filter(other => other !== frame && other.isConnected);
-        const siblingVideos = [...(node.querySelectorAll?.('video') || [])].filter(other => other.isConnected);
+        const siblingVideos = [...(node.querySelectorAll?.('video') || [])].filter(other => other.isConnected && videoVisible(other));
         if (depth > 0 && (siblingFrames.length || siblingVideos.length)) break;
         for (const name of ['data-video-id', 'data-item-id', 'data-aweme-id']) {
           const id = node.getAttribute?.(name);

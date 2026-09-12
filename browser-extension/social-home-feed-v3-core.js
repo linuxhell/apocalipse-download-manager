@@ -1,4 +1,4 @@
-// 0.3.131 shared Home-feed identity helpers.
+// 0.3.132 shared Home-feed identity helpers.
 (() => {
   if (globalThis.ADM_SOCIAL_HOME_FEED_V3_CORE) return;
   const rect=e=>{try{return e?.getBoundingClientRect?.()||null}catch{return null}};
@@ -12,5 +12,5 @@
   const controls=(video,selector,strong='')=>{const s=scope(video),raw=[];for(const n of s.nodes){if(n.matches?.(selector))raw.push(n);for(const e of n.querySelectorAll?.(selector)||[])raw.push(e)}if(strong)for(const e of document.querySelectorAll?.(strong)||[])raw.push(e);const map=new Map;for(const e of raw){const t=clickTarget(e);if(!t)continue;const text=`${ev(e)} ${ev(t)}`.trim(),p=map.get(t);p?p.text+=` ${text}`:map.set(t,{target:t,raw:e,text})}return{s,items:[...map.values()]}};
   const wait=ms=>new Promise(r=>setTimeout(r,ms));
   const stable=async(video,fn)=>{const page=location.href,src=String(video.currentSrc||video.src||''),r=rect(video);let changed=false,mark=()=>{changed=true};for(const e of['emptied','loadstart','loadedmetadata'])video.addEventListener?.(e,mark,true);try{const value=await fn(),delta=dist(r,rect(video)),reason=changed?'player_lifecycle_changed':!video.isConnected?'player_disconnected':location.href!==page?'page_changed_during_lookup':String(video.currentSrc||video.src||'')!==src?'player_source_changed':delta>12?'player_geometry_changed':!videoVis(video)?'player_became_invisible':'player_stable';return{value,ok:reason==='player_stable',reason,delta}}finally{for(const e of['emptied','loadstart','loadedmetadata'])video.removeEventListener?.(e,mark,true)}};
-  globalThis.ADM_SOCIAL_HOME_FEED_V3_CORE={rect,vis,videoVis,center,ev,scope,controls,wait,stable};
+  globalThis.ADM_SOCIAL_HOME_FEED_V3_CORE={rect,vis,videoVis,center,ev,clickTarget,scope,controls,wait,stable};
 })();
