@@ -192,19 +192,28 @@
   const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
   const isSponsoredFacebookPlayer = (element) => {
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return false;
-    const post = element?.closest?.('[role="article"],article') || element?.parentElement;
-    if (!post) return false;
     // A MediaStream/srcObject is used by both ads and ordinary Reels. Only an
-    // explicit ad marker in this exact card is safe grounds for hiding it.
-    const marker = post.querySelector?.([
+    // explicit ad marker in this exact card is safe grounds for hiding it. Some
+    // Facebook ad layouts do not expose role=article, so walk upward only while
+    // the container still belongs to this one player/card.
+    const markerSelector = [
       '[aria-label*="Sponsored" i]', '[aria-label*="Patrocinado" i]',
       '[aria-label*="Publicidad" i]', '[aria-label*="Gesponsert" i]',
       '[data-ad-preview]', '[data-testid*="sponsored" i]',
       'a[href*="ad_id="]', 'a[href*="/ads/"]', 'a[href*="ads/about"]',
-    ].join(','));
-    if (marker) return true;
-    const text = String(post.innerText || post.textContent || "").replace(/\s+/g, " ").trim();
-    return /(?:^|[\s·•|])(?:Sponsored|Patrocinado|Patrocinada|Publicidad|Gesponsert|Sponsorisé|Sponsorizzato|赞助内容|贊助內容)(?:$|[\s·•|])/iu.test(text);
+    ].join(',');
+    const label = /(?:^|[\s·•|])(?:Sponsored|Patrocinado|Patrocinada|Publicidad|Gesponsert|Sponsorisé|Sponsorizzato|赞助内容|贊助內容)(?:$|[\s·•|])/iu;
+    for (let node = element, depth = 0; node && depth < 24; node = node.parentElement, depth += 1) {
+      if (node === document.body || node === document.documentElement) break;
+      const videos = [...(node.querySelectorAll?.('video') || [])];
+      if (String(element?.tagName || '').toUpperCase() === 'VIDEO'
+        ? videos.some(video => video !== element) : videos.length > 1) break;
+      if (node.querySelector?.(markerSelector)) return true;
+      const text = String(node.innerText || node.textContent || "").replace(/\s+/g, " ").trim();
+      if (label.test(text)) return true;
+      if (node.matches?.('[role="article"],article')) break;
+    }
+    return false;
   };
   // Scoped to this document: closing the popup does not destroy the catalog.
   // A new document (including another site) creates a fresh isolated catalog.

@@ -206,7 +206,8 @@ test('Facebook srcObject alone never classifies an ordinary Reel as recording-on
 
 test('Facebook sponsored-player detection is scoped to the exact post and explicit ad markers', () => {
   assert.match(script, /const isSponsoredFacebookPlayer = \(element\) =>/);
-  assert.match(script, /element\?\.closest\?\.\('\[role="article"\],article'\)/);
+  assert.match(script, /depth < 24/);
+  assert.match(script, /videos\.some\(video => video !== element\)/);
   assert.match(script, /data-ad-preview/);
   assert.match(script, /Patrocinado/);
   assert.match(script, /if \(isSponsoredFacebookPlayer\(element\)\) return;/);

@@ -35,7 +35,7 @@
     }
     const queue = [...roots], seen = new WeakSet();
     let candidate = null;
-    for (let cursor = 0; cursor < queue.length && cursor < 8000; cursor += 1) {
+    for (let cursor = 0; cursor < queue.length && cursor < 20000; cursor += 1) {
       const value = queue[cursor];
       if (typeof value === 'string') {
         const direct = canonical(value) || value.match(/https?:\/\/(?:www\.)?tiktok\.com\/@[A-Za-z0-9._-]+\/video\/\d+/i)?.[0];
@@ -52,17 +52,24 @@
         const url = canonical(`https://www.tiktok.com/@${author}/video/${id}`);
         if (url) return { url, candidate, inspected: cursor + 1 };
       }
-      for (const [key, child] of Object.entries(value)) {
-        if (!['return', 'sibling', '_owner', 'alternate', 'stateNode'].includes(key)) queue.push(child);
-      }
+      for (const [key, child] of Object.entries(value)) if (key !== 'stateNode') queue.push(child);
     }
-    return { url: null, candidate, inspected: Math.min(queue.length, 8000) };
+    return { url: null, candidate, inspected: Math.min(queue.length, 20000) };
   };
-  const dismiss = () => {
+  const dismiss = fresh => {
     const close = [...document.querySelectorAll('[data-e2e*="close"],[data-testid*="close"],[aria-label],[title],button')]
       .find(node => C.vis(node) && /^(?:close|fechar|关闭|關閉|cerrar)$/i.test(String(node.getAttribute?.('aria-label') || node.title || node.textContent || '').trim()));
     if (close) C.clickTarget(close)?.click?.();
-    else if (typeof KeyboardEvent === 'function') document.dispatchEvent?.(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+    else {
+      const candidates = [...new Set((fresh || []).map(C.clickTarget))].filter(C.vis);
+      const topRight = candidates.map(node => ({ node, rect: C.rect(node) })).filter(entry => entry.rect)
+        .sort((a, b) => (a.rect.top - b.rect.top) || (b.rect.right - a.rect.right))[0]?.node;
+      if (topRight) topRight.click?.();
+      if (typeof KeyboardEvent === 'function') for (const target of [document, globalThis]) {
+        target.dispatchEvent?.(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+        target.dispatchEvent?.(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+      }
+    }
   };
 
   T.menu = async video => {
@@ -94,22 +101,25 @@
     const copyRe = /(?:copy.?link|copiar link|\bcopy\b|copiar|复制|複製|복사|コピー)/i;
     for (let attempt = 0; attempt < 24 && !copy && !found.url; attempt += 1) {
       await C.wait(100);
-      fresh = [...document.querySelectorAll(selector)].filter(node => C.vis(node) && !before.has(node));
+      const visibleNew = [...document.querySelectorAll(selector)].filter(node => C.vis(node) && !before.has(node));
+      const dialog = visibleNew.map(node => node.closest?.('[role="dialog"],[data-e2e*="share"],[data-testid*="share"]')).find(Boolean);
+      fresh = dialog ? [...dialog.querySelectorAll('*')].filter(C.vis) : visibleNew;
       found = identityFromNodes(fresh);
-      copy = fresh.map(C.clickTarget).find(node => copyRe.test(C.ev(node)));
+      copy = fresh.map(node => ({ node: C.clickTarget(node), text: `${C.ev(node)} ${C.ev(C.clickTarget(node))}` }))
+        .find(entry => copyRe.test(entry.text))?.node;
     }
     if (found.url) {
-      dismiss();
+      dismiss(fresh);
       return { ...base, url: found.url, reason: 'tiktok_share_dialog_framework_identity',
         freshItemsSeen: fresh.length, frameworkValuesInspected: found.inspected };
     }
     if (!copy) {
-      dismiss();
+      dismiss(fresh);
       return { ...base, url: null, reason: 'tiktok_copy_link_item_not_found', freshItemsSeen: fresh.length,
         frameworkValuesInspected: found.inspected };
     }
     copy.click();
-    setTimeout(dismiss, 600);
+    setTimeout(() => dismiss(fresh), 600);
     return { ...base, url: null, reason: 'tiktok_copy_link_clicked', freshItemsSeen: fresh.length,
       frameworkValuesInspected: found.inspected, clipboardRequested: true,
       clipboardCandidate: found.candidate || null };

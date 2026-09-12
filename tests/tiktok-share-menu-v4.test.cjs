@@ -10,10 +10,14 @@ test('TikTok share V4 reads exact item identity from fresh framework data', () =
   assert.match(source, /value\.video \|\| value\.videoInfo/);
   assert.match(source, /value\.author\?\.uniqueId/);
   assert.match(source, /frameworkValuesInspected/);
+  assert.match(source, /key !== 'stateNode'/);
+  assert.match(source, /dialog\.querySelectorAll\('\*'\)/);
+  assert.match(source, /C\.ev\(node\).*C\.ev\(C\.clickTarget\(node\)\)/);
 });
 
 test('TikTok share V4 always dismisses the dialog it opened', () => {
-  assert.match(source, /const dismiss = \(\) =>/);
-  assert.match(source, /setTimeout\(dismiss, 600\)/);
+  assert.match(source, /const dismiss = fresh =>/);
+  assert.match(source, /setTimeout\(\(\) => dismiss\(fresh\), 600\)/);
   assert.match(source, /key: 'Escape'/);
+  assert.match(source, /topRight\.click/);
 });
