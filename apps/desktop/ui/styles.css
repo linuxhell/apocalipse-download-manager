@@ -654,7 +654,7 @@ dialog input:focus {
 .destination-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 34px;
-  border-bottom: 1px solid #15232c;
+  border-bottom: 1px solid var(--line);
 }
 .destination-row:last-child { border-bottom: 0; }
 .destination-row:has(.destination-select:only-child) { grid-template-columns: 1fr; }
@@ -662,7 +662,7 @@ dialog input:focus {
   min-width: 0;
   border: 0;
   background: transparent;
-  color: #cce0e7;
+  color: var(--text);
   padding: 9px 11px;
   text-align: left;
   cursor: pointer;
@@ -673,11 +673,11 @@ dialog input:focus {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.destination-select small { color: var(--cyan); }
-.destination-row.unavailable .destination-select span { color: #667983; }
+.destination-select small { color: var(--accent); }
+.destination-row.unavailable .destination-select span { color: var(--muted); }
 .destination-remove {
   border: 0;
-  border-left: 1px solid #15232c;
+  border-left: 1px solid var(--line);
   background: transparent;
   color: #f28b8b;
   cursor: pointer;
@@ -775,7 +775,7 @@ footer .bridge-connected i {
 .compact-dialog { width:min(440px,calc(100vw - 32px)); }
 .download-row {
   display: grid;
-  grid-template-columns: 22px 42px minmax(0, 1fr) auto;
+  grid-template-columns: 22px 34px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
   padding: 13px 8px;
@@ -790,14 +790,14 @@ footer .bridge-connected i {
   border-bottom: 0;
 }
 .download-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   background: #12313b;
   color: var(--cyan);
   display: grid;
   place-items: center;
-  font-size: 20px;
+  font-size: 16px;
 }
 .download-icon.has-thumbnail {
   width: 72px;
@@ -827,12 +827,13 @@ footer .bridge-connected i {
 .resume-capability {
   display: block;
   margin-top: 7px;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 600;
   line-height: 1.35;
   color: var(--text);
 }
-.resume-capability[data-supported="true"] { color: #55dca3; }
-.resume-capability[data-supported="false"] { color: #ff8b8b; }
+.resume-capability[data-supported="true"] { color: color-mix(in srgb, #35b982 62%, var(--muted)); }
+.resume-capability[data-supported="false"] { color: color-mix(in srgb, #e05f68 62%, var(--muted)); }
 .task-progress {
   height: 4px;
   margin-top: 8px;
@@ -850,6 +851,8 @@ footer .bridge-connected i {
 }
 .download-info strong {
   font-size: 15px;
+  font-weight: 650;
+  color: color-mix(in srgb, var(--text) 82%, var(--muted));
 }
 .download-info small {
   margin-top: 6px;
@@ -858,9 +861,9 @@ footer .bridge-connected i {
   line-height: 1.35;
 }
 .download-state {
-  color: #6eeeff;
-  background: #102b34;
-  border: 1px solid #1a4855;
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
   padding: 5px 9px;
   border-radius: 99px;
   font-size: 10px;
@@ -876,19 +879,20 @@ footer .bridge-connected i {
   gap: 5px;
 }
 .task-action {
-  border: 0;
+  border: 1px solid var(--line);
   border-radius: 6px;
   min-height: 30px;
   padding: 6px 11px;
-  background: #162832;
-  color: #9ac8d2;
+  background: var(--surface-2);
+  color: color-mix(in srgb, var(--text) 78%, var(--muted));
   font-size: 11px;
   font-weight: 650;
   cursor: pointer;
 }
 .task-action:hover {
-  color: #e5fbff;
-  background: #1d3c48;
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
 }
 .history-search { min-width: 150px; max-width: 240px; flex: 1 1 180px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--input); color: var(--text); }
 .advanced-download { margin: 12px 0; padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
@@ -935,7 +939,7 @@ footer .bridge-connected i {
 
 /* Theme layer: surfaces and foreground colors move as a set to preserve contrast. */
 body, dialog { color: var(--text); }
-.brand strong, header p, .cyan, .tabs button.active, .download-state { color: var(--accent); }
+.brand strong, header p, .cyan, .tabs button.active { color: var(--accent); }
 .actions select, dialog, .panel, .engine, .setting-toggle, .pairing-settings,
 .transfer-settings, .tool-settings, .media-inspection, .destination-history {
   background: var(--surface);

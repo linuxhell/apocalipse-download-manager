@@ -5,7 +5,8 @@
   const uuid = value => typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(value);
   const code = value => typeof value === 'string' && /^[a-z0-9_.:-]{1,96}$/i.test(value);
   const enums = new Set(['reason','kind','mediaKind','contentType','method','component','world','readyState',
-    'sourceScheme','eventType','stage','status','state','handler','result','engine','mode','command','script','errorName','decision','transport']);
+    'sourceScheme','eventType','stage','status','state','handler','result','engine','mode','command','script','errorName','decision','transport',
+    'platform','action','route','source','bindingSource','failureStage','matchResult','candidateType','menuState','permalinkSource','canonicalClass','resolverReason','outcome']);
   const forbidden = /cookie|authorization|password|passwd|secret|token|header|body|title|text|html|fileName|stack|message/i;
   const digest = async (salt, value) => {
     const bytes = new TextEncoder().encode(`${salt}\u0000${String(value)}`);

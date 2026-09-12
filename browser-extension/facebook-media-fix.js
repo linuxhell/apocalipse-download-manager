@@ -47,11 +47,42 @@
     return null;
   };
 
-  const thumbnailFor = (video) => video?.poster
-    || document.querySelector('meta[property="og:image"]')?.content
-    || "";
+  const thumbnailFor = (video) => {
+    if (video?.poster) return video.poster;
+    const target = video?.getBoundingClientRect?.();
+    let container = video?.parentElement;
+    for (let depth = 0; target && container && depth < 10; depth += 1, container = container.parentElement) {
+      if (container.querySelectorAll?.("video").length > 1) break;
+      for (const image of container.querySelectorAll?.("img") || []) {
+        const rect = image.getBoundingClientRect();
+        const width = Math.max(0, Math.min(target.right, rect.right) - Math.max(target.left, rect.left));
+        const height = Math.max(0, Math.min(target.bottom, rect.bottom) - Math.max(target.top, rect.top));
+        const overlap = width * height / Math.min(Math.max(1, target.width * target.height), Math.max(1, rect.width * rect.height));
+        const source = image.currentSrc || image.src || image.getAttribute("data-src") || "";
+        if (overlap >= 0.45 && /^https?:/i.test(source)) return source;
+      }
+    }
+    return document.querySelectorAll("video").length <= 1
+      ? document.querySelector('meta[property="og:image"]')?.content || ""
+      : "";
+  };
 
-  document.addEventListener("click", (event) => {
+  const capturedThumbnailFor = async (video) => {
+    const thumbnail = thumbnailFor(video);
+    if (thumbnail) return thumbnail;
+    const rect = video?.getBoundingClientRect?.();
+    if (!rect || rect.width < 80 || rect.height < 45 || rect.bottom <= 0 || rect.top >= innerHeight) return "";
+    try {
+      const result = await chrome.runtime.sendMessage({
+        type: "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL",
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        viewport: { width: innerWidth, height: innerHeight },
+      });
+      return result?.dataUrl || "";
+    } catch { return ""; }
+  };
+
+  document.addEventListener("click", async (event) => {
     const button = event.target?.closest?.(".apocalipse-media-download:not(.apocalipse-media-record)");
     if (!button) return;
     const video = videoForButton(button);
@@ -63,6 +94,7 @@
     const original = button.textContent;
     button.textContent = "…";
     const id = new URL(url).pathname.match(/\/(?:reel|reels|videos|posts)\/([^/?#]+)/i)?.[1] || "video";
+    const thumbnail = await capturedThumbnailFor(video);
     chrome.runtime.sendMessage({
       type: "APOCALIPSE_DOWNLOAD",
       item: {
@@ -72,7 +104,7 @@
         userAgent: navigator.userAgent,
         kind: "video",
         title: `Facebook-${id}`,
-        thumbnail: thumbnailFor(video),
+        thumbnail,
       },
     }, (result) => {
       const failed = chrome.runtime.lastError || !result?.ok;

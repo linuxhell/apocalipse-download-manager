@@ -12,8 +12,130 @@ let lastShortcutMode = "normal";
 let diagnosticOutbox = [];
 const recentFileResponses = [];
 const recentMediaResponses = [];
+const thumbnailDataCache = new Map();
+const tabNavigationEpochs = new Map();
+
+const fetchThumbnailDataUrl = async (value) => {
+  const url = String(value || "");
+  if (url.startsWith("data:image/")) return url;
+  if (!/^https?:/i.test(url)) throw new Error("invalid_thumbnail_url");
+  if (thumbnailDataCache.has(url)) return thumbnailDataCache.get(url);
+  const response = await fetch(url, { credentials: "include", cache: "force-cache" });
+  if (!response.ok) throw new Error(`thumbnail_http_${response.status}`);
+  const blob = await response.blob();
+  if (!/^image\//i.test(blob.type)) throw new Error("thumbnail_not_image");
+  if (blob.size > 384 * 1024) throw new Error("thumbnail_too_large");
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  const dataUrl = `data:${blob.type};base64,${btoa(binary)}`;
+  thumbnailDataCache.set(url, dataUrl);
+  if (thumbnailDataCache.size > 80) thumbnailDataCache.delete(thumbnailDataCache.keys().next().value);
+  return dataUrl;
+};
+
+const portableThumbnail = async (value) => {
+  if (!value) return null;
+  try {
+    const portable = await fetchThumbnailDataUrl(value);
+    // A thumbnail is optional and must never prevent the media handoff.
+    return portable.length <= 180 * 1024 ? portable : null;
+  } catch {
+    const original = String(value);
+    if (/^https?:/i.test(original)) return original;
+    return /^data:image\//i.test(original) && original.length <= 180 * 1024 ? original : null;
+  }
+};
+
+const blobDataUrl = async (blob) => {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return `data:${blob.type || "image/jpeg"};base64,${btoa(binary)}`;
+};
+
+let thumbnailActivationSerial = 0;
+let lastThumbnailCaptureAt = 0;
+let thumbnailCaptureBusy = false;
+chrome.tabs?.onActivated?.addListener(() => { thumbnailActivationSerial += 1; });
+
+const captureVisibleThumbnail = async (sender, requestedRect = null, viewport = null, requestedTabId = null) => {
+  const tab = sender?.tab || (Number.isInteger(requestedTabId) ? await chrome.tabs.get(requestedTabId) : null);
+  if (!tab || !chrome.tabs?.captureVisibleTab) throw new Error("thumbnail_capture_unavailable");
+  // A child frame's local rectangle is not a top-level screenshot rectangle.
+  // The content script can still draw that exact video to a readable canvas.
+  if (sender?.frameId > 0) throw new Error("thumbnail_frame_coordinates_unverified");
+  if (!requestedRect || typeof OffscreenCanvas === "undefined" || typeof createImageBitmap !== "function") {
+    throw new Error("thumbnail_crop_unavailable");
+  }
+  const { left, top, width, height } = requestedRect;
+  const viewportWidth = viewport?.width, viewportHeight = viewport?.height;
+  if (![left, top, width, height, viewportWidth, viewportHeight].every(Number.isFinite)
+    || width < 80 || height < 45 || viewportWidth <= 0 || viewportHeight <= 0
+    || left < 0 || top < 0 || left + width > viewportWidth || top + height > viewportHeight) {
+    throw new Error("thumbnail_crop_not_fully_visible");
+  }
+  const serial = thumbnailActivationSerial;
+  const navigation = tabNavigationEpochs.get(tab.id);
+  const requireCurrentTab = async () => {
+    const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+    if (active?.id !== tab.id || thumbnailActivationSerial !== serial
+      || tabNavigationEpochs.get(tab.id) !== navigation) throw new Error("thumbnail_tab_changed");
+  };
+  await requireCurrentTab();
+  if (thumbnailCaptureBusy || Date.now() - lastThumbnailCaptureAt < 600) throw new Error("thumbnail_capture_throttled");
+  thumbnailCaptureBusy = true;
+  lastThumbnailCaptureAt = Date.now();
+  let bitmap;
+  try {
+    const captured = await new Promise((resolve, reject) => {
+      chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 55 }, (dataUrl) => {
+        const error = chrome.runtime.lastError;
+        if (error || !dataUrl) reject(new Error(error?.message || "thumbnail_capture_failed"));
+        else resolve(dataUrl);
+      });
+    });
+    await requireCurrentTab();
+    bitmap = await createImageBitmap(await (await fetch(captured)).blob());
+    const scaleX = bitmap.width / viewportWidth, scaleY = bitmap.height / viewportHeight;
+    const x = Math.floor(left * scaleX), y = Math.floor(top * scaleY);
+    const cropWidth = Math.min(bitmap.width - x, Math.floor(width * scaleX));
+    const cropHeight = Math.min(bitmap.height - y, Math.floor(height * scaleY));
+    if (cropWidth < 1 || cropHeight < 1) throw new Error("thumbnail_crop_empty");
+    const outputScale = Math.min(1, 320 / cropWidth, 320 / cropHeight);
+    const outputWidth = Math.max(1, Math.round(cropWidth * outputScale));
+    const outputHeight = Math.max(1, Math.round(cropHeight * outputScale));
+    const canvas = new OffscreenCanvas(outputWidth, outputHeight);
+    canvas.getContext("2d").drawImage(bitmap, x, y, cropWidth, cropHeight, 0, 0, outputWidth, outputHeight);
+    const result = await blobDataUrl(await canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 }));
+    await requireCurrentTab();
+    return result;
+  } finally {
+    // Never substitute a full-page screenshot when a crop fails.
+    bitmap?.close?.();
+    thumbnailCaptureBusy = false;
+  }
+};
 const mediaPickerContexts = new Map();
 const inspectedMediaTracks = new Map();
+
+function resetTabMedia(tabId, url = "") {
+  if (!Number.isInteger(tabId) || tabId < 0) return;
+  const previous = recentMediaResponses.length;
+  for (let index = recentMediaResponses.length - 1; index >= 0; index -= 1) {
+    if (recentMediaResponses[index].tabId === tabId) recentMediaResponses.splice(index, 1);
+  }
+  mediaPickerContexts.delete(tabId);
+  tabNavigationEpochs.set(tabId, { startedAt: Date.now(), url });
+  void globalThis.ADM_DIAG_WORKER?.emit("capture.tab_media_reset", {
+    removed: previous - recentMediaResponses.length,
+    reason: "top_level_navigation",
+  }, null, "INFO", tabId);
+}
 const ASSISTED_PREFIX = "assisted-download:";
 const DIRECT_PREFIX = "direct-download:";
 
@@ -107,13 +229,17 @@ if (chrome.webRequest?.onResponseStarted) {
     const disposition = responseHeader(details.responseHeaders, "content-disposition").toLowerCase();
     const looksLikeFile = disposition.includes("attachment")
       || (!contentType.includes("text/html") && /(?:application\/(?:octet-stream|x-rar|zip)|binary)/i.test(contentType));
-    const isSocialTabMedia = /(?:^|\.)(?:tiktok\.com|tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com|facebook\.com|fbcdn\.net|fbsbx\.com|instagram\.com|cdninstagram\.com)$/i
-      .test((() => { try { return new URL(details.url).hostname; } catch { return ""; } })())
-      && (/^(?:video|audio)\//i.test(contentType)
-        || /(?:\/video\/tos\/|\/aweme\/v1\/play\/|mime_type=video|\.mp4(?:$|[?]))/i.test(details.url));
-    void globalThis.ADM_DIAG_WORKER?.network(details, isSocialTabMedia,
-      isSocialTabMedia ? "accepted_by_capture_filter" : /^(?:video|audio)\//i.test(contentType) ? "host_not_in_capture_filter" : "not_classified_as_media");
-    if (isSocialTabMedia) {
+    const requestHost = (() => { try { return new URL(details.url).hostname.toLowerCase(); } catch { return ""; } })();
+    const initiatorHost = (() => { try { return new URL(details.initiator || "").hostname.toLowerCase(); } catch { return ""; } })();
+    const siteKey = host => host.split('.').slice(-2).join('.');
+    const socialHost = /(?:^|\.)(?:tiktok\.com|tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com|facebook\.com|fbcdn\.net|fbsbx\.com|instagram\.com|cdninstagram\.com)$/i.test(requestHost);
+    const sameSiteHost = Boolean(requestHost && initiatorHost && siteKey(requestHost) === siteKey(initiatorHost));
+    const mediaResponse = /^(?:video|audio)\//i.test(contentType)
+      || /(?:\/video\/tos\/|\/aweme\/v1\/play\/|mime_type=video|\.mp4(?:$|[?]))/i.test(details.url);
+    const capturedMedia = mediaResponse && (socialHost || sameSiteHost);
+    void globalThis.ADM_DIAG_WORKER?.network(details, capturedMedia,
+      capturedMedia ? "accepted_by_capture_filter" : mediaResponse ? "host_not_in_capture_filter" : "not_classified_as_media");
+    if (capturedMedia) {
       recentMediaResponses.push({
         tabId: details.tabId,
         frameId: details.frameId,
@@ -129,6 +255,17 @@ if (chrome.webRequest?.onResponseStarted) {
     recentFileResponses.splice(0, Math.max(0, recentFileResponses.length - 50));
   }, { urls: ["http://*/*", "https://*/*"] }, ["responseHeaders"]);
 }
+
+// A tab id survives navigation, so isolate captures by top-level document.
+if (chrome.webRequest?.onBeforeRequest) {
+  chrome.webRequest.onBeforeRequest.addListener((details) => {
+    if (details.type === "main_frame") resetTabMedia(details.tabId, details.url);
+  }, { urls: ["http://*/*", "https://*/*"], types: ["main_frame"] });
+}
+chrome.tabs?.onRemoved?.addListener((tabId) => {
+  resetTabMedia(tabId);
+  tabNavigationEpochs.delete(tabId);
+});
 
 async function bridgeRequest(path, options = {}, suppliedToken = null) {
   const { pairingToken = "" } = suppliedToken === null ? await chrome.storage.local.get({ pairingToken: "" }) : { pairingToken: suppliedToken };
@@ -492,19 +629,59 @@ chrome.downloads.onChanged.addListener((delta) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  // The user's click intent is authoritative. A social-media identity can be
+  // resolved asynchronously while the popup re-renders; if an older/stale
+  // handler wraps that resolved item as a Download, never let a Preview cross
+  // the desktop download boundary and open the save-location flow.
+  const actionIntent = message?.actionIntent || message?.item?.actionIntent || null;
+  if (actionIntent === "preview" && message?.type === "APOCALIPSE_DOWNLOAD") {
+    const item = message.item || {};
+    const pageExtractor = Boolean(item.extractorUrl || item.pageExtractor);
+    message = {
+      type: "APOCALIPSE_PREVIEW_MEDIA",
+      url: item.extractorUrl || item.url,
+      pageUrl: item.playerPageUrl || item.pageUrl || sender.tab?.url || null,
+      audioUrl: pageExtractor ? null : item.audioUrl || null,
+      mediaKind: item.kind || null,
+      pageExtractor,
+      contentType: pageExtractor ? null : item.contentType || null,
+      userAgent: item.userAgent || null,
+      traceId: item.traceId || message.traceId || null,
+      actionIntent: "preview",
+    };
+    void globalThis.ADM_DIAG_WORKER?.emitForSender(sender, "handoff.intent_route_corrected", {
+      actionIntent: "preview", receivedRoute: "download", effectiveRoute: "preview_media",
+      url: message.url,
+    }, message.traceId, "WARN");
+  }
+  if (message?.type === "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL") {
+    captureVisibleThumbnail(sender, message.rect, message.viewport, message.tabId)
+      .then((dataUrl) => reply({ dataUrl }))
+      .catch((error) => reply({ error: String(error) }));
+    return true;
+  }
   if (globalThis.ADM_DIAG_WORKER?.message(message, sender, reply)) return true;
   if (message?.type === "APOCALIPSE_WORKER_PING") {
     reply({ ok: true, version: chrome.runtime.getManifest().version });
     return;
   }
+  if (message?.type === "APOCALIPSE_PREVIEW_IDENTITY_BEGIN") {
+    bridgeRequest("/v1/clipboard-suppress", { method: "POST", body: JSON.stringify({ traceId: message.traceId || null }) })
+      .then(result => reply(result))
+      .catch(error => reply({ ok: false, error: String(error) }));
+    return true;
+  }
   if (message?.type === "APOCALIPSE_RECENT_TAB_MEDIA") {
     const tabId = Number.isInteger(message.tabId) ? message.tabId : sender.tab?.id;
     const cutoff = Date.now() - 120_000;
+    const navigationStartedAt = tabNavigationEpochs.get(tabId)?.startedAt || 0;
     const media = recentMediaResponses
-      .filter((item) => item.tabId === tabId && item.capturedAt >= cutoff)
+      .filter((item) => item.tabId === tabId && item.capturedAt >= cutoff
+        && item.capturedAt >= navigationStartedAt)
       .sort((left, right) => right.capturedAt - left.capturedAt)
       .slice(0, 30);
-    void globalThis.ADM_DIAG_WORKER?.emit("capture.worker_inventory", { count: media.length, retained: recentMediaResponses.length, cutoffMs: 120000 }, null, "INFO", tabId);
+    void globalThis.ADM_DIAG_WORKER?.emit("capture.worker_inventory", { count: media.length,
+      retained: recentMediaResponses.length, cutoffMs: 120000, navigationStartedAt }, null, "INFO", tabId);
     reply({ media: media.map((item) => ({ ...item, ageMs: Date.now() - item.capturedAt })) });
     return;
   }
@@ -591,19 +768,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
   if (message?.type === "APOCALIPSE_FETCH_THUMBNAIL") {
     (async () => {
-      const url = String(message.url || "");
-      if (!/^https?:/i.test(url)) throw new Error("invalid_thumbnail_url");
-      const response = await fetch(url, { credentials: "include", cache: "force-cache" });
-      if (!response.ok) throw new Error(`thumbnail_http_${response.status}`);
-      const blob = await response.blob();
-      if (!/^image\//i.test(blob.type)) throw new Error("thumbnail_not_image");
-      if (blob.size > 3 * 1024 * 1024) throw new Error("thumbnail_too_large");
-      const bytes = new Uint8Array(await blob.arrayBuffer());
-      let binary = "";
-      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-      }
-      reply({ dataUrl: `data:${blob.type};base64,${btoa(binary)}` });
+      reply({ dataUrl: await fetchThumbnailDataUrl(message.url) });
     })().catch((error) => reply({ error: String(error) }));
     return true;
   }
@@ -626,6 +791,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         throw new Error("incomplete_social_media_track");
       }
       const cookieHeader = await cookieHeaderFor([downloadUrl, item.audioUrl]);
+      const thumbnail = await portableThumbnail(item.thumbnail);
       return bridgeRequest("/v1/download", {
       method: "POST",
       body: JSON.stringify({
@@ -635,7 +801,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         fileName: mediaDownloadFileName(item),
         pageUrl,
         title: item.title || null,
-        thumbnail: item.thumbnail || null,
+        thumbnail,
         mediaKind: item.kind || null,
         ambiguousSocialTrack: Boolean(item.ambiguousSocialTrack),
         expectedSize: Number.isFinite(item.size) ? item.size : null,
@@ -670,6 +836,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       const taskIds = [];
       for (const item of items) {
         if (item.ambiguousSocialTrack && !item.audioUrl && !item.extractorUrl) continue;
+        const thumbnail = await portableThumbnail(item.thumbnail);
         const result = await bridgeRequest("/v1/download", {
           method: "POST",
           body: JSON.stringify({
@@ -679,7 +846,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
             fileName: mediaDownloadFileName(item),
             pageUrl,
             title: item.title || null,
-            thumbnail: item.thumbnail || null,
+            thumbnail,
             mediaKind: item.kind || null,
             ambiguousSocialTrack: Boolean(item.ambiguousSocialTrack),
             expectedSize: Number.isFinite(item.size) ? item.size : null,

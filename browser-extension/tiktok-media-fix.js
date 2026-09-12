@@ -3,6 +3,20 @@
   const videoForButton = button => globalThis.ApocalipseTikTokIdentity?.videoFor(button) || null;
   const permalinkFor = video => globalThis.ApocalipseTikTokIdentity?.resolve(video) || null;
 
+  const thumbnailFor = async (video) => {
+    if (video?.poster) return video.poster;
+    const rect = video?.getBoundingClientRect?.();
+    if (!rect || rect.width < 80 || rect.height < 45 || rect.bottom <= 0 || rect.top >= innerHeight) return "";
+    try {
+      const result = await chrome.runtime.sendMessage({
+        type: "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL",
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        viewport: { width: innerWidth, height: innerHeight },
+      });
+      return result?.dataUrl || "";
+    } catch { return ""; }
+  };
+
   const directVideoUrl = (value) => {
     try {
       const url = new URL(String(value || "").replaceAll("\\/", "/"), location.href);
@@ -107,6 +121,7 @@
     const selectedTrackKind = videoItem ? inspections.get(videoItem.url)?.kind : null;
     const audioUrl = url || tiedAudio || selectedTrackKind === "muxed" ? null : audioCandidates[0]?.url || null;
     const ambiguousSocialTrack = Boolean(!url && !audioUrl && selectedUrl && selectedTrackKind !== "muxed");
+    const thumbnail = await thumbnailFor(video);
     chrome.runtime.sendMessage({
       type: "APOCALIPSE_CAPTURE_TRACE",
       eventName: "tiktok_browser_media_selection",
@@ -159,7 +174,7 @@
       const title = String(context?.innerText || document.title || "TikTok").trim().replace(/\s+/g, " ").slice(0, 240);
       chrome.runtime.sendMessage({
         type: "APOCALIPSE_OPEN_MEDIA_PICKER",
-        context: { title, thumbnail: video.poster || "", kind: "video", duration: Number.isFinite(video.duration) ? video.duration : null },
+        context: { title, thumbnail, kind: "video", duration: Number.isFinite(video.duration) ? video.duration : null },
       }).catch(() => {});
       setTimeout(() => { button.textContent = original; }, 2500);
       return;
@@ -177,7 +192,7 @@
         userAgent: navigator.userAgent,
         kind: "video",
         title: document.title,
-        thumbnail: video.poster || "",
+        thumbnail,
       },
     }, (result) => {
       const failed = chrome.runtime.lastError || !result?.ok;

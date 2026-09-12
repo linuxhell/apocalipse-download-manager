@@ -1,5 +1,6 @@
 globalThis.ADM_DIAG?.register("popup.js");
 let media = [], selected = "video", locale = "en", activePageUrl = "", interfaceTheme = "void";
+let activeMediaTab = null, mediaRefreshRunning = false, mediaFingerprint = "";
 const popupThemes = new Set(["void","inferno","toxic","synthwave","royal","crimson","arctic","obsidian","monochrome","midnight","forest","graphite","deepsea","eclipse","hazard","cyberstorm","ultraviolet","emeraldgold","scarletice","coppernavy","solarizednight","pearlblue","whiteaurora","goldenivory","crystalrose","polarmint"]);
 const normalizeDesktopLanguage = (language) => language === "pt-BR" ? "pt_BR" : language === "zh-CN" ? "zh_CN" : ["en","pt_BR","zh_CN"].includes(language) ? language : "en";
 const applyPopupTheme = (theme) => {
@@ -10,6 +11,9 @@ const selectedUrls = new Set();
 const SOCIAL_TRACK_PAIR_WINDOW_MS = 8_000;
 const isSocialPage = (url) => {
   try { return /(^|\.)(?:facebook|tiktok)\.com$/i.test(new URL(url).hostname); } catch { return false; }
+};
+const isSocialMediaPage = (url) => {
+  try { return /(^|\.)(?:facebook|tiktok|instagram)\.com$/i.test(new URL(url).hostname); } catch { return false; }
 };
 const pairSocialTracks = (items, pageUrl) => {
   if (!isSocialPage(pageUrl)) return items;
@@ -44,10 +48,21 @@ const networkMediaKind = (item) => {
 };
 const mergeDetectedMedia = (scanned, network, pageUrl) => {
   const unique = new Map();
-  const hasSocialPageItems = isSocialPage(pageUrl) && scanned.some((item) => item?.kind === "video" && item.pageExtractor);
+  // A visualOnly row is only the identity/geometry of a Blob or MediaStream
+  // player. It is not a downloadable page extractor and must not hide the
+  // captured MP4 tracks needed to resolve that player. Keeping it out of this
+  // gate prevents historical rows from hiding a newly visible unresolved player.
+  const visualVideos = scanned.filter((item) => item?.kind === "video"
+    && !item.visualOnly && !item.retained && (item.playerBound || item.pageExtractor || item.recommended));
+  // Once a social card/player has supplied an identifiable video, its direct
+  // CDN requests are implementation details. Keep them available only when
+  // they describe the exact same URL so size/type metadata can be merged.
+  const hasSocialPageItems = isSocialMediaPage(pageUrl) && visualVideos.length > 0;
+  const visualUrls = new Set(visualVideos.map((item) => item.url));
   for (const item of [...scanned, ...network]) {
     if (!item?.url) continue;
-    if (hasSocialPageItems && item.networkCaptured && (item.kind === "video" || item.kind === "audio")) continue;
+    if (hasSocialPageItems && item.networkCaptured && (item.kind === "video" || item.kind === "audio")
+      && !visualUrls.has(item.url)) continue;
     const previous = unique.get(item.url);
     if (!previous) unique.set(item.url, item);
     else if (item.networkCaptured) unique.set(item.url, {
@@ -57,6 +72,10 @@ const mergeDetectedMedia = (scanned, network, pageUrl) => {
       capturedAt: item.capturedAt, frameId: item.frameId, networkCaptured: true,
     });
   }
+  // Duration is useful metadata, but never proof of file identity. A single
+  // buffered response with the same duration may still belong to another card.
+  // Anonymous resources remain available for explicit selection, without
+  // borrowing a visual player's title or thumbnail.
   return pairSocialTracks([...unique.values()], pageUrl);
 };
 const messages = {
@@ -170,24 +189,66 @@ const loadThumbnail = (image, item) => {
   const source = item.thumbnail || (item.kind === "image" ? item.url : "");
   if (!source) {
     image.src = fallback;
+    void globalThis.ADM_DIAG?.emit("thumbnail.fallback", { kind: item.kind, reason: "missing_source", url: item.url });
     return;
   }
   image.src = source;
+  void globalThis.ADM_DIAG?.emit("thumbnail.source_selected", { kind: item.kind,
+    source: /^data:/i.test(source) ? "captured_data" : source === item.url ? "media_url" : "dom_url", url: item.url });
   image.onerror = () => {
     image.onerror = null;
     chrome.runtime.sendMessage({ type: "APOCALIPSE_FETCH_THUMBNAIL", url: source }, (result) => {
-      image.src = !chrome.runtime.lastError && result?.dataUrl ? result.dataUrl : fallback;
+      const fetched = !chrome.runtime.lastError && Boolean(result?.dataUrl);
+      image.src = fetched ? result.dataUrl : fallback;
+      if (!fetched && activeMediaTab?.id && item.playerBound && !item.retained && item.playerId) {
+        chrome.tabs.sendMessage(activeMediaTab.id, {
+          type: "APOCALIPSE_CAPTURE_PLAYER_THUMBNAIL", playerId: item.playerId,
+          url: item.url, pageUrl: item.playerPageUrl, rejectedSource: source,
+        }, { frameId: 0 }).then(captured => {
+          if (captured?.dataUrl) {
+            item.thumbnail = captured.dataUrl;
+            image.src = captured.dataUrl;
+          }
+        }).catch(() => {});
+      }
+      void globalThis.ADM_DIAG?.emit(fetched ? "thumbnail.fetch_succeeded" : "thumbnail.fallback", {
+        kind: item.kind, reason: fetched ? "protected_source_cached" : "fetch_failed", url: item.url,
+      }, null, fetched ? "INFO" : "WARN");
     });
   };
 };
 // Preview and Download start from the SAME row identity. previewUrl is only a
 // thumbnail/player hint and can be a partial track, blob, or a generic feed URL.
 function previewRequestFor(item, pageUrl) {
+  if (item.visualOnly) return null;
+  // A buffered CDN track on a social feed is not a stable video identity. It
+  // may be video-only, belong to a neighbouring card, or expire while the
+  // asynchronous resolver is running. Only the player-bound resolver below
+  // may turn the visible card into a specific Facebook/TikTok page URL.
+  if (item.ambiguousSocialTrack) {
+    try {
+      const pageHost = new URL(pageUrl).hostname;
+      if (/(^|\.)(?:facebook|tiktok|instagram)\.com$/i.test(pageHost)) return null;
+    } catch {}
+  }
   const url = item.extractorUrl || item.url;
   let parsed;
   try { parsed = new URL(url); } catch { return null; }
   if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) return null;
   const pageExtractor = Boolean(item.extractorUrl || item.pageExtractor);
+  // A social homepage identifies the feed, not one video. The desktop cannot
+  // preview it safely and correctly rejects it as preview_specific_video_required.
+  const socialExtractor = pageExtractor
+    && /(^|\.)(?:facebook|tiktok|instagram)\.com$/i.test(parsed.hostname);
+  if (socialExtractor) {
+    const specific = /(^|\.)facebook\.com$/i.test(parsed.hostname)
+      ? (/^\/(?:watch|reel|reels|videos|share\/v)\b/i.test(parsed.pathname)
+        || parsed.searchParams.has("v") || parsed.searchParams.has("story_fbid"))
+      : /(^|\.)tiktok\.com$/i.test(parsed.hostname)
+        ? /^\/@[^/]+\/video\/\d+/i.test(parsed.pathname)
+        : /^\/(?:reel|reels|p)\/[^/]+/i.test(parsed.pathname);
+    if (!specific) return null;
+  }
   return { type: "APOCALIPSE_PREVIEW_MEDIA", url, pageUrl,
     audioUrl: pageExtractor ? null : item.audioUrl || null,
     mediaKind: item.kind, pageExtractor,
@@ -206,6 +267,8 @@ function manualMediaSelection(item) {
 
 const render = () => {
   const root = document.querySelector("#items");
+  const scroller = document.querySelector("main") || root;
+  const previousScrollTop = scroller.scrollTop;
   root.textContent = "";
   const logs = selected === "logs";
   document.querySelector("#logs-panel").hidden = !logs;
@@ -216,8 +279,9 @@ const render = () => {
   const matches = media.filter((item) => item.kind === selected);
   void globalThis.ADM_DIAG?.emit("popup.render", { videos: media.filter(v => v.kind === "video").length,
     audio: media.filter(v => v.kind === "audio").length, images: media.filter(v => v.kind === "image").length,
+    thumbnails: matches.filter(v => Boolean(v.thumbnail)).length,
     displayed: matches.length, disabled: matches.filter(v => v.ambiguousSocialTrack).length, kind: selected });
-  const selectable = matches;
+  const selectable = matches.filter((item) => !item.visualOnly);
   const updateBulk = () => {
     const chosen = selectable.filter((item) => selectedUrls.has(item.url)).length;
     document.querySelector("#download-selected").disabled = chosen === 0;
@@ -237,7 +301,7 @@ const render = () => {
     const preview = row.querySelector(".preview");
     const metadata = row.querySelector("small");
     const checkbox = row.querySelector(".media-select");
-    checkbox.disabled = false;
+    checkbox.disabled = Boolean(item.visualOnly);
     checkbox.checked = selectedUrls.has(item.url);
     checkbox.onchange = () => { checkbox.checked ? selectedUrls.add(item.url) : selectedUrls.delete(item.url); updateBulk(); };
     const audio = row.querySelector(".audio-icon");
@@ -259,8 +323,9 @@ const render = () => {
     const previewRequest = previewRequestFor(item, activePageUrl);
     previewButton.disabled = !previewRequest;
     void globalThis.ADM_DIAG?.emit("popup.row_state", { url: item.url, kind: item.kind,
-      previewEnabled: Boolean(previewRequest), downloadEnabled: true,
-      reason: item.ambiguousSocialTrack ? "manual_selection_available" : previewRequest ? "valid_selection" : "invalid_preview_source" });
+      thumbnail: Boolean(item.thumbnail), thumbnailSource: /^data:/i.test(item.thumbnail || "") ? "captured_data" : item.thumbnail ? "dom_url" : "none",
+      previewEnabled: Boolean(previewRequest), downloadEnabled: !item.visualOnly,
+      reason: previewRequest ? (item.ambiguousSocialTrack ? "manual_selection_available" : "valid_selection") : "invalid_preview_source" });
     previewButton.title = previewRequest ? t("externalPreview") : t("incompleteTrack");
     previewButton.onclick = () => {
       if (!previewRequest) return;
@@ -286,7 +351,7 @@ const render = () => {
     };
     const button = row.querySelector(".download-item");
     button.textContent = t("download");
-    button.disabled = false;
+    button.disabled = Boolean(item.visualOnly);
     button.onclick = () => {
       const traceId = globalThis.ADM_DIAG?.begin("popup.download_clicked", { url: item.url, kind: item.kind }) || crypto.randomUUID();
       return chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { ...manualMediaSelection(item), traceId } }, (result) => {
@@ -299,6 +364,7 @@ const render = () => {
     root.append(row);
   }
   updateBulk();
+  scroller.scrollTop = previousScrollTop;
 };
 document.querySelectorAll("nav button").forEach((button) => {
   button.onclick = () => {
@@ -322,61 +388,114 @@ document.querySelector("#download-selected").onclick = async () => {
   else showBridgeError(result?.error || "unavailable");
   render();
 };
+
+const scanTopFrame = (tabId) => new Promise((resolve) => {
+  chrome.tabs.sendMessage(tabId, { type: "APOCALIPSE_SCAN" }, { frameId: 0 }, (response) => {
+    const error = chrome.runtime.lastError;
+    resolve({ scanned: error ? [] : (response?.media || []), error });
+  });
+});
+
+const recoverUpdatedTabScripts = async (tab) => {
+  if (!chrome.scripting?.executeScript || !tab?.id || !/^https?:/i.test(tab.url || "")) return false;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      files: ["diagnostics-core.js", "diagnostics.js", "tiktok-identity.js", "content.js"],
+    });
+    if (/(^|\.)facebook\.com$|(^|\.)tiktok\.com$/i.test(new URL(tab.url).hostname)) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, frameIds: [0] },
+        files: ["social-player-resolution.js", "social-player-resolution-v2.js", "social-home-feed-v3-core.js",
+          "social-home-feed-v3-facebook.js", "social-home-feed-v3-tiktok.js", "tiktok-share-menu-v4.js", "social-home-feed-resolution-v3.js"],
+      });
+    }
+    void globalThis.ADM_DIAG?.emit("popup.tab_scripts_recovered", { host: new URL(tab.url).hostname, result: "recovered" });
+    return true;
+  } catch (error) {
+    void globalThis.ADM_DIAG?.emit("popup.tab_scripts_recovery_failed", { errorRef: String(error), result: "failed" }, null, "WARN");
+    return false;
+  }
+};
+
+async function refreshMediaInventory(tab, initial = false) {
+  if (mediaRefreshRunning || !tab?.id || !/^https?:/i.test(tab.url || "")) return;
+  mediaRefreshRunning = true;
+  try {
+    tab = await chrome.tabs.get(tab.id).catch(() => null);
+    if (!tab || !/^https?:/i.test(tab.url || "")) return;
+    activePageUrl = tab.url;
+    let { scanned, error } = await scanTopFrame(tab.id);
+    if (error && await recoverUpdatedTabScripts(tab)) {
+      ({ scanned, error } = await scanTopFrame(tab.id));
+    }
+    void globalThis.ADM_DIAG?.emit("popup.frame0_reply", { ok: !error, count: scanned.length,
+      errorRef: error?.message || "", liveRefresh: !initial }, null, error ? "WARN" : "INFO");
+    const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA", tabId: tab.id }).catch(() => null);
+    const inspected = captured?.media?.length
+      ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_INSPECT_MEDIA_TRACKS", media: captured.media }).catch(() => null)
+      : null;
+    const trackInfo = new Map((inspected?.media || []).map((item) => [item.url, item]));
+    const network = (captured?.media || []).map((item) => {
+      const inspectedKind = trackInfo.get(item.url)?.kind;
+      const video = inspectedKind === "video" || inspectedKind === "muxed"
+        || (inspectedKind !== "audio" && networkMediaKind(item) === "video");
+      return { url: item.url, contentType: item.contentType || null, kind: video ? "video" : "audio",
+        size: item.contentLength || null, ext: video ? "mp4" : "audio",
+        title: (() => { try { return new URL(item.url).hostname.includes("tiktok") ? `TikTok — ${t("capturedResource")}` : t("capturedResource"); } catch { return t("capturedResource"); } })(),
+        capturedAt: item.capturedAt, frameId: item.frameId, muxed: inspectedKind === "muxed",
+        duration: trackInfo.get(item.url)?.duration || null, networkCaptured: true };
+    });
+    const nextMedia = mergeDetectedMedia(scanned, network, tab.url);
+    const visiblePlayers = nextMedia.filter((item) => item.kind === "video"
+      && item.playerBound && item.recommended && !item.networkCaptured && !item.thumbnail && item.rect);
+    for (const visibleVideo of visiblePlayers) {
+      const capturedThumbnail = await chrome.tabs.sendMessage(tab.id, {
+        type: "APOCALIPSE_CAPTURE_PLAYER_THUMBNAIL",
+        playerId: visibleVideo.playerId,
+        url: visibleVideo.url,
+        pageUrl: visibleVideo.playerPageUrl,
+        rect: visibleVideo.rect,
+        viewport: visibleVideo.viewport,
+      }, { frameId: 0 }).catch(() => null);
+      if (capturedThumbnail?.dataUrl) visibleVideo.thumbnail = capturedThumbnail.dataUrl;
+    }
+    const nextFingerprint = JSON.stringify(nextMedia.map((item) => [item.url, item.kind, item.thumbnail || "", item.duration || 0,
+      item.playerId || "", item.title || "", item.size || 0, Boolean(item.retained), Boolean(item.visualOnly)]));
+    if (!initial && nextFingerprint === mediaFingerprint) return;
+    media = nextMedia;
+    mediaFingerprint = nextFingerprint;
+    for (const url of [...selectedUrls]) if (!media.some((item) => item.url === url)) selectedUrls.delete(url);
+    void globalThis.ADM_DIAG?.emit("popup.merged_inventory", { domCount: scanned.length,
+      networkCount: network.length, mergedCount: media.length, liveRefresh: !initial });
+    const picker = await chrome.runtime.sendMessage({ type: "APOCALIPSE_MEDIA_PICKER_CONTEXT", tabId: tab.id }).catch(() => null);
+    const requested = document.querySelector("#requested-media");
+    if (picker?.context) {
+      requested.hidden = false;
+      requested.querySelector("b").textContent = picker.context.title || t("capturedResource");
+      loadThumbnail(requested.querySelector("img"), picker.context);
+    } else requested.hidden = true;
+    render();
+  } finally { mediaRefreshRunning = false; }
+}
+
 chrome.storage.local.get({ language: "en" }, ({ language }) => {
   locale = normalizeDesktopLanguage(language);
   document.querySelector("#language").value = locale;
   translate();
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    const tab = tabs[0];
+    const tab = tabs[0]; activeMediaTab = tab || null;
     activePageUrl = tab?.url || "";
     if (!tab?.id || !/^https?:/i.test(tab.url || "")) {
       media = [];
       render();
       return;
     }
-    // Social sites contain many cross-origin iframes. Without an explicit
-    // frame, Chrome may return the empty scan from an advertisement/player
-    // iframe instead of the visible page.
-    chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_SCAN" }, { frameId: 0 }, async (response) => {
-      const error = chrome.runtime.lastError;
-      const scanned = error ? [] : (response?.media || []);
-      void globalThis.ADM_DIAG?.emit("popup.frame0_reply", { ok: !error, count: scanned.length, errorRef: error?.message || "" }, null, error ? "WARN" : "INFO");
-      const captured = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA", tabId: tab.id }).catch(() => null);
-      const inspected = captured?.media?.length
-        ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_INSPECT_MEDIA_TRACKS", media: captured.media }).catch(() => null)
-        : null;
-      const trackInfo = new Map((inspected?.media || []).map((item) => [item.url, item]));
-      const network = (captured?.media || []).map((item) => {
-        const inspectedKind = trackInfo.get(item.url)?.kind;
-        const video = inspectedKind === "video" || inspectedKind === "muxed"
-          || (inspectedKind !== "audio" && networkMediaKind(item) === "video");
-        return {
-          url: item.url,
-          contentType: item.contentType || null,
-          kind: video ? "video" : "audio",
-          size: item.contentLength || null,
-          ext: video ? "mp4" : "audio",
-          title: (() => { try { return new URL(item.url).hostname.includes("tiktok") ? `TikTok — ${t("capturedResource")}` : t("capturedResource"); } catch { return t("capturedResource"); } })(),
-          capturedAt: item.capturedAt,
-          frameId: item.frameId,
-          muxed: inspectedKind === "muxed",
-          duration: trackInfo.get(item.url)?.duration || null,
-          networkCaptured: true,
-        };
-      });
-      media = mergeDetectedMedia(scanned, network, tab.url);
-      void globalThis.ADM_DIAG?.emit("popup.merged_inventory", { domCount: scanned.length, networkCount: network.length, mergedCount: media.length });
-      const picker = await chrome.runtime.sendMessage({ type: "APOCALIPSE_MEDIA_PICKER_CONTEXT", tabId: tab.id }).catch(() => null);
-      const requested = document.querySelector("#requested-media");
-      if (picker?.context) {
-        requested.hidden = false;
-        requested.querySelector("b").textContent = picker.context.title || t("capturedResource");
-        loadThumbnail(requested.querySelector("img"), picker.context);
-      } else requested.hidden = true;
-      render();
-    });
+    void refreshMediaInventory(tab, true);
   });
 });
+// Keep all three media tabs synchronized while a feed changes under the popup.
+setInterval(() => { if (activeMediaTab) void refreshMediaInventory(activeMediaTab); }, 1500);
 chrome.storage.local.get({ desktopTheme: "void" }, ({ desktopTheme }) => applyPopupTheme(desktopTheme));
 chrome.storage.local.get({ pairingToken: "" }, async ({ pairingToken }) => {
   document.querySelector("#pairing-token").value = pairingToken;

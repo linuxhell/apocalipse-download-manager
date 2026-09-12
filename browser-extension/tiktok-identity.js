@@ -3,7 +3,10 @@
 (() => {
   globalThis.ADM_DIAG?.register("tiktok-identity.js");
   const reasons = new WeakMap();
-  const explain = (video, reason, value) => { reasons.set(video, { reason, resolved: Boolean(value) }); return value; };
+  const explain = (video, reason, value, detail = {}) => {
+    reasons.set(video, { reason, resolved: Boolean(value), ...detail });
+    return value;
+  };
   const buttons = new WeakMap(), pageBindings = new WeakMap(), resolvedBindings = new WeakMap();
   const boundVideoProperty = Symbol.for('apocalipse.tiktok.boundVideo');
   const validUrl = (value) => {
@@ -25,11 +28,22 @@
       return `${url.hostname}${url.pathname}`;
     } catch { return null; }
   };
+  const videoVisible = (video) => {
+    if (!video?.isConnected || video.hidden || video.getAttribute?.('aria-hidden') === 'true') return false;
+    let rect; try { rect = video.getBoundingClientRect?.(); } catch { return false; }
+    if (!rect || rect.width < 40 || rect.height < 20 || rect.bottom <= 0 || rect.right <= 0
+      || rect.top >= (globalThis.innerHeight || 0) || rect.left >= (globalThis.innerWidth || 0)) return false;
+    let style; try { style = globalThis.getComputedStyle?.(video); } catch {}
+    return style?.display !== 'none' && style?.visibility !== 'hidden' && Number.parseFloat(style?.opacity ?? '1') > 0.01;
+  };
   const scopesFor = (video) => {
     const scopes = [];
     for (let node = video, depth = 0; node && depth < 18; node = node.parentElement, depth++) {
       if (node === document.body || node === document.documentElement || /^(BODY|HTML)$/.test(node.tagName || '')) break;
-      if ([...(node.querySelectorAll?.('video') || [])].some(other => other !== video)) break;
+      // TikTok keeps the next item as a hidden/preloaded <video>. Only another
+      // actually visible player is a boundary; hidden preload players must not
+      // prevent us from reaching the current card/framework identity.
+      if ([...(node.querySelectorAll?.('video') || [])].some(other => other !== video && videoVisible(other))) break;
       scopes.push(node);
       if (node !== video && node.matches?.('article,[data-e2e="recommend-list-item-container"],[data-e2e="feed-video"]')) break;
     }
@@ -54,7 +68,8 @@
     }
     return false;
   };
-  const records = (roots) => {
+  const networkRecords = [];
+  const records = (roots, followFiberParents = false) => {
     const found = [], queue = [...roots], seen = new WeakSet();
     for (let cursor = 0; cursor < queue.length && cursor < 14000; cursor++) {
       const value = queue[cursor];
@@ -64,13 +79,73 @@
       const id = typeof rawId === 'number' && !Number.isSafeInteger(rawId) ? '' : String(rawId);
       const author = value.author?.uniqueId || value.author?.unique_id || value.authorInfo?.uniqueId;
       const url = /^\d+$/.test(id) && author ? validUrl(`https://www.tiktok.com/@${author}/video/${id}`) : null;
-      if (url) found.push({ id, url, media: value.video || value.videoInfo || null });
-      // Fiber return/sibling links escape the clicked card. Do not traverse them.
+      if (url) {
+        const media = value.video || value.videoInfo || null;
+        found.push({ id, url, author: String(author), media,
+          duration: Number(media?.duration || value.duration || 0),
+          width: Number(media?.width || 0), height: Number(media?.height || 0) });
+      }
+      // Parent Fiber links are used only by the caller that requires one unique
+      // identity. The normal fallback remains confined to the clicked card.
       for (const [key, child] of Object.entries(value)) {
-        if (!['return', 'sibling', '_owner', 'alternate', 'stateNode'].includes(key) && child && typeof child === 'object') queue.push(child);
+        if (!['sibling', '_owner', 'alternate', 'stateNode'].includes(key)
+          && (followFiberParents || key !== 'return') && child && typeof child === 'object') queue.push(child);
       }
     }
     return found;
+  };
+  const rememberNetworkPayload = payload => {
+    for (const record of records([payload])) {
+      const previous = networkRecords.findIndex(item => item.id === record.id);
+      if (previous >= 0) networkRecords.splice(previous, 1);
+      networkRecords.push({ ...record, seenAt: Date.now() });
+    }
+    while (networkRecords.length > 240) networkRecords.shift();
+  };
+  const inspectResponse = response => {
+    try {
+      const type = String(response?.headers?.get?.('content-type') || '');
+      if (!/json/i.test(type)) return;
+      void response.clone().json().then(rememberNetworkPayload).catch(() => {});
+    } catch {}
+  };
+  // TikTok's current feed can render only Blob players and omit every permalink
+  // and React item prop from the DOM. Preserve the identities from the site's
+  // own feed response before that information is discarded by the renderer.
+  if (typeof globalThis.fetch === 'function' && !globalThis.__apocalipseTikTokFetchIdentity) {
+    globalThis.__apocalipseTikTokFetchIdentity = true;
+    const nativeFetch = globalThis.fetch;
+    globalThis.fetch = async function(...args) {
+      const response = await nativeFetch.apply(this, args);
+      inspectResponse(response);
+      return response;
+    };
+  }
+  if (typeof globalThis.XMLHttpRequest === 'function' && !globalThis.__apocalipseTikTokXhrIdentity) {
+    globalThis.__apocalipseTikTokXhrIdentity = true;
+    const nativeOpen = globalThis.XMLHttpRequest.prototype.open;
+    globalThis.XMLHttpRequest.prototype.open = function(...args) {
+      this.addEventListener?.('load', () => {
+        try {
+          const payload = this.responseType === 'json' ? this.response
+            : JSON.parse(String(this.responseText || ''));
+          rememberNetworkPayload(payload);
+        } catch {}
+      }, { once: true });
+      return nativeOpen.apply(this, args);
+    };
+  }
+  const networkCandidateFor = (video, profileAuthors = new Set()) => {
+    const duration = Number(video?.duration || 0), width = Number(video?.videoWidth || 0), height = Number(video?.videoHeight || 0);
+    const fresh = networkRecords.filter(record => Date.now() - record.seenAt < 10 * 60 * 1000);
+    const sized = fresh.filter(record => record.width > 0 && record.height > 0
+      && ((record.width === width && record.height === height) || (record.width === height && record.height === width)));
+    let matched = (sized.length ? sized : fresh).filter(record => record.duration > 0 && duration > 0
+      && Math.abs(record.duration - duration) < 1.25);
+    const authored = matched.filter(record => profileAuthors.has(record.author.toLowerCase()));
+    if (authored.length) matched = authored;
+    const url = unique(matched.map(record => record.url));
+    return { url, inspected: fresh.length, matched: matched.length };
   };
   const frameAncestorUrl = () => {
     if (typeof window === 'undefined') return null;
@@ -90,7 +165,7 @@
         if (node === parentDocument.body || node === parentDocument.documentElement) break;
         const siblingFrames = [...(node.querySelectorAll?.('iframe') || [])]
           .filter(other => other !== frame && other.isConnected);
-        const siblingVideos = [...(node.querySelectorAll?.('video') || [])].filter(other => other.isConnected);
+        const siblingVideos = [...(node.querySelectorAll?.('video') || [])].filter(other => other.isConnected && videoVisible(other));
         if (depth > 0 && (siblingFrames.length || siblingVideos.length)) break;
         for (const name of ['data-video-id', 'data-item-id', 'data-aweme-id']) {
           const id = node.getAttribute?.(name);
@@ -121,18 +196,22 @@
   const resolveCandidate = (video, allowPage = true) => {
     if (!video || !/(^|\.)tiktok\.com$/i.test(location.hostname)) return null;
     reasons.delete(video);
-    const scopes = scopesFor(video), anchors = [], explicitIds = new Set(), roots = [];
+    const scopes = scopesFor(video), anchors = [], explicitIds = new Set(), profileAuthors = new Set(), roots = [];
     for (const node of scopes) {
       for (const name of ['data-video-id', 'data-item-id', 'data-aweme-id']) {
         const id = node.getAttribute?.(name);
         if (id && /^\d+$/.test(id)) explicitIds.add(id);
       }
       for (const anchor of node.querySelectorAll?.('a[href*="/video/"]') || []) anchors.push(validUrl(anchor.href));
+      for (const anchor of node.querySelectorAll?.('a[href*="/@"]') || []) {
+        try { const match = new URL(anchor.href, location.href).pathname.match(/^\/@([^/]+)/); if (match) profileAuthors.add(decodeURIComponent(match[1]).toLowerCase()); } catch {}
+      }
       for (const key of Object.getOwnPropertyNames(node)) {
         if (/^__(?:reactProps|reactFiber|vue)/i.test(key)) roots.push(node[key]);
       }
     }
     const scopedRecords = records(roots);
+    const parentRecords = records(roots, true);
     const source = mediaKey(video.currentSrc || video.src || '');
     let matched = scopedRecords.filter(record => containsSource(record.media, source));
     if (!matched.length && source) {
@@ -144,6 +223,9 @@
       matched = records(globalRoots).filter(record => containsSource(record.media, source));
     }
     if (matched.length) return explain(video, "matched_media_source", unique(matched.map(record => record.url)));
+    const network = networkCandidateFor(video, profileAuthors);
+    if (network.url) return explain(video, "matched_feed_response", network.url,
+      { networkRecordCount: network.inspected, networkMatchCount: network.matched });
     if (explicitIds.size === 1) {
       const id = [...explicitIds][0];
       return unique([...anchors, ...scopedRecords.map(record => record.url)].filter(url => url?.endsWith(`/video/${id}`)));
@@ -156,13 +238,23 @@
       const scoped = unique(scopedRecords.map(record => record.url));
       if (scopedRecords.length) return explain(video, "scoped_framework_records", scoped);
     }
+    const parentIds = [...new Set(parentRecords.map(record => record.id).filter(Boolean))];
+    const parentScoped = unique(parentRecords.map(record => record.url));
+    if (parentScoped) return explain(video, "unique_parent_framework_record", parentScoped);
     const framed = frameAncestorUrl();
     if (framed) return explain(video, "parent_frame_candidate", framed);
     // Dedicated pages with one player remain supported. Never use the address
     // bar for a multi-player feed whose URL can lag behind scrolling.
     const videos = [...document.querySelectorAll('video')];
     const page = validUrl(location.href);
-    if (!allowPage || !page || videos.length !== 1 || videos[0] !== video) return explain(video, "no_bound_permalink", null);
+    if (!allowPage || !page || videos.length !== 1 || videos[0] !== video) return explain(video, "no_bound_permalink", null, {
+      scopeCount: scopes.length, scopedRecordCount: scopedRecords.length,
+      parentRecordCount: parentRecords.length, parentDistinctIds: parentIds.length,
+      explicitIdCount: explicitIds.size, anchorCount: anchors.filter(Boolean).length,
+      sourceIdentityPresent: Boolean(source),
+      networkRecordCount: network.inspected, networkMatchCount: network.matched,
+      profileAuthorCount: profileAuthors.size,
+    });
     const sourceIdentity = mediaKey(video.currentSrc || video.src || '') || String(video.currentSrc || video.src || '');
     const previous = pageBindings.get(video);
     if (previous?.page === page && previous.source !== sourceIdentity) return null;

@@ -42,6 +42,7 @@
             if (resolved && source === String(video.currentSrc || video.src || '')) {
               found.push({
                 url: resolved,
+                bindingProven: true,
                 score,
                 title: String(document.title || 'TikTok').trim().slice(0, 180),
                 thumbnail: String(video.poster || ''),
@@ -98,7 +99,7 @@
   async function refresh() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
     if (!tab?.id || !isTikTok(tab.url || '')) return;
-    const candidates = await collectTikTokFromAllFrames(tab.id);
+    const candidates = (await collectTikTokFromAllFrames(tab.id)).filter(item => item.bindingProven === true);
     if (!candidates.length) return;
     const unique = new Map();
     for (const item of candidates.sort((a, b) => a.score - b.score)) {
@@ -107,7 +108,7 @@
     const best = [...unique.values()][0];
     if (!best) return;
     void globalThis.ADM_DIAG?.emit("popup.all_frames_selection", { url: best.url, candidates: candidates.length,
-      reason: "viewport_heuristic_not_proven_binding", bindingProven: false }, null, "WARN");
+      reason: "installed_player_identity_resolver", bindingProven: true }, null, "WARN");
     const identified = {
       url: best.url,
       extractorUrl: best.url,

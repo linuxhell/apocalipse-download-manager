@@ -10,16 +10,21 @@ const tiktok = readFileSync(join(__dirname, '../browser-extension/tiktok-media-f
 
 // Run the scripts in manifest order, including TikTok's document-capture listener.
 // Browser APIs are mocked; installed click handlers and outgoing payloads are real.
-function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.com/video/a.mp4', sourceObject = null, permalink = null, network = [], inspections = [], shipped = false, readableBlob = false, onMediaQuery = null } = {}) {
+function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.com/video/a.mp4', sourceObject = null, permalink = null, network = [], inspections = [], shipped = false, readableBlob = false, onMediaQuery = null, sponsored = false } = {}) {
   const sent = [], fetched = [], appended = [], clickListeners = [];
   const location = new URL(url);
   const state = { permalink, network };
   const rect = { left: 20, top: 40, right: 500, bottom: 600, width: 480, height: 560 };
   const anchors = () => state.permalink ? [{ href: state.permalink, getBoundingClientRect: () => rect }] : [];
+  const sponsoredMarker = { innerText: 'Patrocinado',
+    getBoundingClientRect: () => ({ left: 30, right: 140, top: 10, bottom: 30, width: 110, height: 20 }) };
   const post = {
-    parentElement: null, innerHTML: '', getBoundingClientRect: () => rect,
-    querySelectorAll: selector => selector.includes('a[href') ? anchors() : [],
-    querySelector: selector => selector.includes('a[href') ? anchors()[0] || null : null,
+    parentElement: null, innerHTML: '', innerText: sponsored ? 'Synthetic author · Patrocinado' : 'Synthetic author · Reel normal', getBoundingClientRect: () => rect,
+    querySelectorAll: selector => selector.includes('aria-label*="Patrocinado"') && sponsored ? [sponsoredMarker]
+      : selector.includes('span,a') && sponsored ? [sponsoredMarker]
+      : selector.includes('a[href') ? anchors() : [],
+    querySelector: selector => selector.includes('aria-label*="Patrocinado"') && sponsored ? { ariaLabel: 'Patrocinado' }
+      : selector.includes('a[href') ? anchors()[0] || null : null,
   };
   const video = {
     tagName: 'VIDEO', dataset: {}, isConnected: true, currentSrc: source, src: source, srcObject: sourceObject,
@@ -88,6 +93,7 @@ function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.co
   assert.ok(button, 'the actual overlay must be installed');
   return {
     sent, fetched, state, location, video, button,
+    scan: () => context.testHooks.collect(),
     async click() {
       let stopped = false;
       const event = {
@@ -104,6 +110,16 @@ function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.co
     downloads: () => sent.filter(message => message.type === 'APOCALIPSE_DOWNLOAD').map(message => message.item),
   };
 }
+
+test('Facebook normal and sponsored srcObject players are classified separately', () => {
+  const normal = page({ url: 'https://www.facebook.com/', source: '', sourceObject: {} }).scan()
+    .find(item => item.visualOnly);
+  const ad = page({ url: 'https://www.facebook.com/', source: '', sourceObject: {}, sponsored: true }).scan()
+    .find(item => item.visualOnly);
+  assert.ok(normal, 'ordinary Reel remains available for identity resolution');
+  assert.equal(normal.recordingOnly, false);
+  assert.equal(ad, undefined, 'sponsored card is rejected before every capture path');
+});
 
 const track = (url, contentType = 'video/mp4', capturedAt = 1000, frameId = 0) => ({ url, contentType, capturedAt, frameId, ageMs: 10 });
 const videoA = 'https://v16.tiktok.com/video/a.mp4';
@@ -291,13 +307,95 @@ test('popup keeps capture metadata when DOM and network report the same video', 
   assert.equal(result[0].title, 'Current card');
 });
 test('popup hides incidental CDN tracks for both social-page extractors', () => {
-  for (const url of ['https://www.tiktok.com/', 'https://www.facebook.com/']) {
+  for (const url of ['https://www.tiktok.com/', 'https://www.facebook.com/', 'https://www.instagram.com/']) {
     const result = popupContext.mergeDetected([{ url: pageA, kind: 'video', pageExtractor: true }], [
       popupTrack(videoA, 'video', 1000), popupTrack(audioA, 'audio', 1001),
     ], url);
     assert.equal(result.length, 1);
     assert.equal(result[0].pageExtractor, true);
   }
+});
+test('a visual social video suppresses unrelated CDN fragments globally', () => {
+  for (const url of ['https://www.tiktok.com/', 'https://www.facebook.com/', 'https://www.instagram.com/']) {
+    const visual = { url: pageA, kind: 'video', thumbnail: 'https://img.example/current.jpg', pageExtractor: true };
+    const result = popupContext.mergeDetected([visual], [
+      popupTrack(videoA, 'video', 1000), popupTrack(audioA, 'audio', 1001),
+    ], url);
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), [visual]);
+  }
+});
+test('a bound Blob player keeps captured tracks available when identity is unresolved', () => {
+  const player = { url: 'https://www.tiktok.com/#apocalipse-player-1', kind: 'video',
+    playerBound: true, visualOnly: true, recommended: true,
+    rect: { left: 20, top: 40, width: 480, height: 560 } };
+  const result = popupContext.mergeDetected([player], [
+    popupTrack(videoA, 'video', 1000), popupTrack(videoB, 'video', 2000),
+  ], 'https://www.tiktok.com/');
+  assert.equal(result.length, 3);
+  assert.ok(result.some((item) => item.url === player.url && item.visualOnly));
+  assert.ok(result.some((item) => item.url === videoA && item.ambiguousSocialTrack));
+  assert.ok(result.some((item) => item.url === videoB && item.ambiguousSocialTrack));
+});
+test('a visualOnly Blob player cannot identify a captured MP4 by duration alone', () => {
+  for (const pageUrl of ['https://www.tiktok.com/', 'https://www.facebook.com/']) {
+    const player = { url: `${pageUrl}#apocalipse-player-1`, kind: 'video', duration: 30,
+      thumbnail: 'data:image/png;base64,current', title: 'Current visible video',
+      playerBound: true, visualOnly: true, recommended: true };
+    const current = { ...popupTrack(videoA, 'video', 1000), duration: 30, muxed: true };
+    const buffered = { ...popupTrack(videoB, 'video', 2000), duration: 42, muxed: true };
+    const result = popupContext.mergeDetected([player], [buffered, current], pageUrl);
+    assert.equal(result.length, 3);
+    assert.ok(result.find(item => item.url === player.url).visualOnly);
+    for (const item of result.filter(item => item.networkCaptured)) {
+      assert.equal(item.thumbnail, undefined);
+      assert.notEqual(item.title, player.title);
+    }
+  }
+});
+test('a generic social Blob player does not lend its thumbnail to a duration match', () => {
+  const hint = { url: 'https://www.facebook.com/', kind: 'video', duration: 30,
+    thumbnail: 'https://img.example/current.jpg', title: 'Visible card' };
+  const current = { ...popupTrack(videoA, 'video', 1000), duration: 30, muxed: true };
+  const other = { ...popupTrack(videoB, 'video', 2000), duration: 42, muxed: true };
+  const result = popupContext.mergeDetected([hint], [current, other], 'https://www.facebook.com/');
+  assert.equal(result.length, 3);
+  assert.equal(result.find(item => item.url === hint.url).thumbnail, hint.thumbnail);
+  assert.equal(result.find(item => item.url === videoA).thumbnail, undefined);
+  assert.equal(result.find(item => item.url === videoB).thumbnail, undefined);
+});
+
+test('duration fallback refuses tied social CDN tracks', () => {
+  const hint = { url: 'https://www.facebook.com/', kind: 'video', duration: 30,
+    thumbnail: 'https://img.example/current.jpg' };
+  const result = popupContext.mergeDetected([hint], [
+    { ...popupTrack(videoA, 'video', 1000), duration: 30, muxed: true },
+    { ...popupTrack(videoB, 'video', 2000), duration: 30.2, muxed: true },
+  ], 'https://www.facebook.com/');
+  assert.ok(result.length > 1);
+  assert.equal(result.find((item) => item.url === hint.url).ambiguousSocialTrack, true);
+});
+test('popup never assigns the viewport thumbnail to an anonymous CDN response', () => {
+  const popup = readFileSync(join(__dirname, '../browser-extension/popup.js'), 'utf8');
+  assert.match(popup, /item\.playerBound\s*&&\s*item\.recommended\s*&&\s*!item\.networkCaptured\s*&&\s*!item\.thumbnail\s*&&\s*item\.rect/);
+  assert.doesNotMatch(popup, /sort\(\(left, right\).*capturedAt/);
+});
+test('popup crops thumbnails using the exact bound player geometry', () => {
+  const popup = readFileSync(join(__dirname, '../browser-extension/popup.js'), 'utf8');
+  assert.match(popup, /rect:\s*visibleVideo\.rect/);
+  assert.match(popup, /viewport:\s*visibleVideo\.viewport/);
+  assert.match(popup, /if \(item\.visualOnly\) return null/);
+  assert.match(popup, /button\.disabled = Boolean\(item\.visualOnly\)/);
+});
+test('popup disables Preview for a generic social homepage extractor', () => {
+  const popup = readFileSync(join(__dirname, '../browser-extension/popup.js'), 'utf8');
+  assert.match(popup, /const socialExtractor = pageExtractor/);
+  assert.match(popup, /if \(!specific\) return null/);
+});
+test('popup refreshes video, audio and image inventory while it remains open', () => {
+  const popup = readFileSync(join(__dirname, '../browser-extension/popup.js'), 'utf8');
+  assert.match(popup, /async function refreshMediaInventory/);
+  assert.match(popup, /setInterval\(\(\) => \{ if \(activeMediaTab\)/);
+  assert.match(popup, /1500\)/);
 });
 test('popup does not flag complete HLS and DASH manifests as isolated social tracks', () => {
   for (const extension of ['m3u8', 'mpd']) {

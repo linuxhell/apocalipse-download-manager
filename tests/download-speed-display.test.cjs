@@ -47,6 +47,15 @@ test("quiet clipboard polling does not flood diagnostics", () => {
   );
 });
 
+test("clipboard suppression is checked again after an in-flight OS read", () => {
+  const clipboardReader = desktop.match(/fn read_clipboard_link[\s\S]*?\n}\n\n#\[tauri::command\]/)?.[0] || "";
+  assert.match(clipboardReader, /let clipboard_is_suppressed =/);
+  assert.equal((clipboardReader.match(/clipboard_is_suppressed\(\)\?/g) || []).length, 2);
+  assert.ok(clipboardReader.lastIndexOf("clipboard_is_suppressed()?") > clipboardReader.indexOf("read_text()"));
+  assert.match(clipboardReader, /suppressed_value\.as_deref\(\) == Some\(value\)/);
+  assert.match(desktop, /clipboard_suppressed_value: Mutex<Option<String>>/);
+});
+
 test("desktop package and interface versions cannot diverge", () => {
   const packageVersion = cargo.match(/\[workspace\.package\][\s\S]*?version = "([^"]+)"/)?.[1];
   assert.ok(packageVersion, "workspace package version is missing");
@@ -67,4 +76,88 @@ test("five readable light themes are available", () => {
   assert.match(ui, /invoke\("set_application_theme"/);
   assert.match(desktopCss, /\.remove-options button:hover[\s\S]*color-mix\(in srgb, var\(--accent\) 14%, var\(--surface\)\)/);
   assert.match(desktopCss, /\.remove-options button\.danger:hover[\s\S]*color-mix\(in srgb, #ff5364 12%, var\(--surface\)\)/);
+});
+
+test("HLS uses the selected destination for process and temporary files", () => {
+  assert.match(desktop, /command\.current_dir\(directory\)/);
+  assert.match(desktop, /\.arg\("--tmp-dir"\)\s*\.arg\(directory\)/);
+});
+
+test("failed thumbnails restore the compact icon without covering progress", () => {
+  assert.match(ui, /icon\.classList\.remove\("has-thumbnail"\)/);
+  assert.doesNotMatch(ui, /else if \(task\.thumbnail\)\s*\{\s*icon\.classList\.add\("has-thumbnail"\)/);
+  assert.match(desktopCss, /\.download-icon\s*\{[\s\S]*width:\s*32px;[\s\S]*height:\s*32px;/);
+});
+
+test("task state and action controls use the active theme instead of dark constants", () => {
+  assert.match(desktopCss, /\.download-state\s*\{[\s\S]*background:\s*color-mix\(in srgb, var\(--accent\) 10%, var\(--surface\)\)/);
+  assert.match(desktopCss, /\.task-action\s*\{[\s\S]*background:\s*var\(--surface-2\)/);
+});
+
+test("protected thumbnails are cached for the desktop handoff", () => {
+  const worker = fs.readFileSync(path.join(root, "browser-extension/background.js"), "utf8");
+  const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");
+  assert.match(worker, /const fetchThumbnailDataUrl = async/);
+  assert.match(worker, /const thumbnail = await portableThumbnail\(item\.thumbnail\)/);
+  assert.match(worker, /thumbnailDataCache/);
+  assert.match(desktop, /value\.len\(\) <= 600_000/);
+  assert.match(worker, /APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL/);
+  assert.match(worker, /chrome\.tabs\.captureVisibleTab/);
+  assert.match(worker, /new OffscreenCanvas/);
+  assert.match(content, /const captureThumbnailFor = async/);
+});
+
+test("thumbnail diagnostics distinguish DOM, captured, fetched and fallback sources", () => {
+  const popup = fs.readFileSync(path.join(root, "browser-extension/popup.js"), "utf8");
+  assert.match(popup, /thumbnail\.source_selected/);
+  assert.match(popup, /thumbnail\.fetch_succeeded/);
+  assert.match(popup, /thumbnail\.fallback/);
+  assert.match(popup, /thumbnails:\s*matches\.filter/);
+});
+
+test("feed thumbnails come from the exact visual player region before page metadata", () => {
+  const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");
+  assert.match(content, /const visualThumbnailFor = \(element\) =>/);
+  assert.match(content, /if \(videos\.length > 1\) break/);
+  assert.match(content, /if \(overlap < 0\.45\) continue/);
+  assert.match(content, /element\?\.getAttribute\?\.\("poster"\),\s*visualThumbnailFor\(element\)/);
+  assert.match(content, /const socialCardUrl = \(value\) =>/);
+  assert.match(content, /const cardThumbnailFor = \(anchor\) =>/);
+  assert.match(content, /Social feeds commonly expose the permalink and cover image before they/);
+  assert.match(content, /const playerContext = \(element\) =>/);
+  assert.match(content, /playerBound:\s*true/);
+  assert.match(content, /visualOnly:\s*true/);
+});
+
+test("Facebook photo permalinks never leak into the Videos tab", () => {
+  const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");
+  assert.match(content, /\/\\\/\(\?:photo\|photos\)\(\?:\\\.php\|\\\/\|\$\)\/i/);
+  assert.match(content, /Facebook uses `fbid` for both photos and videos/);
+});
+
+test("a closed browser becomes disconnected after the initial extension wait", () => {
+  assert.match(ui, /bridgeDisconnected:\s*"Extension disconnected"/);
+  assert.match(ui, /bridgeDisconnected:\s*"Extensão desconectada"/);
+  assert.match(ui, /bridgeDisconnected:\s*"扩展已断开连接"/);
+  assert.match(ui, /Date\.now\(\) - bridgeStatusStartedAt < 6000/);
+});
+
+test("download destinations and task copy follow the active theme palette", () => {
+  assert.match(desktopCss, /\.destination-select\s*\{[\s\S]*color:\s*var\(--text\)/);
+  assert.match(desktopCss, /\.destination-row\.unavailable \.destination-select span\s*\{\s*color:\s*var\(--muted\)/);
+  assert.match(desktopCss, /\.download-info strong\s*\{[\s\S]*color:\s*color-mix/);
+});
+
+test("paused HLS cleanup includes its isolated segment workspace", () => {
+  assert.match(desktop, /fn hls_workspace_path\(task: &DownloadTask\)/);
+  assert.match(desktop, /torrent_root \|\| hls_workspace/);
+});
+
+test("automatic mirrors are server-advertised, identity-checked and latency-ranked", () => {
+  const core = fs.readFileSync(path.join(root, "crates/apocalipse-core/src/download.rs"), "utf8");
+  assert.match(core, /pub async fn verified_sources/);
+  assert.match(core, /rel=\\"duplicate\\"/);
+  assert.match(core, /same_download_identity/);
+  assert.match(core, /verified\.sort_by_key\(\|\(_, elapsed\)\| \*elapsed\)/);
+  assert.match(desktop, /engine\.verified_sources\(&request, &mirrors\)\.await/);
 });

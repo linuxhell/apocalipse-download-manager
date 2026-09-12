@@ -43,6 +43,8 @@ struct AppState {
     settings: Mutex<UserSettings>,
     settings_path: PathBuf,
     bridge_last_seen: Mutex<Option<Instant>>,
+    clipboard_suppressed_until: Mutex<Option<Instant>>,
+    clipboard_suppressed_value: Mutex<Option<String>>,
     bridge_pending: Mutex<Vec<BridgeDownload>>,
     blob_uploads: Mutex<HashMap<uuid::Uuid, BlobUpload>>,
     recording_stops: Mutex<HashSet<DownloadId>>,
@@ -1997,8 +1999,7 @@ async fn download_with_mirrors(
     mirrors: Vec<String>,
     events: mpsc::Sender<DownloadEvent>,
 ) -> anyhow::Result<()> {
-    let mut sources = vec![request.url.clone()];
-    sources.extend(mirrors);
+    let sources = engine.verified_sources(&request, &mirrors).await;
     let mut last_error = None;
     for source in sources {
         let mut attempt = request.clone();
@@ -2448,6 +2449,11 @@ async fn run_external_download(
                 command
             } else {
                 let mut command = tokio::process::Command::new(&tools.2);
+                // N_m3u8DL-RE creates its segment workspace relative to the
+                // process directory unless an explicit temporary directory is
+                // supplied. A GUI application launched on Windows can inherit
+                // C:\Windows\System32, where regular users cannot write.
+                command.current_dir(directory);
                 if let Some(proxy_url) = proxy_url.as_deref() {
                     command.arg("--custom-proxy").arg(proxy_url);
                 }
@@ -2459,6 +2465,8 @@ async fn run_external_download(
                 command
                     .arg(&task.source)
                     .arg("--save-dir")
+                    .arg(directory)
+                    .arg("--tmp-dir")
                     .arg(directory)
                     .args([
                         "--save-name",
@@ -4528,7 +4536,7 @@ fn enqueue_download_impl(
             (!value.trim().is_empty()).then(|| value.trim().to_owned())
         });
         task.thumbnail = context.thumbnail.filter(|value| {
-            value.len() <= 8192
+            value.len() <= 600_000
                 && (value.starts_with("https://")
                     || value.starts_with("http://")
                     || value.starts_with("data:image/"))
@@ -5391,6 +5399,14 @@ fn read_clipboard_link(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Option<String>, String> {
+    let clipboard_is_suppressed = || -> Result<bool, String> {
+        Ok(state
+            .clipboard_suppressed_until
+            .lock()
+            .map_err(|error| error.to_string())?
+            .is_some_and(|until| Instant::now() < until))
+    };
+    let suppressed_before_read = clipboard_is_suppressed()?;
     if !state
         .settings
         .lock()
@@ -5405,6 +5421,25 @@ fn read_clipboard_link(
         return Ok(None);
     };
     let value = value.trim();
+    // The suppression request can arrive while the OS clipboard read is in
+    // progress. Recheck after the read so Facebook's internal Copy Link probe
+    // can never escape through an already-running clipboard poll.
+    let suppressed = suppressed_before_read || clipboard_is_suppressed()?;
+    let mut suppressed_value = state
+        .clipboard_suppressed_value
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if suppressed {
+        *suppressed_value = Some(value.to_owned());
+        return Ok(None);
+    }
+    // Copy Link remains in the Windows clipboard after the timed guard ends.
+    // Keep consuming that exact internal value until the user copies something
+    // else, otherwise the next 750 ms UI poll opens a delayed save dialog.
+    if suppressed_value.as_deref() == Some(value) {
+        return Ok(None);
+    }
+    *suppressed_value = None;
     Ok(classify_url(value).map(|_| value.to_owned()))
 }
 
@@ -5496,7 +5531,9 @@ fn bridge_content_length(headers: &str) -> usize {
 }
 
 fn read_bridge_request(stream: &mut TcpStream) -> Option<Vec<u8>> {
-    const MAX_REQUEST_SIZE: usize = 262_144;
+    // Authenticated media requests may include a bounded thumbnail. Keep a
+    // defensive ceiling while allowing the extension's portable preview image.
+    const MAX_REQUEST_SIZE: usize = 786_432;
     let mut request = Vec::with_capacity(8_192);
     let mut chunk = [0_u8; 8_192];
     loop {
@@ -6319,6 +6356,28 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                 bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}");
             }
         }
+    } else if first.starts_with("POST /v1/clipboard-suppress ") {
+        let trace = serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|value| value["traceId"].as_str().map(str::to_owned))
+            .filter(|value| uuid::Uuid::parse_str(value).is_ok());
+        if let Ok(mut until) = state.clipboard_suppressed_until.lock() {
+            *until = Some(Instant::now() + Duration::from_secs(4));
+        }
+        state.diagnostics.record(
+            "clipboard.preview_identity_suppressed",
+            "INFO",
+            trace.as_deref(),
+            None,
+            serde_json::json!({"durationMs":4000,"saveDialogBlocked":true}),
+        );
+        diagnostic_log(
+            &state,
+            "DEBUG",
+            "clipboard.preview_identity_suppressed",
+            "duration_ms=4000",
+        );
+        bridge_response(&mut stream, "202 Accepted", origin, "{\"ok\":true}");
     } else if first.starts_with("POST /v1/download ") {
         match serde_json::from_str::<BridgeDownload>(body)
             .map_err(|error| error.to_string())
@@ -7032,7 +7091,9 @@ async fn remove_downloads(
                     classify_url(&task.source),
                     Some(DownloadKind::Torrent | DownloadKind::Magnet)
                 ) && path == task.destination;
-                remove_path_with_retry(&path, torrent_root).await?;
+                let hls_workspace = matches!(classify_url(&task.source), Some(DownloadKind::Hls))
+                    && hls_workspace_path(task).as_ref() == Some(&path);
+                remove_path_with_retry(&path, torrent_root || hls_workspace).await?;
             }
         }
     }
@@ -7081,7 +7142,23 @@ fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
             }
         }
     }
+    if matches!(classify_url(&task.source), Some(DownloadKind::Hls)) {
+        if let Some(workspace) = hls_workspace_path(task) {
+            if !paths.contains(&workspace) {
+                paths.push(workspace);
+            }
+        }
+    }
     paths
+}
+
+fn hls_workspace_path(task: &DownloadTask) -> Option<PathBuf> {
+    let parent = task.destination.parent()?;
+    let stem = task.destination.file_stem()?;
+    if stem.is_empty() {
+        return None;
+    }
+    Some(parent.join(stem))
 }
 
 async fn remove_path_with_retry(path: &Path, allow_directory: bool) -> Result<(), String> {
@@ -7153,6 +7230,8 @@ fn main() {
                 settings: Mutex::new(initial_settings),
                 settings_path,
                 bridge_last_seen: Mutex::new(None),
+                clipboard_suppressed_until: Mutex::new(None),
+                clipboard_suppressed_value: Mutex::new(None),
                 bridge_pending: Mutex::new(Vec::new()),
                 blob_uploads: Mutex::new(HashMap::new()),
                 recording_stops: Mutex::new(HashSet::new()),
@@ -7674,6 +7753,11 @@ mod tests {
         let paths = download_paths(&task);
         assert!(paths.contains(&PathBuf::from("C:/Downloads/157651625.mp4")));
         assert!(paths.contains(&partial_path(&task.destination)));
+        assert!(paths.contains(&PathBuf::from("C:/Downloads/157651625")));
+        assert_eq!(
+            hls_workspace_path(&task),
+            Some(PathBuf::from("C:/Downloads/157651625"))
+        );
     }
 
     #[tokio::test]
