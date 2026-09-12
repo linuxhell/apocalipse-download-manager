@@ -147,6 +147,15 @@ test('buttons keep their exact video reference, not the nearest player geometry'
   assert.equal(f.api.videoFor(button), b.video); assert.notEqual(f.api.videoFor(button), a.video);
   b.video.isConnected = false; assert.equal(f.api.videoFor(button), null);
 });
+test('a copied TikTok permalink is learned only by the exact player and source', () => {
+  const f = fixture(); const a = f.card('111', 'blob:a'), b = f.card('222', 'blob:b');
+  a.root.children = [a.video]; b.root.children = [b.video];
+  assert.equal(f.api.learn(a.video, 'https://www.tiktok.com/@right/video/777'), 'https://www.tiktok.com/@right/video/777');
+  assert.equal(f.api.resolve(a.video), 'https://www.tiktok.com/@right/video/777');
+  assert.notEqual(f.api.resolve(b.video), 'https://www.tiktok.com/@right/video/777');
+  a.video.currentSrc = a.video.src = 'blob:recycled';
+  assert.notEqual(f.api.resolve(a.video), 'https://www.tiktok.com/@right/video/777');
+});
 test('button binding survives a resolver realm restart without guessing another player', () => {
   const f = fixture(); const a = f.card('111', 'blob:a'), b = f.card('222', 'blob:b');
   const button = {}; f.api.bind(button, b.video);

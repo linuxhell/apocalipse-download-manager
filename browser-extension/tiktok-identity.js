@@ -7,7 +7,7 @@
     reasons.set(video, { reason, resolved: Boolean(value), ...detail });
     return value;
   };
-  const buttons = new WeakMap(), pageBindings = new WeakMap(), resolvedBindings = new WeakMap();
+  const buttons = new WeakMap(), pageBindings = new WeakMap(), resolvedBindings = new WeakMap(), learnedBindings = new WeakMap();
   const boundVideoProperty = Symbol.for('apocalipse.tiktok.boundVideo');
   const validUrl = (value) => {
     try {
@@ -276,6 +276,12 @@
   };
   globalThis.ApocalipseTikTokIdentity = {
     resolve(video) {
+      const learned = learnedBindings.get(video);
+      if (learned) {
+        const source = String(video.currentSrc || video.src || '');
+        if (video.isConnected && learned.source === source && Date.now() - learned.at < 10 * 60 * 1000) return learned.url;
+        learnedBindings.delete(video);
+      }
       // The MAIN-world reader can see framework props that ISOLATED scripts
       // cannot. Exchange only strings on the selected element, never credentials.
       if (video?.dispatchEvent && globalThis.Event) {
@@ -295,6 +301,16 @@
       return resolveLocal(video);
     },
     resolveLocal, scopesFor, validUrl, frameAncestorUrl,
+    learn(video, value) {
+      const url = validUrl(value);
+      if (!video?.isConnected || !url) return null;
+      const binding = { url, source: String(video.currentSrc || video.src || ''), at: Date.now() };
+      learnedBindings.set(video, binding);
+      video.addEventListener?.('emptied', () => {
+        if (learnedBindings.get(video) === binding) learnedBindings.delete(video);
+      }, { once: true });
+      return url;
+    },
     diagnosticState(video) { return reasons.get(video) || { reason: "not_evaluated" }; },
     bind(button, video) {
       buttons.set(button, video);

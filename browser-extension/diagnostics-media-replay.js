@@ -104,16 +104,19 @@
     if (!text || text === state.before) return;
     const identity = canonicalMediaUrl(text);
     if (!identity) return; // Arbitrary clipboard content is never emitted.
+    if (identity.platform === 'tiktok' && state.video?.isConnected) {
+      globalThis.ApocalipseTikTokIdentity?.learn?.(state.video, identity.url);
+    }
     void globalThis.ADM_DIAG?.emit?.('media_replay.clipboard_probe', {
       result: 'resolved', reason: 'canonical_media_link_observed', platform: identity.platform,
-      canonicalClass: identity.canonicalClass, url: identity.url, elapsedMs: Date.now() - state.startedAt,
-      ...state.player,
+      canonicalClass: identity.canonicalClass, ...state.player,
+      canonicalUrl: identity.url, elapsedMs: Date.now() - state.startedAt,
     }, state.traceId);
     clearPending(state);
   };
   const beginClipboardWindow = async (event, video, traceId) => {
     clearPending();
-    const state = { traceId, before: '', startedAt: Date.now(), until: Date.now() + 8000,
+    const state = { traceId, video, before: '', startedAt: Date.now(), until: Date.now() + 8000,
       player: globalThis.ADM_DIAG?.player?.(video) || {}, timer: null, expiry: null, readFailureLogged: false };
     // Publish the association before awaiting clipboard permission so the
     // following native contextmenu event keeps the same trace.

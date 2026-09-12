@@ -10,8 +10,8 @@ const native = readFileSync(join(root, 'apps/desktop/src-tauri/src/diagnostics_v
 const popup = readFileSync(join(root, 'browser-extension/popup.js'), 'utf8');
 const desktop = readFileSync(join(root, 'apps/desktop/src-tauri/src/main.rs'), 'utf8');
 
-test('0.3.145 loads the opt-in replay before media handlers in every isolated content chain', () => {
-  assert.equal(manifest.version, '0.3.145');
+test('0.3.146 loads the opt-in replay before media handlers in every isolated content chain', () => {
+  assert.equal(manifest.version, '0.3.146');
   for (const entry of manifest.content_scripts.filter(item => item.js.includes('content.js'))) {
     assert.ok(entry.js.includes('diagnostics-media-replay.js'));
     assert.ok(entry.js.indexOf('diagnostics.js') < entry.js.indexOf('diagnostics-media-replay.js'));
@@ -34,6 +34,9 @@ test('clipboard probe is short-lived and emits only canonical social media links
   assert.match(source, /tiktok_video/);
   for (const kind of ['facebook_watch_id', 'facebook_share_video', 'facebook_profile_video', 'facebook_reel']) assert.match(source, new RegExp(kind));
   assert.match(source, /clearInterval\(pending\.timer\)/);
+  assert.match(source, /canonicalUrl: identity\.url/);
+  assert.doesNotMatch(source, /url: identity\.url[\s\S]{0,120}\.\.\.state\.player/);
+  assert.match(source, /ApocalipseTikTokIdentity\?\.learn/);
 });
 
 test('Facebook replay distinguishes link routes and exact sponsored-card evidence', () => {
