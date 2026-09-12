@@ -47,6 +47,13 @@ test("quiet clipboard polling does not flood diagnostics", () => {
   );
 });
 
+test("clipboard suppression is checked again after an in-flight OS read", () => {
+  const clipboardReader = desktop.match(/fn read_clipboard_link[\s\S]*?\n}\n\n#\[tauri::command\]/)?.[0] || "";
+  assert.match(clipboardReader, /let clipboard_is_suppressed =/);
+  assert.equal((clipboardReader.match(/if clipboard_is_suppressed\(\)\?/g) || []).length, 2);
+  assert.ok(clipboardReader.lastIndexOf("if clipboard_is_suppressed()?") > clipboardReader.indexOf("read_text()"));
+});
+
 test("desktop package and interface versions cannot diverge", () => {
   const packageVersion = cargo.match(/\[workspace\.package\][\s\S]*?version = "([^"]+)"/)?.[1];
   assert.ok(packageVersion, "workspace package version is missing");

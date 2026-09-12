@@ -5398,12 +5398,14 @@ fn read_clipboard_link(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Option<String>, String> {
-    if state
+    let clipboard_is_suppressed = || -> Result<bool, String> {
+        Ok(state
         .clipboard_suppressed_until
         .lock()
         .map_err(|error| error.to_string())?
-        .is_some_and(|until| Instant::now() < until)
-    {
+        .is_some_and(|until| Instant::now() < until))
+    };
+    if clipboard_is_suppressed()? {
         return Ok(None);
     }
     if !state
@@ -5419,6 +5421,12 @@ fn read_clipboard_link(
     let Ok(value) = app.clipboard().read_text() else {
         return Ok(None);
     };
+    // The suppression request can arrive while the OS clipboard read is in
+    // progress. Recheck after the read so Facebook's internal Copy Link probe
+    // can never escape through an already-running clipboard poll.
+    if clipboard_is_suppressed()? {
+        return Ok(None);
+    }
     let value = value.trim();
     Ok(classify_url(value).map(|_| value.to_owned()))
 }
