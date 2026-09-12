@@ -21,10 +21,10 @@ function node({tag='DIV', r=rect(), parent=null, attrs={}, videos=[], click=null
   };
 }
 
-test('0.3.146 manifest version is exact', () => {
+test('0.3.147 manifest version is exact', () => {
   const manifest = JSON.parse(src('manifest.json'));
-  assert.equal(manifest.version, '0.3.146');
-  assert.match(manifest.version_name, /Bind copied TikTok identity/);
+  assert.equal(manifest.version, '0.3.147');
+  assert.match(manifest.version_name, /Never pair a TikTok thumbnail/);
 });
 
 test('0.3.132 resolved Preview and Download are dispatched explicitly, never synthetic re-click', () => {

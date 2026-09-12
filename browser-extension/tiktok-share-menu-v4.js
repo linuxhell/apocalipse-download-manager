@@ -126,8 +126,27 @@
       return { ...base, url: null, reason: 'tiktok_copy_link_item_not_found', freshItemsSeen: fresh.length,
         frameworkValuesInspected: found.inspected, copyCandidates: 0, dismissalMethod };
     }
+    const probeAttribute = 'data-apocalipse-tiktok-copy-probe';
+    const resultAttribute = 'data-apocalipse-tiktok-copy-result';
+    const probeToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    video.removeAttribute(resultAttribute);
+    video.setAttribute(probeAttribute, probeToken);
     copy.click();
-    setTimeout(() => dismiss(fresh), 600);
+    let captured = null;
+    for (let attempt = 0; attempt < 10 && !captured; attempt += 1) {
+      await C.wait(50);
+      if (video.getAttribute(probeAttribute) === probeToken) captured = canonical(video.getAttribute(resultAttribute));
+    }
+    video.removeAttribute(probeAttribute);
+    video.removeAttribute(resultAttribute);
+    if (captured) {
+      const dismissalMethod = dismiss(fresh);
+      audit({ resolved: true, reason: 'clipboard_write_identity', freshItemsSeen: fresh.length,
+        frameworkValuesInspected: found.inspected, copyCandidates: 1, dismissalMethod });
+      return { ...base, url: captured, reason: 'tiktok_copy_handler_identity', freshItemsSeen: fresh.length,
+        frameworkValuesInspected: found.inspected, copyCandidates: 1, dismissalMethod };
+    }
+    setTimeout(() => dismiss(fresh), 100);
     audit({ resolved: false, reason: 'copy_clicked', freshItemsSeen: fresh.length,
       frameworkValuesInspected: found.inspected, copyCandidates: 1,
       dismissalMethod: 'delayed_after_copy', clipboardCandidatePresent: Boolean(found.candidate) });

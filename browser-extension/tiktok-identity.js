@@ -17,6 +17,28 @@
         ? `https://www.tiktok.com/@${match[1]}/video/${match[2]}` : null;
     } catch { return null; }
   };
+  // TikTok's Copy link handler knows the exact permalink even when the browser
+  // refuses a synthetic clipboard write. While an exact player is explicitly
+  // marked by our share probe, observe only that canonical URL and forward the
+  // original write unchanged. No clipboard content is read or retained here.
+  const copyProbeAttribute = 'data-apocalipse-tiktok-copy-probe';
+  const copyResultAttribute = 'data-apocalipse-tiktok-copy-result';
+  const clipboard = globalThis.navigator?.clipboard;
+  const nativeWriteText = clipboard?.writeText;
+  if (typeof nativeWriteText === 'function' && !globalThis.__apocalipseTikTokClipboardWriteIdentity) {
+    globalThis.__apocalipseTikTokClipboardWriteIdentity = true;
+    const wrappedWriteText = function(value) {
+      try {
+        const permalink = validUrl(value);
+        const marked = [...document.querySelectorAll(`video[${copyProbeAttribute}]`)]
+          .filter(video => video.isConnected);
+        if (permalink && marked.length === 1) marked[0].setAttribute(copyResultAttribute, permalink);
+      } catch {}
+      return Reflect.apply(nativeWriteText, this, arguments);
+    };
+    try { Object.defineProperty(clipboard, 'writeText', { configurable: true, writable: true, value: wrappedWriteText }); }
+    catch { try { clipboard.writeText = wrappedWriteText; } catch {} }
+  }
   const mediaKey = (value) => {
     try {
       const url = new URL(value);
@@ -224,13 +246,17 @@
     }
     if (matched.length) return explain(video, "matched_media_source", unique(matched.map(record => record.url)));
     const network = networkCandidateFor(video, profileAuthors);
-    if (network.url) return explain(video, "matched_feed_response", network.url,
-      { networkRecordCount: network.inspected, networkMatchCount: network.matched });
+    // Duration, dimensions and a nearby author are useful diagnostics, but are
+    // not an identity. Different feed items routinely share all three. The
+    // 0.3.146 field log proved that accepting this hint can pair one thumbnail
+    // with another video's permalink.
+    const networkHint = network.url;
     if (explicitIds.size === 1) {
       const id = [...explicitIds][0];
       return unique([...anchors, ...scopedRecords.map(record => record.url)].filter(url => url?.endsWith(`/video/${id}`)));
     }
-    if (explicitIds.size > 1) return explain(video, "conflicting_explicit_ids", null);
+    if (explicitIds.size > 1) return explain(video, "conflicting_explicit_ids", null,
+      { networkHintPresent: Boolean(networkHint), networkRecordCount: network.inspected, networkMatchCount: network.matched });
     // A unique permalink in this card is authoritative; multiple links are not.
     if (anchors.some(Boolean)) return explain(video, "scoped_card_links", unique(anchors));
     // Props are only usable without a source match when scoped to an actual card.
@@ -247,12 +273,13 @@
     // bar for a multi-player feed whose URL can lag behind scrolling.
     const videos = [...document.querySelectorAll('video')];
     const page = validUrl(location.href);
-    if (!allowPage || !page || videos.length !== 1 || videos[0] !== video) return explain(video, "no_bound_permalink", null, {
+    if (!allowPage || !page || videos.length !== 1 || videos[0] !== video) return explain(video, "feed_response_hint_only", null, {
       scopeCount: scopes.length, scopedRecordCount: scopedRecords.length,
       parentRecordCount: parentRecords.length, parentDistinctIds: parentIds.length,
       explicitIdCount: explicitIds.size, anchorCount: anchors.filter(Boolean).length,
       sourceIdentityPresent: Boolean(source),
       networkRecordCount: network.inspected, networkMatchCount: network.matched,
+      networkHintPresent: Boolean(networkHint),
       profileAuthorCount: profileAuthors.size,
     });
     const sourceIdentity = mediaKey(video.currentSrc || video.src || '') || String(video.currentSrc || video.src || '');
@@ -279,7 +306,8 @@
       const learned = learnedBindings.get(video);
       if (learned) {
         const source = String(video.currentSrc || video.src || '');
-        if (video.isConnected && learned.source === source && Date.now() - learned.at < 10 * 60 * 1000) return learned.url;
+        if (video.isConnected && learned.source === source && Date.now() - learned.at < 10 * 60 * 1000)
+          return explain(video, "learned_clipboard_identity", learned.url, { exactBinding: true });
         learnedBindings.delete(video);
       }
       // The MAIN-world reader can see framework props that ISOLATED scripts

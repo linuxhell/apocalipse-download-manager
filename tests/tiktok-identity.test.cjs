@@ -109,12 +109,19 @@ test('unresolved TikTok identity reports safe structure counts without page cont
 
 test('TikTok preserves item identities from feed responses before Blob rendering discards them', () => {
   assert.match(script, /rememberNetworkPayload/);
-  assert.match(script, /matched_feed_response/);
+  assert.match(script, /feed_response_hint_only/);
   assert.match(script, /__apocalipseTikTokFetchIdentity/);
   assert.match(script, /__apocalipseTikTokXhrIdentity/);
 });
 
-test('a unique TikTok feed-response duration and size resolves the current Blob player', async () => {
+test('TikTok Copy handler exposes only a canonical permalink for one explicitly marked player', () => {
+  assert.match(script, /__apocalipseTikTokClipboardWriteIdentity/);
+  assert.match(script, /marked\.length === 1/);
+  assert.match(script, /setAttribute\(copyResultAttribute, permalink\)/);
+  assert.match(script, /Reflect\.apply\(nativeWriteText, this, arguments\)/);
+});
+
+test('duration and size alone never identify the current Blob player', async () => {
   const payload = { itemList: [
     { id: '777', author: { uniqueId: 'right' }, video: { duration: 9, width: 1080, height: 1920 } },
     { id: '888', author: { uniqueId: 'other' }, video: { duration: 20, width: 1080, height: 1920 } },
@@ -125,10 +132,12 @@ test('a unique TikTok feed-response duration and size resolves the current Blob 
   const current = f.card('111', 'blob:current', 'div');
   current.root.children = [current.video]; current.video.duration = 9;
   current.video.videoWidth = 1080; current.video.videoHeight = 1920;
-  assert.equal(f.api.resolveLocal(current.video, false), 'https://www.tiktok.com/@right/video/777');
+  assert.equal(f.api.resolveLocal(current.video, false), null);
+  assert.equal(f.api.diagnosticState(current.video).reason, 'feed_response_hint_only');
+  assert.equal(f.api.diagnosticState(current.video).networkHintPresent, true);
 });
 
-test('TikTok author profile disambiguates feed records with equal duration and size', async () => {
+test('author plus duration and size remain a hint, not an exact identity', async () => {
   const payload = { itemList: [
     { id: '777', author: { uniqueId: 'right' }, video: { duration: 9, width: 1080, height: 1920 } },
     { id: '888', author: { uniqueId: 'other' }, video: { duration: 9, width: 1080, height: 1920 } },
@@ -139,7 +148,8 @@ test('TikTok author profile disambiguates feed records with equal duration and s
   const profile = new Element('a'); profile.href = 'https://www.tiktok.com/@right';
   current.root.children = [current.video, profile]; current.video.duration = 9;
   current.video.videoWidth = 1080; current.video.videoHeight = 1920;
-  assert.equal(f.api.resolveLocal(current.video, false), 'https://www.tiktok.com/@right/video/777');
+  assert.equal(f.api.resolveLocal(current.video, false), null);
+  assert.equal(f.api.diagnosticState(current.video).reason, 'feed_response_hint_only');
 });
 test('buttons keep their exact video reference, not the nearest player geometry', () => {
   const f = fixture(); const a = f.card('111', 'blob:a'), b = f.card('222', 'blob:b');
@@ -152,6 +162,7 @@ test('a copied TikTok permalink is learned only by the exact player and source',
   a.root.children = [a.video]; b.root.children = [b.video];
   assert.equal(f.api.learn(a.video, 'https://www.tiktok.com/@right/video/777'), 'https://www.tiktok.com/@right/video/777');
   assert.equal(f.api.resolve(a.video), 'https://www.tiktok.com/@right/video/777');
+  assert.equal(f.api.diagnosticState(a.video).reason, 'learned_clipboard_identity');
   assert.notEqual(f.api.resolve(b.video), 'https://www.tiktok.com/@right/video/777');
   a.video.currentSrc = a.video.src = 'blob:recycled';
   assert.notEqual(f.api.resolve(a.video), 'https://www.tiktok.com/@right/video/777');
