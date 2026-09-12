@@ -114,7 +114,7 @@ test('Facebook normal and sponsored srcObject players are classified separately'
     .find(item => item.visualOnly);
   assert.ok(normal, 'ordinary Reel remains available for identity resolution');
   assert.equal(normal.recordingOnly, false);
-  assert.equal(ad.recordingOnly, true);
+  assert.equal(ad, undefined, 'sponsored card is rejected before every capture path');
 });
 
 const track = (url, contentType = 'video/mp4', capturedAt = 1000, frameId = 0) => ({ url, contentType, capturedAt, frameId, ageMs: 10 });

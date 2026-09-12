@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.137",
+  "version": "0.3.138",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -140,5 +140,5 @@
       "48": "icons/alien-48.png"
     }
   },
-  "version_name": "0.3.137 test - Preserve normal Facebook Reels and resilient overlays"
+  "version_name": "0.3.138 test - Exclude sponsored Facebook cards before capture"
 }

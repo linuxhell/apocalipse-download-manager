@@ -50,8 +50,10 @@ test("quiet clipboard polling does not flood diagnostics", () => {
 test("clipboard suppression is checked again after an in-flight OS read", () => {
   const clipboardReader = desktop.match(/fn read_clipboard_link[\s\S]*?\n}\n\n#\[tauri::command\]/)?.[0] || "";
   assert.match(clipboardReader, /let clipboard_is_suppressed =/);
-  assert.equal((clipboardReader.match(/if clipboard_is_suppressed\(\)\?/g) || []).length, 2);
-  assert.ok(clipboardReader.lastIndexOf("if clipboard_is_suppressed()?") > clipboardReader.indexOf("read_text()"));
+  assert.equal((clipboardReader.match(/clipboard_is_suppressed\(\)\?/g) || []).length, 2);
+  assert.ok(clipboardReader.lastIndexOf("clipboard_is_suppressed()?") > clipboardReader.indexOf("read_text()"));
+  assert.match(clipboardReader, /suppressed_value\.as_deref\(\) == Some\(value\)/);
+  assert.match(desktop, /clipboard_suppressed_value: Mutex<Option<String>>/);
 });
 
 test("desktop package and interface versions cannot diverge", () => {

@@ -44,6 +44,7 @@ struct AppState {
     settings_path: PathBuf,
     bridge_last_seen: Mutex<Option<Instant>>,
     clipboard_suppressed_until: Mutex<Option<Instant>>,
+    clipboard_suppressed_value: Mutex<Option<String>>,
     bridge_pending: Mutex<Vec<BridgeDownload>>,
     blob_uploads: Mutex<HashMap<uuid::Uuid, BlobUpload>>,
     recording_stops: Mutex<HashSet<DownloadId>>,
@@ -5405,9 +5406,7 @@ fn read_clipboard_link(
             .map_err(|error| error.to_string())?
             .is_some_and(|until| Instant::now() < until))
     };
-    if clipboard_is_suppressed()? {
-        return Ok(None);
-    }
+    let suppressed_before_read = clipboard_is_suppressed()?;
     if !state
         .settings
         .lock()
@@ -5421,13 +5420,26 @@ fn read_clipboard_link(
     let Ok(value) = app.clipboard().read_text() else {
         return Ok(None);
     };
+    let value = value.trim();
     // The suppression request can arrive while the OS clipboard read is in
     // progress. Recheck after the read so Facebook's internal Copy Link probe
     // can never escape through an already-running clipboard poll.
-    if clipboard_is_suppressed()? {
+    let suppressed = suppressed_before_read || clipboard_is_suppressed()?;
+    let mut suppressed_value = state
+        .clipboard_suppressed_value
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if suppressed {
+        *suppressed_value = Some(value.to_owned());
         return Ok(None);
     }
-    let value = value.trim();
+    // Copy Link remains in the Windows clipboard after the timed guard ends.
+    // Keep consuming that exact internal value until the user copies something
+    // else, otherwise the next 750 ms UI poll opens a delayed save dialog.
+    if suppressed_value.as_deref() == Some(value) {
+        return Ok(None);
+    }
+    *suppressed_value = None;
     Ok(classify_url(value).map(|_| value.to_owned()))
 }
 
@@ -7219,6 +7231,7 @@ fn main() {
                 settings_path,
                 bridge_last_seen: Mutex::new(None),
                 clipboard_suppressed_until: Mutex::new(None),
+                clipboard_suppressed_value: Mutex::new(None),
                 bridge_pending: Mutex::new(Vec::new()),
                 blob_uploads: Mutex::new(HashMap::new()),
                 recording_stops: Mutex::new(HashSet::new()),

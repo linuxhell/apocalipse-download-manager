@@ -209,6 +209,8 @@ test('Facebook sponsored-player detection is scoped to the exact post and explic
   assert.match(script, /element\?\.closest\?\.\('\[role="article"\],article'\)/);
   assert.match(script, /data-ad-preview/);
   assert.match(script, /Patrocinado/);
+  assert.match(script, /if \(isSponsoredFacebookPlayer\(element\)\) return;/);
+  assert.match(script, /if \(isSponsoredFacebookPlayer\(anchor\)\) return;/);
 });
 
 test('recording follows player pauses without writing dead timeline gaps', () => {

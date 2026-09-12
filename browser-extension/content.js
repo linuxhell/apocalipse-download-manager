@@ -627,6 +627,9 @@
       });
     };
     document.querySelectorAll("video").forEach((element) => {
+      // Reject an explicitly sponsored Facebook card before any URL, Blob or
+      // MediaStream path can turn it into a popup row.
+      if (isSponsoredFacebookPlayer(element)) return;
       const candidateFacebookUrl = facebookUrlFor(element);
       const facebookUrl = isFacebookMediaUrl(candidateFacebookUrl) ? candidateFacebookUrl : null;
       const tikTokUrl = tikTokUrlFor(element);
@@ -672,6 +675,7 @@
     // create a <video>. Treat that card as a video candidate so its thumbnail
     // is available without starting playback.
     document.querySelectorAll("a[href]").forEach((anchor) => {
+      if (isSponsoredFacebookPlayer(anchor)) return;
       const url = socialCardUrl(anchor.href);
       if (!url || items.has(`video:${url}`)) return;
       const thumbnail = cardThumbnailFor(anchor);
