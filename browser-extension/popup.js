@@ -397,7 +397,7 @@ const recoverUpdatedTabScripts = async (tab) => {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id, frameIds: [0] },
         files: ["social-player-resolution.js", "social-player-resolution-v2.js", "social-home-feed-v3-core.js",
-          "social-home-feed-v3-facebook.js", "social-home-feed-v3-tiktok.js", "social-home-feed-resolution-v3.js"],
+          "social-home-feed-v3-facebook.js", "social-home-feed-v3-tiktok.js", "tiktok-share-menu-v4.js", "social-home-feed-resolution-v3.js"],
       });
     }
     void globalThis.ADM_DIAG?.emit("popup.tab_scripts_recovered", { host: new URL(tab.url).hostname, result: "recovered" });

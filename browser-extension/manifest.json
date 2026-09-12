@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.138",
+  "version": "0.3.139",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -119,6 +119,7 @@
         "social-home-feed-v3-core.js",
         "social-home-feed-v3-facebook.js",
         "social-home-feed-v3-tiktok.js",
+        "tiktok-share-menu-v4.js",
         "social-home-feed-resolution-v3.js"
       ],
       "run_at": "document_start",
@@ -140,5 +141,5 @@
       "48": "icons/alien-48.png"
     }
   },
-  "version_name": "0.3.138 test - Exclude sponsored Facebook cards before capture"
+  "version_name": "0.3.139 test - Resolve and close TikTok share dialogs"
 }
