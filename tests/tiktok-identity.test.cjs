@@ -127,6 +127,20 @@ test('a unique TikTok feed-response duration and size resolves the current Blob 
   current.video.videoWidth = 1080; current.video.videoHeight = 1920;
   assert.equal(f.api.resolveLocal(current.video, false), 'https://www.tiktok.com/@right/video/777');
 });
+
+test('TikTok author profile disambiguates feed records with equal duration and size', async () => {
+  const payload = { itemList: [
+    { id: '777', author: { uniqueId: 'right' }, video: { duration: 9, width: 1080, height: 1920 } },
+    { id: '888', author: { uniqueId: 'other' }, video: { duration: 9, width: 1080, height: 1920 } },
+  ] };
+  const f = fixture('https://www.tiktok.com/', payload);
+  await f.context.fetch('https://www.tiktok.com/api/recommend/item_list/'); await Promise.resolve();
+  const current = f.card('111', 'blob:current', 'div');
+  const profile = new Element('a'); profile.href = 'https://www.tiktok.com/@right';
+  current.root.children = [current.video, profile]; current.video.duration = 9;
+  current.video.videoWidth = 1080; current.video.videoHeight = 1920;
+  assert.equal(f.api.resolveLocal(current.video, false), 'https://www.tiktok.com/@right/video/777');
+});
 test('buttons keep their exact video reference, not the nearest player geometry', () => {
   const f = fixture(); const a = f.card('111', 'blob:a'), b = f.card('222', 'blob:b');
   const button = {}; f.api.bind(button, b.video);

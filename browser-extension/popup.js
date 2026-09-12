@@ -221,6 +221,16 @@ const loadThumbnail = (image, item) => {
 // thumbnail/player hint and can be a partial track, blob, or a generic feed URL.
 function previewRequestFor(item, pageUrl) {
   if (item.visualOnly) return null;
+  // A buffered CDN track on a social feed is not a stable video identity. It
+  // may be video-only, belong to a neighbouring card, or expire while the
+  // asynchronous resolver is running. Only the player-bound resolver below
+  // may turn the visible card into a specific Facebook/TikTok page URL.
+  if (item.ambiguousSocialTrack) {
+    try {
+      const pageHost = new URL(pageUrl).hostname;
+      if (/(^|\.)(?:facebook|tiktok|instagram)\.com$/i.test(pageHost)) return null;
+    } catch {}
+  }
   const url = item.extractorUrl || item.url;
   let parsed;
   try { parsed = new URL(url); } catch { return null; }

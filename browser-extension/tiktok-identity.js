@@ -81,7 +81,7 @@
       const url = /^\d+$/.test(id) && author ? validUrl(`https://www.tiktok.com/@${author}/video/${id}`) : null;
       if (url) {
         const media = value.video || value.videoInfo || null;
-        found.push({ id, url, media,
+        found.push({ id, url, author: String(author), media,
           duration: Number(media?.duration || value.duration || 0),
           width: Number(media?.width || 0), height: Number(media?.height || 0) });
       }
@@ -135,13 +135,15 @@
       return nativeOpen.apply(this, args);
     };
   }
-  const networkCandidateFor = video => {
+  const networkCandidateFor = (video, profileAuthors = new Set()) => {
     const duration = Number(video?.duration || 0), width = Number(video?.videoWidth || 0), height = Number(video?.videoHeight || 0);
     const fresh = networkRecords.filter(record => Date.now() - record.seenAt < 10 * 60 * 1000);
     const sized = fresh.filter(record => record.width > 0 && record.height > 0
       && ((record.width === width && record.height === height) || (record.width === height && record.height === width)));
-    const matched = (sized.length ? sized : fresh).filter(record => record.duration > 0 && duration > 0
+    let matched = (sized.length ? sized : fresh).filter(record => record.duration > 0 && duration > 0
       && Math.abs(record.duration - duration) < 1.25);
+    const authored = matched.filter(record => profileAuthors.has(record.author.toLowerCase()));
+    if (authored.length) matched = authored;
     const url = unique(matched.map(record => record.url));
     return { url, inspected: fresh.length, matched: matched.length };
   };
@@ -194,13 +196,16 @@
   const resolveCandidate = (video, allowPage = true) => {
     if (!video || !/(^|\.)tiktok\.com$/i.test(location.hostname)) return null;
     reasons.delete(video);
-    const scopes = scopesFor(video), anchors = [], explicitIds = new Set(), roots = [];
+    const scopes = scopesFor(video), anchors = [], explicitIds = new Set(), profileAuthors = new Set(), roots = [];
     for (const node of scopes) {
       for (const name of ['data-video-id', 'data-item-id', 'data-aweme-id']) {
         const id = node.getAttribute?.(name);
         if (id && /^\d+$/.test(id)) explicitIds.add(id);
       }
       for (const anchor of node.querySelectorAll?.('a[href*="/video/"]') || []) anchors.push(validUrl(anchor.href));
+      for (const anchor of node.querySelectorAll?.('a[href*="/@"]') || []) {
+        try { const match = new URL(anchor.href, location.href).pathname.match(/^\/@([^/]+)/); if (match) profileAuthors.add(decodeURIComponent(match[1]).toLowerCase()); } catch {}
+      }
       for (const key of Object.getOwnPropertyNames(node)) {
         if (/^__(?:reactProps|reactFiber|vue)/i.test(key)) roots.push(node[key]);
       }
@@ -218,7 +223,7 @@
       matched = records(globalRoots).filter(record => containsSource(record.media, source));
     }
     if (matched.length) return explain(video, "matched_media_source", unique(matched.map(record => record.url)));
-    const network = networkCandidateFor(video);
+    const network = networkCandidateFor(video, profileAuthors);
     if (network.url) return explain(video, "matched_feed_response", network.url,
       { networkRecordCount: network.inspected, networkMatchCount: network.matched });
     if (explicitIds.size === 1) {
@@ -248,6 +253,7 @@
       explicitIdCount: explicitIds.size, anchorCount: anchors.filter(Boolean).length,
       sourceIdentityPresent: Boolean(source),
       networkRecordCount: network.inspected, networkMatchCount: network.matched,
+      profileAuthorCount: profileAuthors.size,
     });
     const sourceIdentity = mediaKey(video.currentSrc || video.src || '') || String(video.currentSrc || video.src || '');
     const previous = pageBindings.get(video);

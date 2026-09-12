@@ -21,10 +21,10 @@ function node({tag='DIV', r=rect(), parent=null, attrs={}, videos=[], click=null
   };
 }
 
-test('0.3.143 manifest version is exact', () => {
+test('0.3.144 manifest version is exact', () => {
   const manifest = JSON.parse(src('manifest.json'));
-  assert.equal(manifest.version, '0.3.143');
-  assert.match(manifest.version_name, /Preserve TikTok feed identity and exact Facebook post scope/);
+  assert.equal(manifest.version, '0.3.144');
+  assert.match(manifest.version_name, /Resolve Facebook Share and TikTok author identity/);
 });
 
 test('0.3.132 resolved Preview and Download are dispatched explicitly, never synthetic re-click', () => {

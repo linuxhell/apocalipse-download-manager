@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.143",
+  "version": "0.3.144",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -118,6 +118,7 @@
         "social-player-resolution-v2.js",
         "social-home-feed-v3-core.js",
         "social-home-feed-v3-facebook.js",
+        "facebook-menu-v4.js",
         "social-home-feed-v3-tiktok.js",
         "tiktok-share-menu-v4.js",
         "social-home-feed-resolution-v3.js"
@@ -141,5 +142,5 @@
       "48": "icons/alien-48.png"
     }
   },
-  "version_name": "0.3.143 test - Preserve TikTok feed identity and exact Facebook post scope"
+  "version_name": "0.3.144 test - Resolve Facebook Share and TikTok author identity"
 }

@@ -210,7 +210,18 @@
       return markerRect.right >= playerRect.left - 80 && markerRect.left <= playerRect.right + 80
         && markerY >= playerRect.top - 320 && markerY <= playerRect.top + 120;
     };
-    const exactPost = element.closest?.('[role="article"],article');
+    let exactPost = element.closest?.('[role="article"],article');
+    if (!exactPost) {
+      const playerRect = element?.getBoundingClientRect?.();
+      for (let node = element?.parentElement, depth = 0; node && depth < 18; node = node.parentElement, depth += 1) {
+        if (node === document.body || node === document.documentElement) break;
+        const rect = node.getBoundingClientRect?.();
+        const videos = [...(node.querySelectorAll?.('video') || [])];
+        if (videos.some(video => video !== element)) break;
+        const verticallyTight = rect && playerRect && rect.top >= playerRect.top - 420 && rect.bottom <= playerRect.bottom + 520;
+        if (verticallyTight && node.querySelector?.(markerSelector)) { exactPost = node; break; }
+      }
+    }
     if (!exactPost) return false;
     for (let node = element, depth = 0; node && depth < 24; node = node.parentElement, depth += 1) {
       if (node === document.body || node === document.documentElement) break;
