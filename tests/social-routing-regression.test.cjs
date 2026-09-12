@@ -10,16 +10,17 @@ const tiktok = readFileSync(join(__dirname, '../browser-extension/tiktok-media-f
 
 // Run the scripts in manifest order, including TikTok's document-capture listener.
 // Browser APIs are mocked; installed click handlers and outgoing payloads are real.
-function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.com/video/a.mp4', sourceObject = null, permalink = null, network = [], inspections = [], shipped = false, readableBlob = false, onMediaQuery = null } = {}) {
+function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.com/video/a.mp4', sourceObject = null, permalink = null, network = [], inspections = [], shipped = false, readableBlob = false, onMediaQuery = null, sponsored = false } = {}) {
   const sent = [], fetched = [], appended = [], clickListeners = [];
   const location = new URL(url);
   const state = { permalink, network };
   const rect = { left: 20, top: 40, right: 500, bottom: 600, width: 480, height: 560 };
   const anchors = () => state.permalink ? [{ href: state.permalink, getBoundingClientRect: () => rect }] : [];
   const post = {
-    parentElement: null, innerHTML: '', getBoundingClientRect: () => rect,
+    parentElement: null, innerHTML: '', innerText: sponsored ? 'Synthetic author · Patrocinado' : 'Synthetic author · Reel normal', getBoundingClientRect: () => rect,
     querySelectorAll: selector => selector.includes('a[href') ? anchors() : [],
-    querySelector: selector => selector.includes('a[href') ? anchors()[0] || null : null,
+    querySelector: selector => selector.includes('aria-label*="Patrocinado"') && sponsored ? { ariaLabel: 'Patrocinado' }
+      : selector.includes('a[href') ? anchors()[0] || null : null,
   };
   const video = {
     tagName: 'VIDEO', dataset: {}, isConnected: true, currentSrc: source, src: source, srcObject: sourceObject,
@@ -88,6 +89,7 @@ function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.co
   assert.ok(button, 'the actual overlay must be installed');
   return {
     sent, fetched, state, location, video, button,
+    scan: () => context.testHooks.collect(),
     async click() {
       let stopped = false;
       const event = {
@@ -104,6 +106,16 @@ function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.co
     downloads: () => sent.filter(message => message.type === 'APOCALIPSE_DOWNLOAD').map(message => message.item),
   };
 }
+
+test('Facebook normal and sponsored srcObject players are classified separately', () => {
+  const normal = page({ url: 'https://www.facebook.com/', source: '', sourceObject: {} }).scan()
+    .find(item => item.visualOnly);
+  const ad = page({ url: 'https://www.facebook.com/', source: '', sourceObject: {}, sponsored: true }).scan()
+    .find(item => item.visualOnly);
+  assert.ok(normal, 'ordinary Reel remains available for identity resolution');
+  assert.equal(normal.recordingOnly, false);
+  assert.equal(ad.recordingOnly, true);
+});
 
 const track = (url, contentType = 'video/mp4', capturedAt = 1000, frameId = 0) => ({ url, contentType, capturedAt, frameId, ageMs: 10 });
 const videoA = 'https://v16.tiktok.com/video/a.mp4';

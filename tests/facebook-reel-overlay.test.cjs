@@ -199,8 +199,16 @@ test('YouTube exposes yt-dlp Download without a redundant recording button', () 
   assert.match(script, /if \(element\.tagName === "VIDEO" && canRecord && !usesExtractorOnlyDownload\)/);
 });
 
-test('Facebook srcObject players are marked as recording-only for the popup', () => {
-  assert.match(script, /recordingOnly:\s*Boolean\(element\.srcObject/);
+test('Facebook srcObject alone never classifies an ordinary Reel as recording-only', () => {
+  assert.match(script, /recordingOnly:\s*Boolean\(element\.srcObject && isSponsoredFacebookPlayer\(element\)\)/);
+  assert.doesNotMatch(script, /recordingOnly:\s*Boolean\(element\.srcObject && \/\(\^\|\\\.\)facebook/);
+});
+
+test('Facebook sponsored-player detection is scoped to the exact post and explicit ad markers', () => {
+  assert.match(script, /const isSponsoredFacebookPlayer = \(element\) =>/);
+  assert.match(script, /element\?\.closest\?\.\('\[role="article"\],article'\)/);
+  assert.match(script, /data-ad-preview/);
+  assert.match(script, /Patrocinado/);
 });
 
 test('recording follows player pauses without writing dead timeline gaps', () => {
