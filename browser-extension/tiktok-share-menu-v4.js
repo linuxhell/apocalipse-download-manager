@@ -151,6 +151,20 @@
       return { ...base, url: null, reason: 'tiktok_copy_link_item_not_found', freshItemsSeen: fresh.length,
         frameworkValuesInspected: found.inspected, copyCandidates: 0, dismissalMethod };
     }
+    let mainWorldIdentity = null;
+    try {
+      copy.removeAttribute('data-apocalipse-tiktok-share-main-result');
+      copy.dispatchEvent(new Event('apocalipse-tiktok-share-identity-request', { bubbles: true }));
+      mainWorldIdentity = canonical(copy.getAttribute('data-apocalipse-tiktok-share-main-result'));
+      copy.removeAttribute('data-apocalipse-tiktok-share-main-result');
+    } catch {}
+    if (mainWorldIdentity) {
+      const dismissalMethod = dismiss(fresh);
+      audit({ resolved: true, reason: 'main_world_control_identity', freshItemsSeen: fresh.length,
+        frameworkValuesInspected: found.inspected, copyCandidates: 1, dismissalMethod });
+      return { ...base, url: mainWorldIdentity, reason: 'tiktok_share_main_world_control_identity',
+        freshItemsSeen: fresh.length, frameworkValuesInspected: found.inspected, copyCandidates: 1, dismissalMethod };
+    }
     const probeAttribute = 'data-apocalipse-tiktok-copy-probe';
     const resultAttribute = 'data-apocalipse-tiktok-copy-result';
     const probeToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;

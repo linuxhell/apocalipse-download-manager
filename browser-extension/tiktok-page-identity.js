@@ -11,4 +11,10 @@
       video.setAttribute('data-apocalipse-current-permalink', url);
     }
   }, true);
+  document.addEventListener('apocalipse-tiktok-share-identity-request', event => {
+    const control = event.target;
+    if (!control?.isConnected) return;
+    const url = identity.resolveElement?.(control);
+    control.setAttribute('data-apocalipse-tiktok-share-main-result', url || '');
+  }, true);
 })();

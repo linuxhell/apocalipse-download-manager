@@ -165,6 +165,24 @@
     }
     return found;
   };
+  const graphPermalinks = roots => {
+    const found = [], queue = [...roots], seen = new WeakSet();
+    for (let cursor = 0; cursor < queue.length && cursor < 20000; cursor += 1) {
+      const value = queue[cursor];
+      if (typeof value === 'string') {
+        const text = value.replaceAll('\\/', '/');
+        const direct = validUrl(text);
+        if (direct) found.push(direct);
+        for (const raw of text.match(/https?:\/\/(?:www\.)?tiktok\.com\/@[A-Za-z0-9._-]+\/video\/\d+/ig) || []) {
+          const url = validUrl(raw); if (url) found.push(url);
+        }
+      } else if (value && typeof value === 'object' && !seen.has(value) && !value.nodeType) {
+        seen.add(value);
+        for (const [key, child] of Object.entries(value)) if (key !== 'stateNode' && key !== 'return') queue.push(child);
+      }
+    }
+    return found;
+  };
   const rememberNetworkPayload = payload => {
     for (const record of records([payload])) {
       const previous = networkRecords.findIndex(item => item.id === record.id);
@@ -378,6 +396,21 @@
       return resolveLocal(video);
     },
     resolveLocal, scopesFor, validUrl, frameAncestorUrl,
+    resolveElement(element) {
+      if (!element?.isConnected) return null;
+      const roots = [], urls = [];
+      for (let node = element, depth = 0; node && depth < 12; node = node.parentElement, depth += 1) {
+        for (const name of ['href', 'data-url', 'data-share-url', 'data-clipboard-text']) {
+          const url = validUrl(node.getAttribute?.(name) || node[name]); if (url) urls.push(url);
+        }
+        for (const key of Object.getOwnPropertyNames(node)) {
+          if (/^__(?:reactProps|reactFiber|vue)/i.test(key)) roots.push(node[key]);
+        }
+        if (node.matches?.('[role="dialog"],[data-e2e*="share"],[data-testid*="share"]')) break;
+      }
+      const exact = unique([...urls, ...graphPermalinks(roots), ...records(roots).map(record => record.url)]);
+      return exact || null;
+    },
     learn(video, value) {
       const url = validUrl(value);
       if (!video?.isConnected || !url) return null;

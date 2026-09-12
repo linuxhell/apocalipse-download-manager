@@ -127,6 +127,14 @@ test('TikTok Copy handler exposes only a canonical permalink for one explicitly 
   assert.match(script, /queueMicrotask\(scanLegacyCopySelection\)/);
 });
 
+test('MAIN-world share control resolver accepts only one exact TikTok identity', () => {
+  assert.match(script, /resolveElement\(element\)/);
+  assert.match(script, /graphPermalinks/);
+  assert.match(script, /records\(roots\)\.map/);
+  assert.match(script, /const exact = unique/);
+  assert.match(script, /key !== 'return'/);
+});
+
 test('duration and size alone never identify the current Blob player', async () => {
   const payload = { itemList: [
     { id: '777', author: { uniqueId: 'right' }, video: { duration: 9, width: 1080, height: 1920 } },
