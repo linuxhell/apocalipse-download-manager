@@ -111,6 +111,15 @@ fn safe_detail(value: &Value, salt: &str, key: &str, depth: usize) -> Value {
                 "transport",
                 "scheme",
                 "version",
+                "platform",
+                "canonicalClass",
+                "phase",
+                "mouseButton",
+                "pointerType",
+                "elementTag",
+                "controlTag",
+                "controlRole",
+                "mediaCardClass",
             ]
             .contains(&key);
             let host = key == "host"
@@ -534,6 +543,7 @@ impl Diagnostics {
         let mut actions = HashMap::<String, Vec<&Value>>::new();
         let mut players = HashMap::<String, Value>::new();
         let mut decisions = Vec::new();
+        let mut media_replay = Vec::new();
         let mut contexts = HashSet::new();
         let mut warnings = Vec::new();
         for record in &records {
@@ -549,6 +559,14 @@ impl Diagnostics {
                 || name.contains("candidate")
             {
                 decisions.push(record.clone());
+            }
+            if name.starts_with("media_replay.")
+                || name == "overlay.click"
+                || name.starts_with("popup.preview_")
+                || name.starts_with("popup.download_")
+                || name.starts_with("handoff.")
+            {
+                media_replay.push(record.clone());
             }
             if name == "players.snapshot" || name == "popup.render" || name == "popup.row_state" {
                 let key = format!("{}:{}", record["contextId"], name);
@@ -618,6 +636,7 @@ impl Diagnostics {
             ("RELATORIO_PARA_IA.txt".into(), report.into_bytes()),
             ("logs/diagnostics-v3.jsonl".into(), jsonl(&records)),
             ("traces/actions.jsonl".into(), jsonl(&action_rows)),
+            ("traces/replay-de-midia.jsonl".into(), jsonl(&media_replay)),
             ("capture/media-decisions.jsonl".into(), jsonl(&decisions)),
             (
                 "state/players-popup.json".into(),

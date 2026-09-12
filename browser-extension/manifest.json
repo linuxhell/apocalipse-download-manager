@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.144",
+  "version": "0.3.145",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -62,6 +62,7 @@
       "js": [
         "diagnostics-core.js",
         "diagnostics.js",
+        "diagnostics-media-replay.js",
         "tiktok-identity.js",
         "content.js"
       ],
@@ -76,6 +77,7 @@
       "js": [
         "diagnostics-core.js",
         "diagnostics.js",
+        "diagnostics-media-replay.js",
         "tiktok-identity.js",
         "tiktok-media-fix.js",
         "content.js"
@@ -142,5 +144,5 @@
       "48": "icons/alien-48.png"
     }
   },
-  "version_name": "0.3.144 test - Resolve Facebook Share and TikTok author identity"
+  "version_name": "0.3.145 test - Add privacy-safe media click replay diagnostics"
 }

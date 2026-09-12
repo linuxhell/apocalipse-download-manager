@@ -401,7 +401,7 @@ const recoverUpdatedTabScripts = async (tab) => {
   try {
     await chrome.scripting.executeScript({
       target: { tabId: tab.id, allFrames: true },
-      files: ["diagnostics-core.js", "diagnostics.js", "tiktok-identity.js", "content.js"],
+      files: ["diagnostics-core.js", "diagnostics.js", "diagnostics-media-replay.js", "tiktok-identity.js", "content.js"],
     });
     if (/(^|\.)facebook\.com$|(^|\.)tiktok\.com$/i.test(new URL(tab.url).hostname)) {
       await chrome.scripting.executeScript({

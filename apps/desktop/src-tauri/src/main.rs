@@ -3017,7 +3017,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         "summary.json".to_owned(),
         serde_json::to_vec_pretty(&summary).map_err(|e| e.to_string())?,
     ));
-    let guide = b"Apocalipse diagnostic bundle v3\nStart with RELATORIO_PARA_IA.txt and health/collectors.json. Legacy v2 files are preserved. A missing event is not proof of no activity. Review legacy logs before sharing.\n";
+    let guide = b"Apocalipse diagnostic bundle v3\nStart with RELATORIO_PARA_IA.txt, traces/replay-de-midia.jsonl and health/collectors.json. Legacy v2 files are preserved. A missing event is not proof of no activity. Review legacy logs before sharing.\n";
     entries.push(("README.txt".to_owned(), guide.to_vec()));
     entries.extend(state.diagnostics.export());
     write_diagnostic_zip(&path, entries)?;
