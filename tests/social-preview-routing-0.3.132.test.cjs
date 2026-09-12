@@ -21,10 +21,10 @@ function node({tag='DIV', r=rect(), parent=null, attrs={}, videos=[], click=null
   };
 }
 
-test('0.3.133 manifest version is exact', () => {
+test('0.3.134 manifest version is exact', () => {
   const manifest = JSON.parse(src('manifest.json'));
-  assert.equal(manifest.version, '0.3.133');
-  assert.match(manifest.version_name, /Enforce preview intent at worker boundary/);
+  assert.equal(manifest.version, '0.3.134');
+  assert.match(manifest.version_name, /Bound thumbnails and renew preview clipboard guard/);
 });
 
 test('0.3.132 resolved Preview and Download are dispatched explicitly, never synthetic re-click', () => {
@@ -106,7 +106,7 @@ test('0.3.132 TikTok fresh menu accepts unique Copy control and requests popup c
   assert.equal(copied,true);
 });
 
-test('0.3.133 TikTok keeps a short Share URL as a canonical-resolution candidate', async () => {
+test('0.3.134 TikTok keeps a short Share URL as a canonical-resolution candidate', async () => {
   let opened=false;
   const body=node({tag:'BODY',r:rect(0,0,1200,900)});
   const video=node({tag:'VIDEO',r:rect(250,60,500,760)}); video.currentSrc='blob:https://www.tiktok.com/current';

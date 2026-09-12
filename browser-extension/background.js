@@ -38,8 +38,15 @@ const fetchThumbnailDataUrl = async (value) => {
 
 const portableThumbnail = async (value) => {
   if (!value) return null;
-  try { return await fetchThumbnailDataUrl(value); }
-  catch { return value; }
+  try {
+    const portable = await fetchThumbnailDataUrl(value);
+    // A thumbnail is optional and must never prevent the media handoff.
+    return portable.length <= 180 * 1024 ? portable : null;
+  } catch {
+    const original = String(value);
+    if (/^https?:/i.test(original)) return original;
+    return /^data:image\//i.test(original) && original.length <= 180 * 1024 ? original : null;
+  }
 };
 
 const blobDataUrl = async (blob) => {

@@ -136,6 +136,18 @@ test('popup rejects a social CDN track explicitly marked incomplete', async () =
   assert.equal(downloads.length, 0);
 });
 
+test('an oversized optional thumbnail never blocks a Facebook download handoff', async () => {
+  const pageUrl = 'https://www.facebook.com/reel/969589099501796';
+  const { send, downloads } = worker(false, pageUrl);
+  const result = await send({
+    type: 'APOCALIPSE_DOWNLOAD',
+    item: { url: pageUrl, kind: 'video', thumbnail: `data:image/jpeg;base64,${'A'.repeat(190 * 1024)}` },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(downloads.length, 1);
+  assert.equal(downloads[0].thumbnail, null);
+});
+
 test('a resolved Preview miswrapped as Download is corrected before reaching the desktop', async () => {
   const pageUrl = 'https://www.facebook.com/';
   const canonical = 'https://www.facebook.com/watch/?v=2816970528630277';

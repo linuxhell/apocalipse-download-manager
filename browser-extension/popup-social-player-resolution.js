@@ -1,5 +1,5 @@
 // Resolve the one remaining visible Facebook/TikTok player on demand.
-// 0.3.133 preserves the original Preview/Download intent explicitly: after
+// 0.3.134 preserves the original Preview/Download intent explicitly: after
 // identity resolution we dispatch that action directly instead of re-rendering
 // and synthetically clicking a new row button.
 (() => {
@@ -277,6 +277,14 @@
     try { clipboardBefore = await navigator.clipboard.readText(); } catch {}
     const outcome = await resolveItem(item, traceId, clipboardBefore);
     const resolved = outcome.item;
+    // Renew from the actual clipboard change so slow menus or polling cannot
+    // outlive the guard started before asynchronous identity discovery.
+    if (action === 'preview' && outcome.reason === 'extension_clipboard_resolved') {
+      const renewed = await chrome.runtime.sendMessage({ type: 'APOCALIPSE_PREVIEW_IDENTITY_BEGIN', traceId, actionIntent: 'preview' }).catch(() => null);
+      void globalThis.ADM_DIAG?.emit?.('popup.preview_identity_guard_renewed', {
+        actionIntent: 'preview', clipboardMonitorSuppressed: Boolean(renewed?.ok), durationMs: renewed?.ok ? 4000 : 0,
+      }, traceId, renewed?.ok ? 'INFO' : 'WARN');
+    }
     void globalThis.ADM_DIAG?.emit?.('popup.player_identity_result', { resolved: Boolean(resolved),
       action, actionIntent: action, failureStage: outcome.failureStage || 'none', reason: outcome.reason || 'unknown',
       platform: outcome.platform || 'unknown', url: resolved?.url || '' }, traceId, resolved ? 'INFO' : 'WARN');

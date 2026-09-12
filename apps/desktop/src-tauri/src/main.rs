@@ -5511,7 +5511,9 @@ fn bridge_content_length(headers: &str) -> usize {
 }
 
 fn read_bridge_request(stream: &mut TcpStream) -> Option<Vec<u8>> {
-    const MAX_REQUEST_SIZE: usize = 262_144;
+    // Authenticated media requests may include a bounded thumbnail. Keep a
+    // defensive ceiling while allowing the extension's portable preview image.
+    const MAX_REQUEST_SIZE: usize = 786_432;
     let mut request = Vec::with_capacity(8_192);
     let mut chunk = [0_u8; 8_192];
     loop {
