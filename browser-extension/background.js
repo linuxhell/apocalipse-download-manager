@@ -618,6 +618,31 @@ chrome.downloads.onChanged.addListener((delta) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  // The user's click intent is authoritative. A social-media identity can be
+  // resolved asynchronously while the popup re-renders; if an older/stale
+  // handler wraps that resolved item as a Download, never let a Preview cross
+  // the desktop download boundary and open the save-location flow.
+  const actionIntent = message?.actionIntent || message?.item?.actionIntent || null;
+  if (actionIntent === "preview" && message?.type === "APOCALIPSE_DOWNLOAD") {
+    const item = message.item || {};
+    const pageExtractor = Boolean(item.extractorUrl || item.pageExtractor);
+    message = {
+      type: "APOCALIPSE_PREVIEW_MEDIA",
+      url: item.extractorUrl || item.url,
+      pageUrl: item.playerPageUrl || item.pageUrl || sender.tab?.url || null,
+      audioUrl: pageExtractor ? null : item.audioUrl || null,
+      mediaKind: item.kind || null,
+      pageExtractor,
+      contentType: pageExtractor ? null : item.contentType || null,
+      userAgent: item.userAgent || null,
+      traceId: item.traceId || message.traceId || null,
+      actionIntent: "preview",
+    };
+    void globalThis.ADM_DIAG_WORKER?.emitForSender(sender, "handoff.intent_route_corrected", {
+      actionIntent: "preview", receivedRoute: "download", effectiveRoute: "preview_media",
+      url: message.url,
+    }, message.traceId, "WARN");
+  }
   if (message?.type === "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL") {
     captureVisibleThumbnail(sender, message.rect, message.viewport, message.tabId)
       .then((dataUrl) => reply({ dataUrl }))
@@ -628,6 +653,12 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "APOCALIPSE_WORKER_PING") {
     reply({ ok: true, version: chrome.runtime.getManifest().version });
     return;
+  }
+  if (message?.type === "APOCALIPSE_PREVIEW_IDENTITY_BEGIN") {
+    bridgeRequest("/v1/clipboard-suppress", { method: "POST", body: "{}" })
+      .then(result => reply(result))
+      .catch(error => reply({ ok: false, error: String(error) }));
+    return true;
   }
   if (message?.type === "APOCALIPSE_RECENT_TAB_MEDIA") {
     const tabId = Number.isInteger(message.tabId) ? message.tabId : sender.tab?.id;

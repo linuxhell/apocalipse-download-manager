@@ -21,10 +21,10 @@ function node({tag='DIV', r=rect(), parent=null, attrs={}, videos=[], click=null
   };
 }
 
-test('0.3.132 manifest version is exact', () => {
+test('0.3.133 manifest version is exact', () => {
   const manifest = JSON.parse(src('manifest.json'));
-  assert.equal(manifest.version, '0.3.132');
-  assert.match(manifest.version_name, /Explicit preview intent and fresh player binding/);
+  assert.equal(manifest.version, '0.3.133');
+  assert.match(manifest.version_name, /Enforce preview intent at worker boundary/);
 });
 
 test('0.3.132 resolved Preview and Download are dispatched explicitly, never synthetic re-click', () => {
@@ -104,6 +104,29 @@ test('0.3.132 TikTok fresh menu accepts unique Copy control and requests popup c
   assert.equal(result.clipboardRequested,true);
   assert.equal(result.reason,'tiktok_copy_link_clicked');
   assert.equal(copied,true);
+});
+
+test('0.3.133 TikTok keeps a short Share URL as a canonical-resolution candidate', async () => {
+  let opened=false;
+  const body=node({tag:'BODY',r:rect(0,0,1200,900)});
+  const video=node({tag:'VIDEO',r:rect(250,60,500,760)}); video.currentSrc='blob:https://www.tiktok.com/current';
+  const share=node({tag:'BUTTON',r:rect(790,550,48,48),attrs:{'data-e2e':'share-icon','aria-label':'Share'},click:()=>{opened=true}});
+  const copy=node({tag:'BUTTON',r:rect(720,300,160,45),attrs:{'data-e2e':'share-copy','data-url':'https://vm.tiktok.com/ZSynthetic/'}}); copy.textContent='Copy link';
+  const card=node({tag:'ARTICLE',r:rect(180,20,700,820),parent:body,videos:[video]}); video.parentElement=card;
+  card.querySelectorAll=selector=>selector==='video'?[video]:selector.includes('button')||selector.includes('[data-e2e]')||selector.includes('[aria-label]')?[share]:[];
+  const document={body,documentElement:node({tag:'HTML'}),querySelectorAll(selector){
+    if(selector.includes('[data-e2e*="share"]')) return [share];
+    if(opened && (selector.includes('[data-e2e]')||selector.includes('button')||selector.includes('[role="button"]'))) return [copy];
+    return [];
+  }};
+  const context=vm.createContext({globalThis:null,URL,Set,Map,Promise,decodeURIComponent,location:{hostname:'www.tiktok.com',href:'https://www.tiktok.com/'},document,
+    innerWidth:1200,innerHeight:900,getComputedStyle(){return{display:'block',visibility:'visible',opacity:'1'}},setTimeout(fn){fn();return 1},clearTimeout(){}});
+  context.globalThis=context;
+  vm.runInContext(src('social-home-feed-v3-core.js'),context);
+  vm.runInContext(src('social-home-feed-v3-tiktok.js'),context);
+  const result=await context.ADM_SOCIAL_HOME_FEED_V3_TT.menu(video);
+  assert.equal(result.clipboardRequested,true);
+  assert.equal(result.clipboardCandidate,'https://vm.tiktok.com/ZSynthetic/');
 });
 
 test('0.3.132 Facebook and TikTok content scripts no longer read clipboard after Copy Link', () => {

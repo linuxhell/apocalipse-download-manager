@@ -1,5 +1,5 @@
 // Resolve the one remaining visible Facebook/TikTok player on demand.
-// 0.3.132 preserves the original Preview/Download intent explicitly: after
+// 0.3.133 preserves the original Preview/Download intent explicitly: after
 // identity resolution we dispatch that action directly instead of re-rendering
 // and synthetically clicking a new row button.
 (() => {
@@ -46,13 +46,13 @@
       label.textContent = `${prefix}: ${result?.error || 'unavailable'}`;
     }
   };
-  const facebookClipboardUrl = value => {
+  const directFacebookUrl = value => {
     const text = String(value || '').trim();
     const raw = text.match(/https?:\/\/[^\s<>"']+/i)?.[0] || text;
     try {
       const url = new URL(raw);
       const host = url.hostname.toLowerCase();
-      if (host === 'fb.watch') return url.pathname.replace(/\//g, '') ? url.href : null;
+      if (host === 'fb.watch') return null;
       if (!(host === 'facebook.com' || host.endsWith('.facebook.com'))) return null;
       const v = url.searchParams.get('v');
       if (v && /^\d{5,}$/.test(v)) return `https://www.facebook.com/watch/?v=${v}`;
@@ -62,9 +62,23 @@
       const single = path.match(/^\/watch\/(\d{5,})(?:\/|$)/i);
       if (single) return `https://www.facebook.com/watch/?v=${single[1]}`;
       if (/^\/watch(?:\/|$)/i.test(path)) return null;
-      if (/\/(?:reel|reels|videos|posts)\/[^/?#]+/i.test(path) || /\/share\/[rv]\/[^/?#]+/i.test(path)) return url.href;
+      if (/\/(?:reel|reels|videos|posts)\/[^/?#]+/i.test(path)) return url.href;
     } catch {}
     return null;
+  };
+  const facebookClipboardUrl = async value => {
+    const text = String(value || '').trim();
+    const raw = text.match(/https?:\/\/[^\s<>"']+/i)?.[0] || text;
+    const direct = directFacebookUrl(raw);
+    if (direct) return direct;
+    try {
+      const url = new URL(raw);
+      const host = url.hostname.toLowerCase();
+      const redirectable = host === 'fb.watch' || ((host === 'facebook.com' || host.endsWith('.facebook.com')) && /^\/share\/[rv]\//i.test(url.pathname));
+      if (!redirectable) return null;
+      const response = await fetch(url.href, { method: 'GET', redirect: 'follow', credentials: 'include', cache: 'no-store' });
+      return directFacebookUrl(response.url);
+    } catch { return null; }
   };
   const canonicalTikTok = value => {
     try {
@@ -87,17 +101,18 @@
       return canonicalTikTok(response.url);
     } catch { return null; }
   };
-  const readClipboardCanonical = async (platform, before, traceId) => {
+  const readClipboardCanonical = async (platform, before, traceId, candidate = '') => {
     let text = '';
     for (let attempt = 0; attempt < 12; attempt += 1) {
       if (attempt) await new Promise(resolve => setTimeout(resolve, 80));
       try { text = await navigator.clipboard.readText(); } catch {
         void globalThis.ADM_DIAG?.emit?.('popup.clipboard_identity', { platform, result: 'rejected', reason: 'extension_clipboard_read_failed' }, traceId, 'WARN');
-        return null;
+        break;
       }
       if (text && (!before || text !== before)) break;
     }
-    const url = platform === 'facebook' ? facebookClipboardUrl(text) : platform === 'tiktok' ? await tiktokClipboardUrl(text) : null;
+    let url = platform === 'facebook' ? await facebookClipboardUrl(text) : platform === 'tiktok' ? await tiktokClipboardUrl(text) : null;
+    if (!url && candidate) url = platform === 'facebook' ? await facebookClipboardUrl(candidate) : platform === 'tiktok' ? await tiktokClipboardUrl(candidate) : null;
     void globalThis.ADM_DIAG?.emit?.('popup.clipboard_identity', { platform, result: url ? 'resolved' : 'rejected',
       reason: url ? 'extension_clipboard_canonical' : text === before ? 'extension_clipboard_unchanged' : 'extension_clipboard_not_canonical', url: url || '' }, traceId, url ? 'INFO' : 'WARN');
     return url;
@@ -113,7 +128,7 @@
       return result;
     }
     void globalThis.ADM_DIAG?.emit?.('popup.resolved_action_dispatch', { actionIntent: 'download', workerRoute: 'download', url: item.url }, traceId);
-    const result = await chrome.runtime.sendMessage({ type: 'APOCALIPSE_DOWNLOAD', item: { ...manualMediaSelection(item), traceId, actionIntent: 'download' } }).catch(error => ({ ok: false, target: 'error', error: String(error) }));
+    const result = await chrome.runtime.sendMessage({ type: 'APOCALIPSE_DOWNLOAD', actionIntent: 'download', item: { ...manualMediaSelection(item), traceId, actionIntent: 'download' } }).catch(error => ({ ok: false, target: 'error', error: String(error) }));
     void globalThis.ADM_DIAG?.emit?.('popup.download_reply', { ok: Boolean(result?.ok), errorRef: result?.error || '', actionIntent: 'download' }, traceId, result?.ok ? 'INFO' : 'ERROR');
     if (result?.target === 'error' || !result?.ok) showBridgeError(result?.error || 'unavailable');
     return result;
@@ -210,7 +225,7 @@
       },
     }, { frameId: 0 }).catch(() => null);
     if (result?.needsClipboard) {
-      const url = await readClipboardCanonical(result.platform, clipboardBefore, traceId);
+      const url = await readClipboardCanonical(result.platform, clipboardBefore, traceId, result.clipboardCandidate || '');
       if (url) {
         const resolved = { ...current, url, extractorUrl: url, kind: 'video', pageExtractor: true, visualOnly: false,
           recommended: true, retained: false, ambiguousSocialTrack: false, thumbnail: current.thumbnail || item.thumbnail || '' };
@@ -244,6 +259,11 @@
       url: item.url, action, actionIntent: action, stage: 'popup_click', playerBound: Boolean(item.playerBound),
       retained: Boolean(item.retained), recommended: Boolean(item.recommended),
     }) || null;
+    // Copy Link is an internal identity probe. Tell ADM to ignore the temporary
+    // clipboard change so a Preview can never open the save-location dialog.
+    if (action === 'preview') {
+      await chrome.runtime.sendMessage({ type: 'APOCALIPSE_PREVIEW_IDENTITY_BEGIN', traceId, actionIntent: 'preview' }).catch(() => null);
+    }
     let clipboardBefore = '';
     try { clipboardBefore = await navigator.clipboard.readText(); } catch {}
     const outcome = await resolveItem(item, traceId, clipboardBefore);

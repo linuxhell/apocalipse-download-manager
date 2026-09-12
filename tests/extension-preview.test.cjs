@@ -5,7 +5,7 @@ const { webcrypto } = require('node:crypto');
 const { test } = require('node:test');
 const vm = require('node:vm');
 function worker(rejectPreview = false, tabUrl = 'https://www.tiktok.com/') {
-  const listeners = [], previews = [], downloads = [], lookups = [];
+  const listeners = [], previews = [], downloads = [], lookups = [], clipboardSuppressions = [];
   const event = { addListener() {} };
   const storage = { get: async () => ({ pairingToken: 'test-token' }), set: async () => {}, remove: async () => {} };
   const context = vm.createContext({ URL, crypto: webcrypto, console, navigator: { userAgent: 'SyntheticBrowser/1.0' },
@@ -20,12 +20,13 @@ function worker(rejectPreview = false, tabUrl = 'https://www.tiktok.com/') {
       const preview = url.endsWith('/v1/preview-media');
       if (preview) previews.push(JSON.parse(options.body));
       if (url.endsWith('/v1/download')) downloads.push(JSON.parse(options.body));
+      if (url.endsWith('/v1/clipboard-suppress')) clipboardSuppressions.push(JSON.parse(options.body));
       return { ok: !(preview && rejectPreview), status: rejectPreview ? 400 : 202,
         json: async () => preview && rejectPreview ? { ok: false, error: 'preview_player_start_failed:NotFound' } : { ok: true } };
     },
   });
   vm.runInContext(readFileSync(join(__dirname, '../browser-extension/background.js'), 'utf8'), context);
-  return { previews, downloads, lookups, send: message => new Promise(resolve => listeners[0](message, { tab: { url: tabUrl } }, resolve)) };
+  return { previews, downloads, lookups, clipboardSuppressions, send: message => new Promise(resolve => listeners[0](message, { tab: { url: tabUrl } }, resolve)) };
 }
 const signed = 'https://v16-webapp-prime.tiktok.com/video/tos/synthetic/?a=1988&&signature=a%2Bb%3D&mime_type=video_mp4';
 test('preserves the exact TikTok URL and only requests matching media cookies', async () => {
@@ -132,6 +133,44 @@ test('popup rejects a social CDN track explicitly marked incomplete', async () =
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /incomplete_social_media_track/);
+  assert.equal(downloads.length, 0);
+});
+
+test('a resolved Preview miswrapped as Download is corrected before reaching the desktop', async () => {
+  const pageUrl = 'https://www.facebook.com/';
+  const canonical = 'https://www.facebook.com/watch/?v=2816970528630277';
+  const { send, previews, downloads } = worker(false, pageUrl);
+  const result = await send({
+    type: 'APOCALIPSE_DOWNLOAD',
+    actionIntent: 'preview',
+    item: {
+      url: canonical,
+      extractorUrl: canonical,
+      playerPageUrl: pageUrl,
+      pageExtractor: true,
+      kind: 'video',
+      traceId: '11111111-1111-4111-8111-111111111111',
+      actionIntent: 'preview',
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(downloads.length, 0, 'Preview must never reach /v1/download');
+  assert.equal(previews.length, 1);
+  assert.equal(previews[0].url, canonical);
+  assert.equal(previews[0].referer, pageUrl);
+  assert.equal(previews[0].pageExtractor, true);
+});
+
+test('Preview identity discovery suppresses the ADM clipboard monitor before Copy Link', async () => {
+  const { send, clipboardSuppressions, previews, downloads } = worker();
+  const result = await send({
+    type: 'APOCALIPSE_PREVIEW_IDENTITY_BEGIN',
+    actionIntent: 'preview',
+    traceId: '22222222-2222-4222-8222-222222222222',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(clipboardSuppressions.length, 1);
+  assert.equal(previews.length, 0);
   assert.equal(downloads.length, 0);
 });
 

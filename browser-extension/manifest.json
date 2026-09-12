@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.132",
+  "version": "0.3.133",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -140,5 +140,5 @@
       "48": "icons/alien-48.png"
     }
   },
-  "version_name": "0.3.132 test - Explicit preview intent and fresh player binding"
+  "version_name": "0.3.133 test - Enforce preview intent at worker boundary"
 }
