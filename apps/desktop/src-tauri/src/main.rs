@@ -5400,10 +5400,10 @@ fn read_clipboard_link(
 ) -> Result<Option<String>, String> {
     let clipboard_is_suppressed = || -> Result<bool, String> {
         Ok(state
-        .clipboard_suppressed_until
-        .lock()
-        .map_err(|error| error.to_string())?
-        .is_some_and(|until| Instant::now() < until))
+            .clipboard_suppressed_until
+            .lock()
+            .map_err(|error| error.to_string())?
+            .is_some_and(|until| Instant::now() < until))
     };
     if clipboard_is_suppressed()? {
         return Ok(None);
