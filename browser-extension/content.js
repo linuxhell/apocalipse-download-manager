@@ -51,6 +51,9 @@
     forcePressed: false,
   }).catch(() => {}));
   const absolute = (value) => {
+    // Missing src/poster values are not relative links: new URL("", base)
+    // resolves to the page and would invent both a media URL and a thumbnail.
+    if (typeof value !== "string" || !value.trim()) return null;
     try { return new URL(value, location.href).href; } catch { return null; }
   };
   // Intercept ChatGPT Library links before Chrome creates its own download dialog.
@@ -187,47 +190,284 @@
     }
   };
   const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
+  const isSponsoredFacebookPlayer = (element) => {
+    if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return false;
+    // A MediaStream/srcObject is used by both ads and ordinary Reels. Only an
+    // explicit ad marker in this exact card is safe grounds for hiding it. Some
+    // Facebook ad layouts do not expose role=article, so walk upward only while
+    // the container still belongs to this one player/card.
+    const markerSelector = [
+      '[aria-label*="Sponsored" i]', '[aria-label*="Patrocinado" i]',
+      '[aria-label*="Publicidad" i]', '[aria-label*="Gesponsert" i]',
+      '[data-ad-preview]', '[data-testid*="sponsored" i]',
+      'a[href*="ad_id="]', 'a[href*="/ads/"]', 'a[href*="ads/about"]',
+    ].join(',');
+    const label = /(?:^|[\s·•|])(?:Sponsored|Patrocinado|Patrocinada|Publicidad|Gesponsert|Sponsorisé|Sponsorizzato|赞助内容|贊助內容)(?:$|[\s·•|])/iu;
+    const closeToPlayer = marker => {
+      const playerRect = element?.getBoundingClientRect?.(), markerRect = marker?.getBoundingClientRect?.();
+      if (!playerRect || !markerRect) return false;
+      const markerY = markerRect.top + markerRect.height / 2;
+      return markerRect.right >= playerRect.left - 80 && markerRect.left <= playerRect.right + 80
+        && markerY >= playerRect.top - 320 && markerY <= playerRect.top + 120;
+    };
+    let exactPost = element.closest?.('[role="article"],article');
+    if (!exactPost) {
+      const playerRect = element?.getBoundingClientRect?.();
+      for (let node = element?.parentElement, depth = 0; node && depth < 18; node = node.parentElement, depth += 1) {
+        if (node === document.body || node === document.documentElement) break;
+        const rect = node.getBoundingClientRect?.();
+        const videos = [...(node.querySelectorAll?.('video') || [])];
+        if (videos.some(video => video !== element)) break;
+        const verticallyTight = rect && playerRect && rect.top >= playerRect.top - 420 && rect.bottom <= playerRect.bottom + 520;
+        if (verticallyTight && node.querySelector?.(markerSelector)) { exactPost = node; break; }
+      }
+    }
+    if (!exactPost) return false;
+    for (let node = element, depth = 0; node && depth < 24; node = node.parentElement, depth += 1) {
+      if (node === document.body || node === document.documentElement) break;
+      const videos = [...(node.querySelectorAll?.('video') || [])];
+      if (String(element?.tagName || '').toUpperCase() === 'VIDEO'
+        ? videos.some(video => video !== element) : videos.length > 1) break;
+      const explicit = [...(node.querySelectorAll?.(markerSelector) || [])].find(closeToPlayer);
+      if (explicit) return true;
+      const textual = [...(node.querySelectorAll?.('span,a,[role="button"],[aria-label]') || [])]
+        .find(candidate => {
+          const text = String(candidate.innerText || candidate.textContent || candidate.getAttribute?.('aria-label') || '').replace(/\s+/g, ' ').trim();
+          return text.length <= 80 && label.test(text) && closeToPlayer(candidate);
+        });
+      if (textual) return true;
+      if (node === exactPost) break;
+    }
+    return false;
+  };
+  // Scoped to this document: closing the popup does not destroy the catalog.
+  // A new document (including another site) creates a fresh isolated catalog.
+  const mediaCatalog = new Map();
+  const MAX_CATALOG_ITEMS = 300;
+  const MAX_CATALOG_THUMBNAIL_BYTES = 6 * 1024 * 1024;
+  const rememberMedia = (items) => {
+    const live = new Set();
+    for (const item of items) {
+      if (item.visualOnly) continue; // A DOM player is not a durable file identity.
+      const key = `${item.kind}:${item.url}`;
+      live.add(key);
+      const previous = mediaCatalog.get(key);
+      mediaCatalog.set(key, { ...previous, ...item,
+        thumbnail: item.thumbnail || previous?.thumbnail || "" });
+    }
+    while (mediaCatalog.size > MAX_CATALOG_ITEMS) mediaCatalog.delete(mediaCatalog.keys().next().value);
+    let bytes = 0;
+    for (const [key, item] of [...mediaCatalog.entries()].reverse()) {
+      if (!item.thumbnail?.startsWith("data:")) continue;
+      bytes += item.thumbnail.length;
+      if (bytes > MAX_CATALOG_THUMBNAIL_BYTES) mediaCatalog.set(key, { ...item, thumbnail: "" });
+    }
+    return [...mediaCatalog.entries()].map(([key, item]) => live.has(key)
+      ? { ...item, retained: false }
+      : { ...item, retained: true, recommended: false, playerBound: false, rect: null, viewport: null })
+      .concat(items.filter(item => item.visualOnly));
+  };
+  const playerIds = new WeakMap();
+  const playerThumbnails = new WeakMap();
+  let playerIdCounter = 0;
+  const playerIdentity = (element) => {
+    const source = String(element?.currentSrc || element?.src || "");
+    const stream = element?.srcObject || null;
+    const pageUrl = location.href;
+    let state = playerIds.get(element);
+    if (!state || state.source !== source || state.stream !== stream || state.pageUrl !== pageUrl || state.invalidated) {
+      playerIdCounter += 1;
+      const watching = state?.watching;
+      const blockedThumbnail = state && (state.source !== source || state.stream !== stream || state.pageUrl !== pageUrl)
+        ? state.lastThumbnail || state.blockedThumbnail : state?.blockedThumbnail;
+      state = { id: `player-${playerIdCounter}`, source, stream, pageUrl, watching: true, blockedThumbnail };
+      playerIds.set(element, state);
+      playerThumbnails.delete(element);
+      if (!watching) for (const event of ["emptied", "loadstart", "loadedmetadata"]) {
+        element?.addEventListener?.(event, () => {
+          const current = playerIds.get(element);
+          if (current) current.invalidated = true;
+        });
+      }
+    }
+    return state.id;
+  };
+  const playerContext = (element) => {
+    const rect = element?.getBoundingClientRect?.();
+    if (!rect || rect.width < 80 || rect.height < 45) return {};
+    const visible = rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight
+      && rect.left < (Number(globalThis.innerWidth) || document.documentElement?.clientWidth || rect.right);
+    return {
+      playerBound: true,
+      playerId: playerIdentity(element),
+      playerPageUrl: location.href,
+      recommended: visible,
+      rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      viewport: {
+        width: Number(globalThis.innerWidth) || document.documentElement?.clientWidth || rect.right,
+        height: Number(globalThis.innerHeight) || document.documentElement?.clientHeight || rect.bottom,
+      },
+    };
+  };
+  const cssImageUrl = (value) => {
+    const match = String(value || "").match(/url\(["']?([^"')]+)["']?\)/i);
+    return match ? absolute(match[1]) : "";
+  };
+  const visualThumbnailFor = (element) => {
+    if (!element?.getBoundingClientRect) return "";
+    const target = element.getBoundingClientRect();
+    const targetArea = Math.max(1, target.width * target.height);
+    let best = null;
+    let container = element.parentElement;
+    for (let depth = 0; container && depth < 10; depth += 1, container = container.parentElement) {
+      const videos = [...(container.querySelectorAll?.("video") || [])];
+      if (videos.length > 1) break;
+      const nodes = [container, ...(container.querySelectorAll?.("img") || [])];
+      for (const node of nodes) {
+        const rect = node.getBoundingClientRect?.();
+        if (!rect || rect.width < 80 || rect.height < 45) continue;
+        const overlapWidth = Math.max(0, Math.min(target.right, rect.right) - Math.max(target.left, rect.left));
+        const overlapHeight = Math.max(0, Math.min(target.bottom, rect.bottom) - Math.max(target.top, rect.top));
+        const overlap = overlapWidth * overlapHeight / Math.min(targetArea, Math.max(1, rect.width * rect.height));
+        if (overlap < 0.45) continue;
+        const source = node.tagName === "IMG"
+          ? absolute(node.currentSrc || node.src || node.getAttribute?.("data-src"))
+          : cssImageUrl(globalThis.getComputedStyle?.(node)?.backgroundImage);
+        if (!source || !/^https?:/i.test(source)) continue;
+        const score = overlap * 100 - depth * 2 + (node.tagName === "IMG" ? 5 : 0);
+        if (!best || score > best.score) best = { source, score };
+      }
+    }
+    return best?.source || "";
+  };
   const pageThumbnail = (element) => {
+    if (element) playerIdentity(element);
+    const state = element && playerIds.get(element);
     const candidates = [
       element?.poster,
       element?.getAttribute?.("poster"),
+      visualThumbnailFor(element),
+    ];
+    // Page-level metadata is safe only when the document has one player. On a
+    // feed it commonly describes the site or the first card, not this video.
+    // One visible player is not proof that page-wide artwork belongs to it:
+    // virtualized feeds reuse that one element. Require an exact media URL.
+    const source = absolute(element?.currentSrc || element?.src);
+    const pageVideo = ["og:video", "og:video:url", "og:video:secure_url"]
+      .map(name => absolute(document.querySelector(`meta[property="${name}"]`)?.content));
+    const pageBound = Boolean(source && /^https?:/i.test(source) && pageVideo.includes(source)
+      && document.querySelectorAll("video").length === 1);
+    if (pageBound) candidates.push(
       document.querySelector('meta[property="og:image:secure_url"]')?.content,
       document.querySelector('meta[property="og:image"]')?.content,
       document.querySelector('meta[name="twitter:image"]')?.content,
       document.querySelector('meta[name="twitter:image:src"]')?.content,
       document.querySelector('link[rel="image_src"]')?.href,
-      element?.closest?.("figure,article,[class*=player],[class*=video]")?.querySelector?.("img")?.currentSrc,
-    ];
+    );
     for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+      if (document.querySelectorAll("video").length > 1) break;
       try {
         const data = JSON.parse(script.textContent || "null");
         const nodes = Array.isArray(data) ? data : [data];
         for (const node of nodes) {
           const value = Array.isArray(node?.thumbnailUrl) ? node.thumbnailUrl[0] : node?.thumbnailUrl;
-          if (value) candidates.push(value);
+          const type = Array.isArray(node?.["@type"]) ? node["@type"] : [node?.["@type"]];
+          if (value && type.includes("VideoObject") && source
+            && absolute(node?.contentUrl) === source) candidates.push(value);
         }
       } catch {}
     }
     for (const candidate of candidates) {
       const url = absolute(candidate);
-      if (url && /^https?:/i.test(url)) return url;
+      if (url && /^https?:/i.test(url) && url !== state?.blockedThumbnail) {
+        if (state) state.lastThumbnail = url;
+        return url;
+      }
     }
     return "";
   };
   const thumbnailFor = (element, kind) => {
     if (kind === "audio") return "";
     if (element?.tagName === "IMG") return element.currentSrc || element.src || "";
+    if (element) {
+      const id = playerIdentity(element);
+      const cached = playerThumbnails.get(element);
+      if (cached?.id === id && cached.dataUrl) return cached.dataUrl;
+    }
     return pageThumbnail(element);
+  };
+  const playerSnapshot = (element) => {
+    const rect = element?.getBoundingClientRect?.();
+    return { id: playerIdentity(element), source: String(element?.currentSrc || element?.src || ""),
+      stream: element?.srcObject, poster: element?.poster, pageUrl: location.href,
+      width: Number(globalThis.innerWidth), height: Number(globalThis.innerHeight),
+      rect: rect && [rect.left, rect.top, rect.width, rect.height] };
+  };
+  const samePlayerSnapshot = (element, before) => {
+    if (element?.isConnected === false) return false;
+    const after = playerSnapshot(element);
+    return before.id === after.id && before.source === after.source && before.stream === after.stream
+      && before.poster === after.poster && before.pageUrl === after.pageUrl
+      && before.width === after.width && before.height === after.height
+      && before.rect?.every((value, index) => Math.abs(value - after.rect?.[index]) < 1);
+  };
+  const captureThumbnailFor = async (element, kind = "video", rejectedSource = null) => {
+    const snapshot = playerSnapshot(element);
+    const cached = playerThumbnails.get(element);
+    if (cached?.id === snapshot.id && cached.dataUrl) return cached.dataUrl;
+    const existing = thumbnailFor(element, kind);
+    if (existing && existing !== rejectedSource) return existing;
+    const rect = element?.getBoundingClientRect?.();
+    if (!rect || rect.width < 80 || rect.height < 45 || rect.bottom <= 0 || rect.top >= innerHeight) return "";
+    // Drawing the exact video is preferable to a viewport screenshot. Cross-origin
+    // canvas restrictions can prevent it; those restrictions are never bypassed.
+    try {
+      if (element.readyState >= 2 && element.videoWidth > 0 && element.videoHeight > 0) {
+        const canvas = document.createElement("canvas");
+        const scale = Math.min(1, 320 / element.videoWidth, 320 / element.videoHeight);
+        canvas.width = Math.max(1, Math.round(element.videoWidth * scale));
+        canvas.height = Math.max(1, Math.round(element.videoHeight * scale));
+        canvas.getContext("2d").drawImage(element, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+        if (samePlayerSnapshot(element, snapshot) && dataUrl.startsWith("data:image/jpeg")) {
+          playerThumbnails.set(element, { id: snapshot.id, dataUrl });
+          return dataUrl;
+        }
+      }
+    } catch {}
+    try {
+      const result = await chrome.runtime.sendMessage({
+        type: "APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL",
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        viewport: { width: innerWidth, height: innerHeight },
+      });
+      if (!samePlayerSnapshot(element, snapshot)) {
+        void globalThis.ADM_DIAG?.emit("thumbnail.stale_capture_rejected", { reason: "player_or_viewport_changed" });
+        return "";
+      }
+      const dataUrl = result?.dataUrl || "";
+      if (dataUrl) playerThumbnails.set(element, { id: snapshot.id, dataUrl });
+      return dataUrl;
+    } catch { return ""; }
   };
   const isFacebookMediaUrl = (url) => {
     try {
       const parsed = new URL(url, location.href);
       if (!/(^|\.)facebook\.com$/i.test(parsed.hostname)) return false;
       if (/\/(?:watch\/hashtag|hashtag)(?:\/|$)/i.test(parsed.pathname)) return false;
+      // Facebook uses `fbid` for both photos and videos. A photo permalink must
+      // stay in the Images tab; otherwise the popup offers the video player for
+      // a JPEG and the desktop correctly rejects it as a non-video page.
+      if (/\/(?:photo|photos)(?:\.php|\/|$)/i.test(parsed.pathname)) return false;
       return /(?:^|\/)(?:reel|reels|watch|videos|posts|share)(?:\/|$)/i.test(parsed.pathname)
         || /\/(?:permalink|story)\.php$/i.test(parsed.pathname)
         || parsed.searchParams.has("fbid")
         || parsed.searchParams.has("story_fbid");
+    } catch { return false; }
+  };
+  const isSocialMediaPage = (url) => {
+    try {
+      return /(^|\.)(?:facebook|tiktok|instagram)\.com$/i.test(new URL(url, location.href).hostname);
     } catch { return false; }
   };
   const isTikTokVideoUrl = (url) => {
@@ -235,6 +475,30 @@
       const parsed = new URL(url, location.href);
       return /(^|\.)tiktok\.com$/i.test(parsed.hostname) && /\/@[^/]+\/video\/\d+/i.test(parsed.pathname);
     } catch { return false; }
+  };
+  const socialCardUrl = (value) => {
+    const url = absolute(value);
+    if (!url) return null;
+    if (isFacebookMediaUrl(url) || isTikTokVideoUrl(url)) return url;
+    try {
+      const parsed = new URL(url);
+      return /(^|\.)instagram\.com$/i.test(parsed.hostname)
+        && /\/(?:reel|reels|p)\/[^/?#]+/i.test(parsed.pathname)
+        ? parsed.href : null;
+    } catch { return null; }
+  };
+  const cardThumbnailFor = (anchor) => {
+    let container = anchor;
+    for (let depth = 0; container && depth < 8; depth += 1, container = container.parentElement) {
+      const images = [...(container.querySelectorAll?.("img") || [])]
+        .map((image) => ({ image, rect: image.getBoundingClientRect?.() }))
+        .filter(({ image, rect }) => rect && rect.width >= 120 && rect.height >= 90
+          && /^https?:/i.test(image.currentSrc || image.src || image.getAttribute?.("data-src") || ""))
+        .sort((left, right) => right.rect.width * right.rect.height - left.rect.width * left.rect.height);
+      if (images[0]) return images[0].image.currentSrc || images[0].image.src || images[0].image.getAttribute("data-src") || "";
+      if (container.matches?.("article,[role=article],[data-e2e*=feed-item]")) break;
+    }
+    return "";
   };
   const tikTokUrlFor = (element) => globalThis.ApocalipseTikTokIdentity?.resolve(element) || null;
   const facebookUrlFor = (element) => {
@@ -397,22 +661,64 @@
       });
     };
     document.querySelectorAll("video").forEach((element) => {
-      const facebookUrl = facebookUrlFor(element);
+      // Reject an explicitly sponsored Facebook card before any URL, Blob or
+      // MediaStream path can turn it into a popup row.
+      if (isSponsoredFacebookPlayer(element)) return;
+      const candidateFacebookUrl = facebookUrlFor(element);
+      const facebookUrl = isFacebookMediaUrl(candidateFacebookUrl) ? candidateFacebookUrl : null;
+      const tikTokUrl = tikTokUrlFor(element);
+      const context = playerContext(element);
       if (facebookUrl) {
         add(facebookUrl, "video", element, undefined, {
           pageExtractor: true,
           previewUrl: absolute(element.currentSrc || element.src),
-          recommended: true,
+          ...context,
+        });
+      } else if (tikTokUrl) {
+        add(tikTokUrl, "video", element, undefined, {
+          pageExtractor: true,
+          previewUrl: absolute(element.currentSrc || element.src),
+          ...context,
         });
       } else {
-        add(element.currentSrc || element.src, "video", element);
-        element.querySelectorAll("source").forEach((source) => add(source.src, "video", element));
+        const source = absolute(element.currentSrc || element.src);
+        if (/^https?:/i.test(source || "")) {
+          add(source, "video", element, undefined, context);
+          element.querySelectorAll("source").forEach((child) => {
+            if (absolute(child.src) !== source) add(child.src, "video", null, "");
+          });
+        } else if (source?.startsWith("blob:") || element.srcObject) {
+          // A Blob/MSE player is still a real visual item. Preserve its stable
+          // element identity and geometry instead of replacing it with every
+          // anonymous CDN request observed in the tab.
+          const identity = new URL(location.href);
+          identity.hash = `apocalipse-${context.playerId || playerIdentity(element)}`;
+          add(identity.href, "video", element, undefined, {
+            ...context,
+            visualOnly: true,
+            pageExtractor: true,
+            // Ordinary Facebook Reels and sponsored cards can both use
+            // srcObject. Do not turn that implementation detail into an ad
+            // classification or valid Reels disappear from the popup.
+            recordingOnly: Boolean(element.srcObject && isSponsoredFacebookPlayer(element)),
+          });
+        }
       }
-      const tikTokUrl = tikTokUrlFor(element);
-      if (tikTokUrl) add(tikTokUrl, "video", element, undefined, {
+    });
+    // Social feeds commonly expose the permalink and cover image before they
+    // create a <video>. Treat that card as a video candidate so its thumbnail
+    // is available without starting playback.
+    document.querySelectorAll("a[href]").forEach((anchor) => {
+      if (isSponsoredFacebookPlayer(anchor)) return;
+      const url = socialCardUrl(anchor.href);
+      if (!url || items.has(`video:${url}`)) return;
+      const thumbnail = cardThumbnailFor(anchor);
+      if (!thumbnail) return;
+      const rect = anchor.getBoundingClientRect?.();
+      add(url, "video", anchor, thumbnail, {
         pageExtractor: true,
-        previewUrl: absolute(element.currentSrc || element.src),
-        recommended: true,
+        recommended: Boolean(rect && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight),
+        title: anchor.getAttribute("aria-label") || anchor.closest?.("article,[role=article]")?.innerText?.trim()?.slice(0, 240) || document.title,
       });
     });
     const facebookPageUrl = facebookUrlFor(document.querySelector("video"));
@@ -434,15 +740,12 @@
     });
     document.querySelectorAll("img").forEach((element) => add(element.currentSrc || element.src, "image", element));
     performance.getEntriesByType("resource").forEach((entry) => {
-      if (/\.m3u8(?:$|[?#])/i.test(entry.name)) add(entry.name, "video", document.querySelector("video"));
+      if (/\.m3u8(?:$|[?#])/i.test(entry.name) && !items.has(`video:${entry.name}`)) {
+        add(entry.name, "video", null, "");
+      }
     });
     const collected = [...items.values()];
-    if (collected.some((item) => item.kind === "video" && item.pageExtractor
-      && /(^|\.)(?:facebook|tiktok)\.com$/i.test(location.hostname))) {
-      return collected.filter((item) => item.kind !== "audio"
-        && (item.kind !== "video" || item.pageExtractor));
-    }
-    return collected;
+    return rememberMedia(collected);
   };
   const downloadLabel = () => {
     const value = String(interfaceLanguage || "en").toLowerCase();
@@ -707,6 +1010,8 @@
       const isTikTokVideo = Boolean(tikTokUrl);
       const url = isFacebookVideo ? facebookUrlFor(element) || location.href : tikTokUrl || downloadUrlFor(element);
       const liveMediaUrl = element.currentSrc || element.src || "";
+      const downloadReady = () => Boolean((downloadUrlFor(element) && /^https?:/.test(downloadUrlFor(element)))
+        || /^blob:/i.test(String(element.currentSrc || element.src || '')));
       const canDownload = Boolean((url && /^https?:/.test(url)) || /^blob:/i.test(liveMediaUrl));
       const canRecord = element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
         && Boolean(element.captureStream || element.webkitCaptureStream);
@@ -898,7 +1203,8 @@
           facebookPageExtractorPreferred: Boolean(facebookPageUrl),
           candidate: currentUrl,
         });
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail: thumbnailFor(element, "video") } }, (result) => {
+        const thumbnail = await captureThumbnailFor(element, "video");
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail } }, (result) => {
           const failed = chrome.runtime.lastError || !result?.ok;
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";
@@ -948,7 +1254,12 @@
             if (Number.isFinite(element.duration)) element.currentTime = 0;
             previousLoop = element.loop;
             element.loop = false;
+            await element.play();
             const stream = capture();
+            for (let attempt = 0; attempt < 20 && !stream.getTracks().length; attempt += 1) {
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            if (!stream.getTracks().length) throw new Error("capture_stream_has_no_tracks");
             const mimeType = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
               .find((type) => MediaRecorder.isTypeSupported(type)) || "";
             const safeTitle = (document.title || "recording").replace(/[<>:\"/\\|?*]+/g, "_").slice(0, 120);
@@ -1024,7 +1335,6 @@
               if (recorder && recorder.state !== "inactive") recorder.stop();
             }, { once: true });
             recorder.start(1000);
-            await element.play();
             startedAt = Date.now();
             recordPhase = "recording";
             refreshRecordLabels();
@@ -1071,9 +1381,10 @@
         const top = rect.top + scrollY + 10;
         button.style.left = `${left}px`;
         button.style.top = `${Math.max(6, top)}px`;
-        button.hidden = !canDownload || rect.width < 100 || rect.height < 55;
+        const liveCanDownload = canDownload || downloadReady();
+        button.hidden = !liveCanDownload || rect.width < 100 || rect.height < 55;
         if (recordButton) {
-          const recordLeft = canDownload && !button.hidden
+          const recordLeft = liveCanDownload && !button.hidden
             ? left + button.offsetWidth + 8
             : left;
           recordButton.style.left = `${recordLeft}px`;
@@ -1110,10 +1421,28 @@
   refreshOverlayLanguages = () => {
     for (const overlay of activeOverlays.values()) overlay.refreshLabels?.();
   };
-  const scheduleOverlays = () => {
-    clearTimeout(overlayTimer);
-    overlayTimer = setTimeout(installOverlays, 250);
+  let catalogTimer = null;
+  const scheduleCatalog = () => {
+    // Throttle rather than indefinitely debounce a continuously mutating feed.
+    if (catalogTimer !== null) return;
+    catalogTimer = setTimeout(() => {
+      catalogTimer = null;
+      if (document.visibilityState === "hidden") return;
+      collect();
+    }, 350);
   };
+  const scheduleOverlays = () => {
+    // Busy players can mutate their controls on every frame. Throttle the
+    // installer so continuous DOM activity cannot postpone it forever.
+    if (overlayTimer !== null && overlayTimer !== undefined) return;
+    overlayTimer = setTimeout(() => {
+      overlayTimer = null;
+      installOverlays();
+    }, 250);
+    scheduleCatalog();
+  };
+  addEventListener("scroll", scheduleCatalog, { passive: true, capture: true });
+  for (const event of ["loadedmetadata", "load", "emptied"]) document.addEventListener(event, scheduleCatalog, true);
   const style = document.createElement("style");
   style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:2px solid var(--apocalipse-accent,#25d9ef)!important;border-radius:8px!important;padding:8px 11px!important;background:#111a20f2!important;color:#fff!important;font:700 13px system-ui!important;box-shadow:0 3px 12px #0008!important;backdrop-filter:blur(5px)!important;cursor:pointer!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download:hover{background:#15262ef8!important;box-shadow:0 3px 14px var(--apocalipse-accent,#25d9ef)!important}.apocalipse-media-download:disabled{cursor:wait!important;opacity:.85!important}.apocalipse-media-record{color:#fff!important;background:#35151cf2!important}.apocalipse-media-record:hover{background:#4a1922f8!important}";
   document.documentElement.append(style);
@@ -1143,6 +1472,21 @@
       });
       return true;
     }
+    if (message?.type === "APOCALIPSE_CAPTURE_PLAYER_THUMBNAIL") {
+      const element = [...document.querySelectorAll("video")]
+        .find(video => playerIdentity(video) === message.playerId);
+      const current = element && collect().find(item => item.playerId === message.playerId
+        && item.url === message.url && !item.retained);
+      if (!current || (message.pageUrl && message.pageUrl !== location.href)) {
+        reply({ dataUrl: "", error: "stale_player_binding" });
+        return;
+      }
+      const snapshot = playerSnapshot(element);
+      captureThumbnailFor(element, "video", message.rejectedSource).then(dataUrl => {
+        reply({ dataUrl: samePlayerSnapshot(element, snapshot) ? dataUrl : "" });
+      }).catch(() => reply({ dataUrl: "" }));
+      return true;
+    }
     if (message?.type !== "APOCALIPSE_SCAN") return;
     const scanTrace = globalThis.ADM_DIAG?.begin("popup.scan_started", { stage: "content" });
     const found = collect();
@@ -1158,6 +1502,7 @@
       }
       return Promise.all(selectedItems.map(async (item) => {
       try {
+        if (item.visualOnly || item.retained) return item;
         return { ...item, ...(await chrome.runtime.sendMessage({ type: "APOCALIPSE_PROBE", url: item.url })) };
       } catch {
         return item;

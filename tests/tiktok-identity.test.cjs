@@ -19,11 +19,13 @@ class Element {
     ]);
   }
 }
-function fixture(url = 'https://www.tiktok.com/') {
+function fixture(url = 'https://www.tiktok.com/', networkPayload = null) {
   const html = new Element('html'), body = new Element('body'); body.parentElement = html;
   const scripts = [];
   const document = { body, documentElement: html, querySelectorAll: selector => selector.startsWith('script') ? scripts : body.querySelectorAll(selector) };
-  const context = vm.createContext({ URL, location: new URL(url), document });
+  const context = vm.createContext({ URL, location: new URL(url), document,
+    ...(networkPayload ? { fetch: async () => ({ headers: { get: () => 'application/json' },
+      clone: () => ({ json: async () => networkPayload }) }) } : {}) });
   vm.runInContext(script, context);
   const card = (id, source, tag = 'article') => {
     const video = new Element('video'); video.currentSrc = video.src = source;
@@ -88,11 +90,96 @@ test('MAIN-world framework props bound to the card are resolved without climbing
     return: { id: '111', author: { uniqueId: 'wrong' } } };
   assert.equal(f.api.resolveLocal(a.video, false), 'https://www.tiktok.com/@current/video/222');
 });
+
+test('a unique parent Fiber identity is accepted when the current TikTok layout has no card marker', () => {
+  const f = fixture();
+  const video = new Element('video'); video.currentSrc = video.src = 'blob:current';
+  const wrapper = new Element('div', {}, [video]); wrapper.parentElement = f.body; f.body.children.push(wrapper);
+  wrapper.__reactFiber$test = { return: { id: '333', author: { uniqueId: 'parent' }, video: {} } };
+  assert.equal(f.api.resolveLocal(video, false), 'https://www.tiktok.com/@parent/video/333');
+});
+
+test('unresolved TikTok identity reports safe structure counts without page content', () => {
+  assert.match(script, /parentRecordCount/);
+  assert.match(script, /parentDistinctIds/);
+  assert.match(script, /explicitIdCount/);
+  assert.match(script, /sourceIdentityPresent/);
+  assert.match(script, /networkRecordCount/);
+});
+
+test('TikTok preserves item identities from feed responses before Blob rendering discards them', () => {
+  assert.match(script, /rememberNetworkPayload/);
+  assert.match(script, /feed_response_hint_only/);
+  assert.match(script, /__apocalipseTikTokFetchIdentity/);
+  assert.match(script, /__apocalipseTikTokXhrIdentity/);
+});
+
+test('TikTok Copy handler exposes only a canonical permalink for one explicitly marked player', () => {
+  assert.match(script, /__apocalipseTikTokClipboardWriteIdentity/);
+  assert.match(script, /marked\.length === 1/);
+  assert.match(script, /setAttribute\(copyResultAttribute, permalink\)/);
+  assert.match(script, /Reflect\.apply\(nativeWriteText, this, arguments\)/);
+  assert.match(script, /__apocalipseTikTokLegacyCopyIdentity/);
+  assert.match(script, /scanLegacyCopySelection/);
+  assert.match(script, /Document\?\.prototype\?\.execCommand/);
+  assert.match(script, /HTMLInputElement/);
+  assert.match(script, /HTMLTextAreaElement/);
+  assert.match(script, /queueMicrotask\(scanLegacyCopySelection\)/);
+});
+
+test('MAIN-world share control resolver accepts only one exact TikTok identity', () => {
+  assert.match(script, /resolveElement\(element\)/);
+  assert.match(script, /graphPermalinks/);
+  assert.match(script, /records\(roots\)\.map/);
+  assert.match(script, /const exact = unique/);
+  assert.match(script, /key !== 'return'/);
+});
+
+test('duration and size alone never identify the current Blob player', async () => {
+  const payload = { itemList: [
+    { id: '777', author: { uniqueId: 'right' }, video: { duration: 9, width: 1080, height: 1920 } },
+    { id: '888', author: { uniqueId: 'other' }, video: { duration: 20, width: 1080, height: 1920 } },
+  ] };
+  const f = fixture('https://www.tiktok.com/', payload);
+  await f.context.fetch('https://www.tiktok.com/api/recommend/item_list/');
+  await Promise.resolve();
+  const current = f.card('111', 'blob:current', 'div');
+  current.root.children = [current.video]; current.video.duration = 9;
+  current.video.videoWidth = 1080; current.video.videoHeight = 1920;
+  assert.equal(f.api.resolveLocal(current.video, false), null);
+  assert.equal(f.api.diagnosticState(current.video).reason, 'feed_response_hint_only');
+  assert.equal(f.api.diagnosticState(current.video).networkHintPresent, true);
+});
+
+test('author plus duration and size remain a hint, not an exact identity', async () => {
+  const payload = { itemList: [
+    { id: '777', author: { uniqueId: 'right' }, video: { duration: 9, width: 1080, height: 1920 } },
+    { id: '888', author: { uniqueId: 'other' }, video: { duration: 9, width: 1080, height: 1920 } },
+  ] };
+  const f = fixture('https://www.tiktok.com/', payload);
+  await f.context.fetch('https://www.tiktok.com/api/recommend/item_list/'); await Promise.resolve();
+  const current = f.card('111', 'blob:current', 'div');
+  const profile = new Element('a'); profile.href = 'https://www.tiktok.com/@right';
+  current.root.children = [current.video, profile]; current.video.duration = 9;
+  current.video.videoWidth = 1080; current.video.videoHeight = 1920;
+  assert.equal(f.api.resolveLocal(current.video, false), null);
+  assert.equal(f.api.diagnosticState(current.video).reason, 'feed_response_hint_only');
+});
 test('buttons keep their exact video reference, not the nearest player geometry', () => {
   const f = fixture(); const a = f.card('111', 'blob:a'), b = f.card('222', 'blob:b');
   const button = {}; f.api.bind(button, b.video);
   assert.equal(f.api.videoFor(button), b.video); assert.notEqual(f.api.videoFor(button), a.video);
   b.video.isConnected = false; assert.equal(f.api.videoFor(button), null);
+});
+test('a copied TikTok permalink is learned only by the exact player and source', () => {
+  const f = fixture(); const a = f.card('111', 'blob:a'), b = f.card('222', 'blob:b');
+  a.root.children = [a.video]; b.root.children = [b.video];
+  assert.equal(f.api.learn(a.video, 'https://www.tiktok.com/@right/video/777'), 'https://www.tiktok.com/@right/video/777');
+  assert.equal(f.api.resolve(a.video), 'https://www.tiktok.com/@right/video/777');
+  assert.equal(f.api.diagnosticState(a.video).reason, 'learned_clipboard_identity');
+  assert.notEqual(f.api.resolve(b.video), 'https://www.tiktok.com/@right/video/777');
+  a.video.currentSrc = a.video.src = 'blob:recycled';
+  assert.notEqual(f.api.resolve(a.video), 'https://www.tiktok.com/@right/video/777');
 });
 test('button binding survives a resolver realm restart without guessing another player', () => {
   const f = fixture(); const a = f.card('111', 'blob:a'), b = f.card('222', 'blob:b');

@@ -11,6 +11,7 @@ use reqwest::{
 };
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashSet,
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     sync::{
@@ -106,6 +107,33 @@ pub struct DownloadEngine {
 #[derive(Clone)]
 struct CustomDnsResolver {
     resolver: TokioResolver,
+}
+
+#[derive(Debug)]
+struct SourceProbe {
+    total: Option<u64>,
+    etag: Option<String>,
+    digest: Option<String>,
+    elapsed: Duration,
+}
+
+fn same_download_identity(
+    primary: &SourceProbe,
+    candidate: &SourceProbe,
+    advertised: bool,
+) -> bool {
+    if primary.total.is_some() && candidate.total.is_some() && primary.total != candidate.total {
+        return false;
+    }
+    if let (Some(left), Some(right)) = (primary.digest.as_deref(), candidate.digest.as_deref()) {
+        return left.eq_ignore_ascii_case(right);
+    }
+    if let (Some(left), Some(right)) = (primary.etag.as_deref(), candidate.etag.as_deref()) {
+        if !left.starts_with("W/") && !right.starts_with("W/") {
+            return left == right;
+        }
+    }
+    advertised && primary.total.is_some() && primary.total == candidate.total
 }
 
 impl Resolve for CustomDnsResolver {
@@ -258,6 +286,119 @@ impl DownloadEngine {
             }
         }
         self.download_single(request, events).await
+    }
+
+    /// Finds server-advertised duplicate resources and ranks every verified
+    /// source by probe latency. Candidates are never inferred from host names.
+    pub async fn verified_sources(
+        &self,
+        request: &DownloadRequest,
+        supplied_mirrors: &[String],
+    ) -> Vec<String> {
+        let advertised = self.advertised_mirrors(request).await;
+        let advertised_set = advertised.iter().cloned().collect::<HashSet<_>>();
+        let mut candidates = vec![request.url.clone()];
+        candidates.extend(advertised);
+        candidates.extend(supplied_mirrors.iter().cloned());
+        let mut seen = HashSet::new();
+        candidates.retain(|url| seen.insert(url.clone()));
+
+        let primary = self.probe_source(request, &request.url).await;
+        let Some(primary_identity) = primary.as_ref() else {
+            return candidates;
+        };
+        let mut probes = FuturesUnordered::new();
+        for url in candidates {
+            let engine = self.clone();
+            let request = request.clone();
+            let server_advertised = advertised_set.contains(&url);
+            probes.push(async move {
+                let probe = engine.probe_source(&request, &url).await?;
+                Some((url, probe, server_advertised))
+            });
+        }
+        let mut verified = Vec::new();
+        while let Some(Some((url, probe, server_advertised))) = probes.next().await {
+            if url == request.url
+                || same_download_identity(primary_identity, &probe, server_advertised)
+            {
+                verified.push((url, probe.elapsed));
+            }
+        }
+        verified.sort_by_key(|(_, elapsed)| *elapsed);
+        if verified.is_empty() {
+            vec![request.url.clone()]
+        } else {
+            verified.into_iter().map(|(url, _)| url).collect()
+        }
+    }
+
+    async fn advertised_mirrors(&self, request: &DownloadRequest) -> Vec<String> {
+        let response = apply_headers(self.client.head(&request.url), &request.headers)
+            .send()
+            .await;
+        let Ok(response) = response else {
+            return Vec::new();
+        };
+        response
+            .headers()
+            .get_all(header::LINK)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .flat_map(|value| value.split(','))
+            .filter(|part| {
+                let lower = part.to_ascii_lowercase();
+                lower.contains("rel=\"duplicate\"")
+                    || lower.contains("rel=duplicate")
+                    || lower.contains("rel=\"mirror\"")
+                    || lower.contains("rel=mirror")
+            })
+            .filter_map(|part| {
+                part.split_once('<')?
+                    .1
+                    .split_once('>')
+                    .map(|value| value.0.trim())
+            })
+            .filter_map(|value| reqwest::Url::parse(&request.url).ok()?.join(value).ok())
+            .filter(|url| {
+                matches!(url.scheme(), "http" | "https")
+                    && url.username().is_empty()
+                    && url.password().is_none()
+            })
+            .map(|url| url.to_string())
+            .take(10)
+            .collect()
+    }
+
+    async fn probe_source(&self, request: &DownloadRequest, url: &str) -> Option<SourceProbe> {
+        let started = Instant::now();
+        let response = apply_headers(self.client.get(url), &request.headers)
+            .header(header::RANGE, "bytes=0-0")
+            .send()
+            .await
+            .ok()?;
+        if !(response.status().is_success() || response.status() == StatusCode::PARTIAL_CONTENT) {
+            return None;
+        }
+        let headers = response.headers();
+        let total = headers
+            .get(header::CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(content_range_total)
+            .or_else(|| response.content_length());
+        Some(SourceProbe {
+            total,
+            etag: headers
+                .get(header::ETAG)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
+            digest: headers
+                .get("digest")
+                .or_else(|| headers.get("content-md5"))
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
+            elapsed: started.elapsed(),
+        })
     }
 
     async fn download_single(
@@ -652,6 +793,48 @@ mod tests {
             chunk_directory(Path::new("first.iso")),
             chunk_directory(Path::new("second.iso"))
         );
+    }
+
+    #[test]
+    fn mirror_identity_rejects_different_files() {
+        let primary = SourceProbe {
+            total: Some(10_000),
+            etag: Some("\"file-a\"".into()),
+            digest: None,
+            elapsed: Duration::from_millis(20),
+        };
+        let different_size = SourceProbe {
+            total: Some(9_999),
+            etag: Some("\"file-a\"".into()),
+            digest: None,
+            elapsed: Duration::from_millis(10),
+        };
+        let different_etag = SourceProbe {
+            total: Some(10_000),
+            etag: Some("\"file-b\"".into()),
+            digest: None,
+            elapsed: Duration::from_millis(10),
+        };
+        assert!(!same_download_identity(&primary, &different_size, true));
+        assert!(!same_download_identity(&primary, &different_etag, false));
+    }
+
+    #[test]
+    fn server_advertised_duplicate_requires_the_same_size_without_a_hash() {
+        let primary = SourceProbe {
+            total: Some(10_000),
+            etag: None,
+            digest: None,
+            elapsed: Duration::from_millis(20),
+        };
+        let duplicate = SourceProbe {
+            total: Some(10_000),
+            etag: None,
+            digest: None,
+            elapsed: Duration::from_millis(10),
+        };
+        assert!(same_download_identity(&primary, &duplicate, true));
+        assert!(!same_download_identity(&primary, &duplicate, false));
     }
 
     #[tokio::test]

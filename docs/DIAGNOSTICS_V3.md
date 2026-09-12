@@ -12,7 +12,9 @@ Desktop 0.4.29 / extension 0.3.102. Built on PR58 0.3.101. This instrumentation 
 Desktop-only sessions can be started in ADM > Logs, for queue/UI problems. Starting a new session replaces the current session; export before starting another investigation. Detailed collection expires after ten minutes. Normal legacy logging remains available.
 
 ## Evidence
-The existing v2 export files remain. New files: RELATORIO_PARA_IA.txt, logs/diagnostics-v3.jsonl, traces/actions.jsonl, capture/media-decisions.jsonl, state/players-popup.json, health/collectors.json.
+The existing v2 export files remain. New files: RELATORIO_PARA_IA.txt, logs/diagnostics-v3.jsonl, traces/actions.jsonl, traces/replay-de-midia.jsonl, capture/media-decisions.jsonl, state/players-popup.json, health/collectors.json.
+
+While the opt-in session is active, the media replay records left/right media interactions and a short clipboard probe after a right click on a player. Only canonical Facebook/TikTok media URLs are accepted and immediately sanitized; arbitrary clipboard contents, keystrokes, editable fields, page copy and form values are never emitted.
 
 An action trace follows a click through extension and bridge to the Save prompt, task binding and native media preparation. Frame context, player generation/source references, popup row enablement reasons, network filter decisions and handler ownership are observations. They are not automatically declared root causes. Last-stage and absent-event interpretations must account for collector health.
 

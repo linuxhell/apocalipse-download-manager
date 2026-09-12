@@ -31,7 +31,7 @@ test('TikTok uses one deterministic isolated-world chain in every frame', () => 
     && item.js.includes('tiktok-media-fix.js') && item.js.includes('content.js'));
   assert.ok(tiktok, 'TikTok chain must be declared');
   assert.equal(tiktok.all_frames, true);
-  assert.deepEqual(tiktok.js, ['diagnostics-core.js', 'diagnostics.js', 'tiktok-identity.js', 'tiktok-media-fix.js', 'content.js']);
+  assert.deepEqual(tiktok.js, ['diagnostics-core.js', 'diagnostics.js', 'diagnostics-media-replay.js', 'tiktok-identity.js', 'tiktok-media-fix.js', 'content.js']);
   const generic = manifest.content_scripts.find((item) => Array.isArray(item.js)
     && item.js.includes('content.js') && !item.js.includes('tiktok-media-fix.js'));
   assert.ok(generic?.exclude_matches?.some((value) => value.includes('tiktok.com')),

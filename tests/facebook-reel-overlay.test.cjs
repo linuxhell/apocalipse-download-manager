@@ -199,6 +199,25 @@ test('YouTube exposes yt-dlp Download without a redundant recording button', () 
   assert.match(script, /if \(element\.tagName === "VIDEO" && canRecord && !usesExtractorOnlyDownload\)/);
 });
 
+test('Facebook srcObject alone never classifies an ordinary Reel as recording-only', () => {
+  assert.match(script, /recordingOnly:\s*Boolean\(element\.srcObject && isSponsoredFacebookPlayer\(element\)\)/);
+  assert.doesNotMatch(script, /recordingOnly:\s*Boolean\(element\.srcObject && \/\(\^\|\\\.\)facebook/);
+});
+
+test('Facebook sponsored-player detection is scoped to the exact post and explicit ad markers', () => {
+  assert.match(script, /const isSponsoredFacebookPlayer = \(element\) =>/);
+  assert.match(script, /depth < 24/);
+  assert.match(script, /videos\.some\(video => video !== element\)/);
+  assert.match(script, /data-ad-preview/);
+  assert.match(script, /Patrocinado/);
+  assert.match(script, /const closeToPlayer = marker =>/);
+  assert.match(script, /let exactPost = element\.closest/);
+  assert.match(script, /if \(!exactPost\) return false/);
+  assert.match(script, /markerY >= playerRect\.top - 320/);
+  assert.match(script, /if \(isSponsoredFacebookPlayer\(element\)\) return;/);
+  assert.match(script, /if \(isSponsoredFacebookPlayer\(anchor\)\) return;/);
+});
+
 test('recording follows player pauses without writing dead timeline gaps', () => {
   assert.match(script, /recording_paused_with_player/);
   assert.match(script, /recorder\.pause\(\)/);
@@ -215,6 +234,13 @@ test('recording keeps the source player alive and stops at its real end', () => 
   assert.match(script, /currentTime >= duration - 0\.25/);
   assert.match(script, /recording_reached_media_end/);
   assert.match(script, /if \(playbackWatch\) clearInterval\(playbackWatch\)/);
+});
+
+test('late direct video sources reveal Download and recording waits for real tracks', () => {
+  assert.match(script, /const downloadReady = \(\) =>/);
+  assert.match(script, /const liveCanDownload = canDownload \|\| downloadReady\(\)/);
+  assert.match(script, /await element\.play\(\);\s*const stream = capture\(\)/);
+  assert.match(script, /capture_stream_has_no_tracks/);
 });
 
 test('recording seals each segment and resumes only after real media progress', () => {

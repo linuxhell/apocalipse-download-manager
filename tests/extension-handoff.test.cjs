@@ -49,6 +49,8 @@ test('media names preserve container, supplied names and signed URLs', () => {
   assert.equal(name({ url: 'https://media.example/opaque/', contentType: 'video/webm; codecs=vp9', title: 'Clip' }), 'Clip.webm');
   assert.equal(name({ url: 'https://media.example/opaque/', contentType: 'audio/mp4', kind: 'audio' }), 'audio.m4a');
   assert.equal(name({ url: 'https://media.example/file', kind: 'video' }), null);
+  assert.equal(name({ url: 'https://p16-sign.tiktokcdn.com/opaque', kind: 'image', title: 'TikTok' }), 'TikTok.jpg');
+  assert.equal(name({ url: 'https://p16-sign.tiktokcdn.com/opaque', kind: 'image', title: 'TikTok', contentType: 'image/webp' }), 'TikTok.webp');
   assert.equal(name({ ...item, title: '../bad: name?' }), '.._bad_ name_.mp4');
   assert.equal(name({ ...item, title: 'CON' }), '_CON.mp4');
 });

@@ -21,10 +21,11 @@ test('paired direct preview preserves video AND audio identity', () => {
   const result = preview(item, 'https://www.tiktok.com/');
   assert.equal(result.url, item.url); assert.equal(result.audioUrl, item.audioUrl); assert.equal(result.mediaKind, 'video');
 });
-test('an explicitly selected video can be previewed so the user can identify the current reel', () => {
+test('an incomplete social track cannot bypass identity resolution through Preview', () => {
   const item = { url: 'https://v16.tiktok.com/track.mp4', ambiguousSocialTrack: true, kind: 'video' };
-  assert.ok(preview(item, 'https://www.tiktok.com/'));
-  assert.ok(preview({ ...item, kind: 'audio' }, 'https://www.tiktok.com/'));
+  assert.equal(preview(item, 'https://www.tiktok.com/'), null);
+  assert.equal(preview({ ...item, url: 'https://video.xx.fbcdn.net/track.mp4' }, 'https://www.facebook.com/'), null);
+  assert.ok(preview(item, 'https://example.com/watch'));
   assert.ok(source.includes('previewButton.hidden = item.kind === "image"'));
   assert.ok(source.includes('previewButton.disabled = !previewRequest'));
 });
