@@ -680,7 +680,11 @@ fn version_numbers(value: &str) -> Vec<u64> {
         .trim()
         .trim_start_matches(['v', 'V'])
         .split('.')
-        .map(|part| part.split(|character: char| !character.is_ascii_digit()).next().unwrap_or("0"))
+        .map(|part| {
+            part.split(|character: char| !character.is_ascii_digit())
+                .next()
+                .unwrap_or("0")
+        })
         .map(|part| part.parse::<u64>().unwrap_or(0))
         .collect()
 }
