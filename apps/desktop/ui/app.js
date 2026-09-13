@@ -1307,6 +1307,7 @@ const selectLanguage = (language) => {
   locale = ["en", "pt-BR", "zh-CN"].includes(language) ? language : "en";
   localStorage.setItem("apocalipse.language", locale);
   translate();
+  window.dispatchEvent(new CustomEvent("apocalipse-language-changed", { detail: { language: locale } }));
   invoke("set_application_language", { language: locale }).catch(console.error);
 };
 document.querySelectorAll("[data-language-choice]").forEach((button) => {

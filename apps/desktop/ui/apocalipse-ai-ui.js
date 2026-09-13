@@ -43,7 +43,7 @@
     const article = document.createElement("article");
     article.className = `ai-message ai-message-${message.role}`;
     const content = document.createElement("p");
-    content.textContent = message.text;
+    content.textContent = message.kind === "welcome" ? AI.say(language(), "hello") : message.text;
     const meta = document.createElement("small");
     meta.textContent = message.role === "assistant" ? `Apocalipse AI · ${timeLabel(message.at)}` : timeLabel(message.at);
     article.append(content, meta);
@@ -53,13 +53,18 @@
     root.replaceChildren(...messages.map(bubble));
     root.scrollTop = root.scrollHeight;
   }
-  function addMessage(role, text) {
-    messages.push({ id: crypto.randomUUID(), role, text, at: Date.now() });
+  function addMessage(role, text, kind = null) {
+    messages.push({ id: crypto.randomUUID(), role, text, kind, at: Date.now() });
     persistMessages();
     renderMessages();
   }
   function welcome() {
-    if (!messages.length) addMessage("assistant", AI.say(language(), "hello"));
+    if (!messages.length) addMessage("assistant", AI.say(language(), "hello"), "welcome");
+    else if (messages.length === 1 && messages[0].role === "assistant"
+      && Object.values(AI.copy).some(dictionary => dictionary.hello === messages[0].text)) {
+      messages[0].kind = "welcome";
+      persistMessages();
+    }
   }
   function parseExtensionVersion(events) {
     const versions = [...String(events || "").matchAll(/extension_version=([0-9.]+)/g)].map(match => match[1]);
@@ -94,6 +99,11 @@
     try {
       const ctx = await context();
       const result = AI.respond(text, ctx);
+      if (result.action?.type === "clear_chat") {
+        messages = [];
+        persistMessages();
+        renderMessages();
+      }
       if (result.action?.type === "save_website_credential") {
         const { host, username, password } = result.action;
         await invoke("save_website_credential", { host, username, password });
@@ -166,6 +176,7 @@
     persistCorrections(); renderCorrections();
   };
   window.addEventListener("apocalipse-ai-opened", () => { welcome(); renderMessages(); updateAlert(); input.focus(); });
+  window.addEventListener("apocalipse-language-changed", () => { welcome(); renderMessages(); renderCorrections(); });
   window.addEventListener("storage", event => { if (event.key === FIX_KEY) { corrections = read(FIX_KEY, []); renderCorrections(); updateAlert(); } });
   updateAlert();
 })();

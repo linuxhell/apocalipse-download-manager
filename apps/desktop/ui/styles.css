@@ -1034,7 +1034,8 @@ nav button:hover, nav button.active, .download-icon { color: var(--accent); }
 .ai-nav-icon i { position:absolute; right:-2px; top:-2px; width:7px; height:7px; border-radius:50%; background:#ff536e; box-shadow:0 0 0 3px color-mix(in srgb,#ff536e 18%,transparent),0 0 10px #ff536e; animation:ai-alert 1.15s ease-in-out infinite; }
 .ai-nav-icon i[hidden] { display:none; }
 @keyframes ai-alert { 50% { opacity:.35; transform:scale(.72); } }
-.ai-panel { min-height:0; flex:1; display:grid; grid-template-rows:auto minmax(280px,1fr) auto auto; border:1px solid var(--line); border-radius:14px; overflow:hidden; background:var(--panel); }
+body:has(#ai-panel:not([hidden])) main { height:100vh; overflow:hidden; }
+.ai-panel { min-height:380px; flex:1; display:grid; grid-template-rows:auto minmax(0,1fr) auto auto; border:1px solid var(--line); border-radius:14px; overflow:hidden; background:var(--panel); }
 .ai-panel[hidden] { display:none; }
 .ai-panel-head { align-items:center; margin:0; padding:14px 16px; border-bottom:1px solid var(--line); background:var(--surface); }
 .ai-identity { display:flex; align-items:center; gap:11px; }
@@ -1042,7 +1043,7 @@ nav button:hover, nav button.active, .download-icon { color: var(--accent); }
 .ai-identity div { display:grid; gap:3px; }
 .ai-identity small,.ai-privacy { color:var(--muted); }
 .ai-panel-head button,.ai-correction-row button,.ai-corrections-toolbar button { border:1px solid var(--line); border-radius:8px; padding:8px 11px; color:var(--text); background:var(--surface-2); cursor:pointer; }
-.ai-conversation { min-height:280px; padding:22px; overflow:auto; display:flex; flex-direction:column; gap:13px; scrollbar-color:var(--accent) var(--surface); }
+.ai-conversation { min-height:0; padding:22px; overflow:auto; display:flex; flex-direction:column; gap:13px; scrollbar-color:var(--accent) var(--surface); }
 .ai-message { max-width:min(720px,86%); display:grid; gap:5px; }
 .ai-message p { margin:0; padding:12px 15px; border:1px solid var(--line); border-radius:14px 14px 14px 4px; background:var(--surface-2); color:var(--text); line-height:1.5; white-space:pre-wrap; }
 .ai-message small { padding:0 4px; color:var(--muted); font-size:10px; }

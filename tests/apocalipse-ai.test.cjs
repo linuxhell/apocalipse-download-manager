@@ -173,3 +173,31 @@ test('incomplete credential commands never trigger a save action', () => {
   assert.equal(result.intent, 'credential_invalid');
   assert.equal(result.action, undefined);
 });
+
+test('the exact chat commands reported by the user are understood', () => {
+  const clear = AI.respond('limpe essa tela do chat', { locale: 'pt-BR', events: '{"level":"ERROR","detail":"403 access denied"}' });
+  assert.equal(clear.intent, 'chat_clear');
+  assert.equal(clear.action.type, 'clear_chat');
+  assert.match(clear.text, /Conversa limpa/);
+
+  const log = AI.respond('como está o seu log? algum erro?', {
+    locale: 'pt-BR', events: [
+      { level: 'INFO', event: 'started', detail: 'ok' },
+      { level: 'ERROR', event: 'http.failed', detail: 'site=example.test error=403' },
+    ],
+  });
+  assert.match(log.text, /1 erro/);
+  assert.doesNotMatch(log.text, /^O site recusou/);
+});
+
+test('welcome message follows language changes and the composer stays fixed', () => {
+  assert.match(aiUi, /message\.kind === "welcome" \? AI\.say\(language\(\), "hello"\)/);
+  assert.match(aiUi, /apocalipse-language-changed/);
+  assert.match(app, /dispatchEvent\(new CustomEvent\("apocalipse-language-changed"/);
+  assert.match(css, /grid-template-rows:auto minmax\(0,1fr\) auto auto/);
+  assert.match(css, /body:has\(#ai-panel:not\(\[hidden\]\)\) main \{ height:100vh; overflow:hidden; \}/);
+});
+
+test('tray reopen uses the larger 1280 by 840 window', () => {
+  assert.match(desktop, /show_main_window[\s\S]*set_size\(tauri::LogicalSize::new\(1280\.0, 840\.0\)\)/);
+});

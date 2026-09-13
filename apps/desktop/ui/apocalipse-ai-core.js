@@ -51,6 +51,7 @@
       credentialSaved: "Credentials for {host} were saved for user {username}.",
       credentialInvalid: "I understood that you want to add site credentials, but the site, username or password is missing. Use: add a rule for site example.com username myuser password mypassword.",
       credentialFailed: "I couldn’t save the credentials. Check the site address, username and password.",
+      chatCleared: "Conversation cleared. How can I help with Apocalipse?",
       offTopic: "I’m specialized in Apocalipse Download Manager. Ask me about its downloads, sites, extension, media, settings, tools or diagnostics.",
     },
     "pt-BR": {
@@ -98,6 +99,7 @@
       credentialSaved: "As credenciais de {host} foram salvas para o usuário {username}.",
       credentialInvalid: "Entendi que você quer adicionar credenciais de site, mas falta o site, o usuário ou a senha. Use: adicione uma regra para o site exemplo.com nome de usuário meuusuario e senha minhasenha.",
       credentialFailed: "Não consegui salvar as credenciais. Confira o endereço do site, o usuário e a senha.",
+      chatCleared: "Conversa limpa. Como posso ajudar com o Apocalipse?",
       offTopic: "Sou especializada no Apocalipse Download Manager. Pergunte sobre downloads, sites, extensão, mídia, configurações, ferramentas ou diagnósticos.",
     },
     "zh-CN": {
@@ -145,6 +147,7 @@
       credentialSaved: "已为用户 {username} 保存 {host} 的凭据。",
       credentialInvalid: "我知道你想添加网站凭据，但缺少网站、用户名或密码。请使用：为网站 example.com 添加规则，用户名 myuser，密码 mypassword。",
       credentialFailed: "无法保存凭据。请检查网站地址、用户名和密码。",
+      chatCleared: "对话已清除。关于 Apocalipse，我能帮你什么？",
       offTopic: "我专用于 Apocalipse Download Manager。你可以询问下载、网站、扩展、媒体、设置、工具或诊断。",
     },
   };
@@ -237,6 +240,12 @@
     const text = scoped.map(eventText).join("\n");
     const failures = scoped.filter(event => String(event.level || "").toUpperCase() === "ERROR" || /failed|error=/.test(eventText(event)));
 
+    if (/(como (?:esta|estao).*(?:log|registro)|(?:log|registro).*(?:erro|falha|estado)|log status|errors? in (?:the )?logs?|日志.*(?:错误|状态)|(?:错误|状态).*日志)/.test(q)) {
+      return failures.length
+        ? say(locale, "errors", { count: failures.length, detail: safeDetail(failures.at(-1)?.detail || failures.at(-1)?.raw || failures.at(-1)?.event) })
+        : say(locale, "noErrors");
+    }
+
     if (site === "tiktok" && /(como|how|怎么|如何|visuali|preview|abr|open)/.test(q)) return say(locale, "tiktokGuide");
     if (site === "pixeldrain" && /(thread|conex|connection|falh|failed|regra|rule|线程|连接|规则)/.test(q)) return say(locale, "pixeldrainRule");
     if (/(atualiz|latest|ultima vers|最新|版本)/.test(q)) return say(locale, "installed", {
@@ -286,6 +295,9 @@
     const corrections = context.corrections || [];
     const pending = [...corrections].reverse().find(item => ["proposed", "testing"].includes(item.status));
     if (!q) return { text: say(locale, "unknown"), intent: "unknown" };
+    if (/(?:^|\b)(?:limpe|limpar|apague|apagar|clear|erase|delete)(?:\s+(?:essa|esta|a|the))?\s+(?:tela\s+do\s+)?(?:chat|conversa|conversation)(?:\b|$)|清除(?:聊天|对话)/.test(q)) {
+      return { text: say(locale, "chatCleared"), intent: "chat_clear", action: { type: "clear_chat" } };
+    }
     const credential = parseCredentialCommand(input);
     if (credential) {
       if (!credential.valid) return { text: say(locale, "credentialInvalid"), intent: "credential_invalid" };
