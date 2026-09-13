@@ -73,9 +73,10 @@ fn host_from_url(url: &str) -> Option<String> {
 
 fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize> {
     let host = host_from_url(url);
-    if host.as_deref().is_some_and(|value| {
-        value == "pixeldrain.com" || value.ends_with(".pixeldrain.com")
-    }) {
+    if host
+        .as_deref()
+        .is_some_and(|value| value == "pixeldrain.com" || value.ends_with(".pixeldrain.com"))
+    {
         // Pixeldrain may reject or destabilize segmented requests. Keep the
         // transfer on its single original stream regardless of the global or
         // per-task connection preference.
@@ -4533,9 +4534,9 @@ fn enqueue_download_impl(
         .collect();
     task.priority = priority.unwrap_or_default().clamp(-10, 10);
     task.bandwidth_limit = bandwidth_limit.filter(|limit| *limit > 0);
-    let pixeldrain_single_connection = host_from_url(&url).as_deref().is_some_and(|value| {
-        value == "pixeldrain.com" || value.ends_with(".pixeldrain.com")
-    });
+    let pixeldrain_single_connection = host_from_url(&url)
+        .as_deref()
+        .is_some_and(|value| value == "pixeldrain.com" || value.ends_with(".pixeldrain.com"));
     task.connections_override = site_connection_override(&url, connections_override);
     if let Some(context) = context {
         task.referer = context
