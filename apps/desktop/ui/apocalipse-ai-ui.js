@@ -99,6 +99,16 @@
     try {
       const ctx = await context();
       const result = AI.respond(text, ctx);
+      if (result.action?.type === "check_app_update") {
+        try {
+          const status = await invoke("check_app_update");
+          result.text = AI.say(language(), status.update_available ? "updateAvailable" : "upToDate", {
+            current: status.current_version, latest: status.latest_version,
+          });
+        } catch {
+          result.text = AI.say(language(), "updateUnavailable", { current: ctx.appVersion });
+        }
+      }
       if (result.action?.type === "clear_chat") {
         messages = [];
         persistMessages();

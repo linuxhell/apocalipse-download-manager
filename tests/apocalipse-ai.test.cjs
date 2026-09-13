@@ -4,6 +4,7 @@ const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 
 const AI = require('../apps/desktop/ui/apocalipse-ai-core.js');
+const LocalModel = require('../apps/desktop/ui/apocalipse-ai-local-model.js');
 const html = readFileSync(join(__dirname, '../apps/desktop/ui/index.html'), 'utf8');
 const app = readFileSync(join(__dirname, '../apps/desktop/ui/app.js'), 'utf8');
 const aiUi = readFileSync(join(__dirname, '../apps/desktop/ui/apocalipse-ai-ui.js'), 'utf8');
@@ -198,6 +199,78 @@ test('welcome message follows language changes and the composer stays fixed', ()
   assert.match(css, /body:has\(#ai-panel:not\(\[hidden\]\)\) main \{ height:100vh; overflow:hidden; \}/);
 });
 
-test('tray reopen uses the larger 1280 by 840 window', () => {
-  assert.match(desktop, /show_main_window[\s\S]*set_size\(tauri::LogicalSize::new\(1280\.0, 840\.0\)\)/);
+test('first launch and tray reopen use the full-height 1280 by 900 window', () => {
+  assert.match(desktop, /show_main_window[\s\S]*set_size\(tauri::LogicalSize::new\(1280\.0, 900\.0\)\)/);
+  assert.match(readFileSync(join(__dirname, '../apps/desktop/src-tauri/tauri.conf.json'), 'utf8'), /"width": 1280,[\s\S]*"height": 900/);
+});
+
+test('short natural acknowledgements never trigger stale log diagnosis', () => {
+  for (const word of ['ok', 'certo', 'bacana', 'legal']) {
+    const result = AI.respond(word, { locale: 'pt-BR', events: '{"level":"ERROR","detail":"403 access denied"}' });
+    assert.equal(result.intent, 'acknowledgement');
+    assert.match(result.text, /Certo/);
+    assert.equal(result.prelude, undefined);
+  }
+});
+
+test('common conversation remains local and natural in all supported languages', () => {
+  const cases = [
+    ['pt-BR', 'valeu', 'thanks'],
+    ['pt-BR', 'como você está?', 'wellbeing'],
+    ['pt-BR', 'o que você consegue fazer?', 'capabilities'],
+    ['en', 'thank you', 'thanks'],
+    ['en', 'can you help me?', 'help'],
+    ['en', 'see you later', 'goodbye'],
+    ['zh-CN', '谢谢', 'thanks'],
+    ['zh-CN', '你能做什么？', 'capabilities'],
+    ['zh-CN', '没问题', 'acknowledgement'],
+  ];
+  for (const [locale, input, intent] of cases) {
+    const result = AI.respond(input, { locale, events: [{ level: 'ERROR', detail: 'stale 403' }] });
+    assert.equal(result.intent, intent, `${locale}: ${input}`);
+    assert.equal(result.prelude, undefined, `${locale}: ${input}`);
+  }
+});
+
+test('conversation vocabulary lives in an extensible offline intent model', () => {
+  assert.equal(LocalModel.classify('sounds good').intent, 'acknowledgement');
+  assert.equal(LocalModel.classify('我需要帮助').intent, 'help');
+  assert.equal(LocalModel.classify('qual é a previsão do tempo?'), null);
+  assert.ok(html.indexOf('apocalipse-ai-local-model.js') < html.indexOf('apocalipse-ai-core.js'));
+});
+
+test('time questions use the computer clock and selected language locally', () => {
+  const now = new Date(2026, 8, 13, 14, 7, 0);
+  const pt = AI.respond('que horas são?', { locale: 'pt-BR', now });
+  const en = AI.respond('what time is it?', { locale: 'en', now });
+  const zh = AI.respond('现在几点？', { locale: 'zh-CN', now });
+  assert.equal(pt.intent, 'current_time');
+  assert.match(pt.text, /14:07/);
+  assert.match(en.text, /2:07 PM/);
+  assert.match(zh.text, /14:07/);
+  for (const result of [pt, en, zh]) assert.equal(result.prelude, undefined);
+});
+
+test('update questions use the official checker and never guess', () => {
+  const result = AI.respond('tem atualização?', { locale: 'pt-BR' });
+  assert.equal(result.intent, 'update_check');
+  assert.equal(result.action.type, 'check_app_update');
+  assert.match(aiUi, /invoke\("check_app_update"\)/);
+  assert.match(desktop, /releases\/latest/);
+  assert.match(desktop, /timeout\(Duration::from_secs\(8\)\)/);
+});
+
+test('natural questions about a named site search its diagnostic records', () => {
+  const found = AI.respond('alguma informação sobre o site rsload.net em seu log?', {
+    locale: 'pt-BR', events: [
+      { level: 'INFO', event: 'page.opened', detail: 'host=outro.test' },
+      { level: 'INFO', event: 'credential.matched', detail: 'host=rsload.net result=available' },
+    ],
+  });
+  assert.match(found.text, /1 registro/);
+  assert.match(found.text, /rsload\.net/);
+  assert.doesNotMatch(found.text, /especializada no Apocalipse/);
+
+  const empty = AI.respond('há algo do site ausente.test nos registros?', { locale: 'pt-BR', events: [] });
+  assert.match(empty.text, /Não encontrei registros/);
 });

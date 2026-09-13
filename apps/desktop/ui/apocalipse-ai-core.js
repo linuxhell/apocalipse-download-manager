@@ -1,8 +1,11 @@
 (function (root, factory) {
-  const api = factory();
+  const localModel = typeof module === "object" && module.exports
+    ? require("./apocalipse-ai-local-model.js")
+    : root.ApocalipseAILocalModel;
+  const api = factory(localModel);
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.ApocalipseAI = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+})(typeof globalThis !== "undefined" ? globalThis : this, function (localModel) {
   "use strict";
 
   const copy = {
@@ -52,6 +55,19 @@
       credentialInvalid: "I understood that you want to add site credentials, but the site, username or password is missing. Use: add a rule for site example.com username myuser password mypassword.",
       credentialFailed: "I couldn’t save the credentials. Check the site address, username and password.",
       chatCleared: "Conversation cleared. How can I help with Apocalipse?",
+      acknowledged: "All right. I’m here if you want to continue.",
+      thanks: "You’re welcome! I’m here if you need anything else about Apocalipse.",
+      goodbye: "See you later! When you need me, I’ll be here in Apocalipse.",
+      wellbeing: "I’m working normally and ready to help with Apocalipse. What would you like me to check?",
+      capabilities: "I can explain Apocalipse features, check its current status and privacy-safe logs, diagnose downloads, previews, recordings and the extension, guide settings, and manage saved site credentials and correction tests.",
+      helpPrompt: "Of course. Tell me what happened, the website name and whether it involved Download, Preview or Record.",
+      currentTime: "The current system time is {time}.",
+      updateChecking: "I’ll check the official Apocalipse release now.",
+      updateAvailable: "An update is available: Apocalipse {latest}. This computer is running {current}.",
+      upToDate: "Apocalipse is up to date. This computer is running {current}.",
+      updateUnavailable: "I couldn’t reach the official update service right now. The installed version is {current}.",
+      siteLogFound: "I found {count} diagnostic event(s) for {site}. The latest record is: {detail}",
+      siteLogEmpty: "I found no diagnostic records for {site} in the current log.",
       offTopic: "I’m specialized in Apocalipse Download Manager. Ask me about its downloads, sites, extension, media, settings, tools or diagnostics.",
     },
     "pt-BR": {
@@ -100,6 +116,19 @@
       credentialInvalid: "Entendi que você quer adicionar credenciais de site, mas falta o site, o usuário ou a senha. Use: adicione uma regra para o site exemplo.com nome de usuário meuusuario e senha minhasenha.",
       credentialFailed: "Não consegui salvar as credenciais. Confira o endereço do site, o usuário e a senha.",
       chatCleared: "Conversa limpa. Como posso ajudar com o Apocalipse?",
+      acknowledged: "Certo. Estou aqui se quiser continuar.",
+      thanks: "Por nada! Estou aqui se precisar de mais alguma coisa sobre o Apocalipse.",
+      goodbye: "Até mais! Quando precisar, estarei aqui no Apocalipse.",
+      wellbeing: "Estou funcionando normalmente e pronta para ajudar com o Apocalipse. O que você quer que eu confira?",
+      capabilities: "Posso explicar as funções do Apocalipse, conferir o estado atual e os registros protegidos, diagnosticar downloads, visualizações, gravações e a extensão, orientar configurações e administrar credenciais de sites e testes de correções.",
+      helpPrompt: "Claro. Conte o que aconteceu, o nome do site e se foi em Baixar, Visualizar ou Gravar.",
+      currentTime: "Agora são {time}, conforme o relógio deste computador.",
+      updateChecking: "Vou consultar agora a versão oficial do Apocalipse.",
+      updateAvailable: "Há uma atualização disponível: Apocalipse {latest}. Este computador está usando a versão {current}.",
+      upToDate: "O Apocalipse está atualizado. Este computador está usando a versão {current}.",
+      updateUnavailable: "Não consegui acessar o serviço oficial de atualização agora. A versão instalada é {current}.",
+      siteLogFound: "Encontrei {count} registro(s) de diagnóstico sobre {site}. O registro mais recente é: {detail}",
+      siteLogEmpty: "Não encontrei registros de diagnóstico sobre {site} no log atual.",
       offTopic: "Sou especializada no Apocalipse Download Manager. Pergunte sobre downloads, sites, extensão, mídia, configurações, ferramentas ou diagnósticos.",
     },
     "zh-CN": {
@@ -148,6 +177,19 @@
       credentialInvalid: "我知道你想添加网站凭据，但缺少网站、用户名或密码。请使用：为网站 example.com 添加规则，用户名 myuser，密码 mypassword。",
       credentialFailed: "无法保存凭据。请检查网站地址、用户名和密码。",
       chatCleared: "对话已清除。关于 Apocalipse，我能帮你什么？",
+      acknowledged: "好的。如果你想继续，我随时在这里。",
+      thanks: "不客气！如果你还需要关于 Apocalipse 的帮助，我随时在这里。",
+      goodbye: "再见！需要帮助时，我会一直在 Apocalipse 里。",
+      wellbeing: "我运行正常，随时可以帮助你使用 Apocalipse。你想让我检查什么？",
+      capabilities: "我可以说明 Apocalipse 的功能，检查当前状态和隐私安全日志，诊断下载、预览、录制和扩展问题，指导设置，并管理网站凭据和修正测试。",
+      helpPrompt: "当然可以。请告诉我发生了什么、网站名称，以及问题涉及下载、预览还是录制。",
+      currentTime: "根据这台电脑的时钟，现在是 {time}。",
+      updateChecking: "我现在会检查 Apocalipse 官方版本。",
+      updateAvailable: "有可用更新：Apocalipse {latest}。这台电脑当前使用 {current}。",
+      upToDate: "Apocalipse 已是最新版本。这台电脑当前使用 {current}。",
+      updateUnavailable: "目前无法连接官方更新服务。已安装版本为 {current}。",
+      siteLogFound: "我找到了 {count} 条关于 {site} 的诊断记录。最新记录是：{detail}",
+      siteLogEmpty: "当前日志中没有找到关于 {site} 的诊断记录。",
       offTopic: "我专用于 Apocalipse Download Manager。你可以询问下载、网站、扩展、媒体、设置、工具或诊断。",
     },
   };
@@ -165,6 +207,8 @@
     .replace(/\b(?:dowload|donwload|downlod)\b/g, "download")
     .replace(/\b(?:tik tok|tik-tok)\b/g, "tiktok")
     .replace(/\b(?:face book)\b/g, "facebook")
+    .replace(/\b(?:obg|brigado|brigada)\b/g, "obrigado")
+    .replace(/\b(?:vlw|valeu demais)\b/g, "valeu")
     .replace(/\s+/g, " ").trim();
   const safeDetail = value => String(value || "").replace(/([?&](?:token|sig|key|auth|password|cookie)=[^\s&]+)/gi, " [protected]").slice(0, 360);
   const eventText = event => fold(`${event?.event || ""} ${event?.detail || event?.raw || ""} ${event?.source || ""}`);
@@ -240,6 +284,12 @@
     const text = scoped.map(eventText).join("\n");
     const failures = scoped.filter(event => String(event.level || "").toUpperCase() === "ERROR" || /failed|error=/.test(eventText(event)));
 
+    if (site && /(?:log|registro|diagnost|record|日志|诊断)/.test(q)) {
+      const latest = scoped.at(-1);
+      return latest
+        ? say(locale, "siteLogFound", { site, count: scoped.length, detail: safeDetail(latest.detail || latest.raw || latest.event) })
+        : say(locale, "siteLogEmpty", { site });
+    }
     if (/(como (?:esta|estao).*(?:log|registro)|(?:log|registro).*(?:erro|falha|estado)|log status|errors? in (?:the )?logs?|日志.*(?:错误|状态)|(?:错误|状态).*日志)/.test(q)) {
       return failures.length
         ? say(locale, "errors", { count: failures.length, detail: safeDetail(failures.at(-1)?.detail || failures.at(-1)?.raw || failures.at(-1)?.event) })
@@ -297,6 +347,21 @@
     if (!q) return { text: say(locale, "unknown"), intent: "unknown" };
     if (/(?:^|\b)(?:limpe|limpar|apague|apagar|clear|erase|delete)(?:\s+(?:essa|esta|a|the))?\s+(?:tela\s+do\s+)?(?:chat|conversa|conversation)(?:\b|$)|清除(?:聊天|对话)/.test(q)) {
       return { text: say(locale, "chatCleared"), intent: "chat_clear", action: { type: "clear_chat" } };
+    }
+    const conversation = localModel?.classify(q);
+    if (conversation) {
+      if (conversation.intent === "update_check") {
+        return { text: say(locale, "updateChecking"), intent: "update_check", action: { type: "check_app_update" }, confidence: conversation.confidence };
+      }
+      if (conversation.intent === "current_time") {
+        const now = context.now instanceof Date ? context.now : new Date();
+        const formatLocale = locale === "pt-BR" ? "pt-BR" : locale === "zh-CN" ? "zh-CN" : "en-US";
+        const time = new Intl.DateTimeFormat(formatLocale, { hour: "2-digit", minute: "2-digit" }).format(now);
+        return { text: say(locale, "currentTime", { time }), intent: "current_time", confidence: conversation.confidence };
+      }
+      const responseKey = conversation.intent === "acknowledgement" ? "acknowledged"
+        : conversation.intent === "help" ? "helpPrompt" : conversation.intent;
+      return { text: say(locale, responseKey), intent: conversation.intent, confidence: conversation.confidence };
     }
     const credential = parseCredentialCommand(input);
     if (credential) {
