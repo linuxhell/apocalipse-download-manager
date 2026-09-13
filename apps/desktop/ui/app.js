@@ -582,7 +582,7 @@ let selectionPointerActive = false;
 let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
-const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", ai: "aiDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
+const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", ai: "aiDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
 const invoke = (command, args = {}) => {
   const bridge = window.__TAURI__?.core?.invoke;
   if (!bridge) throw new Error("Desktop bridge unavailable in preview");
@@ -664,10 +664,13 @@ function updateSpeeds(tasks) {
 }
 
 function visibleDownloads() {
-  let visible = downloads;
-  if (activePage === "torrents") visible = visible.filter((task) => /^(?:magnet:)|\.torrent(?:$|[?#])/i.test(task.source));
-  if (activePage === "media") visible = visible.filter((task) => !/\.recording\.webm$/i.test(`${task.source} ${task.destination}`) && /(?:\.m3u8(?:$|[?#])|youtube\.com|youtu\.be|facebook\.com|fb\.watch|tiktok\.com|instagram\.com)/i.test(`${task.source} ${task.destination}`));
-  if (activePage === "recordings") visible = visible.filter((task) => /\.recording\.webm$/i.test(`${task.source} ${task.destination}`));
+  const isRecording = (task) => /\.recording\.webm$/i.test(`${task.source} ${task.destination}`);
+  const isTorrent = (task) => /^(?:magnet:)|\.torrent(?:$|[?#])/i.test(task.source);
+  let visible = activePage === "recordings"
+    ? downloads.filter(isRecording)
+    : activePage === "torrents"
+      ? downloads.filter(isTorrent)
+      : downloads.filter((task) => !isRecording(task) && !isTorrent(task));
   if (activePage === "link") visible = visible.filter((task) => /^(?:ftp|sftp):/i.test(task.source));
   if (historyQuery) visible = visible.filter((task) => `${task.source} ${task.destination} ${task.sha256 || ""}`.toLocaleLowerCase().includes(historyQuery));
   if (activeFilter === "completed") return visible.filter((task) => task.state === "completed");

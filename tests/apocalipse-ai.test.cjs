@@ -192,16 +192,32 @@ test('the exact chat commands reported by the user are understood', () => {
 });
 
 test('welcome message follows language changes and the composer stays fixed', () => {
-  assert.match(aiUi, /message\.kind === "welcome" \? AI\.say\(language\(\), "hello"\)/);
+  assert.match(aiUi, /isGreeting \? AI\.say\(language\(\), "hello"\)/);
   assert.match(aiUi, /apocalipse-language-changed/);
   assert.match(app, /dispatchEvent\(new CustomEvent\("apocalipse-language-changed"/);
   assert.match(css, /grid-template-rows:auto minmax\(0,1fr\) auto auto/);
   assert.match(css, /body:has\(#ai-panel:not\(\[hidden\]\)\) main \{ height:100vh; overflow:hidden; \}/);
 });
 
-test('first launch and tray reopen use the full-height 1280 by 900 window', () => {
-  assert.match(desktop, /show_main_window[\s\S]*set_size\(tauri::LogicalSize::new\(1280\.0, 900\.0\)\)/);
-  assert.match(readFileSync(join(__dirname, '../apps/desktop/src-tauri/tauri.conf.json'), 'utf8'), /"width": 1280,[\s\S]*"height": 900/);
+test('first launch and tray reopen use the compact full-height 1280 by 850 window', () => {
+  assert.match(desktop, /show_main_window[\s\S]*set_size\(tauri::LogicalSize::new\(1280\.0, 850\.0\)\)/);
+  assert.match(readFileSync(join(__dirname, '../apps/desktop/src-tauri/tauri.conf.json'), 'utf8'), /"width": 1280,[\s\S]*"height": 850/);
+});
+
+test('saved greeting follows the visible language instead of its original text', () => {
+  assert.match(aiUi, /document\.documentElement\.lang/);
+  assert.match(aiUi, /dictionary\.hello === message\.text/);
+  assert.match(aiUi, /result\.intent === "greeting"/);
+});
+
+test('Media navigation is removed and recordings are exclusive to Recordings', () => {
+  assert.doesNotMatch(html, /data-page="media"/);
+  assert.match(app, /activePage === "recordings"[\s\S]*downloads\.filter\(isRecording\)[\s\S]*!isRecording\(task\) && !isTorrent\(task\)/);
+  assert.doesNotMatch(app, /activePage === "media"/);
+});
+
+test('torrent tasks are exclusive to Torrents', () => {
+  assert.match(app, /activePage === "torrents"[\s\S]*downloads\.filter\(isTorrent\)[\s\S]*!isRecording\(task\) && !isTorrent\(task\)/);
 });
 
 test('short natural acknowledgements never trigger stale log diagnosis', () => {

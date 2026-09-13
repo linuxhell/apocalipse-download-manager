@@ -11,7 +11,7 @@
     catch { return fallback; }
   };
   const write = (key, value) => localStorage.setItem(key, JSON.stringify(value));
-  const language = () => AI.localeOf(localStorage.getItem("apocalipse.language") || "en");
+  const language = () => AI.localeOf(document.documentElement.lang || localStorage.getItem("apocalipse.language") || "en");
   const invoke = (command, args = {}) => window.__TAURI__?.core?.invoke(command, args);
   let messages = read(CHAT_KEY, []);
   let corrections = read(FIX_KEY, []);
@@ -43,7 +43,9 @@
     const article = document.createElement("article");
     article.className = `ai-message ai-message-${message.role}`;
     const content = document.createElement("p");
-    content.textContent = message.kind === "welcome" ? AI.say(language(), "hello") : message.text;
+    const isGreeting = ["welcome", "greeting"].includes(message.kind)
+      || Object.values(AI.copy).some(dictionary => dictionary.hello === message.text);
+    content.textContent = isGreeting ? AI.say(language(), "hello") : message.text;
     const meta = document.createElement("small");
     meta.textContent = message.role === "assistant" ? `Apocalipse AI · ${timeLabel(message.at)}` : timeLabel(message.at);
     article.append(content, meta);
@@ -124,7 +126,7 @@
         await new Promise(resolve => setTimeout(resolve, 180));
       }
       applyResult(result);
-      addMessage("assistant", result.text);
+      addMessage("assistant", result.text, result.intent === "greeting" ? "greeting" : null);
       invoke("record_ui_diagnostic", {
         level: "INFO", event: "apocalipse_ai.response",
         detail: `intent=${result.intent} evidence_events=${AI.parseEvents(ctx.events).length} local=true`,
