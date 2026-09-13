@@ -16,6 +16,14 @@ const catalogs = {
     recordingsDescription: "Follow active recordings, stop and save, export or open completed captures.",
     torrentsDescription: "Manage torrents, file selection, peers and previews.",
     linkDescription: "Transfer files securely between this computer and a remote Apocalipse.",
+    aiDescription: "A local assistant that explains problems, reads diagnostics and follows correction tests.",
+    aiLocalPrivate: "Local, private and specialized in your Apocalipse",
+    aiCorrectionHistory: "Correction history", aiCorrectionsFound: "Corrections found",
+    aiCorrectionsHint: "Corrections remain local and are only confirmed after your manual test.",
+    aiDeleteAll: "Delete all", aiNoCorrections: "No corrections found.", aiInputHint: "Ask about Apocalipse…", aiSend: "Send",
+    aiPrivacy: "Works locally using application status and privacy-safe diagnostic records.",
+    aiCopyName: "Copy name", aiDeleteCorrection: "Delete", aiApplyCorrection: "Apply for testing", aiUndoCorrection: "Undo",
+    aiStatusProposed: "Awaiting approval", aiStatusTesting: "Testing", aiStatusSaved: "Saved", aiStatusConfirmed: "Confirmed", aiStatusRejected: "Did not work",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
     toolbox: "TOOLBOX", update: "Update", mediaPlayer: "VLC / mpv / media player",
@@ -185,6 +193,14 @@ const catalogs = {
     recordingsDescription: "Acompanhe gravações ativas, pare e salve, exporte ou abra capturas concluídas.",
     torrentsDescription: "Gerencie torrents, escolha de arquivos, pares e pré-visualizações.",
     linkDescription: "Transfira arquivos com segurança entre este computador e um Apocalipse remoto.",
+    aiDescription: "Assistente local que explica problemas, analisa diagnósticos e acompanha testes de correções.",
+    aiLocalPrivate: "Local, privada e especializada no seu Apocalipse",
+    aiCorrectionHistory: "Histórico de correções", aiCorrectionsFound: "Correções encontradas",
+    aiCorrectionsHint: "As correções permanecem locais e só são confirmadas depois do seu teste manual.",
+    aiDeleteAll: "Apagar todas", aiNoCorrections: "Nenhuma correção encontrada.", aiInputHint: "Pergunte sobre o Apocalipse…", aiSend: "Enviar",
+    aiPrivacy: "Funciona localmente usando o estado do programa e registros de diagnóstico protegidos.",
+    aiCopyName: "Copiar nome", aiDeleteCorrection: "Apagar", aiApplyCorrection: "Aplicar para teste", aiUndoCorrection: "Desfazer",
+    aiStatusProposed: "Aguardando aprovação", aiStatusTesting: "Em teste", aiStatusSaved: "Guardada", aiStatusConfirmed: "Confirmada", aiStatusRejected: "Não funcionou",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
     toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", mediaPlayer: "VLC / mpv / reprodutor de mídia",
@@ -354,6 +370,14 @@ const catalogs = {
     recordingsDescription: "查看正在录制的内容、停止并保存、导出或打开已完成的录制。",
     torrentsDescription: "管理种子、文件选择、节点和预览。",
     linkDescription: "在本机与远程 Apocalipse 之间安全传输文件。",
+    aiDescription: "本地助手，可解释问题、分析诊断并跟踪修正测试。",
+    aiLocalPrivate: "本地、私密，专用于你的 Apocalipse",
+    aiCorrectionHistory: "修正历史", aiCorrectionsFound: "发现的修正",
+    aiCorrectionsHint: "修正保存在本地，只有在你手动测试后才会被确认。",
+    aiDeleteAll: "全部删除", aiNoCorrections: "没有发现修正。", aiInputHint: "询问有关 Apocalipse 的问题…", aiSend: "发送",
+    aiPrivacy: "使用应用状态和经过隐私保护的诊断记录在本地运行。",
+    aiCopyName: "复制名称", aiDeleteCorrection: "删除", aiApplyCorrection: "应用测试", aiUndoCorrection: "撤销",
+    aiStatusProposed: "等待批准", aiStatusTesting: "测试中", aiStatusSaved: "已保存", aiStatusConfirmed: "已确认", aiStatusRejected: "未解决",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
     toolbox: "工具箱", update: "更新", mediaPlayer: "VLC / mpv / 媒体播放器",
@@ -506,6 +530,7 @@ const catalogs = {
     searchHistory: "搜索下载…", importList: "导入列表", advancedOptions: "高级选项", mirrorUrls: "镜像网址（每行一个）", priority: "优先级", priorityHigh: "高", priorityNormal: "普通", priorityLow: "低", verifyIntegrity: "验证 SHA-256", integrityPrompt: "可选的预期 SHA-256（留空则仅计算）：", integrityOk: "SHA-256 已验证",
   },
 };
+window.apocalipseCatalogs = catalogs;
 
 let locale = localStorage.getItem("apocalipse.language") || "en";
 const valid = ["void", "inferno", "toxic", "synthwave", "royal", "crimson", "arctic", "obsidian", "monochrome", "midnight", "forest", "graphite", "deepsea", "eclipse", "hazard", "cyberstorm", "ultraviolet", "emeraldgold", "scarletice", "coppernavy", "solarizednight", "pearlblue", "whiteaurora", "goldenivory", "crystalrose", "polarmint"];
@@ -557,7 +582,7 @@ let selectionPointerActive = false;
 let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
-const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
+const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", ai: "aiDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
 const invoke = (command, args = {}) => {
   const bridge = window.__TAURI__?.core?.invoke;
   if (!bridge) throw new Error("Desktop bridge unavailable in preview");
@@ -958,14 +983,16 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector("header h1").textContent = heading;
     document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
     document.querySelector("#apocalipse-link-panel").hidden = activePage !== "link";
+    document.querySelector("#ai-panel").hidden = activePage !== "ai";
     document.querySelector("#logs-panel").hidden = activePage !== "logs";
     document.querySelector("#themes-panel").hidden = activePage !== "themes";
     document.querySelector("#language-panel").hidden = activePage !== "language";
-    document.querySelector(".metrics").hidden = ["link", "logs", "themes", "language"].includes(activePage);
-    document.querySelector(".panel").hidden = ["link", "logs", "themes", "language"].includes(activePage);
+    document.querySelector(".metrics").hidden = ["link", "ai", "logs", "themes", "language"].includes(activePage);
+    document.querySelector(".panel").hidden = ["link", "ai", "logs", "themes", "language"].includes(activePage);
     renderDownloads();
     invoke("record_ui_diagnostic", { level: "INFO", event: "page_opened", detail: `page=${activePage} panel_present=${activePage === "link" ? Boolean(document.querySelector("#apocalipse-link-panel")) : activePage === "logs" ? Boolean(document.querySelector("#logs-panel")) : true} duration_ms=${Math.round(performance.now() - openedAt)}` }).catch(() => {});
     if (activePage === "logs") refreshLogEvents().catch(console.error);
+    if (activePage === "ai") window.dispatchEvent(new CustomEvent("apocalipse-ai-opened"));
   };
 });
 

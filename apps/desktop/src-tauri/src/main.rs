@@ -71,6 +71,20 @@ fn host_from_url(url: &str) -> Option<String> {
     (!host.is_empty()).then_some(host)
 }
 
+fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize> {
+    let host = host_from_url(url);
+    if host.as_deref().is_some_and(|value| {
+        value == "pixeldrain.com" || value.ends_with(".pixeldrain.com")
+    }) {
+        // Pixeldrain may reject or destabilize segmented requests. Keep the
+        // transfer on its single original stream regardless of the global or
+        // per-task connection preference.
+        Some(1)
+    } else {
+        requested.map(|value| value.clamp(1, 32))
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 struct UserSettings {
     download_directory: Option<PathBuf>,
@@ -4519,7 +4533,10 @@ fn enqueue_download_impl(
         .collect();
     task.priority = priority.unwrap_or_default().clamp(-10, 10);
     task.bandwidth_limit = bandwidth_limit.filter(|limit| *limit > 0);
-    task.connections_override = connections_override.map(|value| value.clamp(1, 32));
+    let pixeldrain_single_connection = host_from_url(&url).as_deref().is_some_and(|value| {
+        value == "pixeldrain.com" || value.ends_with(".pixeldrain.com")
+    });
+    task.connections_override = site_connection_override(&url, connections_override);
     if let Some(context) = context {
         task.referer = context
             .referer
@@ -4606,6 +4623,14 @@ fn enqueue_download_impl(
             task.destination.display()
         ),
     );
+    if pixeldrain_single_connection {
+        diagnostic_log(
+            state,
+            "INFO",
+            "site_rule.pixeldrain_single_connection",
+            &format!("task={} host=pixeldrain.com connections=1", task.id),
+        );
+    }
     start_download(&app, state, task.clone(), kind)?;
     Ok(task)
 }
@@ -7399,6 +7424,26 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pixeldrain_always_uses_one_connection_without_matching_spoofed_hosts() {
+        assert_eq!(
+            site_connection_override("https://pixeldrain.com/u/example", Some(8)),
+            Some(1)
+        );
+        assert_eq!(
+            site_connection_override("https://cdn.pixeldrain.com/api/file/example", None),
+            Some(1)
+        );
+        assert_eq!(
+            site_connection_override("https://pixeldrain.com.evil.test/file", Some(8)),
+            Some(8)
+        );
+        assert_eq!(
+            site_connection_override("https://example.test/file", None),
+            None
+        );
+    }
+
     #[test]
     fn stale_scheduler_snapshot_cannot_dispatch_a_removed_or_stopped_task() {
         let task = DownloadTask::new("https://example.test/file.bin", PathBuf::from("file.bin"));
