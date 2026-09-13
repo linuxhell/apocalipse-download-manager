@@ -135,6 +135,7 @@ const catalogs = {
     dnsScopeHint: "Applied to the native HTTP engine and aria2. SOCKS5H continues resolving through the proxy.",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
+    automatic: "Automatic",
     taskConnections: "Threads for this download",
     taskConnectionsHint: "Only changes this task. Use 1 on sites that reject segmented downloads.",
     downloadBandwidthLimit: "This download limit", megabytesPerSecond: "MB/s", unlimited: "Unlimited", smartAutomation: "Smart automation", bandwidthPanel: "Bandwidth", adaptiveEfficiency: "Adaptive efficiency", adaptiveEfficiencyHint: "Optimizes queue order and connection use for the current workload.", scheduler: "Download schedule", schedulerHint: "Automatically pauses outside the permitted local time window.", scheduleStart: "Start", scheduleEnd: "End", bandwidthPanelHint: "Set limits without changing the window size.", currentBandwidth: "Current usage", globalBandwidthLimit: "Global download limit",
@@ -312,6 +313,7 @@ const catalogs = {
     dnsScopeHint: "Aplicado ao motor HTTP nativo e ao aria2. O SOCKS5H continua resolvendo pelo proxy.",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
+    automatic: "Automático",
     taskConnections: "Threads para este download",
     taskConnectionsHint: "Altera somente esta tarefa. Use 1 em sites que não aceitam downloads segmentados.",
     downloadBandwidthLimit: "Limite deste download", megabytesPerSecond: "MB/s", unlimited: "Ilimitado", smartAutomation: "Automação inteligente", bandwidthPanel: "Banda", adaptiveEfficiency: "Eficiência adaptativa", adaptiveEfficiencyHint: "Otimiza a ordem da fila e o uso de conexões para a carga atual.", scheduler: "Agendamento de downloads", schedulerHint: "Pausa automaticamente fora do horário local permitido.", scheduleStart: "Início", scheduleEnd: "Fim", bandwidthPanelHint: "Defina limites sem alterar o tamanho da janela.", currentBandwidth: "Uso atual", globalBandwidthLimit: "Limite global de download",
@@ -488,6 +490,7 @@ const catalogs = {
     dnsScopeHint: "应用于原生 HTTP 引擎和 aria2。SOCKS5H 仍通过代理解析。",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
+    automatic: "自动",
     taskConnections: "此下载的线程数",
     taskConnectionsHint: "仅更改此任务。对于不允许分段下载的网站，请使用 1。",
     downloadBandwidthLimit: "此下载的限制", megabytesPerSecond: "MB/秒", unlimited: "不限速", smartAutomation: "智能自动化", bandwidthPanel: "带宽", adaptiveEfficiency: "自适应效率", adaptiveEfficiencyHint: "根据当前负载优化队列顺序和连接使用。", scheduler: "下载计划", schedulerHint: "在允许的本地时间之外自动暂停。", scheduleStart: "开始", scheduleEnd: "结束", bandwidthPanelHint: "无需改变窗口大小即可设置限制。", currentBandwidth: "当前使用量", globalBandwidthLimit: "全局下载限制",
@@ -566,6 +569,7 @@ let pendingUserAgent = null;
 let pendingRequestMethod = null;
 let pendingRequestBody = null;
 let pendingRequestContentType = null;
+let taskConnectionsManuallyChanged = false;
 let downloads = [];
 const downloadListState = createTaskListState();
 let activeFilter = "all";
@@ -918,6 +922,9 @@ function translate() {
     .forEach((element) => (element.placeholder = t(element.dataset.i18nPlaceholder)));
   document.querySelectorAll("[data-language-choice]").forEach((button) =>
     button.classList.toggle("active", button.dataset.languageChoice === locale));
+  if (!taskConnectionsManuallyChanged) {
+    document.querySelector("#task-connections-value").value = t("automatic");
+  }
   const activeNavigation = document.querySelector(`nav [data-page="${activePage}"]`);
   if (activeNavigation) document.querySelector("main > header h1").textContent = activeNavigation.querySelector("b")?.textContent || t("downloads");
   document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
@@ -970,7 +977,7 @@ document.querySelector("#import-list").onclick = async (event) => {
     for (const url of urls) {
       try {
         const fileName = await invoke("suggest_download_name", { url });
-        acceptEnqueuedTask(await invoke("enqueue_download", { url, destinationDirectory, fileName, formatSelection: null, torrentSelection: null, mirrors: null, priority: 0, bandwidthLimit: null, connectionsOverride: 8, context: {} }));
+        acceptEnqueuedTask(await invoke("enqueue_download", { url, destinationDirectory, fileName, formatSelection: null, torrentSelection: null, mirrors: null, priority: 0, bandwidthLimit: null, connectionsOverride: null, context: {} }));
       } catch (error) { console.warn("import", url, error); }
     }
     renderDownloads();
@@ -1277,6 +1284,11 @@ async function showTorrentInspection(source) {
   }
   document.querySelector("#torrent-inspection").hidden = false;
 }
+function resetTaskConnections() {
+  taskConnectionsManuallyChanged = false;
+  document.querySelector("#task-connections").value = "8";
+  document.querySelector("#task-connections-value").value = t("automatic");
+}
 document.querySelectorAll("#add").forEach(
   (button) =>
     (button.onclick = () => {
@@ -1296,6 +1308,7 @@ document.querySelectorAll("#add").forEach(
       pendingRequestMethod = null;
       pendingRequestBody = null;
       pendingRequestContentType = null;
+      resetTaskConnections();
       resetMediaInspection();
       invoke("default_download_directory")
         .then((path) => {
@@ -1863,6 +1876,7 @@ document.querySelector("#media-format").onchange = (event) => {
   input.value = `${base}.${audio[1]}`;
 };
 document.querySelector("#task-connections").oninput = (event) => {
+  taskConnectionsManuallyChanged = true;
   document.querySelector("#task-connections-value").value = event.target.value;
 };
 document.querySelector("#analyze").onclick = async () => {
@@ -1939,7 +1953,9 @@ document.querySelector("#enqueue").onclick = async () => {
         mirrors: document.querySelector("#mirrors").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
         priority: Number(document.querySelector("#priority").value),
         bandwidthLimit: Math.round((Number(document.querySelector("#download-bandwidth-limit").value) || 0) * 1024 * 1024) || null,
-        connectionsOverride: Number(document.querySelector("#task-connections").value) || 8,
+        connectionsOverride: taskConnectionsManuallyChanged
+          ? Number(document.querySelector("#task-connections").value) || 8
+          : null,
         context: {
           traceId: pendingDiagnosticTrace,
           referer: pendingReferer,
@@ -1961,8 +1977,7 @@ document.querySelector("#enqueue").onclick = async () => {
     document.querySelector("#mirrors").value = "";
     document.querySelector("#priority").value = "0";
     document.querySelector("#download-bandwidth-limit").value = "0";
-    document.querySelector("#task-connections").value = "8";
-    document.querySelector("#task-connections-value").value = "8";
+    resetTaskConnections();
     pendingTitle = null;
     pendingThumbnail = null;
     pendingAudioUrl = null;
@@ -2026,6 +2041,7 @@ setInterval(async () => {
     pendingRequestMethod = null;
     pendingRequestBody = null;
     pendingRequestContentType = null;
+    resetTaskConnections();
     const url = document.querySelector("#url");
     url.value = link;
     document.querySelector("#analysis").hidden = true;
@@ -2061,6 +2077,7 @@ async function consumeBridgeDownload() {
     pendingRequestMethod = request.requestMethod || null;
     pendingRequestBody = request.requestBody || null;
     pendingRequestContentType = request.requestContentType || null;
+    resetTaskConnections();
     document.querySelector("#url").value = request.url;
     const requestedName = request.fileName || "";
     const genericMediaName = /^(?:watch|reel|video|download)(?:\.[a-z0-9]{1,10})?$/i.test(requestedName.trim());

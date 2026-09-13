@@ -10,6 +10,7 @@ const app = readFileSync(join(__dirname, '../apps/desktop/ui/app.js'), 'utf8');
 const aiUi = readFileSync(join(__dirname, '../apps/desktop/ui/apocalipse-ai-ui.js'), 'utf8');
 const css = readFileSync(join(__dirname, '../apps/desktop/ui/styles.css'), 'utf8');
 const desktop = readFileSync(join(__dirname, '../apps/desktop/src-tauri/src/main.rs'), 'utf8');
+const downloadCore = readFileSync(join(__dirname, '../crates/apocalipse-core/src/download.rs'), 'utf8');
 
 test('Apocalipse AI is a real local page loaded before its UI controller', () => {
   assert.match(html, /data-page="ai"/);
@@ -68,6 +69,16 @@ test('Pixeldrain compatibility is exact-host-only and visible to diagnostics', (
   assert.match(desktop, /site_rule\.pixeldrain_single_connection/);
   assert.match(desktop, /connections=1/);
   assert.match(AI.respond('qual regra de conexão do pixeldrain?', { locale: 'pt-BR' }).text, /uma conexão/);
+});
+
+test('direct downloads use automatic high-speed defaults without bypassing site rules', () => {
+  assert.match(app, /connectionsOverride: null/);
+  assert.match(app, /taskConnectionsManuallyChanged\s*\?\s*Number/);
+  assert.match(app, /taskConnectionsManuallyChanged = false/);
+  assert.match(desktop, /limits\.connections_per_download\.max\(16\)/);
+  assert.match(downloadCore, /SEGMENT_CHUNK_SIZE: u64 = 64 \* 1024 \* 1024/);
+  assert.match(downloadCore, /WORKER_START_INTERVAL_MS: u64 = 35/);
+  assert.match(desktop, /task\.connections_override = site_connection_override\(&url, connections_override\)/);
 });
 
 test('Apocalipse AI uses theme variables and includes light-theme readability', () => {
