@@ -71,6 +71,21 @@ fn host_from_url(url: &str) -> Option<String> {
     (!host.is_empty()).then_some(host)
 }
 
+fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize> {
+    let host = host_from_url(url);
+    if host
+        .as_deref()
+        .is_some_and(|value| value == "pixeldrain.com" || value.ends_with(".pixeldrain.com"))
+    {
+        // Pixeldrain may reject or destabilize segmented requests. Keep the
+        // transfer on its single original stream regardless of the global or
+        // per-task connection preference.
+        Some(1)
+    } else {
+        requested.map(|value| value.clamp(1, 32))
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 struct UserSettings {
     download_directory: Option<PathBuf>,
@@ -651,6 +666,54 @@ struct MediaPreviewRequest {
 #[tauri::command]
 fn get_app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
+}
+
+#[derive(Serialize)]
+struct AppUpdateStatus {
+    current_version: String,
+    latest_version: String,
+    update_available: bool,
+}
+
+fn version_numbers(value: &str) -> Vec<u64> {
+    value
+        .trim()
+        .trim_start_matches(['v', 'V'])
+        .split('.')
+        .map(|part| {
+            part.split(|character: char| !character.is_ascii_digit())
+                .next()
+                .unwrap_or("0")
+        })
+        .map(|part| part.parse::<u64>().unwrap_or(0))
+        .collect()
+}
+
+#[tauri::command]
+async fn check_app_update() -> Result<AppUpdateStatus, String> {
+    let current = env!("CARGO_PKG_VERSION").to_owned();
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .map_err(|error| error.to_string())?
+        .get("https://api.github.com/repos/linuxhell/apocalipse-download-manager/releases/latest")
+        .header(reqwest::header::USER_AGENT, "Apocalipse-Download-Manager")
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?;
+    let payload: serde_json::Value = response.json().await.map_err(|error| error.to_string())?;
+    let latest = payload["tag_name"]
+        .as_str()
+        .ok_or_else(|| "release_without_tag".to_owned())?
+        .trim_start_matches(['v', 'V'])
+        .to_owned();
+    Ok(AppUpdateStatus {
+        update_available: version_numbers(&latest) > version_numbers(&current),
+        current_version: current,
+        latest_version: latest,
+    })
 }
 
 fn open_media_preview(
@@ -4519,7 +4582,10 @@ fn enqueue_download_impl(
         .collect();
     task.priority = priority.unwrap_or_default().clamp(-10, 10);
     task.bandwidth_limit = bandwidth_limit.filter(|limit| *limit > 0);
-    task.connections_override = connections_override.map(|value| value.clamp(1, 32));
+    let pixeldrain_single_connection = host_from_url(&url)
+        .as_deref()
+        .is_some_and(|value| value == "pixeldrain.com" || value.ends_with(".pixeldrain.com"));
+    task.connections_override = site_connection_override(&url, connections_override);
     if let Some(context) = context {
         task.referer = context
             .referer
@@ -4606,6 +4672,14 @@ fn enqueue_download_impl(
             task.destination.display()
         ),
     );
+    if pixeldrain_single_connection {
+        diagnostic_log(
+            state,
+            "INFO",
+            "site_rule.pixeldrain_single_connection",
+            &format!("task={} host=pixeldrain.com connections=1", task.id),
+        );
+    }
     start_download(&app, state, task.clone(), kind)?;
     Ok(task)
 }
@@ -5571,6 +5645,7 @@ fn show_main_window(app: &tauri::AppHandle) {
     let main_app = app.clone();
     let _ = app.run_on_main_thread(move || {
         if let Some(window) = main_app.get_webview_window("main") {
+            let _ = window.set_size(tauri::LogicalSize::new(1280.0, 850.0));
             let _ = window.show();
             let _ = window.unminimize();
             let _ = window.set_always_on_top(true);
@@ -7329,6 +7404,7 @@ fn main() {
             set_tool_paths,
             get_media_player,
             get_app_version,
+            check_app_update,
             set_media_player,
             preview_torrent,
             update_tool,
@@ -7399,6 +7475,26 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pixeldrain_always_uses_one_connection_without_matching_spoofed_hosts() {
+        assert_eq!(
+            site_connection_override("https://pixeldrain.com/u/example", Some(8)),
+            Some(1)
+        );
+        assert_eq!(
+            site_connection_override("https://cdn.pixeldrain.com/api/file/example", None),
+            Some(1)
+        );
+        assert_eq!(
+            site_connection_override("https://pixeldrain.com.evil.test/file", Some(8)),
+            Some(8)
+        );
+        assert_eq!(
+            site_connection_override("https://example.test/file", None),
+            None
+        );
+    }
+
     #[test]
     fn stale_scheduler_snapshot_cannot_dispatch_a_removed_or_stopped_task() {
         let task = DownloadTask::new("https://example.test/file.bin", PathBuf::from("file.bin"));

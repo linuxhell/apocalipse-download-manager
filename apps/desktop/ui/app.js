@@ -16,6 +16,14 @@ const catalogs = {
     recordingsDescription: "Follow active recordings, stop and save, export or open completed captures.",
     torrentsDescription: "Manage torrents, file selection, peers and previews.",
     linkDescription: "Transfer files securely between this computer and a remote Apocalipse.",
+    aiDescription: "A local assistant that explains problems, reads diagnostics and follows correction tests.",
+    aiLocalPrivate: "Local, private and specialized in your Apocalipse",
+    aiCorrectionHistory: "Correction history", aiCorrectionsFound: "Corrections found",
+    aiCorrectionsHint: "Corrections remain local and are only confirmed after your manual test.",
+    aiDeleteAll: "Delete all", aiNoCorrections: "No corrections found.", aiInputHint: "Ask about Apocalipse…", aiSend: "Send",
+    aiPrivacy: "Works locally using application status and privacy-safe diagnostic records.",
+    aiCopyName: "Copy name", aiDeleteCorrection: "Delete", aiApplyCorrection: "Apply for testing", aiUndoCorrection: "Undo",
+    aiStatusProposed: "Awaiting approval", aiStatusTesting: "Testing", aiStatusSaved: "Saved", aiStatusConfirmed: "Confirmed", aiStatusRejected: "Did not work",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
     toolbox: "TOOLBOX", update: "Update", mediaPlayer: "VLC / mpv / media player",
@@ -127,6 +135,7 @@ const catalogs = {
     dnsScopeHint: "Applied to the native HTTP engine and aria2. SOCKS5H continues resolving through the proxy.",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
+    automatic: "Automatic",
     taskConnections: "Threads for this download",
     taskConnectionsHint: "Only changes this task. Use 1 on sites that reject segmented downloads.",
     downloadBandwidthLimit: "This download limit", megabytesPerSecond: "MB/s", unlimited: "Unlimited", smartAutomation: "Smart automation", bandwidthPanel: "Bandwidth", adaptiveEfficiency: "Adaptive efficiency", adaptiveEfficiencyHint: "Optimizes queue order and connection use for the current workload.", scheduler: "Download schedule", schedulerHint: "Automatically pauses outside the permitted local time window.", scheduleStart: "Start", scheduleEnd: "End", bandwidthPanelHint: "Set limits without changing the window size.", currentBandwidth: "Current usage", globalBandwidthLimit: "Global download limit",
@@ -185,6 +194,14 @@ const catalogs = {
     recordingsDescription: "Acompanhe gravações ativas, pare e salve, exporte ou abra capturas concluídas.",
     torrentsDescription: "Gerencie torrents, escolha de arquivos, pares e pré-visualizações.",
     linkDescription: "Transfira arquivos com segurança entre este computador e um Apocalipse remoto.",
+    aiDescription: "Assistente local que explica problemas, analisa diagnósticos e acompanha testes de correções.",
+    aiLocalPrivate: "Local, privada e especializada no seu Apocalipse",
+    aiCorrectionHistory: "Histórico de correções", aiCorrectionsFound: "Correções encontradas",
+    aiCorrectionsHint: "As correções permanecem locais e só são confirmadas depois do seu teste manual.",
+    aiDeleteAll: "Apagar todas", aiNoCorrections: "Nenhuma correção encontrada.", aiInputHint: "Pergunte sobre o Apocalipse…", aiSend: "Enviar",
+    aiPrivacy: "Funciona localmente usando o estado do programa e registros de diagnóstico protegidos.",
+    aiCopyName: "Copiar nome", aiDeleteCorrection: "Apagar", aiApplyCorrection: "Aplicar para teste", aiUndoCorrection: "Desfazer",
+    aiStatusProposed: "Aguardando aprovação", aiStatusTesting: "Em teste", aiStatusSaved: "Guardada", aiStatusConfirmed: "Confirmada", aiStatusRejected: "Não funcionou",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
     toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", mediaPlayer: "VLC / mpv / reprodutor de mídia",
@@ -296,6 +313,7 @@ const catalogs = {
     dnsScopeHint: "Aplicado ao motor HTTP nativo e ao aria2. O SOCKS5H continua resolvendo pelo proxy.",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
+    automatic: "Automático",
     taskConnections: "Threads para este download",
     taskConnectionsHint: "Altera somente esta tarefa. Use 1 em sites que não aceitam downloads segmentados.",
     downloadBandwidthLimit: "Limite deste download", megabytesPerSecond: "MB/s", unlimited: "Ilimitado", smartAutomation: "Automação inteligente", bandwidthPanel: "Banda", adaptiveEfficiency: "Eficiência adaptativa", adaptiveEfficiencyHint: "Otimiza a ordem da fila e o uso de conexões para a carga atual.", scheduler: "Agendamento de downloads", schedulerHint: "Pausa automaticamente fora do horário local permitido.", scheduleStart: "Início", scheduleEnd: "Fim", bandwidthPanelHint: "Defina limites sem alterar o tamanho da janela.", currentBandwidth: "Uso atual", globalBandwidthLimit: "Limite global de download",
@@ -354,6 +372,14 @@ const catalogs = {
     recordingsDescription: "查看正在录制的内容、停止并保存、导出或打开已完成的录制。",
     torrentsDescription: "管理种子、文件选择、节点和预览。",
     linkDescription: "在本机与远程 Apocalipse 之间安全传输文件。",
+    aiDescription: "本地助手，可解释问题、分析诊断并跟踪修正测试。",
+    aiLocalPrivate: "本地、私密，专用于你的 Apocalipse",
+    aiCorrectionHistory: "修正历史", aiCorrectionsFound: "发现的修正",
+    aiCorrectionsHint: "修正保存在本地，只有在你手动测试后才会被确认。",
+    aiDeleteAll: "全部删除", aiNoCorrections: "没有发现修正。", aiInputHint: "询问有关 Apocalipse 的问题…", aiSend: "发送",
+    aiPrivacy: "使用应用状态和经过隐私保护的诊断记录在本地运行。",
+    aiCopyName: "复制名称", aiDeleteCorrection: "删除", aiApplyCorrection: "应用测试", aiUndoCorrection: "撤销",
+    aiStatusProposed: "等待批准", aiStatusTesting: "测试中", aiStatusSaved: "已保存", aiStatusConfirmed: "已确认", aiStatusRejected: "未解决",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
     toolbox: "工具箱", update: "更新", mediaPlayer: "VLC / mpv / 媒体播放器",
@@ -464,6 +490,7 @@ const catalogs = {
     dnsScopeHint: "应用于原生 HTTP 引擎和 aria2。SOCKS5H 仍通过代理解析。",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
+    automatic: "自动",
     taskConnections: "此下载的线程数",
     taskConnectionsHint: "仅更改此任务。对于不允许分段下载的网站，请使用 1。",
     downloadBandwidthLimit: "此下载的限制", megabytesPerSecond: "MB/秒", unlimited: "不限速", smartAutomation: "智能自动化", bandwidthPanel: "带宽", adaptiveEfficiency: "自适应效率", adaptiveEfficiencyHint: "根据当前负载优化队列顺序和连接使用。", scheduler: "下载计划", schedulerHint: "在允许的本地时间之外自动暂停。", scheduleStart: "开始", scheduleEnd: "结束", bandwidthPanelHint: "无需改变窗口大小即可设置限制。", currentBandwidth: "当前使用量", globalBandwidthLimit: "全局下载限制",
@@ -506,6 +533,7 @@ const catalogs = {
     searchHistory: "搜索下载…", importList: "导入列表", advancedOptions: "高级选项", mirrorUrls: "镜像网址（每行一个）", priority: "优先级", priorityHigh: "高", priorityNormal: "普通", priorityLow: "低", verifyIntegrity: "验证 SHA-256", integrityPrompt: "可选的预期 SHA-256（留空则仅计算）：", integrityOk: "SHA-256 已验证",
   },
 };
+window.apocalipseCatalogs = catalogs;
 
 let locale = localStorage.getItem("apocalipse.language") || "en";
 const valid = ["void", "inferno", "toxic", "synthwave", "royal", "crimson", "arctic", "obsidian", "monochrome", "midnight", "forest", "graphite", "deepsea", "eclipse", "hazard", "cyberstorm", "ultraviolet", "emeraldgold", "scarletice", "coppernavy", "solarizednight", "pearlblue", "whiteaurora", "goldenivory", "crystalrose", "polarmint"];
@@ -541,6 +569,7 @@ let pendingUserAgent = null;
 let pendingRequestMethod = null;
 let pendingRequestBody = null;
 let pendingRequestContentType = null;
+let taskConnectionsManuallyChanged = false;
 let downloads = [];
 const downloadListState = createTaskListState();
 let activeFilter = "all";
@@ -557,7 +586,7 @@ let selectionPointerActive = false;
 let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
-const descriptions = { downloads: "downloadsDescription", media: "mediaDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
+const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", ai: "aiDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
 const invoke = (command, args = {}) => {
   const bridge = window.__TAURI__?.core?.invoke;
   if (!bridge) throw new Error("Desktop bridge unavailable in preview");
@@ -639,10 +668,13 @@ function updateSpeeds(tasks) {
 }
 
 function visibleDownloads() {
-  let visible = downloads;
-  if (activePage === "torrents") visible = visible.filter((task) => /^(?:magnet:)|\.torrent(?:$|[?#])/i.test(task.source));
-  if (activePage === "media") visible = visible.filter((task) => !/\.recording\.webm$/i.test(`${task.source} ${task.destination}`) && /(?:\.m3u8(?:$|[?#])|youtube\.com|youtu\.be|facebook\.com|fb\.watch|tiktok\.com|instagram\.com)/i.test(`${task.source} ${task.destination}`));
-  if (activePage === "recordings") visible = visible.filter((task) => /\.recording\.webm$/i.test(`${task.source} ${task.destination}`));
+  const isRecording = (task) => /\.recording\.webm$/i.test(`${task.source} ${task.destination}`);
+  const isTorrent = (task) => /^(?:magnet:)|\.torrent(?:$|[?#])/i.test(task.source);
+  let visible = activePage === "recordings"
+    ? downloads.filter(isRecording)
+    : activePage === "torrents"
+      ? downloads.filter(isTorrent)
+      : downloads.filter((task) => !isRecording(task) && !isTorrent(task));
   if (activePage === "link") visible = visible.filter((task) => /^(?:ftp|sftp):/i.test(task.source));
   if (historyQuery) visible = visible.filter((task) => `${task.source} ${task.destination} ${task.sha256 || ""}`.toLocaleLowerCase().includes(historyQuery));
   if (activeFilter === "completed") return visible.filter((task) => task.state === "completed");
@@ -890,6 +922,9 @@ function translate() {
     .forEach((element) => (element.placeholder = t(element.dataset.i18nPlaceholder)));
   document.querySelectorAll("[data-language-choice]").forEach((button) =>
     button.classList.toggle("active", button.dataset.languageChoice === locale));
+  if (!taskConnectionsManuallyChanged) {
+    document.querySelector("#task-connections-value").value = t("automatic");
+  }
   const activeNavigation = document.querySelector(`nav [data-page="${activePage}"]`);
   if (activeNavigation) document.querySelector("main > header h1").textContent = activeNavigation.querySelector("b")?.textContent || t("downloads");
   document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
@@ -942,7 +977,7 @@ document.querySelector("#import-list").onclick = async (event) => {
     for (const url of urls) {
       try {
         const fileName = await invoke("suggest_download_name", { url });
-        acceptEnqueuedTask(await invoke("enqueue_download", { url, destinationDirectory, fileName, formatSelection: null, torrentSelection: null, mirrors: null, priority: 0, bandwidthLimit: null, connectionsOverride: 8, context: {} }));
+        acceptEnqueuedTask(await invoke("enqueue_download", { url, destinationDirectory, fileName, formatSelection: null, torrentSelection: null, mirrors: null, priority: 0, bandwidthLimit: null, connectionsOverride: null, context: {} }));
       } catch (error) { console.warn("import", url, error); }
     }
     renderDownloads();
@@ -958,14 +993,16 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector("header h1").textContent = heading;
     document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
     document.querySelector("#apocalipse-link-panel").hidden = activePage !== "link";
+    document.querySelector("#ai-panel").hidden = activePage !== "ai";
     document.querySelector("#logs-panel").hidden = activePage !== "logs";
     document.querySelector("#themes-panel").hidden = activePage !== "themes";
     document.querySelector("#language-panel").hidden = activePage !== "language";
-    document.querySelector(".metrics").hidden = ["link", "logs", "themes", "language"].includes(activePage);
-    document.querySelector(".panel").hidden = ["link", "logs", "themes", "language"].includes(activePage);
+    document.querySelector(".metrics").hidden = ["link", "ai", "logs", "themes", "language"].includes(activePage);
+    document.querySelector(".panel").hidden = ["link", "ai", "logs", "themes", "language"].includes(activePage);
     renderDownloads();
     invoke("record_ui_diagnostic", { level: "INFO", event: "page_opened", detail: `page=${activePage} panel_present=${activePage === "link" ? Boolean(document.querySelector("#apocalipse-link-panel")) : activePage === "logs" ? Boolean(document.querySelector("#logs-panel")) : true} duration_ms=${Math.round(performance.now() - openedAt)}` }).catch(() => {});
     if (activePage === "logs") refreshLogEvents().catch(console.error);
+    if (activePage === "ai") window.dispatchEvent(new CustomEvent("apocalipse-ai-opened"));
   };
 });
 
@@ -1247,6 +1284,11 @@ async function showTorrentInspection(source) {
   }
   document.querySelector("#torrent-inspection").hidden = false;
 }
+function resetTaskConnections() {
+  taskConnectionsManuallyChanged = false;
+  document.querySelector("#task-connections").value = "8";
+  document.querySelector("#task-connections-value").value = t("automatic");
+}
 document.querySelectorAll("#add").forEach(
   (button) =>
     (button.onclick = () => {
@@ -1266,6 +1308,7 @@ document.querySelectorAll("#add").forEach(
       pendingRequestMethod = null;
       pendingRequestBody = null;
       pendingRequestContentType = null;
+      resetTaskConnections();
       resetMediaInspection();
       invoke("default_download_directory")
         .then((path) => {
@@ -1280,6 +1323,7 @@ const selectLanguage = (language) => {
   locale = ["en", "pt-BR", "zh-CN"].includes(language) ? language : "en";
   localStorage.setItem("apocalipse.language", locale);
   translate();
+  window.dispatchEvent(new CustomEvent("apocalipse-language-changed", { detail: { language: locale } }));
   invoke("set_application_language", { language: locale }).catch(console.error);
 };
 document.querySelectorAll("[data-language-choice]").forEach((button) => {
@@ -1832,6 +1876,7 @@ document.querySelector("#media-format").onchange = (event) => {
   input.value = `${base}.${audio[1]}`;
 };
 document.querySelector("#task-connections").oninput = (event) => {
+  taskConnectionsManuallyChanged = true;
   document.querySelector("#task-connections-value").value = event.target.value;
 };
 document.querySelector("#analyze").onclick = async () => {
@@ -1908,7 +1953,9 @@ document.querySelector("#enqueue").onclick = async () => {
         mirrors: document.querySelector("#mirrors").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
         priority: Number(document.querySelector("#priority").value),
         bandwidthLimit: Math.round((Number(document.querySelector("#download-bandwidth-limit").value) || 0) * 1024 * 1024) || null,
-        connectionsOverride: Number(document.querySelector("#task-connections").value) || 8,
+        connectionsOverride: taskConnectionsManuallyChanged
+          ? Number(document.querySelector("#task-connections").value) || 8
+          : null,
         context: {
           traceId: pendingDiagnosticTrace,
           referer: pendingReferer,
@@ -1930,8 +1977,7 @@ document.querySelector("#enqueue").onclick = async () => {
     document.querySelector("#mirrors").value = "";
     document.querySelector("#priority").value = "0";
     document.querySelector("#download-bandwidth-limit").value = "0";
-    document.querySelector("#task-connections").value = "8";
-    document.querySelector("#task-connections-value").value = "8";
+    resetTaskConnections();
     pendingTitle = null;
     pendingThumbnail = null;
     pendingAudioUrl = null;
@@ -1995,6 +2041,7 @@ setInterval(async () => {
     pendingRequestMethod = null;
     pendingRequestBody = null;
     pendingRequestContentType = null;
+    resetTaskConnections();
     const url = document.querySelector("#url");
     url.value = link;
     document.querySelector("#analysis").hidden = true;
@@ -2030,6 +2077,7 @@ async function consumeBridgeDownload() {
     pendingRequestMethod = request.requestMethod || null;
     pendingRequestBody = request.requestBody || null;
     pendingRequestContentType = request.requestContentType || null;
+    resetTaskConnections();
     document.querySelector("#url").value = request.url;
     const requestedName = request.fileName || "";
     const genericMediaName = /^(?:watch|reel|video|download)(?:\.[a-z0-9]{1,10})?$/i.test(requestedName.trim());

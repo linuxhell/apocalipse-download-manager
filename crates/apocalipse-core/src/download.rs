@@ -28,7 +28,8 @@ use tokio::{
 
 use crate::validation::{validate_payload, PayloadExpectation};
 
-const SEGMENT_CHUNK_SIZE: u64 = 16 * 1024 * 1024;
+const SEGMENT_CHUNK_SIZE: u64 = 64 * 1024 * 1024;
+const WORKER_START_INTERVAL_MS: u64 = 35;
 
 #[derive(Debug, Clone)]
 pub struct DownloadRequest {
@@ -520,7 +521,10 @@ impl DownloadEngine {
             let limiters = request.limiters.clone();
             jobs.push(async move {
                 if worker_index > 0 {
-                    tokio::time::sleep(Duration::from_millis(worker_index as u64 * 150)).await;
+                    tokio::time::sleep(Duration::from_millis(
+                        worker_index as u64 * WORKER_START_INTERVAL_MS,
+                    ))
+                    .await;
                 }
                 loop {
                     let index = cursor.fetch_add(1, Ordering::Relaxed);

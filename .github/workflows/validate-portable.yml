@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  push:
+    branches:
+      - fix/hls-workdir-download-ui-0.4.41
 
 permissions:
   contents: read
