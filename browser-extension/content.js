@@ -56,6 +56,19 @@
     if (typeof value !== "string" || !value.trim()) return null;
     try { return new URL(value, location.href).href; } catch { return null; }
   };
+  const youtubeExtractorUrl = () => {
+    try {
+      const page = new URL(location.href);
+      const host = page.hostname.toLowerCase();
+      if (host === "youtu.be") {
+        return /^\/[A-Za-z0-9_-]{6,}(?:\/|$)/.test(page.pathname) ? page.href : null;
+      }
+      if (!(host === "youtube.com" || host.endsWith(".youtube.com"))) return null;
+      if (page.pathname === "/watch" && page.searchParams.get("v")) return page.href;
+      if (/^\/(?:shorts|live)\/[A-Za-z0-9_-]{6,}(?:\/|$)/.test(page.pathname)) return page.href;
+    } catch {}
+    return null;
+  };
   // Intercept ChatGPT Library links before Chrome creates its own download dialog.
   // Use composedPath + nearby link discovery because ChatGPT may wrap the visible
   // download control in buttons/spans instead of making the clicked node the anchor.
@@ -730,9 +743,11 @@
         recommended: true,
       });
     }
-    if (/^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch") {
-      const videoId = new URL(location.href).searchParams.get("v");
-      add(location.href, "video", document.querySelector("video"), document.querySelector('meta[property="og:image"]')?.content || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ""));
+    const youtubeUrl = youtubeExtractorUrl();
+    if (youtubeUrl) {
+      const parsed = new URL(youtubeUrl);
+      const videoId = parsed.searchParams.get("v") || parsed.pathname.match(/^\/(?:shorts|live)\/([^/]+)/)?.[1] || (parsed.hostname === "youtu.be" ? parsed.pathname.split("/")[1] : null);
+      add(youtubeUrl, "video", document.querySelector("video"), document.querySelector('meta[property="og:image"]')?.content || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ""));
     }
     document.querySelectorAll("audio").forEach((element) => {
       add(element.currentSrc || element.src, "audio", element);
@@ -808,7 +823,7 @@
     return null;
   };
   const forceKnownHlsDownload = (event) => {
-    if (/^(?:www\.)?youtube\.com$/i.test(location.hostname) && location.pathname === "/watch") return false;
+    if (youtubeExtractorUrl()) return false;
     const control = looksLikeDownloadControl(event);
     const video = document.querySelector("video");
     const hls = hlsForPage();
@@ -910,7 +925,7 @@
     return { candidates: urls, fallback: masters.at(-1) || urls.at(-1) || null };
   };
   const downloadUrlFor = (element) => {
-    if (element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch") return location.href;
+    if (element.tagName === "VIDEO" && youtubeExtractorUrl()) return youtubeExtractorUrl();
     if (element.tagName === "VIDEO") {
       const tikTokUrl = tikTokUrlFor(element);
       if (tikTokUrl) return tikTokUrl;
@@ -929,7 +944,7 @@
     if (element.tagName !== "VIDEO") return immediate;
     // YouTube has its own format-selection pipeline (video + audio merging).
     // Keep both regular videos and live streams out of the generic HLS route.
-    if (/^(?:www\.)?youtube\.com$/i.test(location.hostname) && location.pathname === "/watch") return immediate;
+    if (youtubeExtractorUrl()) return immediate;
     const hls = hlsForPage();
     if (!hls.candidates.length) return immediate;
     try {
@@ -945,6 +960,9 @@
   const activeOverlays = new Map();
   const installOverlays = () => {
     if (/(^|\.)chatgpt\.com$/.test(location.hostname)) return;
+    if (youtubeExtractorUrl()) {
+      document.querySelectorAll(".apocalipse-media-record").forEach((button) => button.remove());
+    }
     for (const overlay of activeOverlays.values()) {
       if (!overlay.element.isConnected || overlay.pageUrl !== location.href) overlay.cleanup();
     }
@@ -998,7 +1016,8 @@
 
     document.querySelectorAll("video,audio").forEach((element) => {
       if (element.dataset.apocalipseButton) return;
-      const isYouTubeVideo = element.tagName === "VIDEO" && /^(?:www\.)?youtube\.com$/.test(location.hostname) && location.pathname === "/watch";
+      const youtubeUrl = element.tagName === "VIDEO" ? youtubeExtractorUrl() : null;
+      const isYouTubeVideo = Boolean(youtubeUrl);
       // Extractor-first pages already have a complete, higher-quality download
       // route. Recording would only duplicate yt-dlp with a less reliable path.
       const usesExtractorOnlyDownload = isYouTubeVideo;
@@ -1013,7 +1032,7 @@
       const downloadReady = () => Boolean((downloadUrlFor(element) && /^https?:/.test(downloadUrlFor(element)))
         || /^blob:/i.test(String(element.currentSrc || element.src || '')));
       const canDownload = Boolean((url && /^https?:/.test(url)) || /^blob:/i.test(liveMediaUrl));
-      const canRecord = element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
+      const canRecord = !isYouTubeVideo && element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
         && Boolean(element.captureStream || element.webkitCaptureStream);
       if (!canDownload && !canRecord) return;
       element.dataset.apocalipseButton = "1";
@@ -1116,7 +1135,7 @@
         // For a real <video>, the source feeding the player is more authoritative
         // than location.href. Try readable blob first; for MSE blobs, fall through
         // to the most recent underlying media request captured by Performance API.
-        if (liveBlobUrl && !socialVideo) {
+        if (liveBlobUrl && !socialVideo && !isYouTubeVideo) {
           try {
             const fallbackName = isFacebookVideo ? facebookDownloadTitle(location.href) : null;
             await uploadBlobUrl(liveBlobUrl, fallbackName);

@@ -14,7 +14,7 @@ test('Facebook srcObject download falls back to the exact combined player stream
 
 // Execute the real content script and its installed click handler. Only browser
 // APIs/DOM geometry are mocked; URL selection and the outgoing payload are real.
-function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false } = {}) {
+function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false } = {}) {
   const sent = [], fetched = [], appended = [], listeners = [];
   const location = new URL(url);
   const rect = { left: 20, top: 40, right: 500, bottom: 600, width: 480, height: 560 };
@@ -24,6 +24,7 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
     title: 'Synthetic complete reel', poster: 'https://images.example/poster.jpg', duration: 30,
     parentElement: post, innerHTML: '', getBoundingClientRect: () => rect,
     getAttribute: () => null,
+    ...(recordable ? { captureStream: () => ({ getTracks: () => [] }) } : {}),
     querySelector: selector => selector.includes('a[href') && permalink ? { href: permalink } : null,
     querySelectorAll: () => [], closest: selector => selector.includes('article') ? post : null,
   };
@@ -39,6 +40,7 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
   };
   const context = vm.createContext({
     URL, Blob, Uint8Array, crypto: webcrypto, console, Date, document, location,
+    ...(recordable ? { MediaRecorder: class {} } : {}),
     navigator: { language: 'pt-BR', userAgent: 'Synthetic browser' },
     innerHeight: 800, scrollX: 0, scrollY: 0,
     addEventListener() {}, removeEventListener() {}, postMessage() {},
@@ -72,7 +74,7 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
   const button = appended.find(node => node.className === 'apocalipse-media-download');
   assert.ok(button, 'the actual overlay must be installed');
   return {
-    sent, fetched, location, video,
+    sent, fetched, location, video, appended,
     click: () => button.click({ preventDefault() {}, stopPropagation() {} }),
     scan: () => context.testHooks.collect(),
     downloads: () => sent.filter(message => message.type === 'APOCALIPSE_DOWNLOAD'),
@@ -194,9 +196,23 @@ test('YouTube page extraction and ordinary direct HTTP downloads are unchanged',
   }
 });
 
-test('YouTube exposes yt-dlp Download without a redundant recording button', () => {
-  assert.match(script, /const usesExtractorOnlyDownload = isYouTubeVideo;/);
-  assert.match(script, /if \(element\.tagName === "VIDEO" && canRecord && !usesExtractorOnlyDownload\)/);
+test('every supported YouTube player immediately exposes only yt-dlp Download', async () => {
+  for (const url of [
+    'https://www.youtube.com/watch?v=synthetic123',
+    'https://m.youtube.com/watch?v=synthetic123',
+    'https://music.youtube.com/watch?v=synthetic123',
+    'https://www.youtube.com/shorts/synthetic123',
+    'https://www.youtube.com/live/synthetic123',
+  ]) {
+    const p = page({ url, source: 'blob:https://www.youtube.com/player', recordable: true });
+    const visible = p.appended.filter(node => !node.removed && String(node.className).includes('apocalipse-media-download'));
+    assert.equal(visible.length, 1, `${url} must have one action`);
+    assert.equal(visible[0].className, 'apocalipse-media-download');
+    assert.equal(visible[0].hidden, false);
+    await p.click();
+    assert.equal(p.downloads()[0].item.url, url);
+    assert.equal(p.fetched.length, 0, `${url} must not probe the internal blob`);
+  }
 });
 
 test('Facebook srcObject alone never classifies an ordinary Reel as recording-only', () => {
