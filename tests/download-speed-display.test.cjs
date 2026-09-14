@@ -62,6 +62,14 @@ test("removing a media task terminates yt-dlp and every child process", () => {
   assert.match(desktop, /child\.wait\(\)\.await/);
 });
 
+test("Facebook composite links are canonicalized and downloads use segmented aria2", () => {
+  assert.match(desktop, /fn canonical_facebook_video_url/);
+  assert.match(desktop, /Some\(format!\("https:\/\/www\.facebook\.com\/watch\/\?v=\{video_id\}"\)\)/);
+  assert.match(desktop, /\.arg\("--downloader"\)\s*\.arg\(&tools\.3\)/);
+  assert.match(desktop, /aria2c:-x\{media_connections\} -s\{media_connections\} -k1M/);
+  assert.match(desktop, /parse_aria2_progress\(&progress_buffer\)/);
+});
+
 test("streamed browser recordings publish a global core speed", () => {
   assert.match(desktop, /speed_sample_at: Instant/);
   assert.match(desktop, /task\.download_speed = Some\(download_speed\)/);
