@@ -27,6 +27,25 @@ test("active downloads keep the engine-reported speed visible", () => {
   );
 });
 
+test("yt-dlp publishes bytes, total, percent and speed to the ADM interface", () => {
+  assert.match(desktop, /download:ADM_PROGRESS\|%\(progress\.downloaded_bytes\)s\|%\(progress\.total_bytes\)s\|%\(progress\.total_bytes_estimate\)s\|%\(progress\.speed\)s/);
+  assert.match(desktop, /fn parse_yt_dlp_progress/);
+  assert.match(desktop, /task\.download_speed = Some\(speed\)/);
+  assert.match(desktop, /task\.received = received/);
+  assert.match(desktop, /task\.total = total/);
+  assert.match(desktop, /task_connections\.max\(16\)/);
+});
+
+test("YouTube live downloads start from the beginning and grow in the chosen folder", () => {
+  assert.match(desktop, /status == "is_live"/);
+  assert.match(desktop, /task\.is_live = context\.is_live/);
+  assert.match(desktop, /command\.args\(\["--live-from-start", "--hls-use-mpegts"\]\)/);
+  assert.match(desktop, /DownloadKind::MediaPage && !task\.is_live/);
+  assert.match(desktop, /let output_template = if task\.is_live/);
+  assert.match(ui, /pendingIsLive = media\.isLive === true/);
+  assert.match(ui, /isLive: pendingIsLive/);
+});
+
 test("streamed browser recordings publish a global core speed", () => {
   assert.match(desktop, /speed_sample_at: Instant/);
   assert.match(desktop, /task\.download_speed = Some\(download_speed\)/);
