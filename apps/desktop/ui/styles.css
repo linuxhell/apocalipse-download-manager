@@ -709,7 +709,7 @@ footer .bridge-connected i {
 .task-connections label { display:flex; justify-content:space-between; align-items:center; gap:16px; }
 .task-connections label span { display:grid; gap:4px; }
 .task-connections label small { color:var(--muted); font-weight:400; }
-.task-connections output { min-width:44px; padding:7px 10px; border-radius:9px; background:var(--accent); color:#fff; text-align:center; font-weight:800; }
+.task-connections output { min-width:96px; box-sizing:border-box; flex:0 0 auto; padding:7px 12px; border:1px solid color-mix(in srgb, var(--accent) 55%, var(--line)); border-radius:9px; background:color-mix(in srgb, var(--accent) 18%, var(--surface)); color:var(--text); text-align:center; white-space:nowrap; font-weight:800; }
 .task-connections > input { width:100%; accent-color:var(--accent); }
 .range-scale { display:flex; justify-content:space-between; color:var(--muted); font-size:11px; }
 .logs-panel { display:grid; gap:16px; padding:20px; border:1px solid var(--line); border-radius:14px; background:var(--panel); min-height:420px; }

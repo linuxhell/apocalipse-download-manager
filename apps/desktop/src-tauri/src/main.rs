@@ -2262,7 +2262,7 @@ async fn run_external_download(
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("download");
-    let media_work_directory = (kind == DownloadKind::MediaPage && !task.is_live).then(|| {
+    let media_work_directory = (kind == DownloadKind::MediaPage).then(|| {
         app.state::<AppState>()
             .queue_path
             .parent()
@@ -2493,22 +2493,11 @@ async fn run_external_download(
             } else {
                 command.args(["-f", selection, "--merge-output-format", "mp4"]);
             }
-            let output_template = if task.is_live {
-                format!(
-                    "{}.%(ext)s",
-                    task.destination
-                        .file_stem()
-                        .and_then(|value| value.to_str())
-                        .unwrap_or("apocalipse-live")
-                )
-            } else {
-                "apocalipse-media.%(ext)s".to_owned()
-            };
             command
                 .arg("-P")
                 .arg(media_work_directory.as_deref().unwrap_or(directory))
                 .arg("-o")
-                .arg(output_template)
+                .arg("apocalipse-media.%(ext)s")
                 .arg(&task.source);
             command
         }
@@ -2722,6 +2711,11 @@ async fn run_external_download(
         use std::os::windows::process::CommandExt;
         command.as_std_mut().creation_flags(0x08000000);
     }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.as_std_mut().process_group(0);
+    }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     command.kill_on_drop(true);
     let mut result = match command.spawn() {
@@ -2744,7 +2738,10 @@ async fn run_external_download(
             });
             let status = tokio::select! {
                 biased;
-                _ = &mut cancellation => { let _ = child.kill().await; return; }
+                _ = &mut cancellation => {
+                    terminate_process_tree(&mut child).await;
+                    return;
+                }
                 status = child.wait() => status,
             };
             let mut text = String::from_utf8_lossy(&output.await.unwrap_or_default()).into_owned();
@@ -2809,6 +2806,31 @@ async fn run_external_download(
         workers.remove(&id);
     }
     start_next_queued(&app);
+}
+
+#[cfg(target_os = "windows")]
+async fn terminate_process_tree(child: &mut tokio::process::Child) {
+    if let Some(pid) = child.id() {
+        let mut command = tokio::process::Command::new("taskkill.exe");
+        command.args(["/PID", &pid.to_string(), "/T", "/F"]);
+        use std::os::windows::process::CommandExt;
+        command.as_std_mut().creation_flags(0x08000000);
+        let _ = command.status().await;
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+}
+
+#[cfg(unix)]
+async fn terminate_process_tree(child: &mut tokio::process::Child) {
+    if let Some(pid) = child.id() {
+        let _ = tokio::process::Command::new("kill")
+            .args(["-TERM", &format!("-{pid}")])
+            .status()
+            .await;
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
 }
 
 fn write_yt_dlp_diagnostic(
@@ -3317,12 +3339,17 @@ async fn read_process_tail(
     progress: Option<(tauri::AppHandle, DownloadId, DownloadKind)>,
 ) -> Vec<u8> {
     let mut tail = Vec::new();
+    let mut progress_buffer = String::new();
     let mut chunk = [0_u8; 4096];
     loop {
         match stream.read(&mut chunk).await {
             Ok(0) | Err(_) => break,
             Ok(count) => {
                 let text = String::from_utf8_lossy(&chunk[..count]);
+                if progress_buffer.len() > 16_384 {
+                    progress_buffer.clear();
+                }
+                progress_buffer.push_str(&text);
                 if let Some((app, id, kind)) = progress.as_ref() {
                     if matches!(
                         *kind,
@@ -3340,7 +3367,7 @@ async fn read_process_tail(
                             seeders,
                             leechers,
                             eta,
-                        )) = parse_aria2_progress(&text)
+                        )) = parse_aria2_progress(&progress_buffer)
                         {
                             update_task(app, *id, false, |task| {
                                 task.received = received;
@@ -3355,7 +3382,7 @@ async fn read_process_tail(
                         }
                     } else if *kind == DownloadKind::MediaPage {
                         if let Some((received, total, percent, speed)) =
-                            parse_yt_dlp_progress(&text)
+                            parse_yt_dlp_progress(&progress_buffer)
                         {
                             update_task(app, *id, false, |task| {
                                 task.received = received;
@@ -3367,14 +3394,14 @@ async fn read_process_tail(
                                     );
                                 }
                             });
-                        } else if let Some(percent) = parse_external_progress(&text) {
+                        } else if let Some(percent) = parse_external_progress(&progress_buffer) {
                             update_task(app, *id, false, |task| {
                                 task.progress_percent = Some(
                                     task.progress_percent.unwrap_or(0.0).max(percent.min(90.0)),
                                 );
                             });
                         }
-                    } else if let Some(percent) = parse_external_progress(&text) {
+                    } else if let Some(percent) = parse_external_progress(&progress_buffer) {
                         update_task(app, *id, false, |task| {
                             let percent = if *kind == DownloadKind::MediaPage {
                                 percent.min(90.0)
@@ -7261,6 +7288,12 @@ async fn remove_downloads(
                 let hls_workspace = matches!(classify_url(&task.source), Some(DownloadKind::Hls))
                     && hls_workspace_path(task).as_ref() == Some(&path);
                 remove_path_with_retry(&path, torrent_root || hls_workspace).await?;
+            }
+            if matches!(classify_url(&task.source), Some(DownloadKind::MediaPage)) {
+                if let Some(parent) = state.queue_path.parent() {
+                    let workspace = parent.join("media-work").join(task.id.to_string());
+                    remove_path_with_retry(&workspace, true).await?;
+                }
             }
         }
     }
