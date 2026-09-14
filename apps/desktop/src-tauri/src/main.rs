@@ -2407,13 +2407,12 @@ async fn run_external_download(
             if bandwidth_limit > 0 {
                 command.arg("--limit-rate").arg(bandwidth_limit.to_string());
             }
-            let media_connections = if task.source.contains("youtube.com/")
-                || task.source.contains("youtu.be/")
-            {
-                task_connections.max(16)
-            } else {
-                task_connections
-            };
+            let media_connections =
+                if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
+                    task_connections.max(16)
+                } else {
+                    task_connections
+                };
             command
                 .arg("--concurrent-fragments")
                 .arg(media_connections.to_string());
