@@ -5949,6 +5949,7 @@ fn queue_from_bridge(
             trace_id: request.trace_id.clone(),
             referer: request.page_url,
             known_duration: request.duration,
+            is_live: false,
             title: request.title,
             thumbnail: request.thumbnail,
             audio_url: request.audio_url,
