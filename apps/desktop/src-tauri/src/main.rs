@@ -2390,8 +2390,8 @@ async fn run_external_download(
     let mut command = match kind {
         DownloadKind::MediaPage => {
             let mut command = tokio::process::Command::new(&tools.1);
-            let media_source = canonical_facebook_video_url(&task.source)
-                .unwrap_or_else(|| task.source.clone());
+            let media_source =
+                canonical_facebook_video_url(&task.source).unwrap_or_else(|| task.source.clone());
             let facebook_media = media_source.contains("facebook.com/");
             if let Some(proxy_url) = proxy_url.as_deref() {
                 command.arg("--proxy").arg(proxy_url);
@@ -8059,7 +8059,10 @@ mod tests {
             .as_deref(),
             Some("https://www.facebook.com/watch/?v=1054475184024216")
         );
-        assert!(canonical_facebook_video_url("https://www.facebook.com/reel/1084652417273846").is_none());
+        assert!(
+            canonical_facebook_video_url("https://www.facebook.com/reel/1084652417273846")
+                .is_none()
+        );
     }
 
     #[test]
