@@ -559,6 +559,7 @@ applyAppearance();
 let pendingDiagnosticTrace = null;
 let pendingReferer = null;
 let pendingDuration = null;
+let pendingIsLive = false;
 let pendingTitle = null;
 let pendingThumbnail = null;
 let pendingAudioUrl = null;
@@ -1298,6 +1299,7 @@ document.querySelectorAll("#add").forEach(
       pendingDiagnosticTrace = null;
       pendingReferer = null;
       pendingDuration = null;
+      pendingIsLive = false;
       pendingTitle = null;
       pendingThumbnail = null;
       pendingAudioUrl = null;
@@ -1844,6 +1846,7 @@ async function showMediaInspection(url) {
     pendingTitle = media.title || pendingTitle;
     pendingThumbnail = media.thumbnail || pendingThumbnail;
     pendingDuration = Number.isFinite(media.duration) ? media.duration : pendingDuration;
+    pendingIsLive = media.isLive === true;
     document.querySelector("#media-title").textContent = media.title;
     document.querySelector("#media-duration").textContent = media.duration ? `${t("duration")}: ${secondsLabel(media.duration)}` : "";
     const thumbnail = document.querySelector("#media-thumbnail");
@@ -1960,6 +1963,7 @@ document.querySelector("#enqueue").onclick = async () => {
           traceId: pendingDiagnosticTrace,
           referer: pendingReferer,
           knownDuration: pendingDuration,
+          isLive: pendingIsLive,
           title: pendingTitle,
           thumbnail: pendingThumbnail,
           audioUrl: pendingAudioUrl,
@@ -2031,6 +2035,7 @@ setInterval(async () => {
     pendingDiagnosticTrace = null;
     pendingReferer = null;
     pendingDuration = null;
+    pendingIsLive = false;
     pendingTitle = null;
     pendingThumbnail = null;
     pendingAudioUrl = null;
@@ -2067,6 +2072,7 @@ async function consumeBridgeDownload() {
     pendingDiagnosticTrace = request.traceId || null;
     pendingReferer = request.pageUrl || null;
     pendingDuration = Number.isFinite(request.duration) ? request.duration : null;
+    pendingIsLive = false;
     pendingTitle = request.title || null;
     pendingThumbnail = request.thumbnail || null;
     pendingAudioUrl = request.audioUrl || null;

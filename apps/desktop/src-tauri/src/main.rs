@@ -259,6 +259,7 @@ struct MediaInspection {
     title: String,
     thumbnail: Option<String>,
     duration: Option<f64>,
+    is_live: bool,
     suggested_file_name: String,
     formats: Vec<MediaFormat>,
 }
@@ -994,6 +995,8 @@ struct DownloadContext {
     referer: Option<String>,
     known_duration: Option<f64>,
     #[serde(default)]
+    is_live: bool,
+    #[serde(default)]
     title: Option<String>,
     #[serde(default)]
     thumbnail: Option<String>,
@@ -1456,6 +1459,14 @@ async fn inspect_media_formats(
         .and_then(|item| item.as_str())
         .map(str::to_owned);
     let duration = value.get("duration").and_then(|item| item.as_f64());
+    let is_live = value
+        .get("is_live")
+        .and_then(|item| item.as_bool())
+        .unwrap_or(false)
+        || value
+            .get("live_status")
+            .and_then(|item| item.as_str())
+            .is_some_and(|status| status == "is_live");
     let mut formats = value
         .get("formats")
         .and_then(|item| item.as_array())
@@ -1521,6 +1532,7 @@ async fn inspect_media_formats(
         title,
         thumbnail,
         duration,
+        is_live,
         suggested_file_name: format!("{safe_title}.mp4"),
         formats,
     })
@@ -2378,6 +2390,9 @@ async fn run_external_download(
     let mut command = match kind {
         DownloadKind::MediaPage => {
             let mut command = tokio::process::Command::new(&tools.1);
+            let media_source =
+                canonical_facebook_video_url(&task.source).unwrap_or_else(|| task.source.clone());
+            let facebook_media = media_source.contains("facebook.com/");
             if let Some(proxy_url) = proxy_url.as_deref() {
                 command.arg("--proxy").arg(proxy_url);
             }
@@ -2385,13 +2400,37 @@ async fn run_external_download(
                 .format_selection
                 .as_deref()
                 .unwrap_or("bestvideo+bestaudio/best");
-            command.args(["--no-playlist", "--newline", "--verbose"]);
+            command.args([
+                "--no-playlist",
+                "--newline",
+                "--verbose",
+                "--progress-template",
+                "download:ADM_PROGRESS|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress._percent_str)s",
+            ]);
             if bandwidth_limit > 0 {
                 command.arg("--limit-rate").arg(bandwidth_limit.to_string());
             }
+            let media_connections =
+                if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
+                    task_connections.max(16)
+                } else {
+                    task_connections
+                };
             command
                 .arg("--concurrent-fragments")
-                .arg(task_connections.to_string());
+                .arg(media_connections.to_string());
+            if task.is_live {
+                command.args(["--live-from-start", "--hls-use-mpegts"]);
+            }
+            if facebook_media {
+                command
+                    .arg("--downloader")
+                    .arg(&tools.3)
+                    .arg("--downloader-args")
+                    .arg(format!(
+                        "aria2c:-x{media_connections} -s{media_connections} -k1M --file-allocation=none"
+                    ));
+            }
             let quickjs_name = if cfg!(windows) { "qjs.exe" } else { "qjs" };
             let configured_quickjs = app
                 .state::<AppState>()
@@ -2471,7 +2510,7 @@ async fn run_external_download(
                 .arg(media_work_directory.as_deref().unwrap_or(directory))
                 .arg("-o")
                 .arg("apocalipse-media.%(ext)s")
-                .arg(&task.source);
+                .arg(&media_source);
             command
         }
         DownloadKind::Hls => {
@@ -2684,6 +2723,11 @@ async fn run_external_download(
         use std::os::windows::process::CommandExt;
         command.as_std_mut().creation_flags(0x08000000);
     }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.as_std_mut().process_group(0);
+    }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     command.kill_on_drop(true);
     let mut result = match command.spawn() {
@@ -2706,7 +2750,10 @@ async fn run_external_download(
             });
             let status = tokio::select! {
                 biased;
-                _ = &mut cancellation => { let _ = child.kill().await; return; }
+                _ = &mut cancellation => {
+                    terminate_process_tree(&mut child).await;
+                    return;
+                }
                 status = child.wait() => status,
             };
             let mut text = String::from_utf8_lossy(&output.await.unwrap_or_default()).into_owned();
@@ -2771,6 +2818,31 @@ async fn run_external_download(
         workers.remove(&id);
     }
     start_next_queued(&app);
+}
+
+#[cfg(target_os = "windows")]
+async fn terminate_process_tree(child: &mut tokio::process::Child) {
+    if let Some(pid) = child.id() {
+        let mut command = tokio::process::Command::new("taskkill.exe");
+        command.args(["/PID", &pid.to_string(), "/T", "/F"]);
+        use std::os::windows::process::CommandExt;
+        command.as_std_mut().creation_flags(0x08000000);
+        let _ = command.status().await;
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+}
+
+#[cfg(unix)]
+async fn terminate_process_tree(child: &mut tokio::process::Child) {
+    if let Some(pid) = child.id() {
+        let _ = tokio::process::Command::new("kill")
+            .args(["-TERM", &format!("-{pid}")])
+            .status()
+            .await;
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
 }
 
 fn write_yt_dlp_diagnostic(
@@ -3279,12 +3351,17 @@ async fn read_process_tail(
     progress: Option<(tauri::AppHandle, DownloadId, DownloadKind)>,
 ) -> Vec<u8> {
     let mut tail = Vec::new();
+    let mut progress_buffer = String::new();
     let mut chunk = [0_u8; 4096];
     loop {
         match stream.read(&mut chunk).await {
             Ok(0) | Err(_) => break,
             Ok(count) => {
                 let text = String::from_utf8_lossy(&chunk[..count]);
+                if progress_buffer.len() > 16_384 {
+                    progress_buffer.clear();
+                }
+                progress_buffer.push_str(&text);
                 if let Some((app, id, kind)) = progress.as_ref() {
                     if matches!(
                         *kind,
@@ -3302,7 +3379,7 @@ async fn read_process_tail(
                             seeders,
                             leechers,
                             eta,
-                        )) = parse_aria2_progress(&text)
+                        )) = parse_aria2_progress(&progress_buffer)
                         {
                             update_task(app, *id, false, |task| {
                                 task.received = received;
@@ -3315,7 +3392,39 @@ async fn read_process_tail(
                                 task.torrent_eta = eta;
                             });
                         }
-                    } else if let Some(percent) = parse_external_progress(&text) {
+                    } else if *kind == DownloadKind::MediaPage {
+                        if let Some((received, total, percent, speed)) =
+                            parse_yt_dlp_progress(&progress_buffer)
+                        {
+                            update_task(app, *id, false, |task| {
+                                task.received = received;
+                                task.total = total;
+                                task.download_speed = Some(speed);
+                                if let Some(percent) = percent {
+                                    task.progress_percent = Some(
+                                        task.progress_percent.unwrap_or(0.0).max(percent.min(90.0)),
+                                    );
+                                }
+                            });
+                        } else if let Some((received, total, percent, speed, _, _, _, _)) =
+                            parse_aria2_progress(&progress_buffer)
+                        {
+                            update_task(app, *id, false, |task| {
+                                task.received = received;
+                                task.total = Some(total);
+                                task.download_speed = Some(speed);
+                                task.progress_percent = Some(
+                                    task.progress_percent.unwrap_or(0.0).max(percent.min(90.0)),
+                                );
+                            });
+                        } else if let Some(percent) = parse_external_progress(&progress_buffer) {
+                            update_task(app, *id, false, |task| {
+                                task.progress_percent = Some(
+                                    task.progress_percent.unwrap_or(0.0).max(percent.min(90.0)),
+                                );
+                            });
+                        }
+                    } else if let Some(percent) = parse_external_progress(&progress_buffer) {
                         update_task(app, *id, false, |task| {
                             let percent = if *kind == DownloadKind::MediaPage {
                                 percent.min(90.0)
@@ -3423,6 +3532,51 @@ fn parse_external_progress(text: &str) -> Option<f64> {
             prefix[start..].parse::<f64>().ok()
         })
         .rfind(|value| (0.0..=100.0).contains(value))
+}
+
+fn parse_yt_dlp_number(value: &str) -> Option<u64> {
+    let value = value.trim();
+    if value.is_empty() || value.eq_ignore_ascii_case("NA") || value.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    value
+        .parse::<f64>()
+        .ok()
+        .filter(|number| number.is_finite() && *number >= 0.0)
+        .map(|number| number as u64)
+}
+
+fn parse_yt_dlp_progress(text: &str) -> Option<(u64, Option<u64>, Option<f64>, u64)> {
+    text.lines().rev().find_map(|line| {
+        let payload = line.trim().strip_prefix("ADM_PROGRESS|")?;
+        let mut fields = payload.split('|');
+        let received = parse_yt_dlp_number(fields.next()?)?;
+        let exact_total = parse_yt_dlp_number(fields.next()?);
+        let estimated_total = parse_yt_dlp_number(fields.next()?);
+        let speed = parse_yt_dlp_number(fields.next()?).unwrap_or(0);
+        let percent = fields
+            .next()
+            .map(str::trim)
+            .map(|value| value.trim_end_matches('%').trim())
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| (0.0..=100.0).contains(value));
+        Some((received, exact_total.or(estimated_total), percent, speed))
+    })
+}
+
+fn canonical_facebook_video_url(source: &str) -> Option<String> {
+    let parsed = url::Url::parse(source).ok()?;
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    if host != "facebook.com" && !host.ends_with(".facebook.com") {
+        return None;
+    }
+    let segments = parsed.path_segments()?.collect::<Vec<_>>();
+    let videos = segments.iter().position(|segment| *segment == "videos")?;
+    let video_id = segments[videos + 1..]
+        .iter()
+        .rev()
+        .find(|segment| segment.len() >= 6 && segment.bytes().all(|byte| byte.is_ascii_digit()))?;
+    Some(format!("https://www.facebook.com/watch/?v={video_id}"))
 }
 
 fn external_error_detail(output: &str, exit_code: Option<i32>) -> String {
@@ -4593,6 +4747,7 @@ fn enqueue_download_impl(
         task.known_duration = context
             .known_duration
             .filter(|duration| duration.is_finite() && *duration > 0.0);
+        task.is_live = context.is_live;
         task.display_title = context.title.and_then(|value| {
             let value = value
                 .chars()
@@ -5029,6 +5184,7 @@ fn redownload_downloads(
         task.format_selection = original.format_selection.clone();
         task.referer = original.referer.clone();
         task.known_duration = original.known_duration;
+        task.is_live = original.is_live;
         task.display_title = original.display_title.clone();
         task.thumbnail = original.thumbnail.clone();
         if let Some(identity) = saved_identities.get(&original.id) {
@@ -5858,6 +6014,7 @@ fn queue_from_bridge(
             trace_id: request.trace_id.clone(),
             referer: request.page_url,
             known_duration: request.duration,
+            is_live: false,
             title: request.title,
             thumbnail: request.thumbnail,
             audio_url: request.audio_url,
@@ -7170,6 +7327,12 @@ async fn remove_downloads(
                     && hls_workspace_path(task).as_ref() == Some(&path);
                 remove_path_with_retry(&path, torrent_root || hls_workspace).await?;
             }
+            if matches!(classify_url(&task.source), Some(DownloadKind::MediaPage)) {
+                if let Some(parent) = state.queue_path.parent() {
+                    let workspace = parent.join("media-work").join(task.id.to_string());
+                    remove_path_with_retry(&workspace, true).await?;
+                }
+            }
         }
     }
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
@@ -7873,6 +8036,33 @@ mod tests {
     fn uses_latest_valid_percentage_in_a_progress_chunk() {
         assert_eq!(parse_external_progress("Vid: 42% Aud: 41%"), Some(41.0));
         assert_eq!(parse_external_progress("HTTP 403%"), None);
+    }
+
+    #[test]
+    fn parses_structured_yt_dlp_speed_and_estimated_total() {
+        assert_eq!(
+            parse_yt_dlp_progress("ADM_PROGRESS|1048576|NA|4194304|524288| 25.0%"),
+            Some((1048576, Some(4194304), Some(25.0), 524288))
+        );
+        assert_eq!(
+            parse_yt_dlp_progress("ADM_PROGRESS|2097152|4194304|NA|NA| 50.0%"),
+            Some((2097152, Some(4194304), Some(50.0), 0))
+        );
+    }
+
+    #[test]
+    fn canonicalizes_composite_facebook_video_links() {
+        assert_eq!(
+            canonical_facebook_video_url(
+                "https://www.facebook.com/61592165240994/videos/pcb.1848807619833077/1054475184024216"
+            )
+            .as_deref(),
+            Some("https://www.facebook.com/watch/?v=1054475184024216")
+        );
+        assert!(
+            canonical_facebook_video_url("https://www.facebook.com/reel/1084652417273846")
+                .is_none()
+        );
     }
 
     #[test]

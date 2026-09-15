@@ -27,6 +27,49 @@ test("active downloads keep the engine-reported speed visible", () => {
   );
 });
 
+test("yt-dlp publishes bytes, total, percent and speed to the ADM interface", () => {
+  assert.match(desktop, /download:ADM_PROGRESS\|%\(progress\.downloaded_bytes\)s\|%\(progress\.total_bytes\)s\|%\(progress\.total_bytes_estimate\)s\|%\(progress\.speed\)s/);
+  assert.match(desktop, /fn parse_yt_dlp_progress/);
+  assert.match(desktop, /task\.download_speed = Some\(speed\)/);
+  assert.match(desktop, /task\.received = received/);
+  assert.match(desktop, /task\.total = total/);
+  assert.match(desktop, /task_connections\.max\(16\)/);
+});
+
+test("YouTube live downloads start from the beginning inside an isolated workspace", () => {
+  assert.match(desktop, /status == "is_live"/);
+  assert.match(desktop, /task\.is_live = context\.is_live/);
+  assert.match(desktop, /command\.args\(\["--live-from-start", "--hls-use-mpegts"\]\)/);
+  assert.match(desktop, /let media_work_directory = \(kind == DownloadKind::MediaPage\)/);
+  assert.match(desktop, /parent\.join\("media-work"\)\.join\(task\.id\.to_string\(\)\)/);
+  assert.match(desktop, /remove_path_with_retry\(&workspace, true\)\.await/);
+  assert.match(ui, /pendingIsLive = media\.isLive === true/);
+  assert.match(ui, /isLive: pendingIsLive/);
+});
+
+test("split yt-dlp progress lines remain buffered until speed can be parsed", () => {
+  assert.match(desktop, /let mut progress_buffer = String::new\(\)/);
+  assert.match(desktop, /progress_buffer\.push_str\(&text\)/);
+  assert.match(desktop, /parse_yt_dlp_progress\(&progress_buffer\)/);
+});
+
+test("removing a media task terminates yt-dlp and every child process", () => {
+  assert.match(desktop, /terminate_process_tree\(&mut child\)\.await/);
+  assert.match(desktop, /taskkill\.exe/);
+  assert.match(desktop, /"\/PID", &pid\.to_string\(\), "\/T", "\/F"/);
+  assert.match(desktop, /process_group\(0\)/);
+  assert.match(desktop, /format!\("-\{pid\}"\)/);
+  assert.match(desktop, /child\.wait\(\)\.await/);
+});
+
+test("Facebook composite links are canonicalized and downloads use segmented aria2", () => {
+  assert.match(desktop, /fn canonical_facebook_video_url/);
+  assert.match(desktop, /Some\(format!\("https:\/\/www\.facebook\.com\/watch\/\?v=\{video_id\}"\)\)/);
+  assert.match(desktop, /\.arg\("--downloader"\)\s*\.arg\(&tools\.3\)/);
+  assert.match(desktop, /aria2c:-x\{media_connections\} -s\{media_connections\} -k1M/);
+  assert.match(desktop, /parse_aria2_progress\(&progress_buffer\)/);
+});
+
 test("streamed browser recordings publish a global core speed", () => {
   assert.match(desktop, /speed_sample_at: Instant/);
   assert.match(desktop, /task\.download_speed = Some\(download_speed\)/);
@@ -92,6 +135,12 @@ test("failed thumbnails restore the compact icon without covering progress", () 
 test("task state and action controls use the active theme instead of dark constants", () => {
   assert.match(desktopCss, /\.download-state\s*\{[\s\S]*background:\s*color-mix\(in srgb, var\(--accent\) 10%, var\(--surface\)\)/);
   assert.match(desktopCss, /\.task-action\s*\{[\s\S]*background:\s*var\(--surface-2\)/);
+});
+
+test("automatic thread selection stays readable without clipping", () => {
+  assert.match(desktopCss, /\.task-connections output \{[^}]*min-width:96px/);
+  assert.match(desktopCss, /\.task-connections output \{[^}]*white-space:nowrap/);
+  assert.match(desktopCss, /\.task-connections output \{[^}]*color:var\(--text\)/);
 });
 
 test("protected thumbnails are cached for the desktop handoff", () => {

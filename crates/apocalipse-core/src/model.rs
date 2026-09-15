@@ -49,6 +49,8 @@ pub struct DownloadTask {
     pub referer: Option<String>,
     #[serde(default)]
     pub known_duration: Option<f64>,
+    #[serde(default)]
+    pub is_live: bool,
     /// Human-readable media title supplied by inspection or the browser bridge.
     #[serde(default)]
     pub display_title: Option<String>,
@@ -98,6 +100,7 @@ impl DownloadTask {
             format_selection: None,
             referer: None,
             known_duration: None,
+            is_live: false,
             display_title: None,
             thumbnail: None,
             companion_audio_url: None,
