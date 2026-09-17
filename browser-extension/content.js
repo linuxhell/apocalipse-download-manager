@@ -668,6 +668,7 @@
   };
   const collect = () => {
     const items = new Map();
+    const youtubeUrl = youtubeExtractorUrl();
     const add = (url, kind, element, thumbnail, extra = {}) => {
       url = absolute(url);
       if (!url || !/^https?:/.test(url)) return;
@@ -685,6 +686,10 @@
       });
     };
     document.querySelectorAll("video").forEach((element) => {
+      // YouTube uses several hidden/standby Blob players on watch, live and
+      // Shorts pages. They are implementation details, not separate media.
+      // The canonical page-extractor row is added once below.
+      if (youtubeUrl) return;
       // Reject an explicitly sponsored Facebook card before any URL, Blob or
       // MediaStream path can turn it into a popup row.
       if (isSponsoredFacebookPlayer(element)) return;
@@ -754,11 +759,20 @@
         recommended: true,
       });
     }
-    const youtubeUrl = youtubeExtractorUrl();
     if (youtubeUrl) {
       const parsed = new URL(youtubeUrl);
       const videoId = parsed.searchParams.get("v") || parsed.pathname.match(/^\/(?:shorts|live)\/([^/]+)/)?.[1] || (parsed.hostname === "youtu.be" ? parsed.pathname.split("/")[1] : null);
-      add(youtubeUrl, "video", document.querySelector("video"), document.querySelector('meta[property="og:image"]')?.content || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ""));
+      const videos = [...document.querySelectorAll("video")];
+      const video = videos.sort((left, right) => {
+        const a = left.getBoundingClientRect?.() || { width: 0, height: 0 };
+        const b = right.getBoundingClientRect?.() || { width: 0, height: 0 };
+        return (b.width * b.height) - (a.width * a.height);
+      })[0] || null;
+      add(youtubeUrl, "video", video, document.querySelector('meta[property="og:image"]')?.content || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ""), {
+        ...playerContext(video),
+        pageExtractor: true,
+        recommended: true,
+      });
     }
     document.querySelectorAll("audio").forEach((element) => {
       add(element.currentSrc || element.src, "audio", element);

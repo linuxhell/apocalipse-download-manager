@@ -374,7 +374,7 @@ document.querySelectorAll("nav button").forEach((button) => {
   };
 });
 document.querySelector("#select-all").onchange = (event) => {
-  for (const item of media.filter((value) => value.kind === selected)) {
+  for (const item of media.filter((value) => value.kind === selected && !value.visualOnly)) {
     if (event.target.checked) selectedUrls.add(item.url); else selectedUrls.delete(item.url);
   }
   render();
