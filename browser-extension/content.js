@@ -4,6 +4,17 @@
   let interfaceLanguage = "en";
   let interfaceTheme = "void";
   let refreshOverlayLanguages = () => {};
+  const extensionContextActive = () => {
+    try { return Boolean(chrome?.runtime?.id); } catch { return false; }
+  };
+  const sendRuntimeMessageQuietly = (message) => {
+    try {
+      if (!extensionContextActive()) return Promise.resolve(null);
+      return Promise.resolve(chrome.runtime.sendMessage(message)).catch(() => null);
+    } catch {
+      return Promise.resolve(null);
+    }
+  };
   chrome.storage.local.get({ forceShortcut: "Shift", bypassShortcut: "Alt", language: "en", desktopTheme: "void" }, (value) => {
     shortcutKeys = { force: value.forceShortcut, bypass: value.bypassShortcut };
     interfaceLanguage = value.language || "en";
@@ -29,7 +40,7 @@
     refreshOverlayLanguages();
   });
   const modifierPressed = (event, key) => ({ Alt: event.altKey, Shift: event.shiftKey, Control: event.ctrlKey }[key] || false);
-  const sendShortcutState = (event) => chrome.runtime.sendMessage({
+  const sendShortcutState = (event) => sendRuntimeMessageQuietly({
     type: "APOCALIPSE_SHORTCUT_STATE",
     bypassPressed: modifierPressed(event, shortcutKeys.bypass),
     forcePressed: modifierPressed(event, shortcutKeys.force),
@@ -40,12 +51,12 @@
     const bypass = modifierPressed(event, shortcutKeys.bypass);
     const force = modifierPressed(event, shortcutKeys.force);
     if (bypass) {
-      chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 }).catch(() => {});
+      void sendRuntimeMessageQuietly({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 });
     } else if (force) {
-      chrome.runtime.sendMessage({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 }).catch(() => {});
+      void sendRuntimeMessageQuietly({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 });
     }
   }, true);
-  window.addEventListener("blur", () => chrome.runtime.sendMessage({
+  window.addEventListener("blur", () => sendRuntimeMessageQuietly({
     type: "APOCALIPSE_SHORTCUT_STATE",
     bypassPressed: false,
     forcePressed: false,
@@ -1470,7 +1481,9 @@
     button.classList.remove("apocalipse-click-feedback");
     void button.offsetWidth;
     button.classList.add("apocalipse-click-feedback");
-    setTimeout(() => button.classList.remove("apocalipse-click-feedback"), 360);
+    setTimeout(() => {
+      try { if (button.isConnected) button.classList.remove("apocalipse-click-feedback"); } catch {}
+    }, 360);
   };
   document.addEventListener("pointerdown", (event) => {
     restartOverlayButtonFeedback(event.target?.closest?.(".apocalipse-media-download"));
@@ -1481,10 +1494,14 @@
   }, true);
   new MutationObserver(scheduleOverlays).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "poster"] });
   scheduleOverlays();
-  setInterval(scheduleOverlays, 2000);
-  setInterval(() => {
+  const overlayRefreshTimer = setInterval(() => {
+    if (!extensionContextActive()) return clearInterval(overlayRefreshTimer);
+    try { scheduleOverlays(); } catch {}
+  }, 2000);
+  const appearanceSyncTimer = setInterval(() => {
+    if (!extensionContextActive()) return clearInterval(appearanceSyncTimer);
     if (!activeOverlays.size) return;
-    chrome.runtime.sendMessage({ type: "APOCALIPSE_SYNC_DESKTOP_APPEARANCE" }).then((result) => {
+    sendRuntimeMessageQuietly({ type: "APOCALIPSE_SYNC_DESKTOP_APPEARANCE" }).then((result) => {
       if (!result?.language) return;
       const changed = result.language !== interfaceLanguage || result.theme !== interfaceTheme;
       interfaceLanguage = result.language;
@@ -1562,12 +1579,15 @@
   // before Chrome creates a native download, while this isolated-world script
   // retains access to chrome.runtime and the existing Alt/Shift configuration.
   const postApocalipseShortcutConfig = () => {
-    window.postMessage({
-      source: "apocalipse-extension",
-      type: "shortcut-config",
-      bypass: shortcutKeys.bypass,
-      force: shortcutKeys.force,
-    }, "*");
+    if (!extensionContextActive()) return;
+    try {
+      window.postMessage({
+        source: "apocalipse-extension",
+        type: "shortcut-config",
+        bypass: shortcutKeys.bypass,
+        force: shortcutKeys.force,
+      }, "*");
+    } catch {}
   };
   postApocalipseShortcutConfig();
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -1579,7 +1599,7 @@
     if (event.source !== window) return;
     const data = event.data;
     if (data?.source === "apocalipse-page-hook" && data.type === "capture-trace") {
-      chrome.runtime.sendMessage({ type: "APOCALIPSE_CAPTURE_TRACE", eventName: data.eventName, mode: data.mode, detail: data.detail || {}, traceId: data.traceId, pageUrl: location.href, at: data.at || Date.now() }).catch(() => {});
+      void sendRuntimeMessageQuietly({ type: "APOCALIPSE_CAPTURE_TRACE", eventName: data.eventName, mode: data.mode, detail: data.detail || {}, traceId: data.traceId, pageUrl: location.href, at: data.at || Date.now() });
       return;
     }
     if (!data || data.source !== "apocalipse-page-hook" || data.type !== "pre-download-url") return;

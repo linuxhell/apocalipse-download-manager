@@ -177,6 +177,16 @@ test("extension popup and video overlays provide visible click feedback", () => 
   assert.match(content, /prefers-reduced-motion:reduce/);
 });
 
+test("stale Chrome content scripts stop quietly after an extension reload", () => {
+  const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");
+  assert.match(content, /const extensionContextActive =/);
+  assert.match(content, /const sendRuntimeMessageQuietly =/);
+  assert.match(content, /if \(!extensionContextActive\(\)\) return clearInterval\(overlayRefreshTimer\)/);
+  assert.match(content, /if \(!extensionContextActive\(\)\) return clearInterval\(appearanceSyncTimer\)/);
+  assert.match(content, /try \{ if \(button\.isConnected\) button\.classList\.remove/);
+  assert.match(content, /if \(!extensionContextActive\(\)\) return;[\s\S]*window\.postMessage/);
+});
+
 test("protected thumbnails are cached for the desktop handoff", () => {
   const worker = fs.readFileSync(path.join(root, "browser-extension/background.js"), "utf8");
   const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");
