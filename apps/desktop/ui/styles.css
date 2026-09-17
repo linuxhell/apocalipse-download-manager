@@ -289,10 +289,138 @@ h1 {
   justify-content: flex-end;
 }
 .list-actions > button { white-space: nowrap; }
-.list-actions label {
-  color: var(--muted);
+.list-action-button {
+  min-height: 34px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, var(--text));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-2) 92%, var(--accent));
+  color: color-mix(in srgb, var(--text) 88%, var(--muted));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 8%, transparent);
+  font: inherit;
   font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
   cursor: pointer;
+  user-select: none;
+  transition: color .16s ease, border-color .16s ease, background .16s ease,
+    box-shadow .16s ease, transform .16s ease;
+}
+.list-action-button:hover:not(:disabled),
+.list-action-button:has(input:not(:disabled)):hover {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+  color: var(--text);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 12%, transparent);
+  transform: translateY(-1px);
+}
+.list-action-button:focus-visible,
+.list-action-button:has(input:focus-visible) {
+  outline: 2px solid color-mix(in srgb, var(--accent) 72%, transparent);
+  outline-offset: 2px;
+}
+.list-action-button:active:not(:disabled) { transform: translateY(0); }
+.list-action-button:disabled,
+.list-action-button:has(input:disabled) {
+  opacity: .42;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.list-action-icon {
+  width: 16px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 850;
+}
+.list-action-danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, #ff5364 64%, var(--line));
+  background: color-mix(in srgb, #ff5364 13%, var(--surface-2));
+  color: color-mix(in srgb, #ff5364 72%, var(--text));
+  box-shadow: 0 4px 12px color-mix(in srgb, #ff5364 12%, transparent);
+}
+.list-action-danger .list-action-icon { color: #ff6675; }
+.list-select-button { position: relative; }
+.list-select-button input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.list-select-indicator {
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--muted) 72%, var(--line));
+  border-radius: 4px;
+  background: var(--input);
+}
+.list-select-button input:checked + .list-select-indicator,
+.list-select-button input:indeterminate + .list-select-indicator {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.list-select-button input:checked + .list-select-indicator::after {
+  content: "✓";
+  color: var(--surface);
+  font-size: 10px;
+  font-weight: 900;
+}
+.list-select-button input:indeterminate + .list-select-indicator::after {
+  content: "−";
+  color: var(--surface);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+/* Every clickable button confirms pointer and keyboard activation. */
+button,
+.list-select-button {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  transform-origin: center;
+  -webkit-tap-highlight-color: transparent;
+}
+button::after,
+.list-select-button::after {
+  content: "";
+  position: absolute;
+  inset: 50%;
+  border-radius: inherit;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 36%, transparent) 0 34%, transparent 72%);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(.18);
+}
+.button-click-feedback {
+  animation: apocalipse-button-press .34s cubic-bezier(.2, .8, .2, 1);
+}
+.button-click-feedback::after {
+  animation: apocalipse-button-wave .34s ease-out;
+}
+@keyframes apocalipse-button-press {
+  0% { transform: scale(1); }
+  32% { transform: scale(.94); filter: brightness(1.12); }
+  68% { transform: scale(1.025); }
+  100% { transform: scale(1); filter: none; }
+}
+@keyframes apocalipse-button-wave {
+  0% { inset: 50%; opacity: .9; transform: translate(-50%, -50%) scale(.12); }
+  100% { inset: -65%; opacity: 0; transform: translate(0, 0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .button-click-feedback { animation-duration: .12s; }
+  .button-click-feedback::after { animation: none; }
 }
 .list-actions input,
 .task-select {

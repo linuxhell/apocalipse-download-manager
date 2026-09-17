@@ -143,6 +143,25 @@ test("automatic thread selection stays readable without clipping", () => {
   assert.match(desktopCss, /\.task-connections output \{[^}]*color:var\(--text\)/);
 });
 
+test("bulk list actions are translated theme-aware buttons", () => {
+  assert.match(desktopHtml, /id="import-list" class="list-action-button"[\s\S]*data-i18n="importList"/);
+  assert.match(desktopHtml, /class="list-action-button list-select-button"[\s\S]*data-i18n="selectAll"/);
+  assert.match(desktopHtml, /id="manage-list"[\s\S]*class="list-action-button list-action-danger"[\s\S]*data-i18n="removeSelected"/);
+  assert.match(desktopHtml, /id="redownload-selected"[\s\S]*class="list-action-button"[\s\S]*data-i18n="redownloadSelected"/);
+  assert.match(desktopCss, /\.list-action-button \{[\s\S]*var\(--surface-2\)/);
+  assert.match(desktopCss, /\.list-action-danger:hover:not\(:disabled\)/);
+});
+
+test("every interface button has pointer and keyboard click feedback", () => {
+  const feedback = fs.readFileSync(path.join(root, "apps/desktop/ui/button-feedback.js"), "utf8");
+  assert.match(feedback, /document\.addEventListener\("pointerdown"/);
+  assert.match(feedback, /event\.key === "Enter" \|\| event\.key === " "/);
+  assert.match(feedback, /button-click-feedback/);
+  assert.match(desktopCss, /@keyframes apocalipse-button-press/);
+  assert.match(desktopCss, /@keyframes apocalipse-button-wave/);
+  assert.match(desktopHtml, /<script src="button-feedback\.js"><\/script>/);
+});
+
 test("protected thumbnails are cached for the desktop handoff", () => {
   const worker = fs.readFileSync(path.join(root, "browser-extension/background.js"), "utf8");
   const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");

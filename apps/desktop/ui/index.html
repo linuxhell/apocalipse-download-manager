@@ -159,28 +159,32 @@
           </div>
           <div class="list-actions">
             <input id="history-search" class="history-search" type="search" data-i18n-placeholder="searchHistory" placeholder="Search downloads…" />
-            <button id="import-list" class="ghost" type="button" data-i18n="importList">Import list</button>
-            <label
-              ><input id="select-all" type="checkbox" /><span
-                data-i18n="selectAll"
-                >Select all</span
-              ></label
-            >
+            <button id="import-list" class="list-action-button" type="button">
+              <span class="list-action-icon" aria-hidden="true">⇩</span>
+              <span data-i18n="importList">Import list</span>
+            </button>
+            <label class="list-action-button list-select-button">
+              <input id="select-all" type="checkbox" />
+              <span class="list-select-indicator" aria-hidden="true"></span>
+              <span data-i18n="selectAll">Select all</span>
+            </label>
             <button
               id="manage-list"
-              class="ghost"
-              data-i18n="removeSelected"
+              class="list-action-button list-action-danger"
+              type="button"
               disabled
             >
-              Remove selected
+              <span class="list-action-icon" aria-hidden="true">×</span>
+              <span data-i18n="removeSelected">Remove selected</span>
             </button>
             <button
               id="redownload-selected"
-              class="ghost"
-              data-i18n="redownloadSelected"
+              class="list-action-button"
+              type="button"
               disabled
             >
-              Download again
+              <span class="list-action-icon" aria-hidden="true">↻</span>
+              <span data-i18n="redownloadSelected">Download again</span>
             </button>
           </div>
         </div>
@@ -563,6 +567,7 @@
         <div class="dialog-actions"><button type="button" data-ai-corrections-close data-i18n="closeLog">Close</button></div>
       </form>
     </dialog>
+    <script src="button-feedback.js"></script>
     <script src="dialog-scrollbar.js"></script>
     <script src="task-list-state.js"></script>
     <script src="apocalipse-ai-local-model.js"></script>
