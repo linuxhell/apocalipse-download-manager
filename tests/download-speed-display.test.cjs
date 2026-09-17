@@ -162,6 +162,21 @@ test("every interface button has pointer and keyboard click feedback", () => {
   assert.match(desktopHtml, /<script src="button-feedback\.js"><\/script>/);
 });
 
+test("extension popup and video overlays provide visible click feedback", () => {
+  const popup = fs.readFileSync(path.join(root, "browser-extension/popup.js"), "utf8");
+  const popupCss = fs.readFileSync(path.join(root, "browser-extension/popup.css"), "utf8");
+  const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");
+
+  assert.match(popup, /addEventListener\("pointerdown"/);
+  assert.match(popup, /event\.key !== "Enter" && event\.key !== " "/);
+  assert.match(popup, /button\.disabled/);
+  assert.match(popupCss, /apocalipse-extension-press/);
+  assert.match(popupCss, /prefers-reduced-motion/);
+  assert.match(content, /restartOverlayButtonFeedback/);
+  assert.match(content, /apocalipse-overlay-press/);
+  assert.match(content, /prefers-reduced-motion:reduce/);
+});
+
 test("protected thumbnails are cached for the desktop handoff", () => {
   const worker = fs.readFileSync(path.join(root, "browser-extension/background.js"), "utf8");
   const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");

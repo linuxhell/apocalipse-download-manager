@@ -600,3 +600,19 @@ document.querySelector("#settings-toggle").onclick = () => {
   panel.hidden = !panel.hidden;
   document.querySelector("#settings-toggle").setAttribute("aria-expanded", String(!panel.hidden));
 };
+const restartButtonFeedback = (button) => {
+  if (!(button instanceof HTMLButtonElement) || button.disabled) return;
+  button.classList.remove("apocalipse-click-feedback");
+  void button.offsetWidth;
+  button.classList.add("apocalipse-click-feedback");
+  setTimeout(() => button.classList.remove("apocalipse-click-feedback"), 360);
+};
+
+document.addEventListener("pointerdown", (event) => {
+  restartButtonFeedback(event.target?.closest?.("button"));
+}, true);
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  restartButtonFeedback(event.target?.closest?.("button"));
+}, true);
