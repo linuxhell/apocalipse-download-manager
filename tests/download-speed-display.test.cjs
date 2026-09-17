@@ -143,6 +143,50 @@ test("automatic thread selection stays readable without clipping", () => {
   assert.match(desktopCss, /\.task-connections output \{[^}]*color:var\(--text\)/);
 });
 
+test("bulk list actions are translated theme-aware buttons", () => {
+  assert.match(desktopHtml, /id="import-list" class="list-action-button"[\s\S]*data-i18n="importList"/);
+  assert.match(desktopHtml, /class="list-action-button list-select-button"[\s\S]*data-i18n="selectAll"/);
+  assert.match(desktopHtml, /id="manage-list"[\s\S]*class="list-action-button list-action-danger"[\s\S]*data-i18n="removeSelected"/);
+  assert.match(desktopHtml, /id="redownload-selected"[\s\S]*class="list-action-button"[\s\S]*data-i18n="redownloadSelected"/);
+  assert.match(desktopCss, /\.list-action-button \{[\s\S]*var\(--surface-2\)/);
+  assert.match(desktopCss, /\.list-action-danger:hover:not\(:disabled\)/);
+});
+
+test("every interface button has pointer and keyboard click feedback", () => {
+  const feedback = fs.readFileSync(path.join(root, "apps/desktop/ui/button-feedback.js"), "utf8");
+  assert.match(feedback, /document\.addEventListener\("pointerdown"/);
+  assert.match(feedback, /event\.key === "Enter" \|\| event\.key === " "/);
+  assert.match(feedback, /button-click-feedback/);
+  assert.match(desktopCss, /@keyframes apocalipse-button-press/);
+  assert.match(desktopCss, /@keyframes apocalipse-button-wave/);
+  assert.match(desktopHtml, /<script src="button-feedback\.js"><\/script>/);
+});
+
+test("extension popup and video overlays provide visible click feedback", () => {
+  const popup = fs.readFileSync(path.join(root, "browser-extension/popup.js"), "utf8");
+  const popupCss = fs.readFileSync(path.join(root, "browser-extension/popup.css"), "utf8");
+  const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");
+
+  assert.match(popup, /addEventListener\("pointerdown"/);
+  assert.match(popup, /event\.key !== "Enter" && event\.key !== " "/);
+  assert.match(popup, /button\.disabled/);
+  assert.match(popupCss, /apocalipse-extension-press/);
+  assert.match(popupCss, /prefers-reduced-motion/);
+  assert.match(content, /restartOverlayButtonFeedback/);
+  assert.match(content, /apocalipse-overlay-press/);
+  assert.match(content, /prefers-reduced-motion:reduce/);
+});
+
+test("stale Chrome content scripts stop quietly after an extension reload", () => {
+  const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");
+  assert.match(content, /const extensionContextActive =/);
+  assert.match(content, /const sendRuntimeMessageQuietly =/);
+  assert.match(content, /if \(!extensionContextActive\(\)\) return clearInterval\(overlayRefreshTimer\)/);
+  assert.match(content, /if \(!extensionContextActive\(\)\) return clearInterval\(appearanceSyncTimer\)/);
+  assert.match(content, /try \{ if \(button\.isConnected\) button\.classList\.remove/);
+  assert.match(content, /if \(!extensionContextActive\(\)\) return;[\s\S]*window\.postMessage/);
+});
+
 test("protected thumbnails are cached for the desktop handoff", () => {
   const worker = fs.readFileSync(path.join(root, "browser-extension/background.js"), "utf8");
   const content = fs.readFileSync(path.join(root, "browser-extension/content.js"), "utf8");

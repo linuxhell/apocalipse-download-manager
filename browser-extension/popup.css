@@ -1,5 +1,13 @@
 :root { color-scheme: dark; font: 14px system-ui; width: 540px; height: 580px; overflow: hidden; }
 *, *::before, *::after { box-sizing: border-box; }
+button { position: relative; overflow: hidden; isolation: isolate; cursor: pointer; }
+button::after { content: ""; position: absolute; inset: 50%; border-radius: 999px; background: color-mix(in srgb, var(--p-accent, #25d9ef) 38%, transparent); opacity: 0; pointer-events: none; transform: translate(-50%, -50%) scale(0); }
+button.apocalipse-click-feedback { animation: apocalipse-extension-press .34s cubic-bezier(.2, .8, .2, 1); }
+button.apocalipse-click-feedback::after { animation: apocalipse-extension-wave .34s ease-out; }
+@keyframes apocalipse-extension-press { 0% { transform: scale(1); } 42% { transform: scale(.94); filter: brightness(1.2); } 100% { transform: scale(1); } }
+@keyframes apocalipse-extension-wave { 0% { opacity: .8; transform: translate(-50%, -50%) scale(0); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(5); } }
+button:disabled { cursor: default; }
+@media (prefers-reduced-motion: reduce) { button.apocalipse-click-feedback { animation-duration: .12s; } button.apocalipse-click-feedback::after { animation: none; } }
 html, body { margin: 0; width: 540px; min-width: 540px; height: 580px; min-height: 580px; max-height: 580px; overflow: hidden; }
 body { display: flex; flex-direction: column; background: #090d14; color: #e9faff; }
 body > :not(main) { flex: 0 0 auto; }

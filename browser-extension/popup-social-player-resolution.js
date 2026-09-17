@@ -8,7 +8,12 @@
   const aliases = new Map();
   let syncing = false;
 
-  const resolvable = item => Boolean(item?.kind === 'video' && item?.visualOnly && item?.playerBound
+  const socialResolverPage = () => {
+    try {
+      return /(^|\.)(?:facebook|tiktok)\.com$/i.test(new URL(activePageUrl || '').hostname);
+    } catch { return false; }
+  };
+  const resolvable = item => Boolean(socialResolverPage() && item?.kind === 'video' && item?.visualOnly && item?.playerBound
     && item?.recommended && !item?.retained && item?.rect && activeMediaTab?.id);
 
   const visibleRows = () => [...document.querySelectorAll('#items > article')];

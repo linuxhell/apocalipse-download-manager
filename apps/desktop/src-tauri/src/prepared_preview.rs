@@ -305,6 +305,11 @@ fn page_command(
             "2",
             "--max-filesize",
             "1G",
+            // A preview must complete for an ongoing live stream. Limit page
+            // extractors to a short playable sample instead of waiting for the
+            // broadcast (or a long normal video) to end.
+            "--download-sections",
+            "*0-30",
             "-f",
             "bestvideo+bestaudio/best",
             "--merge-output-format",

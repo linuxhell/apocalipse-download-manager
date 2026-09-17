@@ -4,6 +4,17 @@
   let interfaceLanguage = "en";
   let interfaceTheme = "void";
   let refreshOverlayLanguages = () => {};
+  const extensionContextActive = () => {
+    try { return Boolean(chrome?.runtime?.id); } catch { return false; }
+  };
+  const sendRuntimeMessageQuietly = (message) => {
+    try {
+      if (!extensionContextActive()) return Promise.resolve(null);
+      return Promise.resolve(chrome.runtime.sendMessage(message)).catch(() => null);
+    } catch {
+      return Promise.resolve(null);
+    }
+  };
   chrome.storage.local.get({ forceShortcut: "Shift", bypassShortcut: "Alt", language: "en", desktopTheme: "void" }, (value) => {
     shortcutKeys = { force: value.forceShortcut, bypass: value.bypassShortcut };
     interfaceLanguage = value.language || "en";
@@ -29,7 +40,7 @@
     refreshOverlayLanguages();
   });
   const modifierPressed = (event, key) => ({ Alt: event.altKey, Shift: event.shiftKey, Control: event.ctrlKey }[key] || false);
-  const sendShortcutState = (event) => chrome.runtime.sendMessage({
+  const sendShortcutState = (event) => sendRuntimeMessageQuietly({
     type: "APOCALIPSE_SHORTCUT_STATE",
     bypassPressed: modifierPressed(event, shortcutKeys.bypass),
     forcePressed: modifierPressed(event, shortcutKeys.force),
@@ -40,12 +51,12 @@
     const bypass = modifierPressed(event, shortcutKeys.bypass);
     const force = modifierPressed(event, shortcutKeys.force);
     if (bypass) {
-      chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 }).catch(() => {});
+      void sendRuntimeMessageQuietly({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 });
     } else if (force) {
-      chrome.runtime.sendMessage({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 }).catch(() => {});
+      void sendRuntimeMessageQuietly({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 });
     }
   }, true);
-  window.addEventListener("blur", () => chrome.runtime.sendMessage({
+  window.addEventListener("blur", () => sendRuntimeMessageQuietly({
     type: "APOCALIPSE_SHORTCUT_STATE",
     bypassPressed: false,
     forcePressed: false,
@@ -657,6 +668,7 @@
   };
   const collect = () => {
     const items = new Map();
+    const youtubeUrl = youtubeExtractorUrl();
     const add = (url, kind, element, thumbnail, extra = {}) => {
       url = absolute(url);
       if (!url || !/^https?:/.test(url)) return;
@@ -674,6 +686,10 @@
       });
     };
     document.querySelectorAll("video").forEach((element) => {
+      // YouTube uses several hidden/standby Blob players on watch, live and
+      // Shorts pages. They are implementation details, not separate media.
+      // The canonical page-extractor row is added once below.
+      if (youtubeUrl) return;
       // Reject an explicitly sponsored Facebook card before any URL, Blob or
       // MediaStream path can turn it into a popup row.
       if (isSponsoredFacebookPlayer(element)) return;
@@ -743,11 +759,20 @@
         recommended: true,
       });
     }
-    const youtubeUrl = youtubeExtractorUrl();
     if (youtubeUrl) {
       const parsed = new URL(youtubeUrl);
       const videoId = parsed.searchParams.get("v") || parsed.pathname.match(/^\/(?:shorts|live)\/([^/]+)/)?.[1] || (parsed.hostname === "youtu.be" ? parsed.pathname.split("/")[1] : null);
-      add(youtubeUrl, "video", document.querySelector("video"), document.querySelector('meta[property="og:image"]')?.content || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ""));
+      const videos = [...document.querySelectorAll("video")];
+      const video = videos.sort((left, right) => {
+        const a = left.getBoundingClientRect?.() || { width: 0, height: 0 };
+        const b = right.getBoundingClientRect?.() || { width: 0, height: 0 };
+        return (b.width * b.height) - (a.width * a.height);
+      })[0] || null;
+      add(youtubeUrl, "video", video, document.querySelector('meta[property="og:image"]')?.content || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ""), {
+        ...playerContext(video),
+        pageExtractor: true,
+        recommended: true,
+      });
     }
     document.querySelectorAll("audio").forEach((element) => {
       add(element.currentSrc || element.src, "audio", element);
@@ -1463,14 +1488,34 @@
   addEventListener("scroll", scheduleCatalog, { passive: true, capture: true });
   for (const event of ["loadedmetadata", "load", "emptied"]) document.addEventListener(event, scheduleCatalog, true);
   const style = document.createElement("style");
-  style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:2px solid var(--apocalipse-accent,#25d9ef)!important;border-radius:8px!important;padding:8px 11px!important;background:#111a20f2!important;color:#fff!important;font:700 13px system-ui!important;box-shadow:0 3px 12px #0008!important;backdrop-filter:blur(5px)!important;cursor:pointer!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download:hover{background:#15262ef8!important;box-shadow:0 3px 14px var(--apocalipse-accent,#25d9ef)!important}.apocalipse-media-download:disabled{cursor:wait!important;opacity:.85!important}.apocalipse-media-record{color:#fff!important;background:#35151cf2!important}.apocalipse-media-record:hover{background:#4a1922f8!important}";
+  style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:2px solid var(--apocalipse-accent,#25d9ef)!important;border-radius:8px!important;padding:8px 11px!important;background:#111a20f2!important;color:#fff!important;font:700 13px system-ui!important;box-shadow:0 3px 12px #0008!important;backdrop-filter:blur(5px)!important;cursor:pointer!important;overflow:hidden!important;isolation:isolate!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download::after{content:\"\"!important;position:absolute!important;inset:50%!important;border-radius:999px!important;background:color-mix(in srgb,var(--apocalipse-accent,#25d9ef) 42%,transparent)!important;opacity:0!important;pointer-events:none!important;transform:translate(-50%,-50%) scale(0)!important}.apocalipse-media-download.apocalipse-click-feedback{animation:apocalipse-overlay-press .34s cubic-bezier(.2,.8,.2,1)!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:apocalipse-overlay-wave .34s ease-out!important}@keyframes apocalipse-overlay-press{0%{transform:scale(1)}42%{transform:scale(.92);filter:brightness(1.3)}100%{transform:scale(1)}}@keyframes apocalipse-overlay-wave{0%{opacity:.85;transform:translate(-50%,-50%) scale(0)}100%{opacity:0;transform:translate(-50%,-50%) scale(5)}}.apocalipse-media-download:hover{background:#15262ef8!important;box-shadow:0 3px 14px var(--apocalipse-accent,#25d9ef)!important}.apocalipse-media-download:disabled{cursor:wait!important;opacity:.85!important}.apocalipse-media-record{color:#fff!important;background:#35151cf2!important}.apocalipse-media-record:hover{background:#4a1922f8!important}@media (prefers-reduced-motion:reduce){.apocalipse-media-download.apocalipse-click-feedback{animation-duration:.12s!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:none!important}}";
   document.documentElement.append(style);
+  const restartOverlayButtonFeedback = (button) => {
+    if (!button || button.disabled) return;
+    button.classList.remove("apocalipse-click-feedback");
+    void button.offsetWidth;
+    button.classList.add("apocalipse-click-feedback");
+    setTimeout(() => {
+      try { if (button.isConnected) button.classList.remove("apocalipse-click-feedback"); } catch {}
+    }, 360);
+  };
+  document.addEventListener("pointerdown", (event) => {
+    restartOverlayButtonFeedback(event.target?.closest?.(".apocalipse-media-download"));
+  }, true);
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    restartOverlayButtonFeedback(event.target?.closest?.(".apocalipse-media-download"));
+  }, true);
   new MutationObserver(scheduleOverlays).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "poster"] });
   scheduleOverlays();
-  setInterval(scheduleOverlays, 2000);
-  setInterval(() => {
+  const overlayRefreshTimer = setInterval(() => {
+    if (!extensionContextActive()) return clearInterval(overlayRefreshTimer);
+    try { scheduleOverlays(); } catch {}
+  }, 2000);
+  const appearanceSyncTimer = setInterval(() => {
+    if (!extensionContextActive()) return clearInterval(appearanceSyncTimer);
     if (!activeOverlays.size) return;
-    chrome.runtime.sendMessage({ type: "APOCALIPSE_SYNC_DESKTOP_APPEARANCE" }).then((result) => {
+    sendRuntimeMessageQuietly({ type: "APOCALIPSE_SYNC_DESKTOP_APPEARANCE" }).then((result) => {
       if (!result?.language) return;
       const changed = result.language !== interfaceLanguage || result.theme !== interfaceTheme;
       interfaceLanguage = result.language;
@@ -1548,12 +1593,15 @@
   // before Chrome creates a native download, while this isolated-world script
   // retains access to chrome.runtime and the existing Alt/Shift configuration.
   const postApocalipseShortcutConfig = () => {
-    window.postMessage({
-      source: "apocalipse-extension",
-      type: "shortcut-config",
-      bypass: shortcutKeys.bypass,
-      force: shortcutKeys.force,
-    }, "*");
+    if (!extensionContextActive()) return;
+    try {
+      window.postMessage({
+        source: "apocalipse-extension",
+        type: "shortcut-config",
+        bypass: shortcutKeys.bypass,
+        force: shortcutKeys.force,
+      }, "*");
+    } catch {}
   };
   postApocalipseShortcutConfig();
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -1565,7 +1613,7 @@
     if (event.source !== window) return;
     const data = event.data;
     if (data?.source === "apocalipse-page-hook" && data.type === "capture-trace") {
-      chrome.runtime.sendMessage({ type: "APOCALIPSE_CAPTURE_TRACE", eventName: data.eventName, mode: data.mode, detail: data.detail || {}, traceId: data.traceId, pageUrl: location.href, at: data.at || Date.now() }).catch(() => {});
+      void sendRuntimeMessageQuietly({ type: "APOCALIPSE_CAPTURE_TRACE", eventName: data.eventName, mode: data.mode, detail: data.detail || {}, traceId: data.traceId, pageUrl: location.href, at: data.at || Date.now() });
       return;
     }
     if (!data || data.source !== "apocalipse-page-hook" || data.type !== "pre-download-url") return;
