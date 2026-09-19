@@ -413,7 +413,10 @@ impl DownloadEngine {
                         .and_then(content_range_total)
                         .or(total);
                     if let Some(total) = range_total {
-                        if request.expected_size.is_some_and(|expected| expected != total) {
+                        if request
+                            .expected_size
+                            .is_some_and(|expected| expected != total)
+                        {
                             bail!("expected size mismatch: remote={total}");
                         }
                         let identity = resume_identity_from_headers(probe.headers(), total);
@@ -1583,7 +1586,9 @@ mod tests {
             expected_sha256: Some("0".repeat(64)),
             limiters: Vec::new(),
         };
-        assert!(finish_download(&request, &partial, 15, Some(15), &tx).await.is_err());
+        assert!(finish_download(&request, &partial, 15, Some(15), &tx)
+            .await
+            .is_err());
         assert!(!destination.exists());
         assert!(partial.exists());
         let _ = fs::remove_dir_all(root).await;
