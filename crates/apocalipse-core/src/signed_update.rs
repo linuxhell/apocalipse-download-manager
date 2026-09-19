@@ -53,10 +53,7 @@ pub fn verify_update_manifest(
         if artifact.target.is_empty()
             || artifact.length == 0
             || artifact.sha256.len() != 64
-            || !artifact
-                .sha256
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit())
+            || !artifact.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
             || !artifact.url.starts_with("https://")
         {
             bail!("invalid update artifact metadata")
