@@ -3,6 +3,7 @@ use reqwest::Url;
 
 const MAX_METALINK_BYTES: usize = 4 * 1024 * 1024;
 const MAX_MIRRORS: usize = 32;
+const MAX_FILES: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MetalinkFile {
@@ -158,6 +159,9 @@ pub fn parse_metalink(xml: &[u8], base_url: Option<&str>) -> Result<Vec<Metalink
                 sha256,
                 urls,
             });
+            if files.len() >= MAX_FILES {
+                break;
+            }
         }
     }
     if files.is_empty() {
