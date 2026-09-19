@@ -199,6 +199,19 @@ test('AI UI retrieves privacy-safe engine diagnostics and passes the selected la
   assert.match(desktop, /ai_snapshot\(750\)/);
 });
 
+test('thumbnails use the validated persistent cache instead of direct remote rendering', () => {
+  assert.match(appJs, /invoke\("resolve_thumbnail", \{ url \}\)/);
+  assert.match(appJs, /resolveCachedThumbnail\(requestedThumbnail\)/);
+  assert.match(appJs, /loadPreviewThumbnail\(image, thumbnail\)/);
+  assert.doesNotMatch(appJs, /thumbnail\.src = task\.thumbnail/);
+  assert.doesNotMatch(appJs, /image\.src = thumbnail/);
+  assert.match(desktop, /mod thumbnail_cache;/);
+  assert.match(desktop, /async fn resolve_thumbnail_internal/);
+  assert.match(desktop, /prefetch_thumbnail\(app\.clone\(\), thumbnail\)/);
+  assert.match(desktop, /thumbnail\.cache_hit/);
+  assert.match(desktop, /thumbnail\.cached/);
+});
+
 test('site credential commands use the existing secure settings action', () => {
   const pt = AI.respond('adicione uma regra para o site https://exemplo.com nome de usuário juliano e senha segredo forte', { locale: 'pt-BR' });
   assert.equal(pt.intent, 'credential_save');
