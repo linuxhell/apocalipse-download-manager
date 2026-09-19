@@ -2038,6 +2038,9 @@ async fn run_download(
     let (events, mut receiver) = mpsc::channel(64);
     let mut download = Box::pin(download_with_mirrors(engine, request, mirrors, events));
     let mut was_cancelled = false;
+    let mut active_connections = 1_usize;
+    let mut perf_last_at = Instant::now();
+    let mut perf_last_bytes = 0_u64;
     loop {
         tokio::select! {
             biased;
@@ -2063,7 +2066,23 @@ async fn run_download(
             }
             event = receiver.recv() => match event {
                 Some(DownloadEvent::Started { resumed_at, total, connections, resume_supported }) => {
+                    active_connections = connections;
+                    perf_last_at = Instant::now();
+                    perf_last_bytes = resumed_at;
                     diagnostic_log(&app.state::<AppState>(), "INFO", "http.mode", &format!("task={id} connections={connections} segmented={}", connections > 1));
+                    app.state::<AppState>().diagnostics.record(
+                        "http.transfer_started",
+                        "INFO",
+                        None,
+                        Some(&id.to_string()),
+                        serde_json::json!({
+                            "resumedBytes": resumed_at,
+                            "totalBytes": total,
+                            "activeConnections": connections,
+                            "resumeSupported": resume_supported,
+                            "mode": if connections > 1 { "segmented" } else { "single" }
+                        }),
+                    );
                     update_task(&app, id, true, |task| {
                         task.state = DownloadState::Downloading;
                         task.received = resumed_at;
@@ -2071,10 +2090,47 @@ async fn run_download(
                         task.resume_supported = Some(resume_supported);
                     });
                 },
-                Some(DownloadEvent::Progress { received, total }) => update_task(&app, id, false, |task| {
-                    task.received = received;
-                    task.total = total;
-                }),
+                Some(DownloadEvent::Progress { received, total }) => {
+                    update_task(&app, id, false, |task| {
+                        task.received = received;
+                        task.total = total;
+                    });
+                    let elapsed = perf_last_at.elapsed();
+                    if elapsed >= Duration::from_secs(2) {
+                        let elapsed_ms = elapsed.as_millis() as u64;
+                        let interval_bytes = received.saturating_sub(perf_last_bytes);
+                        let bytes_per_second = if elapsed_ms > 0 {
+                            interval_bytes.saturating_mul(1000) / elapsed_ms
+                        } else {
+                            0
+                        };
+                        app.state::<AppState>().diagnostics.record(
+                            "http.performance_sample",
+                            "INFO",
+                            None,
+                            Some(&id.to_string()),
+                            serde_json::json!({
+                                "receivedBytes": received,
+                                "totalBytes": total,
+                                "intervalBytes": interval_bytes,
+                                "intervalMs": elapsed_ms,
+                                "bytesPerSecond": bytes_per_second,
+                                "activeConnections": active_connections
+                            }),
+                        );
+                        perf_last_at = Instant::now();
+                        perf_last_bytes = received;
+                    }
+                },
+                Some(DownloadEvent::Diagnostic { event, detail }) => {
+                    app.state::<AppState>().diagnostics.record(
+                        event,
+                        "INFO",
+                        None,
+                        Some(&id.to_string()),
+                        detail,
+                    );
+                },
                 Some(DownloadEvent::Completed { bytes }) => update_task(&app, id, true, |task| {
                     task.received = bytes;
                     task.total = Some(bytes);
