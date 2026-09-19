@@ -134,6 +134,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libpam0g-dev patchelf ffmpeg
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # The Linux build moved from ubuntu-latest to ubuntu-22.04 for broader
+          # glibc compatibility. Keep target artifacts isolated by runner image
+          # so crates compiled on Ubuntu 24.04 are never restored on Ubuntu 22.04.
+          key: ${{ matrix.os }}
       - name: Validate formatting and workspace tests
         shell: bash
         run: |
