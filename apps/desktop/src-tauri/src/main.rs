@@ -5163,6 +5163,7 @@ fn start_download(
                 .unwrap_or_else(|| "GET".to_owned()),
             body: identity.and_then(|item| item.request_body.map(String::into_bytes)),
             headers,
+            expected_sha256: task.sha256.clone(),
             limiters: {
                 let mut limiters = vec![state.global_bandwidth_limiter.clone()];
                 let task_limiter =
