@@ -24,7 +24,7 @@ use std::{
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncWriteExt, BufWriter},
-    sync::mpsc,
+    sync::{mpsc, Mutex as AsyncMutex},
 };
 
 use crate::validation::{validate_payload, PayloadExpectation};
@@ -109,8 +109,13 @@ async fn request_range_from_sources(
         let source = &sources[(chunk_index + offset) % sources.len()];
         let mut builder = apply_headers(client.get(source), headers)
             .header(header::RANGE, format!("bytes={start}-{end}"));
-        if let Some(validator) = if_range_value(identity) {
-            builder = builder.header(header::IF_RANGE, validator);
+        // A validator belongs to the origin that issued it. Only reuse it for
+        // the single-source path; verified mirrors can legitimately expose a
+        // different ETag for the same digest.
+        if sources.len() == 1 {
+            if let Some(validator) = if_range_value(identity) {
+                builder = builder.header(header::IF_RANGE, validator);
+            }
         }
         match builder.send().await {
             Ok(response)
@@ -186,6 +191,22 @@ struct ResumeIdentity {
     chunk_size: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+enum JournalPhase {
+    DownloadStarted,
+    ChunkCommitted { index: usize, bytes: u64, sha256: String },
+    AssemblyStarted,
+    DataSynced { bytes: u64 },
+    DestinationCommitted { bytes: u64 },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct JournalRecord {
+    sequence: u64,
+    event: JournalPhase,
+}
+
 fn source_hash(url: &str) -> String {
     format!("{:x}", Sha256::digest(url.as_bytes()))
 }
@@ -205,7 +226,7 @@ fn resume_manifest_path(destination: &Path) -> PathBuf {
 fn same_download_identity(
     primary: &SourceProbe,
     candidate: &SourceProbe,
-    advertised: bool,
+    _advertised: bool,
 ) -> bool {
     if primary.total.is_some() && candidate.total.is_some() && primary.total != candidate.total {
         return false;
@@ -218,7 +239,10 @@ fn same_download_identity(
             return left == right;
         }
     }
-    advertised && primary.total.is_some() && primary.total == candidate.total
+    // Equal length (even from an advertised mirror) is not proof of equal
+    // content. Without a digest or matching strong ETag the candidate remains
+    // a sequential failover source and must not be striped into one file.
+    false
 }
 
 impl Resolve for CustomDnsResolver {
@@ -709,6 +733,13 @@ impl DownloadEngine {
             };
             prepare_resume_manifest(&request.destination, &identity).await?;
         }
+        recover_transaction(&request.destination).await?;
+        let journal_sequence = append_journal(
+            &request.destination,
+            0,
+            JournalPhase::DownloadStarted,
+        )
+        .await?;
         let content_type = response
             .headers()
             .get(header::CONTENT_TYPE)
@@ -745,8 +776,20 @@ impl DownloadEngine {
         }
         file.flush().await?;
         file.get_ref().sync_all().await?;
+        let journal_sequence = append_journal(
+            &request.destination,
+            journal_sequence,
+            JournalPhase::DataSynced { bytes: received },
+        )
+        .await?;
         let result = finish_download(&request, &partial, received, total, &events).await;
         if result.is_ok() {
+            append_journal(
+                &request.destination,
+                journal_sequence,
+                JournalPhase::DestinationCommitted { bytes: received },
+            )
+            .await?;
             cleanup_chunk_artifacts(&request.destination).await?;
         }
         result
@@ -766,8 +809,17 @@ impl DownloadEngine {
         let chunk_count = total.div_ceil(chunk_size) as usize;
         let worker_count = connections.min(chunk_count);
         let next_chunk = Arc::new(AtomicUsize::new(0));
+        let journal_lock = Arc::new(AsyncMutex::new(()));
 
         prepare_resume_manifest(&request.destination, &identity).await?;
+        recover_transaction(&request.destination).await?;
+        let journal_sequence = append_journal(
+            &request.destination,
+            0,
+            JournalPhase::DownloadStarted,
+        )
+        .await?;
+        let journal_sequence = Arc::new(AtomicU64::new(journal_sequence));
 
         for index in 0..chunk_count {
             let start = index as u64 * chunk_size;
@@ -810,6 +862,8 @@ impl DownloadEngine {
             let cursor = next_chunk.clone();
             let limiters = request.limiters.clone();
             let identity = identity.clone();
+            let journal_lock = journal_lock.clone();
+            let journal_sequence = journal_sequence.clone();
             jobs.push(async move {
                 if worker_index > 0 {
                     tokio::time::sleep(Duration::from_millis(
@@ -871,6 +925,20 @@ impl DownloadEngine {
                         bail!("incomplete segment: received {downloaded} of {expected} bytes");
                     }
                     record_chunk_hash(&segment).await?;
+                    let digest = fs::read_to_string(chunk_hash_path(&segment)).await?;
+                    let _guard = journal_lock.lock().await;
+                    let previous = journal_sequence.fetch_add(1, Ordering::Relaxed);
+                    let committed = append_journal(
+                        &destination,
+                        previous,
+                        JournalPhase::ChunkCommitted {
+                            index,
+                            bytes: downloaded,
+                            sha256: digest.trim().to_owned(),
+                        },
+                    )
+                    .await?;
+                    journal_sequence.store(committed, Ordering::Relaxed);
                 }
                 Result::<()>::Ok(())
             });
@@ -888,6 +956,12 @@ impl DownloadEngine {
             result?;
         }
         let partial = partial_path(&request.destination);
+        let journal_sequence = append_journal(
+            &request.destination,
+            journal_sequence.load(Ordering::Relaxed),
+            JournalPhase::AssemblyStarted,
+        )
+        .await?;
         let mut output = fs::File::create(&partial).await?;
         let mut buffer = vec![0_u8; 4 * 1024 * 1024];
         for index in 0..chunk_count {
@@ -904,8 +978,20 @@ impl DownloadEngine {
         }
         output.flush().await?;
         output.sync_all().await?;
-        let _ = cleanup_chunk_artifacts(&request.destination).await;
-        finish_download(&request, &partial, total, Some(total), &events).await
+        let journal_sequence = append_journal(
+            &request.destination,
+            journal_sequence,
+            JournalPhase::DataSynced { bytes: total },
+        )
+        .await?;
+        finish_download(&request, &partial, total, Some(total), &events).await?;
+        append_journal(
+            &request.destination,
+            journal_sequence,
+            JournalPhase::DestinationCommitted { bytes: total },
+        )
+        .await?;
+        cleanup_chunk_artifacts(&request.destination).await
     }
 }
 
@@ -959,6 +1045,55 @@ async fn prepare_resume_manifest(destination: &Path, identity: &ResumeIdentity) 
 async fn load_resume_manifest(destination: &Path) -> Option<ResumeIdentity> {
     let data = fs::read(resume_manifest_path(destination)).await.ok()?;
     serde_json::from_slice(&data).ok()
+}
+
+fn journal_path(destination: &Path) -> PathBuf {
+    chunk_directory(destination).join("transaction.jsonl")
+}
+
+async fn append_journal(
+    destination: &Path,
+    previous_sequence: u64,
+    event: JournalPhase,
+) -> Result<u64> {
+    let path = journal_path(destination);
+    fs::create_dir_all(chunk_directory(destination)).await?;
+    let sequence = previous_sequence.saturating_add(1).max(1);
+    let record = JournalRecord { sequence, event };
+    let mut line = serde_json::to_vec(&record)?;
+    line.push(b'\n');
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await?;
+    file.write_all(&line).await?;
+    file.sync_data().await?;
+    Ok(sequence)
+}
+
+async fn recover_transaction(destination: &Path) -> Result<()> {
+    let Ok(data) = fs::read(journal_path(destination)).await else {
+        return Ok(());
+    };
+    let last = data
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| serde_json::from_slice::<JournalRecord>(line).ok())
+        .last();
+    if last.as_ref().is_some_and(|record| {
+        matches!(
+            &record.event,
+            JournalPhase::AssemblyStarted | JournalPhase::DataSynced { .. }
+        )
+    }) {
+        match fs::remove_file(partial_path(destination)).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
 }
 
 fn content_range_matches(value: &str, start: u64, end: u64, total: u64) -> bool {
@@ -1266,7 +1401,7 @@ mod tests {
             digest: None,
             elapsed: Duration::from_millis(10),
         };
-        assert!(same_download_identity(&primary, &duplicate, true));
+        assert!(!same_download_identity(&primary, &duplicate, true));
         assert!(!same_download_identity(&primary, &duplicate, false));
     }
 
