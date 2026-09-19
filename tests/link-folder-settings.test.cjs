@@ -17,7 +17,7 @@ test("Apocalipse Link selects and transfers both files and folders", () => {
   assert.match(app, /linkSelectedRemote = entry;/);
   assert.match(app, /directory: linkSelectedRemote\.directory/);
   assert.match(rust, /"PUT"[\s\S]*\/v1\/link\/directory\?path=\{encoded\}/);
-  assert.match(rust, /tokio::fs::create_dir_all\(&destination\)/);
+  assert.match(rust, /fs::create_dir_all\(&destination\)/);
   assert.match(rust, /send_link_directory\(&state, &id, &password, &remote_path\)/);
 });
 
@@ -119,6 +119,7 @@ test("Link keeps system-account fields for encrypted remote login without requir
   assert.equal((app.match(/linkRemoteSystemPassword:/g) || []).length, 3);
   assert.equal((app.match(/linkCredentialsRequired:/g) || []).length, 3);
   assert.equal((app.match(/linkRemoteSessionReady:/g) || []).length, 3);
+  assert.equal((app.match(/linkRemoteFirstTrust:/g) || []).length, 3);
   assert.match(app, /passwordField\.value = "";/);
   assert.match(app, /invoke\("authenticate_remote_link_account"/);
   assert.match(linkJs, /invoke\("authenticate_remote_link_account"/);
