@@ -494,32 +494,59 @@ fn get_link_identity(state: State<'_, AppState>) -> Result<LinkIdentity, String>
 }
 
 fn link_share_entries(settings: &UserSettings) -> Vec<LinkFileEntry> {
-    settings.link_shares.iter().filter_map(|share| {
-        let metadata = fs::metadata(&share.path).ok()?;
-        Some(LinkFileEntry {
-            name: share.name.clone(), path: format!("/shares/{}", share.id),
-            size: if metadata.is_file() { metadata.len() } else { 0 }, directory: metadata.is_dir(),
+    settings
+        .link_shares
+        .iter()
+        .filter_map(|share| {
+            let metadata = fs::metadata(&share.path).ok()?;
+            Some(LinkFileEntry {
+                name: share.name.clone(),
+                path: format!("/shares/{}", share.id),
+                size: if metadata.is_file() {
+                    metadata.len()
+                } else {
+                    0
+                },
+                directory: metadata.is_dir(),
+            })
         })
-    }).collect()
+        .collect()
 }
 
-fn resolve_link_share(settings: &UserSettings, virtual_path: &str) -> Result<(PathBuf, bool), String> {
+fn resolve_link_share(
+    settings: &UserSettings,
+    virtual_path: &str,
+) -> Result<(PathBuf, bool), String> {
     let mut parts = virtual_path.trim_matches('/').split('/');
-    if parts.next() != Some("shares") { return Err("path_not_shared".to_owned()); }
+    if parts.next() != Some("shares") {
+        return Err("path_not_shared".to_owned());
+    }
     let id = parts.next().ok_or_else(|| "path_not_shared".to_owned())?;
-    let share = settings.link_shares.iter().find(|share| share.id == id)
+    let share = settings
+        .link_shares
+        .iter()
+        .find(|share| share.id == id)
         .ok_or_else(|| "path_not_shared".to_owned())?;
     let mut path = share.path.clone();
     for part in parts {
-        if part.is_empty() || part == "." { continue; }
-        if part == ".." || part.contains(['/', '\\']) { return Err("invalid_remote_path".to_owned()); }
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." || part.contains(['/', '\\']) {
+            return Err("invalid_remote_path".to_owned());
+        }
         path.push(part);
     }
     Ok((path, share.allow_write))
 }
 
-fn list_shared_link_directory(settings: &UserSettings, path: &str) -> Result<Vec<LinkFileEntry>, String> {
-    if path.trim().is_empty() { return Ok(link_share_entries(settings)); }
+fn list_shared_link_directory(
+    settings: &UserSettings,
+    path: &str,
+) -> Result<Vec<LinkFileEntry>, String> {
+    if path.trim().is_empty() {
+        return Ok(link_share_entries(settings));
+    }
     let (directory, _) = resolve_link_share(settings, path)?;
     let mut entries = list_link_directory(&directory.to_string_lossy())?;
     for entry in &mut entries {
@@ -531,16 +558,32 @@ fn list_shared_link_directory(settings: &UserSettings, path: &str) -> Result<Vec
 
 #[tauri::command]
 fn list_link_shares(state: State<'_, AppState>) -> Result<Vec<LinkShare>, String> {
-    Ok(state.settings.lock().map_err(|error| error.to_string())?.link_shares.clone())
+    Ok(state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .link_shares
+        .clone())
 }
 
 #[tauri::command]
 fn add_link_share(state: State<'_, AppState>) -> Result<Vec<LinkShare>, String> {
-    let Some(path) = rfd::FileDialog::new().pick_folder() else { return Err("cancelled".to_owned()); };
-    let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("Shared folder").to_owned();
+    let Some(path) = rfd::FileDialog::new().pick_folder() else {
+        return Err("cancelled".to_owned());
+    };
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Shared folder")
+        .to_owned();
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     if !settings.link_shares.iter().any(|share| share.path == path) {
-        settings.link_shares.push(LinkShare { id: uuid::Uuid::new_v4().simple().to_string(), name, path, allow_write: false });
+        settings.link_shares.push(LinkShare {
+            id: uuid::Uuid::new_v4().simple().to_string(),
+            name,
+            path,
+            allow_write: false,
+        });
         save_settings(&state, &settings)?;
     }
     Ok(settings.link_shares.clone())
@@ -548,20 +591,39 @@ fn add_link_share(state: State<'_, AppState>) -> Result<Vec<LinkShare>, String> 
 
 #[tauri::command]
 fn add_link_file_share(state: State<'_, AppState>) -> Result<Vec<LinkShare>, String> {
-    let Some(path) = rfd::FileDialog::new().pick_file() else { return Err("cancelled".to_owned()); };
-    let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("Shared file").to_owned();
+    let Some(path) = rfd::FileDialog::new().pick_file() else {
+        return Err("cancelled".to_owned());
+    };
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Shared file")
+        .to_owned();
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     if !settings.link_shares.iter().any(|share| share.path == path) {
-        settings.link_shares.push(LinkShare { id: uuid::Uuid::new_v4().simple().to_string(), name, path, allow_write: false });
+        settings.link_shares.push(LinkShare {
+            id: uuid::Uuid::new_v4().simple().to_string(),
+            name,
+            path,
+            allow_write: false,
+        });
         save_settings(&state, &settings)?;
     }
     Ok(settings.link_shares.clone())
 }
 
 #[tauri::command]
-fn update_link_share(state: State<'_, AppState>, id: String, allow_write: bool) -> Result<Vec<LinkShare>, String> {
+fn update_link_share(
+    state: State<'_, AppState>,
+    id: String,
+    allow_write: bool,
+) -> Result<Vec<LinkShare>, String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    let share = settings.link_shares.iter_mut().find(|share| share.id == id).ok_or_else(|| "share_not_found".to_owned())?;
+    let share = settings
+        .link_shares
+        .iter_mut()
+        .find(|share| share.id == id)
+        .ok_or_else(|| "share_not_found".to_owned())?;
     share.allow_write = allow_write;
     save_settings(&state, &settings)?;
     Ok(settings.link_shares.clone())
@@ -595,25 +657,48 @@ fn delete_local_link_item(path: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn delete_remote_link_item(id: String, password: String, path: String) -> Result<(), String> {
-    let address = if id.starts_with("http://") { id } else { format!("http://{id}") };
+    let address = if id.starts_with("http://") {
+        id
+    } else {
+        format!("http://{id}")
+    };
     let encoded = url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>();
     reqwest::Client::new()
         .delete(format!("{address}/v1/link/item?path={encoded}"))
         .bearer_auth(password)
-        .send().await.map_err(|error| error.to_string())?
-        .error_for_status().map_err(|error| error.to_string())?;
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-async fn get_remote_link_capabilities(id: String, password: String, path: String) -> Result<LinkCapabilities, String> {
-    let address = if id.starts_with("http://") { id } else { format!("http://{id}") };
+async fn get_remote_link_capabilities(
+    id: String,
+    password: String,
+    path: String,
+) -> Result<LinkCapabilities, String> {
+    let address = if id.starts_with("http://") {
+        id
+    } else {
+        format!("http://{id}")
+    };
     reqwest::Client::new()
-        .get(format!("{address}/v1/link/capabilities?path={}", url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>()))
+        .get(format!(
+            "{address}/v1/link/capabilities?path={}",
+            url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>()
+        ))
         .bearer_auth(password)
-        .send().await.map_err(|error| error.to_string())?
-        .error_for_status().map_err(|error| error.to_string())?
-        .json().await.map_err(|error| error.to_string())
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?
+        .json()
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -664,8 +749,14 @@ async fn download_remote_link_file(
     directory: bool,
     file_name: Option<String>,
 ) -> Result<String, String> {
-    let fallback_name = Path::new(&path).file_name().and_then(|value| value.to_str()).unwrap_or("download");
-    let file_name = file_name.as_deref().filter(|value| !value.is_empty()).unwrap_or(fallback_name);
+    let fallback_name = Path::new(&path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download");
+    let file_name = file_name
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback_name);
     let address = if id.starts_with("http://") {
         id
     } else {
@@ -707,6 +798,7 @@ async fn download_remote_link_file(
                 }
             }
         }
+
         return Ok(destination.to_string_lossy().into_owned());
     }
     let Some(destination) = rfd::FileDialog::new().set_file_name(file_name).save_file() else {
@@ -727,8 +819,7 @@ async fn download_link_file_to(
             .await
             .map_err(|error| error.to_string())?;
     }
-    let encoded =
-        url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
+    let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
     let response = reqwest::Client::new()
         .get(format!("{address}/v1/link/file?path={encoded}"))
         .bearer_auth(password)
@@ -755,14 +846,15 @@ fn remote_link_join(parent: &str, child: &str) -> String {
     } else {
         '/'
     };
-    format!("{}{}{}", parent.trim_end_matches(['/', '\\']), separator, child)
+    format!(
+        "{}{}{}",
+        parent.trim_end_matches(['/', '\\']),
+        separator,
+        child
+    )
 }
 
-fn send_link_directory(
-    id: &str,
-    password: &str,
-    remote_path: &str,
-) -> Result<(), String> {
+fn send_link_directory(id: &str, password: &str, remote_path: &str) -> Result<(), String> {
     let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
     let parsed = url::Url::parse(&if id.starts_with("http://") {
         id.to_owned()
@@ -839,7 +931,10 @@ async fn upload_remote_link_file(
         return Err("select_remote_directory".to_owned());
     }
     tokio::task::spawn_blocking(move || {
-        let name = source.file_name().and_then(|value| value.to_str()).ok_or_else(|| "invalid_file_name".to_owned())?;
+        let name = source
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| "invalid_file_name".to_owned())?;
         let remote_path = remote_link_join(&remote_directory, name);
         if source.is_file() {
             send_link_file(&id, &password, &source, &remote_path)?;
@@ -865,7 +960,9 @@ async fn upload_remote_link_file(
             }
         }
         Ok(remote_path)
-    }).await.map_err(|error| error.to_string())?
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 enum BValue {
@@ -1502,6 +1599,7 @@ fn social_cookie_domain(url: &str) -> Option<&'static str> {
         ("b23.tv", "bilibili.com"),
         ("bili.tv", "bilibili.com"),
     ]
+
     .into_iter()
     .find_map(|(source_domain, cookie_domain)| {
         (host == source_domain || host.ends_with(&format!(".{source_domain}")))
@@ -1594,14 +1692,30 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     }
     if headers.starts_with("GET /v1/link/capabilities ") {
         let state = app.state::<AppState>();
-        let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
+        let settings = match state.settings.lock() {
+            Ok(value) => value,
+            Err(_) => return,
+        };
         if !bridge_authorized(&headers, &settings.link_password) {
             bridge_response(&mut stream, "401 Unauthorized", None, "");
             return;
         }
-        let request_target = headers.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("");
-        let virtual_path = url::Url::parse(&format!("http://localhost{request_target}")).ok().and_then(|url| url.query_pairs().find(|(key, _)| key == "path").map(|(_, value)| value.into_owned())).unwrap_or_default();
-        let allow_write = resolve_link_share(&settings, &virtual_path).map(|(_, write)| write).unwrap_or(false);
+        let request_target = headers
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("");
+        let virtual_path = url::Url::parse(&format!("http://localhost{request_target}"))
+            .ok()
+            .and_then(|url| {
+                url.query_pairs()
+                    .find(|(key, _)| key == "path")
+                    .map(|(_, value)| value.into_owned())
+            })
+            .unwrap_or_default();
+        let allow_write = resolve_link_share(&settings, &virtual_path)
+            .map(|(_, write)| write)
+            .unwrap_or(false);
         let body = serde_json::to_string(&LinkCapabilities { allow_write })
             .unwrap_or_else(|_| "{\"allowWrite\":false}".to_owned());
         bridge_response(&mut stream, "200 OK", None, &body);
@@ -1609,25 +1723,45 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     }
     if headers.starts_with("DELETE /v1/link/item?") {
         let state = app.state::<AppState>();
-        let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
+        let settings = match state.settings.lock() {
+            Ok(value) => value,
+            Err(_) => return,
+        };
         if !bridge_authorized(&headers, &settings.link_password) {
             bridge_response(&mut stream, "401 Unauthorized", None, "");
             return;
         }
-        let request_target = headers.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("");
-        let path = url::Url::parse(&format!("http://localhost{request_target}")).ok().and_then(|url| {
-            url.query_pairs().find(|(key, _)| key == "path").map(|(_, value)| value.into_owned())
-        });
-        let resolved = path.ok_or_else(|| "invalid_path".to_owned()).and_then(|value| {
-            let is_root = value.trim_matches('/').split('/').count() <= 2;
-            let (path, allow_write) = resolve_link_share(&settings, &value)?;
-            if !allow_write || is_root { return Err("link_write_not_allowed".to_owned()); }
-            Ok(path)
-        });
+        let request_target = headers
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("");
+        let path = url::Url::parse(&format!("http://localhost{request_target}"))
+            .ok()
+            .and_then(|url| {
+                url.query_pairs()
+                    .find(|(key, _)| key == "path")
+                    .map(|(_, value)| value.into_owned())
+            });
+        let resolved = path
+            .ok_or_else(|| "invalid_path".to_owned())
+            .and_then(|value| {
+                let is_root = value.trim_matches('/').split('/').count() <= 2;
+                let (path, allow_write) = resolve_link_share(&settings, &value)?;
+                if !allow_write || is_root {
+                    return Err("link_write_not_allowed".to_owned());
+                }
+                Ok(path)
+            });
         drop(settings);
         match resolved.and_then(|value| remove_link_path(&value.to_string_lossy())) {
             Ok(()) => bridge_response(&mut stream, "200 OK", None, "{\"ok\":true}"),
-            Err(_) => bridge_response(&mut stream, "400 Bad Request", None, "{\"error\":\"delete_failed\"}"),
+            Err(_) => bridge_response(
+                &mut stream,
+                "400 Bad Request",
+                None,
+                "{\"error\":\"delete_failed\"}",
+            ),
         }
         return;
     }
@@ -1653,7 +1787,8 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                     .find(|(key, _)| key == "path")
                     .map(|(_, value)| value.into_owned())
             });
-        let Some((path, true)) = path.and_then(|value| resolve_link_share(&settings, &value).ok()) else {
+        let Some((path, true)) = path.and_then(|value| resolve_link_share(&settings, &value).ok())
+        else {
             bridge_response(&mut stream, "400 Bad Request", None, "");
             return;
         };
@@ -1686,7 +1821,8 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                     .find(|(key, _)| key == "path")
                     .map(|(_, value)| value.into_owned())
             });
-        let Some((path, true)) = path.and_then(|value| resolve_link_share(&settings, &value).ok()) else {
+        let Some((path, true)) = path.and_then(|value| resolve_link_share(&settings, &value).ok())
+        else {
             bridge_response(&mut stream, "400 Bad Request", None, "");
             return;
         };
@@ -1817,7 +1953,8 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                     .find(|(key, _)| key == "path")
                     .map(|(_, value)| value.into_owned())
             });
-        let Some((path, _)) = path.and_then(|value| resolve_link_share(&settings, &value).ok()) else {
+        let Some((path, _)) = path.and_then(|value| resolve_link_share(&settings, &value).ok())
+        else {
             bridge_response(&mut stream, "400 Bad Request", None, "");
             return;
         };
@@ -2263,6 +2400,7 @@ fn redact_url(url: &str) -> String {
         .next()
         .unwrap_or_default()
         .split('&')
+
         .filter(|item| !item.is_empty())
         .map(|item| {
             format!(
@@ -3063,6 +3201,7 @@ async fn run_external_download(
         .ok()
         .and_then(|settings| {
             effective_credential_for_download(&settings, &task.source, task.referer.as_deref())
+
         });
     let user_agent = configured_user_agent.as_deref()
         .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_deref()))
@@ -3863,6 +4002,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
 
 #[tauri::command]
 fn read_ai_diagnostics(state: State<'_, AppState>) -> Vec<serde_json::Value> {
+
     state.diagnostics.ai_snapshot(750)
 }
 
@@ -4663,6 +4803,7 @@ fn remove_download_directory(state: State<'_, AppState>, path: String) -> Result
 
 #[tauri::command]
 fn clear_download_directories(state: State<'_, AppState>) -> Result<(), String> {
+
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.recent_download_directories.clear();
     save_settings(&state, &settings)
@@ -5463,6 +5604,7 @@ fn enqueue_download_impl(
                 .chars()
                 .filter(|character| !character.is_control())
                 .take(512)
+
                 .collect::<String>();
             (!value.trim().is_empty()).then(|| value.trim().to_owned())
         });
@@ -6263,6 +6405,7 @@ fn set_transfer_limits(
     settings.adaptive_efficiency = adaptive_efficiency;
     settings.global_bandwidth_limit = global_bandwidth_limit.min(10 * 1024 * 1024 * 1024);
     state
+
         .global_bandwidth_limiter
         .set_limit(settings.global_bandwidth_limit);
     save_settings(&state, &settings)?;
@@ -7063,6 +7206,7 @@ fn valid_apocalipse_release_url(value: &str) -> Option<&str> {
         .trim_end_matches('.')
         .to_ascii_lowercase();
     let path = parsed.path();
+
     (parsed.scheme() == "https"
         && host == "github.com"
         && (path == "/linuxhell/apocalipse-download-manager/releases"
@@ -7863,6 +8007,7 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                 bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}");
             }
         }
+
     } else if first.starts_with("POST /v1/clipboard-suppress ") {
         let trace = serde_json::from_str::<serde_json::Value>(body)
             .ok()
@@ -8663,6 +8808,7 @@ fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
         }
     }
     paths
+
 }
 
 fn hls_workspace_path(task: &DownloadTask) -> Option<PathBuf> {
@@ -9463,6 +9609,7 @@ mod tests {
         );
         assert!(
             canonical_facebook_video_url("https://www.facebook.com/reel/1084652417273846")
+
                 .is_none()
         );
     }
@@ -9500,7 +9647,10 @@ mod tests {
     #[test]
     fn joins_remote_link_paths_using_the_remote_separator() {
         assert_eq!(remote_link_join(r"C:\Users", "Folder"), r"C:\Users\Folder");
-        assert_eq!(remote_link_join("/home/user/", "Folder"), "/home/user/Folder");
+        assert_eq!(
+            remote_link_join("/home/user/", "Folder"),
+            "/home/user/Folder"
+        );
     }
 
     #[test]
@@ -9552,3 +9702,4 @@ mod tests {
         assert!(parse_dns_servers(&["not-an-address".to_owned()]).is_err());
     }
 }
+
