@@ -38,6 +38,31 @@ use tokio::{
 };
 use zeroize::Zeroize;
 
+#[cfg(windows)]
+use std::{
+    ffi::{c_void, OsStr},
+    os::windows::ffi::OsStrExt,
+};
+
+#[cfg(windows)]
+#[link(name = "advapi32")]
+extern "system" {
+    fn LogonUserW(
+        username: *const u16,
+        domain: *const u16,
+        password: *const u16,
+        logon_type: u32,
+        logon_provider: u32,
+        token: *mut *mut c_void,
+    ) -> i32;
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn CloseHandle(object: *mut c_void) -> i32;
+}
+
 const VAULT_SERVICE: &str = "com.linuxhell.apocalipse";
 const VAULT_BRIDGE_TOKEN: &str = "extension-bridge-token";
 const VAULT_LINK_PASSWORD: &str = "apocalipse-link-password";
@@ -483,6 +508,95 @@ fn get_link_identity() -> LinkIdentity {
     }
 }
 
+#[cfg(windows)]
+fn windows_wide(value: &str) -> Vec<u16> {
+    OsStr::new(value)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(windows)]
+fn windows_logon_parts(value: &str) -> Result<(String, Option<String>), String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err("system_username_required".to_owned());
+    }
+    if let Some((domain, user)) = value.split_once('\\') {
+        if domain.is_empty() || user.is_empty() {
+            return Err("invalid_system_username".to_owned());
+        }
+        if ["hotmail.com", "outlook.com", "live.com"]
+            .iter()
+            .any(|candidate| domain.eq_ignore_ascii_case(candidate))
+            && !user.contains('@')
+        {
+            return Ok((
+                format!("{user}@{domain}"),
+                Some("MicrosoftAccount".to_owned()),
+            ));
+        }
+        return Ok((user.to_owned(), Some(domain.to_owned())));
+    }
+    if value.contains('@') {
+        Ok((value.to_owned(), None))
+    } else {
+        Ok((value.to_owned(), Some(".".to_owned())))
+    }
+}
+
+#[cfg(windows)]
+fn verify_system_account(username: &str, password: &str) -> Result<(), String> {
+    let (account, domain) = windows_logon_parts(username)?;
+    let account_wide = windows_wide(&account);
+    let domain_wide = domain.as_deref().map(windows_wide);
+    let mut password_wide = windows_wide(password);
+    let mut token: *mut c_void = std::ptr::null_mut();
+    let domain_ptr = domain_wide
+        .as_ref()
+        .map_or(std::ptr::null(), |value| value.as_ptr());
+    let authenticated = unsafe {
+        LogonUserW(
+            account_wide.as_ptr(),
+            domain_ptr,
+            password_wide.as_ptr(),
+            3,
+            0,
+            &mut token,
+        )
+    };
+    let error_code = if authenticated == 0 {
+        std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+    } else {
+        0
+    };
+    password_wide.zeroize();
+    if authenticated == 0 {
+        return Err(format!("system_auth_failed:{error_code}"));
+    }
+    if !token.is_null() {
+        unsafe {
+            CloseHandle(token);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn verify_system_account(_username: &str, _password: &str) -> Result<(), String> {
+    Err("system_auth_not_implemented_for_platform".to_owned())
+}
+
+#[tauri::command]
+fn authenticate_local_link_account(
+    username: String,
+    mut password: String,
+) -> Result<(), String> {
+    let result = verify_system_account(&username, &password);
+    password.zeroize();
+    result
+}
+
 fn link_share_entries(settings: &UserSettings) -> Vec<LinkFileEntry> {
     settings
         .link_shares
@@ -701,6 +815,155 @@ fn list_local_link_files(
 ) -> Result<Vec<LinkFileEntry>, String> {
     let settings = state.settings.lock().map_err(|error| error.to_string())?;
     list_shared_link_directory(&settings, &path)
+}
+
+#[tauri::command]
+fn get_local_link_share_capabilities(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<LinkCapabilities, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    let allow_write = resolve_link_share(&settings, &path)
+        .map(|(_, write)| write)
+        .unwrap_or(false);
+    Ok(LinkCapabilities { allow_write })
+}
+
+#[tauri::command]
+fn delete_local_shared_link_item(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
+    let target = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        let (target, allow_write) = resolve_link_share(&settings, &path)?;
+        if !allow_write {
+            return Err("link_write_not_allowed".to_owned());
+        }
+        target
+    };
+    remove_link_path(&target.to_string_lossy())
+}
+
+fn copy_local_link_directory(source: &Path, destination: &Path) -> Result<(), String> {
+    if destination.starts_with(source) {
+        return Err("destination_inside_source".to_owned());
+    }
+    fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+    let mut pending = vec![(source.to_path_buf(), destination.to_path_buf())];
+    while let Some((current_source, current_destination)) = pending.pop() {
+        fs::create_dir_all(&current_destination).map_err(|error| error.to_string())?;
+        for entry in fs::read_dir(&current_source).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let file_type = entry.file_type().map_err(|error| error.to_string())?;
+            if file_type.is_symlink() {
+                continue;
+            }
+            let target = current_destination.join(entry.file_name());
+            if file_type.is_dir() {
+                pending.push((entry.path(), target));
+            } else if file_type.is_file() {
+                fs::copy(entry.path(), target).map_err(|error| error.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn download_local_shared_link_item(
+    state: State<'_, AppState>,
+    path: String,
+    directory: bool,
+    file_name: Option<String>,
+) -> Result<String, String> {
+    let source = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        resolve_link_share(&settings, &path)?.0
+    };
+    let metadata = fs::symlink_metadata(&source).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() {
+        return Err("symlink_not_allowed".to_owned());
+    }
+    if directory || metadata.is_dir() {
+        let Some(parent) = rfd::FileDialog::new().pick_folder() else {
+            return Err("cancelled".to_owned());
+        };
+        let name = file_name
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .or_else(|| source.file_name().and_then(|value| value.to_str()))
+            .unwrap_or("download");
+        let destination = parent.join(name);
+        let source_for_copy = source.clone();
+        let destination_for_copy = destination.clone();
+        tokio::task::spawn_blocking(move || {
+            copy_local_link_directory(&source_for_copy, &destination_for_copy)
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+        return Ok(destination.to_string_lossy().into_owned());
+    }
+    let name = file_name
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .or_else(|| source.file_name().and_then(|value| value.to_str()))
+        .unwrap_or("download");
+    let Some(destination) = rfd::FileDialog::new().set_file_name(name).save_file() else {
+        return Err("cancelled".to_owned());
+    };
+    tokio::fs::copy(&source, &destination)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(destination.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn upload_local_shared_link_item(
+    state: State<'_, AppState>,
+    remote_directory: String,
+    local_path: String,
+) -> Result<String, String> {
+    let (source, destination_root) = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        let source = resolve_link_share(&settings, &local_path)?.0;
+        let (destination_root, allow_write) =
+            resolve_link_share(&settings, &remote_directory)?;
+        if !allow_write {
+            return Err("link_write_not_allowed".to_owned());
+        }
+        (source, destination_root)
+    };
+    if !destination_root.is_dir() {
+        return Err("select_remote_directory".to_owned());
+    }
+    let name = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "invalid_file_name".to_owned())?
+        .to_owned();
+    let destination = destination_root.join(&name);
+    if source == destination {
+        return Err("source_and_destination_are_same".to_owned());
+    }
+    let metadata = fs::symlink_metadata(&source).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() {
+        return Err("symlink_not_allowed".to_owned());
+    }
+    if metadata.is_dir() {
+        let source_for_copy = source.clone();
+        let destination_for_copy = destination.clone();
+        tokio::task::spawn_blocking(move || {
+            copy_local_link_directory(&source_for_copy, &destination_for_copy)
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+    } else {
+        tokio::fs::copy(&source, &destination)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(remote_link_join(&remote_directory, &name))
 }
 
 #[tauri::command]
@@ -8853,12 +9116,17 @@ fn main() {
             inspect_media_formats,
             inspect_torrent_metadata,
             get_link_identity,
+            authenticate_local_link_account,
             list_link_shares,
             add_link_share,
             add_link_file_share,
             update_link_share,
             remove_link_share,
             list_local_link_files,
+            get_local_link_share_capabilities,
+            download_local_shared_link_item,
+            upload_local_shared_link_item,
+            delete_local_shared_link_item,
             list_remote_link_files,
             get_remote_link_capabilities,
             download_remote_link_file,
