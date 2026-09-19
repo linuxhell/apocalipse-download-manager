@@ -102,6 +102,13 @@ pub enum DownloadEvent {
     Completed {
         bytes: u64,
     },
+    /// Structured, privacy-bounded engine telemetry. The desktop stores this
+    /// only in an active diagnostics session so performance logging never
+    /// becomes part of the hot-path legacy log by default.
+    Diagnostic {
+        event: &'static str,
+        detail: serde_json::Value,
+    },
 }
 
 #[derive(Clone)]
@@ -322,6 +329,26 @@ impl DownloadEngine {
                         let identity = resume_identity_from_headers(probe.headers(), total);
                         let useful_connections = adaptive_connection_count(total, requested);
                         if useful_connections > 1 {
+                            let planned_chunk_size = adaptive_chunk_size(total, useful_connections);
+                            let _ = events.try_send(DownloadEvent::Diagnostic {
+                                event: "http.engine_plan",
+                                detail: serde_json::json!({
+                                    "totalBytes": total,
+                                    "requestedConnections": requested,
+                                    "activeConnections": useful_connections,
+                                    "chunkBytes": planned_chunk_size,
+                                    "chunkCount": total.div_ceil(planned_chunk_size),
+                                    "sourceCount": sources.len(),
+                                    "crossOriginSources": sources.iter().filter(|source| !same_origin(&request.url, source)).count(),
+                                    "resumeValidator": if identity.etag.as_deref().is_some_and(|value| !value.trim_start().starts_with("W/")) {
+                                        "etag"
+                                    } else if identity.last_modified.is_some() {
+                                        "last_modified"
+                                    } else {
+                                        "none"
+                                    }
+                                }),
+                            });
                             let mut attempt_connections = useful_connections;
                             loop {
                                 let segmented = self
@@ -567,6 +594,24 @@ impl DownloadEngine {
             }
         }
 
+        let _ = events.try_send(DownloadEvent::Diagnostic {
+            event: "http.resume_decision",
+            detail: serde_json::json!({
+                "mode": "single",
+                "candidateBytes": resume_from,
+                "accepted": resumed,
+                "validatorPresent": saved_resume
+                    .as_ref()
+                    .is_some_and(|journal| resume_validator(&journal.identity).is_some()),
+                "reason": if resume_from == 0 {
+                    "no_validated_checkpoint"
+                } else if resumed {
+                    "validator_and_content_range_match"
+                } else {
+                    "remote_identity_changed_or_range_rejected"
+                }
+            }),
+        });
         let response = response.error_for_status()?;
         let start = if resumed { resume_from } else { 0 };
         let total = if resumed {
@@ -691,6 +736,22 @@ impl DownloadEngine {
             .filter(|(_, complete)| **complete)
             .map(|(index, _)| chunk_bounds(index, chunk_size, total).2)
             .sum::<u64>();
+        let _ = events.try_send(DownloadEvent::Diagnostic {
+            event: "http.resume_decision",
+            detail: serde_json::json!({
+                "mode": "segmented",
+                "accepted": can_resume,
+                "resumedBytes": resumed,
+                "completedChunks": journal.completed.iter().filter(|complete| **complete).count(),
+                "chunkCount": chunk_count,
+                "validatorPresent": resume_validator(&identity).is_some(),
+                "reason": if can_resume {
+                    "journal_and_remote_identity_match"
+                } else {
+                    "new_or_unvalidated_segment_session"
+                }
+            }),
+        });
         let progress = Arc::new(AtomicU64::new(resumed));
         let journal = Arc::new(Mutex::new(journal));
         let sources = Arc::new(sources);
@@ -741,6 +802,7 @@ impl DownloadEngine {
                         let source_index = (index + worker_index + source_offset) % sources.len();
                         let source = &sources[source_index];
                         let source_headers = headers_for_source(&primary_url, source, &headers);
+                        let attempt_started = Instant::now();
                         let response = match apply_headers(client.get(source), &source_headers)
                             .header(header::RANGE, format!("bytes={start}-{end}"))
                             .send()
@@ -774,6 +836,7 @@ impl DownloadEngine {
                             continue;
                         }
 
+                        let protocol = format!("{:?}", response.version());
                         let mut file = fs::OpenOptions::new()
                             .write(true)
                             .open(&partial)
@@ -831,6 +894,25 @@ impl DownloadEngine {
                             state.completed[index] = true;
                             persist_segment_journal(&destination, &mut state).await?;
                         }
+                        let elapsed_ms = attempt_started.elapsed().as_millis() as u64;
+                        let _ = sender.try_send(DownloadEvent::Diagnostic {
+                            event: "http.segment_completed",
+                            detail: serde_json::json!({
+                                "chunkIndex": index,
+                                "chunkCount": chunk_count,
+                                "bytes": expected,
+                                "sourceIndex": source_index,
+                                "sourceCount": sources.len(),
+                                "attempts": source_offset + 1,
+                                "elapsedMs": elapsed_ms,
+                                "bytesPerSecond": if elapsed_ms > 0 {
+                                    expected.saturating_mul(1000) / elapsed_ms
+                                } else {
+                                    expected
+                                },
+                                "transport": protocol
+                            }),
+                        });
                         completed = true;
                         break;
                     }
