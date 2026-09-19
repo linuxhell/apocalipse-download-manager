@@ -99,7 +99,7 @@ impl App {
                 if let Some((h, f)) = parse(line) { a.add(h, f); }
             }
         }
-        a.save();
+        a.save_specs();
         a
     }
 
@@ -116,7 +116,7 @@ impl App {
         if self.selected.is_none() { self.selected = Some(id); }
     }
 
-    fn save(&self) {
+    fn save_specs(&self) {
         if let Some(p) = self.config.parent() { let _ = fs::create_dir_all(p); }
         let body = self.targets.iter().map(Target::spec).collect::<Vec<_>>().join("\n");
         let _ = fs::write(&self.config, body);
@@ -128,7 +128,7 @@ impl App {
             let host = raw.strip_prefix("ipv4:").or_else(|| raw.strip_prefix("ipv6:")).unwrap_or(&raw).to_string();
             self.add(host.clone(), Family::V4); self.add(host, Family::V6);
         } else if let Some((h, f)) = parse(&raw) { self.add(h, f); }
-        self.save();
+        self.save_specs();
     }
 }
 
@@ -147,7 +147,7 @@ impl eframe::App for App {
                             self.targets[i].stop.store(true, Ordering::Relaxed);
                             self.targets.remove(i);
                             self.selected = self.targets.first().map(|t| t.id);
-                            self.save();
+                            self.save_specs();
                         }
                     }
                 }
@@ -207,7 +207,7 @@ impl eframe::App for App {
 impl Drop for App {
     fn drop(&mut self) {
         for t in &self.targets { t.stop.store(true, Ordering::Relaxed); }
-        self.save();
+        self.save_specs();
     }
 }
 
