@@ -121,10 +121,7 @@ async fn read_cached(
         return Ok(None);
     }
 
-    let content_path = cache_dir.join(format!(
-        "{}.{}",
-        metadata.content_hash, metadata.extension
-    ));
+    let content_path = cache_dir.join(format!("{}.{}", metadata.content_hash, metadata.extension));
     let bytes = match fs::read(&content_path).await {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -165,7 +162,10 @@ async fn fetch_validated(
     for redirect in 0..=MAX_REDIRECTS {
         let response = client
             .get(url.clone())
-            .header(reqwest::header::ACCEPT, "image/avif,image/webp,image/png,image/jpeg,image/gif,image/*;q=0.8")
+            .header(
+                reqwest::header::ACCEPT,
+                "image/avif,image/webp,image/png,image/jpeg,image/gif,image/*;q=0.8",
+            )
             .send()
             .await
             .map_err(|error| error.to_string())?;
@@ -355,11 +355,7 @@ async fn prune_cache(cache_dir: &Path) {
         }
         let size = metadata.len();
         total = total.saturating_add(size);
-        content.push((
-            path,
-            size,
-            metadata.modified().unwrap_or(UNIX_EPOCH),
-        ));
+        content.push((path, size, metadata.modified().unwrap_or(UNIX_EPOCH)));
     }
     if total <= MAX_CACHE_BYTES {
         return;
@@ -388,7 +384,10 @@ fn valid_content_hash(value: &str) -> bool {
 }
 
 fn valid_extension(value: &str) -> bool {
-    matches!(value, "jpg" | "png" | "gif" | "webp" | "avif" | "bmp" | "ico")
+    matches!(
+        value,
+        "jpg" | "png" | "gif" | "webp" | "avif" | "bmp" | "ico"
+    )
 }
 
 fn epoch_seconds() -> u64 {
@@ -451,6 +450,9 @@ mod tests {
 
     #[test]
     fn data_uri_uses_sniffed_mime() {
-        assert_eq!(data_uri("image/jpeg", b"abc"), "data:image/jpeg;base64,YWJj");
+        assert_eq!(
+            data_uri("image/jpeg", b"abc"),
+            "data:image/jpeg;base64,YWJj"
+        );
     }
 }
