@@ -6255,7 +6255,22 @@ fn save_host_rule(
         secret = password;
     }
 
-    let username = (!username.is_empty()).then(|| username.to_owned());
+    let existing_username = state
+        .settings
+        .lock()
+        .ok()
+        .and_then(|settings| {
+            settings
+                .host_rules
+                .iter()
+                .find(|rule| rule.pattern == pattern)
+                .and_then(|rule| rule.username.clone())
+        });
+    let username = if username.is_empty() && !clear_password {
+        existing_username
+    } else {
+        (!username.is_empty()).then(|| username.to_owned())
+    };
     if username.is_some() != !secret.is_empty() {
         secret.zeroize();
         return Err("host_rule_credentials_must_have_username_and_password".to_owned());
