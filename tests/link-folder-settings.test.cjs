@@ -55,3 +55,12 @@ test("Link share mutations refresh local and self-test panels at the share root"
   assert.match(app, /const localPath = resetToRoot \? "" : linkLocalPath;/);
   assert.match(app, /const remotePath = resetToRoot \? "" : linkRemotePath;/);
 });
+
+test("Link self-test reads the live local share state instead of loopback HTTP", () => {
+  assert.match(app, /let linkSelfTestMode = false;/);
+  assert.match(app, /linkSelfTestMode\s*\?\s*await invoke\("get_local_link_capabilities"/);
+  assert.match(app, /linkSelfTestMode\s*\?\s*await invoke\("list_local_link_files"/);
+  assert.match(app, /linkSelfTestMode = true;/);
+  assert.match(rust, /fn get_local_link_capabilities\([\s\S]*resolve_link_share/);
+  assert.match(rust, /get_local_link_capabilities,/);
+});

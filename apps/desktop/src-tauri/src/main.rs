@@ -668,6 +668,18 @@ async fn delete_remote_link_item(id: String, password: String, path: String) -> 
 }
 
 #[tauri::command]
+fn get_local_link_capabilities(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<LinkCapabilities, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    let allow_write = resolve_link_share(&settings, &path)
+        .map(|(_, write)| write)
+        .unwrap_or(false);
+    Ok(LinkCapabilities { allow_write })
+}
+
+#[tauri::command]
 async fn get_remote_link_capabilities(
     id: String,
     password: String,
@@ -8867,6 +8879,7 @@ fn main() {
             remove_link_share,
             list_local_link_files,
             list_remote_link_files,
+            get_local_link_capabilities,
             get_remote_link_capabilities,
             download_remote_link_file,
             upload_remote_link_file,
