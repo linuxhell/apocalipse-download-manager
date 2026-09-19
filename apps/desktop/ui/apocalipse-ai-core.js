@@ -52,6 +52,8 @@
       performanceResumeRestarted: "A previous partial transfer was not resumed because the remote identity or byte range no longer matched the saved checkpoint. Apocalipse restarted safely instead of mixing incompatible bytes.",
       performanceResumeAccepted: "The saved checkpoint matched the remote validator and byte range, so safe resume was accepted.",
       performanceProtocolUnknown: "protocol not recorded yet",
+      performanceRangeSteal: "Adaptive range stealing reassigned {count} slow-tail range(s), moving {bytes} to idle/faster workers instead of waiting for the original connection.",
+      performanceRemoteChecksum: "The server advertised a SHA-256 digest and Apocalipse is using it to detect transfer corruption. Because the digest came from the same origin, it is transport-integrity evidence, not independent publisher authentication.",
       previewHelp: "Preview opens the selected media in the external player configured in Tools. It must never create a download or open the save-location window.",
       recordingHelp: "Record captures media while it plays and later exports the result. Use it when the page does not provide a complete direct download address.",
       extensionHelp: "The browser extension detects media and sends approved actions to the desktop application. Its connection status appears at the bottom of Apocalipse.",
@@ -124,6 +126,8 @@
       performanceResumeRestarted: "Uma transferência parcial anterior não foi retomada porque a identidade remota ou a faixa de bytes deixou de corresponder ao checkpoint salvo. O Apocalipse reiniciou com segurança em vez de misturar bytes incompatíveis.",
       performanceResumeAccepted: "O checkpoint salvo correspondeu ao validador remoto e à faixa de bytes, então a retomada segura foi aceita.",
       performanceProtocolUnknown: "protocolo ainda não registrado",
+      performanceRangeSteal: "O range stealing adaptativo redistribuiu {count} cauda(s) lenta(s), movendo {bytes} para workers ociosos/mais rápidos em vez de esperar a conexão original.",
+      performanceRemoteChecksum: "O servidor anunciou um SHA-256 e o Apocalipse está usando esse hash para detectar corrupção na transferência. Como o hash veio da própria origem, ele comprova integridade de transporte, não autenticação independente do publicador.",
       previewHelp: "Visualizar abre a mídia escolhida no player externo configurado em Ferramentas. Essa ação nunca deve criar um download nem abrir a janela de escolha do local de salvamento.",
       recordingHelp: "Gravar captura a mídia enquanto ela é reproduzida e permite exportar o resultado depois. Use quando a página não fornecer um endereço direto completo para download.",
       extensionHelp: "A extensão detecta mídias no navegador e envia as ações autorizadas ao aplicativo. O estado da conexão aparece no rodapé do Apocalipse.",
@@ -196,6 +200,8 @@
       performanceResumeRestarted: "之前的部分下载没有继续，因为远程文件身份或字节范围已不再匹配保存的检查点。Apocalipse 为避免混合不兼容的数据而进行了安全重启。",
       performanceResumeAccepted: "保存的检查点与远程验证器和字节范围一致，因此已接受安全续传。",
       performanceProtocolUnknown: "尚未记录协议",
+      performanceRangeSteal: "自适应范围窃取重新分配了 {count} 个慢速尾部范围，将 {bytes} 交给空闲或更快的工作线程，而不是等待原连接完成。",
+      performanceRemoteChecksum: "服务器公布了 SHA-256，Apocalipse 正用它检测传输损坏。由于该摘要来自同一来源，它只能作为传输完整性证据，不能独立证明发布者身份。",
       previewHelp: "预览会在“工具”中设置的外部播放器里打开所选媒体。它绝不能创建下载或打开保存位置窗口。",
       recordingHelp: "录制会在媒体播放时捕获内容，之后可以导出结果。当页面没有提供完整的直接下载地址时可使用此功能。",
       extensionHelp: "浏览器扩展负责检测媒体，并把获准的操作发送到桌面应用。连接状态显示在 Apocalipse 底部。",
@@ -319,7 +325,7 @@
 
   function performanceDiagnosis(context, locale) {
     const events = parseEvents(context.engineEvents || [])
-      .filter(event => /^http\.(?:engine_|performance_|segment_|resume_|transfer_|transport_)/.test(String(event?.event || "")));
+      .filter(event => /^http\.(?:engine_|performance_|segment_|resume_|transfer_|transport_|range_|remote_|integrity_)/.test(String(event?.event || "")));
     if (!events.length) return say(locale, "performanceNeedDiagnostics");
 
     const samples = events.filter(event => event.event === "http.performance_sample"
@@ -349,6 +355,18 @@
 
     const mirrorFallbacks = segments.filter(event => Number(event?.detail?.attempts || 1) > 1).length;
     if (mirrorFallbacks) findings.push(say(locale, "performanceMirrors", { count: mirrorFallbacks }));
+
+    const steals = events.filter(event => event.event === "http.range_stolen");
+    if (steals.length) {
+      const stolenBytes = steals.reduce((sum, event) => sum + Number(event?.detail?.stolenBytes || 0), 0);
+      findings.push(say(locale, "performanceRangeSteal", {
+        count: steals.length,
+        bytes: formatRate(stolenBytes).replace("/s", ""),
+      }));
+    }
+    if (events.some(event => event.event === "http.remote_checksum")) {
+      findings.push(say(locale, "performanceRemoteChecksum"));
+    }
 
     const resume = [...events].reverse().find(event => event.event === "http.resume_decision");
     if (resume?.detail?.accepted === true
