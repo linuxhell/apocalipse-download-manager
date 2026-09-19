@@ -149,7 +149,7 @@ test("About page is localized, sits below PayPal and resets its audio when leavi
   assert.match(html, /id="donate-paypal"[\s\S]*data-page="about"/);
   assert.match(html, /id="about-panel"/);
   assert.match(html, /assets\/about-creator\.jpg/);
-  assert.match(html, /assets\/about-theme\.m4a/);
+  assert.match(html, /assets\/about-theme\.mp4/);
   assert.match(app, /about: "About"/);
   assert.match(app, /about: "Sobre"/);
   assert.match(app, /about: "关于"/);
