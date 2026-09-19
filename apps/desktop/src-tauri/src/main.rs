@@ -3247,6 +3247,11 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
 }
 
 #[tauri::command]
+fn read_ai_diagnostics(state: State<'_, AppState>) -> Vec<serde_json::Value> {
+    state.diagnostics.ai_snapshot(750)
+}
+
+#[tauri::command]
 fn diagnostics_status(state: State<'_, AppState>) -> serde_json::Value {
     let mut status = state.diagnostics.status();
     if let Some(object) = status.as_object_mut() {
@@ -7655,6 +7660,7 @@ fn main() {
             suggest_download_name,
             remove_downloads,
             read_general_log,
+            read_ai_diagnostics,
             clear_general_log,
             export_diagnostic_bundle,
             diagnostics_status,
