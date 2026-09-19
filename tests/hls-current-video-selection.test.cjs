@@ -22,3 +22,13 @@ test('generic HLS overlays send the current player duration using the worker con
 test('HLS analysis ranks playlists by distance from the visible player duration', () => {
   assert.match(background, /Math\.abs\(a\.duration - expected\) - Math\.abs\(b\.duration - expected\)/);
 });
+
+
+test('HLS analysis detects audio-only segment playlists and propagates the media kind', () => {
+  assert.match(background, /response\.headers\.get\("content-type"\)/);
+  assert.match(background, /mediaKind = inspected\.kind === "audio" \? "audio"/);
+  assert.match(background, /mediaKind: result\.mediaKind \|\| null/);
+  assert.match(content, /if \(hls\.length > 0\)/);
+  assert.match(content, /kind: detail\.mediaKind \|\| item\.kind/);
+  assert.match(content, /kind: resolved\?\.mediaKind \|\| element\.tagName\.toLowerCase\(\)/);
+});
