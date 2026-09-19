@@ -720,6 +720,21 @@ impl Diagnostics {
             ),
         ]
     }
+    pub(super) fn ai_snapshot(&self, limit: usize) -> Vec<Value> {
+        let Ok(store) = self.inner.lock() else {
+            return Vec::new();
+        };
+        let (records, _) = self.records_locked(&store.config["sessionId"]);
+        records
+            .into_iter()
+            .rev()
+            .take(limit.clamp(1, 1000))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect()
+    }
+
     pub(super) fn report(&self) -> String {
         self.export()
             .into_iter()
