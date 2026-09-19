@@ -25,6 +25,9 @@ test("Link exposes only explicit shares with per-share write permission", () => 
   assert.match(app, /update_link_share/);
   assert.match(app, /delete_remote_link_item/);
   assert.match(rust, /list_shared_link_directory/);
+  assert.match(rust, /fn list_local_link_files\([\s\S]*list_shared_link_directory/);
+  assert.match(app, /linkNoShares/);
+  assert.match(app, /refreshVisibleLinkPanels/);
   assert.match(rust, /resolve_link_share/);
   assert.match(rust, /DELETE \/v1\/link\/item/);
   assert.match(rust, /link_write_not_allowed/);
@@ -38,7 +41,10 @@ test("Link lists remain readable and settings use the available window", () => {
 });
 
 test("per-site rules own new credentials and expose removal", () => {
-  assert.match(html, /website-credentials-settings" hidden aria-hidden="true"/);
+  assert.doesNotMatch(html, /id="website-credential-/);
+  assert.doesNotMatch(app, /invoke\("list_website_credentials"/);
+  assert.doesNotMatch(rust, /fn list_website_credentials/);
+  assert.match(rust, /legacy_website_credentials/);
   assert.match(app, /hostRuleRemoveConfirm/);
   assert.match(app, /invoke\("remove_host_rule"/);
   assert.match(app, /remove\.className = "danger-action"/);

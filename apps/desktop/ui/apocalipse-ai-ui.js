@@ -224,7 +224,10 @@
       }
       if (result.action?.type === "save_website_credential") {
         const { host, username, password } = result.action;
-        await invoke("save_website_credential", { host, username, password });
+        await invoke("save_host_rule", {
+          pattern: host, username, password, userAgent: "",
+          connections: null, bandwidthLimit: null, clearPassword: false,
+        });
         result.action.password = "";
       }
       if (result.prelude) {

@@ -175,8 +175,8 @@ struct UserSettings {
     proxy_username: Option<String>,
     #[serde(default, skip_serializing)]
     proxy_password: Option<String>,
-    #[serde(default)]
-    website_credentials: Vec<WebsiteCredential>,
+    #[serde(default, rename = "website_credentials", skip_serializing)]
+    legacy_website_credentials: Vec<WebsiteCredential>,
     #[serde(default)]
     host_rules: Vec<HostRule>,
     #[serde(default)]
@@ -250,7 +250,7 @@ impl Default for UserSettings {
             proxy_url: None,
             proxy_username: None,
             proxy_password: None,
-            website_credentials: Vec::new(),
+            legacy_website_credentials: Vec::new(),
             host_rules: Vec::new(),
             dns_enabled: false,
             dns_servers: Vec::new(),
@@ -269,13 +269,6 @@ struct WebsiteCredential {
     username: String,
     #[serde(default, skip_serializing)]
     password: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WebsiteCredentialSummary {
-    host: String,
-    username: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -713,8 +706,12 @@ fn regenerate_link_password(state: State<'_, AppState>) -> Result<String, String
 }
 
 #[tauri::command]
-fn list_local_link_files(path: String) -> Result<Vec<LinkFileEntry>, String> {
-    list_link_directory(&path)
+fn list_local_link_files(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Vec<LinkFileEntry>, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    list_shared_link_directory(&settings, &path)
 }
 
 #[tauri::command]
@@ -917,12 +914,16 @@ fn send_link_file(
 
 #[tauri::command]
 async fn upload_remote_link_file(
+    state: State<'_, AppState>,
     id: String,
     password: String,
     remote_directory: String,
     local_path: String,
 ) -> Result<String, String> {
-    let source = PathBuf::from(local_path);
+    let source = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        resolve_link_share(&settings, &local_path)?.0
+    };
     if !source.is_file() && !source.is_dir() {
         return Err("selected_local_item_not_found".to_owned());
     }
@@ -1688,7 +1689,9 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         bridge_response(&mut stream, "200 OK", None, &body);
         return;
     }
-    if headers.starts_with("GET /v1/link/capabilities ") {
+    if headers.starts_with("GET /v1/link/capabilities?")
+        || headers.starts_with("GET /v1/link/capabilities ")
+    {
         let state = app.state::<AppState>();
         let settings = match state.settings.lock() {
             Ok(value) => value,
@@ -2062,7 +2065,7 @@ async fn inspect_media_formats(
                 &settings.qjs_path,
                 if cfg!(windows) { "qjs.exe" } else { "qjs" },
             ),
-            website_credential_for_url(&settings, &url).cloned(),
+            effective_credential_for_download(&settings, &url, None),
         )
     };
     let mut command = tokio::process::Command::new(executable);
@@ -2341,14 +2344,26 @@ fn hydrate_and_migrate_secrets(settings: &mut UserSettings) -> Result<(), String
     }
     settings.proxy_password = vault_load(VAULT_PROXY_PASSWORD)?;
 
-    for credential in &mut settings.website_credentials {
+    for credential in &mut settings.legacy_website_credentials {
         let account = website_vault_account(&credential.host);
-        if !credential.password.is_empty() && vault_load(&account)?.is_none() {
-            vault_store_verified(&account, &credential.password)?;
+        let secret = vault_load(&account)?.unwrap_or_else(|| credential.password.clone());
+        if !secret.is_empty()
+            && !settings.host_rules.iter().any(|rule| rule.pattern == credential.host)
+        {
+            vault_store_verified(&host_rule_vault_account(&credential.host), &secret)?;
+            settings.host_rules.push(HostRule {
+                pattern: credential.host.clone(),
+                username: Some(credential.username.clone()),
+                password: secret,
+                user_agent: None,
+                connections: None,
+                bandwidth_limit: None,
+            });
         }
+        let _ = vault_delete(&account);
         credential.password.zeroize();
-        credential.password = vault_load(&account)?.unwrap_or_default();
     }
+    settings.legacy_website_credentials.clear();
     for rule in &mut settings.host_rules {
         let account = host_rule_vault_account(&rule.pattern);
         if !rule.password.is_empty() && vault_load(&account)?.is_none() {
@@ -6531,7 +6546,7 @@ fn effective_credential_for_download(
     source: &str,
     referer: Option<&str>,
 ) -> Option<WebsiteCredential> {
-    if let Some(rule) = host_rule_for_url(settings, source) {
+    let credential_from_rule = |rule: &HostRule| {
         if let Some(username) = rule.username.as_deref().filter(|value| !value.is_empty()) {
             if !rule.password.is_empty() {
                 return Some(WebsiteCredential {
@@ -6541,8 +6556,19 @@ fn effective_credential_for_download(
                 });
             }
         }
-    }
-    website_credential_for_download(settings, source, referer).cloned()
+        None
+    };
+    host_rule_for_url(settings, source)
+        .and_then(credential_from_rule)
+        .or_else(|| {
+            let source_host = url::Url::parse(source).ok()?.host_str()?.to_ascii_lowercase();
+            let referer = referer?;
+            let referer_host = url::Url::parse(referer).ok()?.host_str()?.to_ascii_lowercase();
+            ((source_host == "fixti.net" || source_host.ends_with(".fixti.net"))
+                && (referer_host == "rsload.net" || referer_host.ends_with(".rsload.net")))
+                .then(|| host_rule_for_url(settings, referer).and_then(credential_from_rule))
+                .flatten()
+        })
 }
 
 fn normalize_credential_host(value: &str) -> Result<String, String> {
@@ -6565,141 +6591,6 @@ fn normalize_credential_host(value: &str) -> Result<String, String> {
         .host_str()
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| "invalid_credential_host".to_owned())
-}
-
-fn website_credential_for_url<'a>(
-    settings: &'a UserSettings,
-    source: &str,
-) -> Option<&'a WebsiteCredential> {
-    let host = url::Url::parse(source)
-        .ok()?
-        .host_str()?
-        .to_ascii_lowercase();
-    settings.website_credentials.iter().find(|credential| {
-        host == credential.host || host.ends_with(&format!(".{}", credential.host))
-    })
-}
-
-fn website_credential_for_download<'a>(
-    settings: &'a UserSettings,
-    source: &str,
-    referer: Option<&str>,
-) -> Option<&'a WebsiteCredential> {
-    website_credential_for_url(settings, source).or_else(|| {
-        let source_host = url::Url::parse(source)
-            .ok()?
-            .host_str()?
-            .to_ascii_lowercase();
-        let referer = referer?;
-        let referer_host = url::Url::parse(referer)
-            .ok()?
-            .host_str()?
-            .to_ascii_lowercase();
-        let is_rsload_download = (source_host == "fixti.net"
-            || source_host.ends_with(".fixti.net"))
-            && (referer_host == "rsload.net" || referer_host.ends_with(".rsload.net"));
-        is_rsload_download
-            .then(|| website_credential_for_url(settings, referer))
-            .flatten()
-    })
-}
-
-#[tauri::command]
-fn list_website_credentials(
-    state: State<'_, AppState>,
-) -> Result<Vec<WebsiteCredentialSummary>, String> {
-    let settings = state.settings.lock().map_err(|error| error.to_string())?;
-    Ok(settings
-        .website_credentials
-        .iter()
-        .map(|credential| WebsiteCredentialSummary {
-            host: credential.host.clone(),
-            username: credential.username.clone(),
-        })
-        .collect())
-}
-
-#[tauri::command]
-fn save_website_credential(
-    state: State<'_, AppState>,
-    host: String,
-    username: String,
-    password: String,
-) -> Result<Vec<WebsiteCredentialSummary>, String> {
-    let host = normalize_credential_host(&host)?;
-    let username = username.trim();
-    if username.is_empty()
-        || password.is_empty()
-        || username.len() > 512
-        || password.len() > 2048
-        || username
-            .chars()
-            .any(|character| matches!(character, '\r' | '\n'))
-        || password
-            .chars()
-            .any(|character| matches!(character, '\r' | '\n'))
-    {
-        return Err("invalid_website_credential".to_owned());
-    }
-    let account = website_vault_account(&host);
-    vault_store_verified(&account, &password)?;
-    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    if let Some(existing) = settings
-        .website_credentials
-        .iter_mut()
-        .find(|credential| credential.host == host)
-    {
-        existing.username = username.to_owned();
-        existing.password.zeroize();
-        existing.password = password;
-    } else {
-        settings.website_credentials.push(WebsiteCredential {
-            host,
-            username: username.to_owned(),
-            password,
-        });
-    }
-    settings
-        .website_credentials
-        .sort_by(|left, right| left.host.cmp(&right.host));
-    save_settings(&state, &settings)?;
-    Ok(settings
-        .website_credentials
-        .iter()
-        .map(|credential| WebsiteCredentialSummary {
-            host: credential.host.clone(),
-            username: credential.username.clone(),
-        })
-        .collect())
-}
-
-#[tauri::command]
-fn remove_website_credential(
-    state: State<'_, AppState>,
-    host: String,
-) -> Result<Vec<WebsiteCredentialSummary>, String> {
-    let host = normalize_credential_host(&host)?;
-    vault_delete(&website_vault_account(&host))?;
-    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    for credential in settings
-        .website_credentials
-        .iter_mut()
-        .filter(|item| item.host == host)
-    {
-        credential.password.zeroize();
-    }
-    settings
-        .website_credentials
-        .retain(|credential| credential.host != host);
-    save_settings(&state, &settings)?;
-    Ok(settings
-        .website_credentials
-        .iter()
-        .map(|credential| WebsiteCredentialSummary {
-            host: credential.host.clone(),
-            username: credential.username.clone(),
-        })
-        .collect())
 }
 
 fn host_rule_summaries(settings: &UserSettings) -> Vec<HostRuleSummary> {
@@ -9028,9 +8919,6 @@ fn main() {
             set_user_agent,
             get_proxy_setting,
             set_proxy_setting,
-            list_website_credentials,
-            save_website_credential,
-            remove_website_credential,
             list_host_rules,
             save_host_rule,
             remove_host_rule,
@@ -9442,41 +9330,32 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_site_credential_domains_and_matches_subdomains() {
+    fn normalizes_site_domains_for_transfer_rules() {
         assert_eq!(
             normalize_credential_host("https://Example.COM/").as_deref(),
             Ok("example.com")
         );
         assert!(normalize_credential_host("https://example.com/login").is_err());
-        let mut settings = UserSettings::default();
-        settings.website_credentials.push(WebsiteCredential {
-            host: "example.com".into(),
-            username: "user".into(),
-            password: "secret".into(),
-        });
-        assert_eq!(
-            website_credential_for_url(&settings, "https://cdn.example.com/file")
-                .map(|credential| credential.username.as_str()),
-            Some("user")
-        );
-        assert!(website_credential_for_url(&settings, "https://notexample.com/file").is_none());
     }
 
     #[test]
     fn applies_rsload_credentials_only_to_its_known_download_host() {
         let mut settings = UserSettings::default();
-        settings.website_credentials.push(WebsiteCredential {
-            host: "rsload.net".into(),
-            username: "rsload".into(),
+        settings.host_rules.push(HostRule {
+            pattern: "rsload.net".into(),
+            username: Some("rsload".into()),
             password: "rsload".into(),
+            user_agent: None,
+            connections: None,
+            bandwidth_limit: None,
         });
-        assert!(website_credential_for_download(
+        assert!(effective_credential_for_download(
             &settings,
             "https://s4.fixti.net/files/freeware/file.zip",
             Some("https://rsload.net/software/page.html")
         )
         .is_some());
-        assert!(website_credential_for_download(
+        assert!(effective_credential_for_download(
             &settings,
             "https://unrelated.example/file.zip",
             Some("https://rsload.net/software/page.html")

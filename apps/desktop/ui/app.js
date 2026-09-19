@@ -91,6 +91,7 @@ const catalogs = {
     linkUploadFailed: "Upload failed",
     linkShareNotice: "Share a file, folder or mapped drive and choose its permission for it to appear in Apocalipse Link.",
     linkRemoteShareNotice: "Only files, folders and drives shared by the other user appear below.",
+    linkNoShares: "No shared files, folders or drives yet. Share an item above to make it appear here.",
     linkWindowsLoginNotice: "On Windows, use the remote account password; the Windows Hello PIN cannot be used. Apocalipse does not save this password.",
     linkShareFile: "Share file", linkShareFolder: "Share folder or drive", linkReadOnly: "Read only", linkReadWrite: "Read and write", linkStopSharing: "Stop sharing",
     linkDelete: "Delete",
@@ -289,6 +290,7 @@ const catalogs = {
     linkUploadFailed: "Falha no envio",
     linkShareNotice: "Compartilhe um arquivo, pasta ou unidade mapeada e escolha a permissão para que apareça no Apocalipse Link.",
     linkRemoteShareNotice: "Abaixo aparecem somente arquivos, pastas e unidades compartilhados pelo outro usuário.",
+    linkNoShares: "Nenhum arquivo, pasta ou unidade foi compartilhado. Compartilhe um item acima para ele aparecer aqui.",
     linkWindowsLoginNotice: "No Windows, use a senha da conta remota; o PIN do Windows Hello não pode ser usado. O Apocalipse não salva essa senha.",
     linkShareFile: "Compartilhar arquivo", linkShareFolder: "Compartilhar pasta ou unidade", linkReadOnly: "Somente leitura", linkReadWrite: "Leitura e gravação", linkStopSharing: "Parar de compartilhar",
     linkDelete: "Apagar",
@@ -486,6 +488,7 @@ const catalogs = {
     linkUploadFailed: "发送失败",
     linkShareNotice: "共享文件、文件夹或映射驱动器并选择权限后，它才会显示在 Apocalipse Link 中。",
     linkRemoteShareNotice: "下方仅显示对方用户共享的文件、文件夹和驱动器。",
+    linkNoShares: "尚未共享文件、文件夹或驱动器。请先在上方共享项目。",
     linkWindowsLoginNotice: "在 Windows 上请使用远程账户密码；Windows Hello PIN 无法使用。Apocalipse 不会保存此密码。",
     linkShareFile: "共享文件", linkShareFolder: "共享文件夹或驱动器", linkReadOnly: "只读", linkReadWrite: "读写", linkStopSharing: "停止共享",
     linkDelete: "删除",
@@ -1178,6 +1181,13 @@ function updateLinkTransferButtons() {
 function renderLinkFiles(target, entries, open, select) {
   const root = document.querySelector(target);
   root.replaceChildren();
+  if (!entries.length) {
+    const empty = document.createElement("small");
+    empty.className = "link-empty";
+    empty.textContent = t("linkNoShares");
+    root.append(empty);
+    return;
+  }
   for (const entry of entries) {
     const row = document.createElement("button");
     row.type = "button";
@@ -1232,6 +1242,10 @@ document.querySelector('[data-page="link"]').addEventListener("click", () => loa
 document.querySelector("#link-new-password").onclick = async () => {
   document.querySelector("#link-own-password").value = await invoke("regenerate_link_password");
 };
+async function refreshVisibleLinkPanels() {
+  await openLocalLink(linkLocalPath).catch(() => openLocalLink(""));
+  if (linkRemoteId) await openRemoteLink(linkRemotePath).catch(() => openRemoteLink(""));
+}
 function renderLinkShares(shares) {
   const root = document.querySelector("#link-share-list"); root.replaceChildren();
   for (const share of shares) {
@@ -1240,14 +1254,14 @@ function renderLinkShares(shares) {
     const permission = document.createElement("select");
     permission.append(new Option(t("linkReadOnly"), "false"), new Option(t("linkReadWrite"), "true"));
     permission.value = String(Boolean(share.allowWrite));
-    permission.onchange = async () => renderLinkShares(await invoke("update_link_share", { id: share.id, allowWrite: permission.value === "true" }));
+    permission.onchange = async () => { renderLinkShares(await invoke("update_link_share", { id: share.id, allowWrite: permission.value === "true" })); await refreshVisibleLinkPanels(); };
     const remove = Object.assign(document.createElement("button"), { type: "button", textContent: t("linkStopSharing") });
-    remove.onclick = async () => renderLinkShares(await invoke("remove_link_share", { id: share.id }));
+    remove.onclick = async () => { renderLinkShares(await invoke("remove_link_share", { id: share.id })); await refreshVisibleLinkPanels(); };
     row.append(name, permission, remove); root.append(row);
   }
 }
-document.querySelector("#link-share-file").onclick = async () => { try { renderLinkShares(await invoke("add_link_file_share")); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
-document.querySelector("#link-share-folder").onclick = async () => { try { renderLinkShares(await invoke("add_link_share")); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
+document.querySelector("#link-share-file").onclick = async () => { try { renderLinkShares(await invoke("add_link_file_share")); await refreshVisibleLinkPanels(); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
+document.querySelector("#link-share-folder").onclick = async () => { try { renderLinkShares(await invoke("add_link_share")); await refreshVisibleLinkPanels(); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
 document.querySelector("#link-connect").onclick = async () => {
   linkRemoteId = document.querySelector("#link-remote-id").value.trim();
   linkRemotePassword = document.querySelector("#link-remote-password").value.trim();
@@ -1571,39 +1585,6 @@ document.querySelector("#dns-preset").onchange = (event) => {
     document.querySelector("#dns-servers").value = event.target.value;
   }
 };
-function renderWebsiteCredentials(credentials) {
-  const list = document.querySelector("#website-credential-list");
-  list.replaceChildren();
-  if (!credentials.length) {
-    const empty = document.createElement("small");
-    empty.textContent = t("websiteCredentialsEmpty");
-    list.append(empty);
-    return;
-  }
-  for (const credential of credentials) {
-    const row = document.createElement("div");
-    const identity = document.createElement("span");
-    const host = document.createElement("b");
-    const username = document.createElement("small");
-    const remove = document.createElement("button");
-    host.textContent = credential.host;
-    username.textContent = credential.username;
-    identity.append(host, username);
-    remove.type = "button";
-    remove.textContent = t("websiteCredentialRemove");
-    remove.onclick = async () => {
-      remove.disabled = true;
-      try {
-        renderWebsiteCredentials(await invoke("remove_website_credential", { host: credential.host }));
-      } catch (error) {
-        console.error(error);
-        remove.disabled = false;
-      }
-    };
-    row.append(identity, remove);
-    list.append(row);
-  }
-}
 function renderHostRules(rules) {
   const list = document.querySelector("#host-rule-list");
   list.replaceChildren();
@@ -1693,32 +1674,9 @@ document.querySelector("#save-host-rule").onclick = async (event) => {
   }
 };
 
-document.querySelector("#save-website-credential").onclick = async (event) => {
-  const button = event.currentTarget;
-  const host = document.querySelector("#website-credential-host");
-  const username = document.querySelector("#website-credential-username");
-  const password = document.querySelector("#website-credential-password");
-  if (![host, username, password].every((input) => input.reportValidity()) || !host.value.trim() || !username.value.trim() || !password.value) return;
-  button.disabled = true;
-  try {
-    renderWebsiteCredentials(await invoke("save_website_credential", {
-      host: host.value,
-      username: username.value,
-      password: password.value,
-    }));
-    host.value = "";
-    username.value = "";
-    password.value = "";
-  } catch (error) {
-    console.error(error);
-    window.alert(String(error));
-  } finally {
-    button.disabled = false;
-  }
-};
 const openSettings = async (target = "general") => {
   try {
-    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations, websiteCredentials, hostRules] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations, hostRules] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
@@ -1729,7 +1687,6 @@ const openSettings = async (target = "general") => {
       invoke("get_proxy_setting"),
       invoke("get_dns_setting"),
       invoke("get_associations"),
-      invoke("list_website_credentials"),
       invoke("list_host_rules"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
@@ -1770,7 +1727,6 @@ const openSettings = async (target = "general") => {
       ? dnsValue
       : "custom";
     updateDnsControls();
-    renderWebsiteCredentials(websiteCredentials);
     renderHostRules(hostRules);
     updateLogEditorControls();
     settingsDialog.showModal();

@@ -411,19 +411,7 @@
           </label>
           <small data-i18n="proxyPortableWarning">The proxy configuration is saved in the portable data/settings.json file.</small>
         </section>
-        <section class="pairing-settings website-credentials-settings" hidden aria-hidden="true">
-          <b data-i18n="websiteCredentials">Site credentials</b>
-          <small data-i18n="websiteCredentialsHint">Automatically authenticate compatible HTTP, FTP and media downloads.</small>
-          <div class="website-credential-form">
-            <label><span data-i18n="websiteHost">Site domain</span><input id="website-credential-host" type="text" maxlength="253" autocomplete="off" data-i18n-placeholder="websiteHostHint" placeholder="example.com" /></label>
-            <label><span data-i18n="proxyUsername">Username</span><input id="website-credential-username" type="text" maxlength="512" autocomplete="off" /></label>
-            <label><span data-i18n="proxyPassword">Password</span><input id="website-credential-password" type="password" maxlength="2048" autocomplete="new-password" /></label>
-            <button id="save-website-credential" type="button" data-i18n="websiteCredentialAdd">Add or update</button>
-          </div>
-          <div id="website-credential-list" class="website-credential-list"></div>
-          <small data-i18n="websiteCredentialsLocalWarning">Passwords are stored locally in the portable data/settings.json file. Protect access to this folder.</small>
-        </section>
-        <section class="pairing-settings website-credentials-settings">
+        <section class="pairing-settings host-rules-settings">
           <b data-i18n="hostRules">Per-site transfer rules</b>
           <small data-i18n="hostRulesHint">Apply exact hosts or wildcard subdomains and optionally save credentials, connections, speed and User-Agent in one rule.</small>
           <div class="website-credential-form">
