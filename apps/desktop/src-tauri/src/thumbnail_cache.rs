@@ -106,7 +106,7 @@ async fn read_cached(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.to_string()),
     };
-    let metadata: ThumbnailMetadata = match serde_json::from_slice(&raw) {
+    let metadata: ThumbnailMetadata = match serde_json::from_slice::<ThumbnailMetadata>(&raw) {
         Ok(metadata) if metadata.version == CACHE_VERSION => metadata,
         _ => {
             let _ = fs::remove_file(&metadata_path).await;
