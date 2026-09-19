@@ -438,9 +438,7 @@ impl DownloadEngine {
             if let Some(body) = &request.body {
                 builder = builder.body(body.clone());
             }
-            if existing > 0
-                && request.method.eq_ignore_ascii_case("GET")
-                && request.body.is_none()
+            if existing > 0 && request.method.eq_ignore_ascii_case("GET") && request.body.is_none()
             {
                 builder = builder.header(header::RANGE, format!("bytes={existing}-"));
             }
