@@ -29,7 +29,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, State,
+    Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::{
@@ -569,6 +569,32 @@ fn get_link_identity() -> LinkIdentity {
     }
 }
 
+#[tauri::command]
+async fn open_link_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("apocalipse-link") {
+        window.show().map_err(|error| error.to_string())?;
+        let _ = window.unminimize();
+        let _ = window.maximize();
+        window.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(
+        &app,
+        "apocalipse-link",
+        WebviewUrl::App("link.html".into()),
+    )
+    .title("Apocalipse Link")
+    .inner_size(1400.0, 900.0)
+    .min_inner_size(960.0, 640.0)
+    .resizable(true)
+    .maximized(true)
+    .decorations(true)
+    .build()
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 #[cfg(windows)]
 fn windows_wide(value: &str) -> Vec<u16> {
     OsStr::new(value)
@@ -578,11 +604,13 @@ fn windows_wide(value: &str) -> Vec<u16> {
 }
 
 #[cfg(windows)]
-fn windows_logon_parts(value: &str) -> Result<(String, Option<String>), String> {
+fn windows_logon_candidates(value: &str) -> Result<Vec<(String, Option<String>)>, String> {
     let value = value.trim();
     if value.is_empty() {
         return Err("system_username_required".to_owned());
     }
+
+    let mut candidates = Vec::new();
     if let Some((domain, user)) = value.split_once('\\') {
         if domain.is_empty() || user.is_empty() {
             return Err("invalid_system_username".to_owned());
@@ -592,55 +620,69 @@ fn windows_logon_parts(value: &str) -> Result<(String, Option<String>), String> 
             .any(|candidate| domain.eq_ignore_ascii_case(candidate))
             && !user.contains('@')
         {
-            return Ok((
-                format!("{user}@{domain}"),
-                Some("MicrosoftAccount".to_owned()),
-            ));
+            let email = format!("{user}@{domain}");
+            candidates.push((email.clone(), Some("MicrosoftAccount".to_owned())));
+            candidates.push((email, None));
+        } else {
+            candidates.push((user.to_owned(), Some(domain.to_owned())));
         }
-        return Ok((user.to_owned(), Some(domain.to_owned())));
-    }
-    if value.contains('@') {
-        Ok((value.to_owned(), None))
+    } else if value.contains('@') {
+        // UPN is the documented form for a NULL domain. Windows 10/11 can also
+        // require explicit MicrosoftAccount or AzureAD providers, so retry both.
+        candidates.push((value.to_owned(), None));
+        candidates.push((value.to_owned(), Some("MicrosoftAccount".to_owned())));
+        candidates.push((value.to_owned(), Some("AzureAD".to_owned())));
     } else {
-        Ok((value.to_owned(), Some(".".to_owned())))
+        candidates.push((value.to_owned(), Some(".".to_owned())));
+        candidates.push((value.to_owned(), None));
     }
+
+    candidates.dedup();
+    Ok(candidates)
 }
 
 #[cfg(windows)]
 fn verify_system_account(username: &str, password: &str) -> Result<(), String> {
-    let (account, domain) = windows_logon_parts(username)?;
-    let account_wide = windows_wide(&account);
-    let domain_wide = domain.as_deref().map(windows_wide);
+    let candidates = windows_logon_candidates(username)?;
     let mut password_wide = windows_wide(password);
-    let mut token: *mut c_void = std::ptr::null_mut();
-    let domain_ptr = domain_wide
-        .as_ref()
-        .map_or(std::ptr::null(), |value| value.as_ptr());
-    let authenticated = unsafe {
-        LogonUserW(
-            account_wide.as_ptr(),
-            domain_ptr,
-            password_wide.as_ptr(),
-            3,
-            0,
-            &mut token,
-        )
-    };
-    let error_code = if authenticated == 0 {
-        std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
-    } else {
-        0
-    };
-    password_wide.zeroize();
-    if authenticated == 0 {
-        return Err(format!("system_auth_failed:{error_code}"));
-    }
-    if !token.is_null() {
-        unsafe {
-            CloseHandle(token);
+    let mut last_error = 0;
+
+    for (account, domain) in candidates {
+        let account_wide = windows_wide(&account);
+        let domain_wide = domain.as_deref().map(windows_wide);
+        let domain_ptr = domain_wide
+            .as_ref()
+            .map_or(std::ptr::null(), |value| value.as_ptr());
+
+        // NETWORK avoids credential caching; INTERACTIVE is a compatibility
+        // fallback for local/Microsoft accounts that reject network logon.
+        for logon_type in [3_u32, 2_u32] {
+            let mut token: *mut c_void = std::ptr::null_mut();
+            let authenticated = unsafe {
+                LogonUserW(
+                    account_wide.as_ptr(),
+                    domain_ptr,
+                    password_wide.as_ptr(),
+                    logon_type,
+                    0,
+                    &mut token,
+                )
+            };
+            if authenticated != 0 {
+                if !token.is_null() {
+                    unsafe {
+                        CloseHandle(token);
+                    }
+                }
+                password_wide.zeroize();
+                return Ok(());
+            }
+            last_error = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
         }
     }
-    Ok(())
+
+    password_wide.zeroize();
+    Err(format!("system_auth_failed:{last_error}"))
 }
 
 #[cfg(unix)]
@@ -9300,9 +9342,11 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -9310,6 +9354,7 @@ fn main() {
             inspect_media_formats,
             inspect_torrent_metadata,
             get_link_identity,
+            open_link_window,
             authenticate_local_link_account,
             list_link_shares,
             add_link_share,
