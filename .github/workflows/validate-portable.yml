@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - fix/hls-workdir-download-ui-0.4.41
+      - feature/next-gen-media-workflows
 
 permissions:
   contents: read

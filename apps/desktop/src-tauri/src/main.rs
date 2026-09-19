@@ -1020,9 +1020,21 @@ struct RequestIdentity {
 
 fn social_cookie_domain(url: &str) -> Option<&'static str> {
     let host = url::Url::parse(url).ok()?.host_str()?.to_ascii_lowercase();
-    ["facebook.com", "instagram.com", "tiktok.com"]
-        .into_iter()
-        .find(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+    [
+        ("facebook.com", "facebook.com"),
+        ("instagram.com", "instagram.com"),
+        ("tiktok.com", "tiktok.com"),
+        ("twitch.tv", "twitch.tv"),
+        ("twitch.com", "twitch.tv"),
+        ("bilibili.com", "bilibili.com"),
+        ("b23.tv", "bilibili.com"),
+        ("bili.tv", "bilibili.com"),
+    ]
+    .into_iter()
+    .find_map(|(source_domain, cookie_domain)| {
+        (host == source_domain || host.ends_with(&format!(".{source_domain}")))
+            .then_some(cookie_domain)
+    })
 }
 
 fn write_social_cookie_jar(path: &Path, url: &str, header: &str) -> Result<(), String> {
@@ -1377,6 +1389,19 @@ async fn inspect_media_formats(
         ])
         .arg("--js-runtimes")
         .arg(format!("quickjs:{}", quickjs.display()))
+        .args([
+            "--ignore-config",
+            "--retries",
+            "30",
+            "--extractor-retries",
+            "10",
+            "--retry-sleep",
+            "2",
+            "--retry-sleep",
+            "extractor:2",
+            "--socket-timeout",
+            "30",
+        ])
         .arg(&url);
     let cookie_jar = cookie_header
         .as_deref()
@@ -2075,16 +2100,7 @@ async fn download_with_mirrors(
     events: mpsc::Sender<DownloadEvent>,
 ) -> anyhow::Result<()> {
     let sources = engine.verified_sources(&request, &mirrors).await;
-    let mut last_error = None;
-    for source in sources {
-        let mut attempt = request.clone();
-        attempt.url = source;
-        match engine.download(attempt, events.clone()).await {
-            Ok(()) => return Ok(()),
-            Err(error) => last_error = Some(error),
-        }
-    }
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no_download_source")))
+    engine.download_from_sources(request, sources, events).await
 }
 
 fn finalize_media_page_download(
@@ -2456,7 +2472,12 @@ async fn run_external_download(
             }
             let browser_session_site = task.source.contains("instagram.com/")
                 || task.source.contains("tiktok.com/")
-                || task.source.contains("facebook.com/");
+                || task.source.contains("facebook.com/")
+                || task.source.contains("twitch.tv/")
+                || task.source.contains("twitch.com/")
+                || task.source.contains("bilibili.com/")
+                || task.source.contains("b23.tv/")
+                || task.source.contains("bili.tv/");
             if let Some(cookie) = identity
                 .as_ref()
                 .and_then(|value| value.cookie_header.as_deref())
@@ -2476,19 +2497,23 @@ async fn run_external_download(
             } else if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
                 command.args(["--cookies-from-browser", "chrome"]);
             }
-            if task.source.contains("youtube.com/")
-                || task.source.contains("youtu.be/")
-                || browser_session_site
-            {
-                command.args([
-                    "--retries",
-                    "10",
-                    "--fragment-retries",
-                    "10",
-                    "--retry-sleep",
-                    "fragment:exp=1:8",
-                ]);
-            }
+            command.args([
+                "--ignore-config",
+                "--retries",
+                "30",
+                "--fragment-retries",
+                "30",
+                "--extractor-retries",
+                "10",
+                "--retry-sleep",
+                "2",
+                "--retry-sleep",
+                "extractor:2",
+                "--retry-sleep",
+                "fragment:exp=1:8",
+                "--socket-timeout",
+                "30",
+            ]);
             command.args(["--user-agent", user_agent]);
             if let Some(credential) = website_credential.as_ref() {
                 command
@@ -7981,6 +8006,42 @@ mod tests {
             Some("https://rsload.net/software/page.html")
         )
         .is_none());
+    }
+
+    #[test]
+    fn social_cookie_domains_cover_authenticated_media_sites_without_spoofing() {
+        assert_eq!(
+            social_cookie_domain("https://www.facebook.com/reel/123"),
+            Some("facebook.com")
+        );
+        assert_eq!(
+            social_cookie_domain("https://www.instagram.com/reel/example/"),
+            Some("instagram.com")
+        );
+        assert_eq!(
+            social_cookie_domain("https://www.tiktok.com/@creator/video/123"),
+            Some("tiktok.com")
+        );
+        assert_eq!(
+            social_cookie_domain("https://www.twitch.tv/videos/123"),
+            Some("twitch.tv")
+        );
+        assert_eq!(
+            social_cookie_domain("https://www.bilibili.com/video/BV1xx"),
+            Some("bilibili.com")
+        );
+        assert_eq!(
+            social_cookie_domain("https://b23.tv/example"),
+            Some("bilibili.com")
+        );
+        assert_eq!(
+            social_cookie_domain("https://facebook.com.evil.test/video"),
+            None
+        );
+        assert_eq!(
+            social_cookie_domain("https://bilibili.com.evil.test/video"),
+            None
+        );
     }
 
     #[test]
