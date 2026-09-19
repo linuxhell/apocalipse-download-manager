@@ -2348,7 +2348,10 @@ fn hydrate_and_migrate_secrets(settings: &mut UserSettings) -> Result<(), String
         let account = website_vault_account(&credential.host);
         let secret = vault_load(&account)?.unwrap_or_else(|| credential.password.clone());
         if !secret.is_empty()
-            && !settings.host_rules.iter().any(|rule| rule.pattern == credential.host)
+            && !settings
+                .host_rules
+                .iter()
+                .any(|rule| rule.pattern == credential.host)
         {
             vault_store_verified(&host_rule_vault_account(&credential.host), &secret)?;
             settings.host_rules.push(HostRule {
@@ -6561,13 +6564,19 @@ fn effective_credential_for_download(
     host_rule_for_url(settings, source)
         .and_then(credential_from_rule)
         .or_else(|| {
-            let source_host = url::Url::parse(source).ok()?.host_str()?.to_ascii_lowercase();
+            let source_host = url::Url::parse(source)
+                .ok()?
+                .host_str()?
+                .to_ascii_lowercase();
             let referer = referer?;
-            let referer_host = url::Url::parse(referer).ok()?.host_str()?.to_ascii_lowercase();
+            let referer_host = url::Url::parse(referer)
+                .ok()?
+                .host_str()?
+                .to_ascii_lowercase();
             ((source_host == "fixti.net" || source_host.ends_with(".fixti.net"))
                 && (referer_host == "rsload.net" || referer_host.ends_with(".rsload.net")))
-                .then(|| host_rule_for_url(settings, referer).and_then(credential_from_rule))
-                .flatten()
+            .then(|| host_rule_for_url(settings, referer).and_then(credential_from_rule))
+            .flatten()
         })
 }
 
