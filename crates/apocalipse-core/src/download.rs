@@ -156,7 +156,7 @@ struct SourceProbe {
 fn same_download_identity(
     primary: &SourceProbe,
     candidate: &SourceProbe,
-    advertised: bool,
+    _advertised: bool,
 ) -> bool {
     if primary.total.is_some() && candidate.total.is_some() && primary.total != candidate.total {
         return false;
@@ -165,19 +165,14 @@ fn same_download_identity(
         return left.eq_ignore_ascii_case(right);
     }
     if let (Some(left), Some(right)) = (primary.etag.as_deref(), candidate.etag.as_deref()) {
-        if !left.starts_with("W/") && !right.starts_with("W/") {
+        if !left.trim_start().starts_with("W/") && !right.trim_start().starts_with("W/") {
             return left == right;
         }
     }
-    if let (Some(left), Some(right)) = (
-        primary.last_modified.as_deref(),
-        candidate.last_modified.as_deref(),
-    ) {
-        if primary.total.is_some() && primary.total == candidate.total {
-            return left == right;
-        }
-    }
-    advertised && primary.total.is_some() && primary.total == candidate.total
+    // Size and Last-Modified are useful hints for sequential failover, but
+    // they are not cryptographic/content identities and must never authorize
+    // striping bytes from different origins into the same output file.
+    false
 }
 
 impl Resolve for CustomDnsResolver {
@@ -1327,6 +1322,35 @@ mod tests {
             chunk_directory(Path::new("first.iso")),
             chunk_directory(Path::new("second.iso"))
         );
+    }
+
+    #[test]
+    fn advertised_mirror_needs_digest_or_strong_etag_before_striping() {
+        let primary = SourceProbe {
+            total: Some(10_000),
+            etag: None,
+            last_modified: Some("Mon, 01 Jan 2024 00:00:00 GMT".into()),
+            digest: None,
+            elapsed: Duration::from_millis(20),
+        };
+        let same_size = SourceProbe {
+            total: Some(10_000),
+            etag: None,
+            last_modified: Some("Mon, 01 Jan 2024 00:00:00 GMT".into()),
+            digest: None,
+            elapsed: Duration::from_millis(10),
+        };
+        assert!(!same_download_identity(&primary, &same_size, true));
+
+        let primary = SourceProbe {
+            etag: Some("\"file-v1\"".into()),
+            ..primary
+        };
+        let candidate = SourceProbe {
+            etag: Some("\"file-v1\"".into()),
+            ..same_size
+        };
+        assert!(same_download_identity(&primary, &candidate, true));
     }
 
     #[test]
