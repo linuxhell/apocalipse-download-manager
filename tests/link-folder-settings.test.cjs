@@ -8,6 +8,7 @@ const app = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8");
 const html = fs.readFileSync(path.join(root, "apps/desktop/ui/index.html"), "utf8");
 const css = fs.readFileSync(path.join(root, "apps/desktop/ui/styles.css"), "utf8");
 const rust = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
+const workflow = fs.readFileSync(path.join(root, ".github/workflows/validate-portable.yml"), "utf8");
 
 test("Apocalipse Link selects and transfers both files and folders", () => {
   assert.match(app, /linkSelectedLocal = entry;/);
@@ -112,7 +113,7 @@ test("Link has one address-based connection flow for loopback, LAN and Internet"
   assert.doesNotMatch(rust, /struct LinkIdentity\s*\{[^}]*password:/);
 });
 
-test("Loopback Link authenticates the Windows account before exposing shares", () => {
+test("Loopback Link authenticates the native OS account before exposing shares", () => {
   assert.match(app, /function isLocalLinkTarget\(value\)/);
   assert.match(app, /host === "127\.0\.0\.1"/);
   assert.match(app, /invoke\("authenticate_local_link_account", \{ username, password: systemPassword \}\)/);
@@ -122,9 +123,15 @@ test("Loopback Link authenticates the Windows account before exposing shares", (
   assert.match(app, /systemPassword = "";/);
   assert.match(app, /passwordField\.value = "";/);
   assert.match(rust, /fn authenticate_local_link_account\([\s\S]*password\.zeroize\(\)/);
-  assert.match(rust, /fn verify_system_account\([\s\S]*LogonUserW/);
+  assert.match(rust, /#\[cfg\(windows\)\][\s\S]*fn verify_system_account\([\s\S]*LogonUserW/);
   assert.match(rust, /Some\("\."\.to_owned\(\)\)/);
   assert.match(rust, /MicrosoftAccount/);
+  assert.match(rust, /#\[cfg\(unix\)\][\s\S]*#\[link\(name = "pam"\)\]/);
+  assert.match(rust, /pam_start\(/);
+  assert.match(rust, /pam_authenticate\(/);
+  assert.match(rust, /pam_acct_mgmt\(/);
+  assert.match(rust, /data\.password\.zeroize\(\)/);
+  assert.match(workflow, /libpam0g-dev/);
 });
 
 test("Loopback Link file operations bypass the legacy remote transport", () => {
