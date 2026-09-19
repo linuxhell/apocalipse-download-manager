@@ -2685,8 +2685,7 @@ async fn run_external_download(
         .unwrap_or_default();
     let bandwidth_limit = match (
         global_bandwidth_limit,
-        task
-            .bandwidth_limit
+        task.bandwidth_limit
             .or_else(|| host_rule.as_ref().and_then(|rule| rule.bandwidth_limit))
             .unwrap_or_default(),
     ) {
@@ -5626,9 +5625,7 @@ fn start_download(
                             let limit = task
                                 .bandwidth_limit
                                 .or_else(|| {
-                                    host_rule
-                                        .as_ref()
-                                        .and_then(|rule| rule.bandwidth_limit)
+                                    host_rule.as_ref().and_then(|rule| rule.bandwidth_limit)
                                 })
                                 .unwrap_or_default();
                             if limit == 0 {
@@ -6244,7 +6241,11 @@ fn save_host_rule(
         || user_agent.len() > 1024
         || [username, password.as_str(), user_agent]
             .iter()
-            .any(|value| value.chars().any(|character| matches!(character, '\r' | '\n')))
+            .any(|value| {
+                value
+                    .chars()
+                    .any(|character| matches!(character, '\r' | '\n'))
+            })
         || connections.is_some_and(|value| !(1..=32).contains(&value))
     {
         return Err("invalid_host_rule".to_owned());
@@ -6262,17 +6263,13 @@ fn save_host_rule(
         secret = password;
     }
 
-    let existing_username = state
-        .settings
-        .lock()
-        .ok()
-        .and_then(|settings| {
-            settings
-                .host_rules
-                .iter()
-                .find(|rule| rule.pattern == pattern)
-                .and_then(|rule| rule.username.clone())
-        });
+    let existing_username = state.settings.lock().ok().and_then(|settings| {
+        settings
+            .host_rules
+            .iter()
+            .find(|rule| rule.pattern == pattern)
+            .and_then(|rule| rule.username.clone())
+    });
     let username = if username.is_empty() && !clear_password {
         existing_username
     } else {
@@ -6695,7 +6692,10 @@ fn activate_main_window(app: tauri::AppHandle) {
 
 fn valid_apocalipse_release_url(value: &str) -> Option<&str> {
     let parsed = url::Url::parse(value).ok()?;
-    let host = parsed.host_str()?.trim_end_matches('.').to_ascii_lowercase();
+    let host = parsed
+        .host_str()?
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
     let path = parsed.path();
     (parsed.scheme() == "https"
         && host == "github.com"
