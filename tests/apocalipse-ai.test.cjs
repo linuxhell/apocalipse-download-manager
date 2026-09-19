@@ -154,6 +154,51 @@ test('answers stay in English and Simplified Chinese when selected', () => {
   assert.match(AI.respond('隐私怎么样？', { locale: 'zh-CN' }).text, /本地运行/);
 });
 
+test('Apocalipse AI always obeys the application-selected language, not the question language', () => {
+  const engineEvents = [
+    { event: 'http.transfer_started', detail: { activeConnections: 16 } },
+    { event: 'http.engine_plan', detail: { activeConnections: 16, sourceCount: 2 } },
+    { event: 'http.performance_sample', detail: { bytesPerSecond: 100 * 1024 * 1024, activeConnections: 16 } },
+    { event: 'http.performance_sample', detail: { bytesPerSecond: 50 * 1024 * 1024, activeConnections: 16 } },
+    { event: 'http.segment_completed', detail: { bytesPerSecond: 80 * 1024 * 1024, attempts: 2, sourceCount: 2, transport: 'HTTP/2' } },
+  ];
+
+  const englishUi = AI.respond('por que meu download está lento?', { locale: 'en', engineEvents });
+  assert.match(englishUi.text, /^The transfer-engine telemetry/);
+  assert.doesNotMatch(englishUi.text, /^A telemetria do motor/);
+
+  const portugueseUi = AI.respond('why is my download slow?', { locale: 'pt-BR', engineEvents });
+  assert.match(portugueseUi.text, /^A telemetria do motor/);
+
+  const chineseUi = AI.respond('why is my download slow?', { locale: 'zh-CN', engineEvents });
+  assert.match(chineseUi.text, /^传输引擎遥测/);
+});
+
+test('Apocalipse AI explains measured slowdown and mirror recovery from engine telemetry', () => {
+  const engineEvents = [
+    { event: 'http.engine_plan', detail: { activeConnections: 16, sourceCount: 3 } },
+    { event: 'http.performance_sample', detail: { bytesPerSecond: 120 * 1024 * 1024, activeConnections: 16 } },
+    { event: 'http.performance_sample', detail: { bytesPerSecond: 48 * 1024 * 1024, activeConnections: 16 } },
+    { event: 'http.segment_completed', detail: { attempts: 2, sourceCount: 3, transport: 'HTTP/2' } },
+  ];
+  const answer = AI.respond('meu download está lento, qual o gargalo?', { locale: 'pt-BR', engineEvents }).text;
+  assert.match(answer, /48\.0 MB\/s/);
+  assert.match(answer, /120 MB\/s/);
+  assert.match(answer, /16 conexão/);
+  assert.match(answer, /3 fonte/);
+  assert.match(answer, /HTTP\/2/);
+  assert.match(answer, /40% do pico/);
+  assert.match(answer, /fallback de mirrors/);
+});
+
+test('AI UI retrieves privacy-safe engine diagnostics and passes the selected language', () => {
+  assert.match(aiUi, /invoke\("read_ai_diagnostics"\)/);
+  assert.match(aiUi, /locale: language\(\)/);
+  assert.match(aiUi, /application-selected language is authoritative/);
+  assert.match(desktop, /fn read_ai_diagnostics/);
+  assert.match(desktop, /ai_snapshot\(750\)/);
+});
+
 test('site credential commands use the existing secure settings action', () => {
   const pt = AI.respond('adicione uma regra para o site https://exemplo.com nome de usuário juliano e senha segredo forte', { locale: 'pt-BR' });
   assert.equal(pt.intent, 'credential_save');
