@@ -94,7 +94,10 @@ const catalogs = {
     linkRemoteUsername: "Operating-system username",
     linkRemoteSystemPassword: "System account password",
     linkCredentialsRequired: "Enter the remote IP/host, operating-system username and account password.",
-    linkNativeAuthPending: "System-account login is configured for the new secure Link protocol. This build will not send your system password through the legacy unencrypted Link transport.",
+    linkAuthenticating: "Authenticating system account…",
+    linkAuthenticationFailed: "System account authentication failed",
+    linkLocalSessionReady: "Authenticated locally. Shared items are available below.",
+    linkNativeAuthPending: "LAN/Internet account login is waiting for the encrypted Link protocol. Your system password will not be sent through the legacy unencrypted transport.",
     linkRemoteAuthPlan: "Remote access uses one login: IP/host + operating-system username + account password.",
     linkRemoteAccountFormats: "Windows examples: MicrosoftAccount\\name@hotmail.com, hotmail.com\\name, AzureAD\\name@company.com, PC-NAME\\name. Windows Hello PIN is not a remote password. The system password will not be saved.",
     linkRemoteSecurityNotice: "The system password is never saved. It must only be used with encrypted native authentication. Only explicitly shared items remain visible, with their read-only or read/write permission.",
@@ -298,7 +301,10 @@ const catalogs = {
     linkRemoteUsername: "Usuário do sistema operacional",
     linkRemoteSystemPassword: "Senha da conta do sistema",
     linkCredentialsRequired: "Informe o IP/host remoto, o usuário do sistema operacional e a senha da conta.",
-    linkNativeAuthPending: "O login pela conta do sistema está configurado para o novo protocolo seguro do Link. Esta versão não enviará sua senha do sistema pelo transporte legado não criptografado.",
+    linkAuthenticating: "Autenticando conta do sistema…",
+    linkAuthenticationFailed: "Falha na autenticação da conta do sistema",
+    linkLocalSessionReady: "Autenticado localmente. Os compartilhamentos estão disponíveis abaixo.",
+    linkNativeAuthPending: "O login por conta pela LAN/Internet aguarda o protocolo criptografado do Link. Sua senha do sistema não será enviada pelo transporte legado sem criptografia.",
     linkRemoteAuthPlan: "O acesso remoto usa um único login: IP/host + usuário do sistema operacional + senha da conta.",
     linkRemoteAccountFormats: "Exemplos no Windows: MicrosoftAccount\\nome@hotmail.com, hotmail.com\\nome, AzureAD\\nome@empresa.com, NOME-PC\\nome. O PIN do Windows Hello não é uma senha remota. A senha do sistema não será salva.",
     linkRemoteSecurityNotice: "A senha do sistema nunca é salva. Ela só pode ser usada com autenticação nativa criptografada. Continuam visíveis apenas os itens compartilhados explicitamente, respeitando Somente leitura ou Leitura e gravação.",
@@ -501,7 +507,10 @@ const catalogs = {
     linkRemoteUsername: "操作系统用户名",
     linkRemoteSystemPassword: "系统账户密码",
     linkCredentialsRequired: "请输入远程 IP/主机、操作系统用户名和账户密码。",
-    linkNativeAuthPending: "系统账户登录已为新的安全 Link 协议配置。此版本不会通过旧的未加密 Link 传输发送系统密码。",
+    linkAuthenticating: "正在验证系统账户…",
+    linkAuthenticationFailed: "系统账户身份验证失败",
+    linkLocalSessionReady: "本机身份验证成功。共享项目已显示在下方。",
+    linkNativeAuthPending: "局域网/互联网账户登录需等待加密的 Link 协议。系统密码不会通过旧的未加密传输发送。",
     linkRemoteAuthPlan: "远程访问使用一次登录：IP/主机 + 操作系统用户名 + 账户密码。",
     linkRemoteAccountFormats: "Windows 示例：MicrosoftAccount\\name@hotmail.com、hotmail.com\\name、AzureAD\\name@company.com、PC-NAME\\name。Windows Hello PIN 不是远程密码。系统密码不会被保存。",
     linkRemoteSecurityNotice: "系统密码绝不会被保存，只能通过加密的原生身份验证使用。仍只显示明确共享的项目，并遵守只读或读写权限。",
@@ -1184,10 +1193,27 @@ let linkLocalPath = "";
 let linkRemotePath = "";
 let linkRemoteId = "";
 let linkRemoteTransportToken = "";
+let linkLocalIdentity = "";
+let linkLocalAccountSession = false;
 let linkSelectedLocal = null;
 let linkSelectedRemote = null;
 let linkRemoteAllowWrite = false;
 const linkParent = (path) => /^[A-Za-z]:[\\/]?$/.test(path) || /^\/shares\/[^/]+\/?$/.test(path) ? "" : path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
+function linkHost(value) {
+  const authority = String(value || "").trim().replace(/^https?:\/\//i, "").split(/[/?#]/)[0];
+  if (!authority) return "";
+  if (authority.startsWith("[")) {
+    const end = authority.indexOf("]");
+    return (end > 0 ? authority.slice(1, end) : authority).toLowerCase();
+  }
+  if (authority === "::1" || (authority.match(/:/g) || []).length > 1) return authority.toLowerCase();
+  return authority.split(":")[0].toLowerCase();
+}
+function isLocalLinkTarget(value) {
+  const host = linkHost(value);
+  const ownHost = linkHost(linkLocalIdentity);
+  return host === "127.0.0.1" || host === "localhost" || host === "::1" || Boolean(ownHost && host === ownHost);
+}
 function updateLinkTransferButtons() {
   document.querySelector("#link-upload-local").disabled = !linkSelectedLocal || !linkRemoteId || !linkRemotePath || !linkRemoteAllowWrite;
   document.querySelector("#link-download-remote").disabled = !linkSelectedRemote;
@@ -1236,10 +1262,14 @@ async function openRemoteLink(path = "") {
   linkSelectedRemote = null;
   updateLinkTransferButtons();
   document.querySelector("#link-remote-path").textContent = path || t("linkDrives");
-  const capabilities = await invoke("get_remote_link_capabilities", { id: linkRemoteId, password: linkRemoteTransportToken, path });
+  const capabilities = linkLocalAccountSession
+    ? await invoke("get_local_link_share_capabilities", { path })
+    : await invoke("get_remote_link_capabilities", { id: linkRemoteId, password: linkRemoteTransportToken, path });
   linkRemoteAllowWrite = Boolean(capabilities.allowWrite);
   updateLinkTransferButtons();
-  const entries = await invoke("list_remote_link_files", { id: linkRemoteId, password: linkRemoteTransportToken, path });
+  const entries = linkLocalAccountSession
+    ? await invoke("list_local_link_files", { path })
+    : await invoke("list_remote_link_files", { id: linkRemoteId, password: linkRemoteTransportToken, path });
   renderLinkFiles("#link-remote-files", entries, openRemoteLink, (entry) => {
     linkSelectedRemote = entry;
     updateLinkTransferButtons();
@@ -1247,6 +1277,7 @@ async function openRemoteLink(path = "") {
 }
 async function loadLinkIdentity() {
   const identity = await invoke("get_link_identity");
+  linkLocalIdentity = identity.id;
   document.querySelector("#link-own-id").value = identity.id;
   renderLinkShares(await invoke("list_link_shares"));
   await openLocalLink();
@@ -1278,21 +1309,44 @@ document.querySelector("#link-connect").onclick = async () => {
   const id = document.querySelector("#link-remote-id").value.trim();
   const username = document.querySelector("#link-remote-username").value.trim();
   const passwordField = document.querySelector("#link-remote-password");
-  const systemPassword = passwordField.value;
+  let systemPassword = passwordField.value;
   if (!id || !username || !systemPassword) {
     document.querySelector("#link-status").textContent = t("linkCredentialsRequired");
     return;
   }
   linkRemoteId = "";
   linkRemoteTransportToken = "";
-  passwordField.value = "";
-  document.querySelector("#link-status").textContent = t("linkNativeAuthPending");
+  linkLocalAccountSession = false;
+  try {
+    if (!isLocalLinkTarget(id)) {
+      document.querySelector("#link-status").textContent = t("linkNativeAuthPending");
+      return;
+    }
+    document.querySelector("#link-status").textContent = t("linkAuthenticating");
+    await invoke("authenticate_local_link_account", { username, password: systemPassword });
+    linkRemoteId = id;
+    linkLocalAccountSession = true;
+    await openRemoteLink("");
+    document.querySelector("#link-status").textContent = t("linkLocalSessionReady");
+  } catch (error) {
+    linkRemoteId = "";
+    linkLocalAccountSession = false;
+    document.querySelector("#link-status").textContent = `${t("linkAuthenticationFailed")}: ${error}`;
+  } finally {
+    systemPassword = "";
+    passwordField.value = "";
+    updateLinkTransferButtons();
+  }
 };
 document.querySelector("#link-local-up").onclick = () => openLocalLink(linkParent(linkLocalPath)).catch(console.error);
 document.querySelector("#link-remote-up").onclick = () => openRemoteLink(linkParent(linkRemotePath)).catch(console.error);
 document.querySelector("#link-delete-remote").onclick = async () => {
   if (!linkSelectedRemote || !window.confirm(t("linkDeleteConfirm").replace("{name}", linkSelectedRemote.name))) return;
-  await invoke("delete_remote_link_item", { id: linkRemoteId, password: linkRemoteTransportToken, path: linkSelectedRemote.path });
+  if (linkLocalAccountSession) {
+    await invoke("delete_local_shared_link_item", { path: linkSelectedRemote.path });
+  } else {
+    await invoke("delete_remote_link_item", { id: linkRemoteId, password: linkRemoteTransportToken, path: linkSelectedRemote.path });
+  }
   await openRemoteLink(linkRemotePath);
 };
 document.querySelector("#link-download-remote").onclick = async () => {
@@ -1300,13 +1354,19 @@ document.querySelector("#link-download-remote").onclick = async () => {
   const status = document.querySelector("#link-status");
   status.textContent = t("linkTransferring");
   try {
-    const destination = await invoke("download_remote_link_file", {
-      id: linkRemoteId,
-      password: linkRemoteTransportToken,
-      path: linkSelectedRemote.path,
-      directory: linkSelectedRemote.directory,
-      fileName: linkSelectedRemote.name,
-    });
+    const destination = linkLocalAccountSession
+      ? await invoke("download_local_shared_link_item", {
+          path: linkSelectedRemote.path,
+          directory: linkSelectedRemote.directory,
+          fileName: linkSelectedRemote.name,
+        })
+      : await invoke("download_remote_link_file", {
+          id: linkRemoteId,
+          password: linkRemoteTransportToken,
+          path: linkSelectedRemote.path,
+          directory: linkSelectedRemote.directory,
+          fileName: linkSelectedRemote.name,
+        });
     status.textContent = `${t("linkCompleted")}: ${destination}`;
   } catch (error) { if (`${error}` !== "cancelled") status.textContent = `${t("linkTransferFailed")}: ${error}`; }
 };
@@ -1317,12 +1377,17 @@ document.querySelector("#link-upload-local").onclick = async () => {
   status.textContent = t("linkSending");
   button.disabled = true;
   try {
-    const remotePath = await invoke("upload_remote_link_file", {
-      id: linkRemoteId,
-      password: linkRemoteTransportToken,
-      remoteDirectory: linkRemotePath,
-      localPath: linkSelectedLocal.path,
-    });
+    const remotePath = linkLocalAccountSession
+      ? await invoke("upload_local_shared_link_item", {
+          remoteDirectory: linkRemotePath,
+          localPath: linkSelectedLocal.path,
+        })
+      : await invoke("upload_remote_link_file", {
+          id: linkRemoteId,
+          password: linkRemoteTransportToken,
+          remoteDirectory: linkRemotePath,
+          localPath: linkSelectedLocal.path,
+        });
     status.textContent = `${t("linkCompleted")}: ${remotePath}`;
     await openRemoteLink(linkRemotePath);
   } catch (error) {
