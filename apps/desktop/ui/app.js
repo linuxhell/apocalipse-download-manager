@@ -184,6 +184,7 @@ const catalogs = {
     qualityFormat: "Quality and format",
     bestQuality: "Best video + best audio (recommended)",
     audioOnly: "Audio only",
+    audioOriginal: "Keep original audio container",
     duration: "Duration",
     mediaUnavailable: "Media details are unavailable; the default format can still be used.",
     externalTools: "Required media and transfer tools",
@@ -392,6 +393,7 @@ const catalogs = {
     qualityFormat: "Qualidade e formato",
     bestQuality: "Melhor vídeo + melhor áudio (recomendado)",
     audioOnly: "Somente áudio",
+    audioOriginal: "Manter contêiner de áudio original",
     duration: "Duração",
     mediaUnavailable: "Os detalhes da mídia não estão disponíveis; ainda é possível usar o formato padrão.",
     externalTools: "Ferramentas obrigatórias de mídia e transferência",
@@ -599,6 +601,7 @@ const catalogs = {
     qualityFormat: "质量和格式",
     bestQuality: "最佳视频 + 最佳音频（推荐）",
     audioOnly: "仅音频",
+    audioOriginal: "保留原始音频容器",
     duration: "时长",
     mediaUnavailable: "媒体详情不可用；仍可使用默认格式。",
     externalTools: "必需的媒体和传输工具",
@@ -2114,6 +2117,28 @@ function option(select, value, label) {
   select.append(Object.assign(document.createElement("option"), { value, textContent: label }));
 }
 
+function populateAudioConversionOptions({ includeOriginal = true } = {}) {
+  const select = document.querySelector("#media-format");
+  select.replaceChildren();
+  if (includeOriginal) option(select, "", t("audioOriginal"));
+  for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
+    option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
+  document.querySelector("#media-format-control").hidden = false;
+}
+
+function isAudioFocusedBridgeRequest(request) {
+  if (String(request?.mediaKind || "").toLowerCase() === "audio") return true;
+  const candidates = [request?.pageUrl, request?.referer, request?.url].filter(Boolean);
+  return candidates.some((value) => {
+    try {
+      const host = new URL(value).hostname.toLowerCase();
+      return host === "soundcloud.com" || host.endsWith(".soundcloud.com");
+    } catch {
+      return false;
+    }
+  });
+}
+
 async function showMediaInspection(url) {
   const panel = document.querySelector("#media-inspection");
   const select = document.querySelector("#media-format");
@@ -2206,12 +2231,8 @@ document.querySelector("#analyze").onclick = async () => {
       box.textContent = `${plan.primary} · ${plan.reason}`;
     }
     else if (plan.primary === "NM3u8DlRe") {
-      const select = document.querySelector("#media-format");
-      select.replaceChildren();
-      option(select, "", t("bestQuality"));
-      for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
-        option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
-      showCapturedPreview({ title: pendingTitle || "HLS", thumbnail: pendingThumbnail, kind: "M3U8 / HLS", duration: pendingDuration, size: pendingExpectedSize, showFormats: true });
+      populateAudioConversionOptions();
+      showCapturedPreview({ title: pendingTitle || "HLS", thumbnail: pendingThumbnail, kind: pendingMediaKind === "audio" ? "AUDIO · M3U8 / HLS" : "M3U8 / HLS", duration: pendingDuration, size: pendingExpectedSize, showFormats: true });
     } else if (pendingMediaKind === "image" || /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)(?:$|[?#])/i.test(url.value)) {
       showCapturedPreview({ title: pendingTitle || fileName.value, thumbnail: pendingThumbnail || url.value, kind: pendingMediaKind || "image", duration: null, size: pendingExpectedSize });
     }
@@ -2387,6 +2408,29 @@ async function consumeBridgeDownload() {
     resetMediaInspection();
     if (pendingThumbnail || pendingTitle || pendingMediaKind === "image") {
       showCapturedPreview({ title: pendingTitle, thumbnail: pendingThumbnail || (pendingMediaKind === "image" ? request.url : null), kind: pendingMediaKind, duration: pendingDuration, size: pendingExpectedSize });
+    }
+    if (isAudioFocusedBridgeRequest(request)) {
+      try {
+        const plan = await invoke("inspect_url", { url: request.url });
+        if (plan.primary === "NM3u8DlRe") {
+          populateAudioConversionOptions();
+          showCapturedPreview({
+            title: pendingTitle || "Audio",
+            thumbnail: pendingThumbnail,
+            kind: "AUDIO · M3U8 / HLS",
+            duration: pendingDuration,
+            size: pendingExpectedSize,
+            showFormats: true,
+          });
+          const box = document.querySelector("#analysis");
+          box.hidden = false;
+          box.textContent = `${plan.primary} · ${plan.reason}`;
+          document.querySelector("#analyze").hidden = true;
+          document.querySelector("#enqueue").hidden = false;
+        }
+      } catch (error) {
+        console.warn("audio bridge preflight", error);
+      }
     }
     document.querySelector("#destination").value = await invoke("default_download_directory");
     await refreshDestinationHistory();
