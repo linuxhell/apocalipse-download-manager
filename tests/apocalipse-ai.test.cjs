@@ -199,6 +199,19 @@ test('AI UI retrieves privacy-safe engine diagnostics and passes the selected la
   assert.match(desktop, /ai_snapshot\(750\)/);
 });
 
+test('per-site transfer rules are exposed in all three languages and wired to the vault-backed backend', () => {
+  assert.match(app, /hostRules: "Per-site transfer rules"/);
+  assert.match(app, /hostRules: "Regras de transferência por site"/);
+  assert.match(app, /hostRules: "按网站传输规则"/);
+  assert.match(app, /invoke\("list_host_rules"\)/);
+  assert.match(app, /invoke\("save_host_rule"/);
+  assert.match(app, /invoke\("remove_host_rule"/);
+  assert.match(desktop, /fn host_rule_for_url/);
+  assert.match(desktop, /fn effective_credential_for_download/);
+  assert.match(desktop, /host_rule_vault_account/);
+  assert.match(desktop, /task\.connections_override\s*\.or_else\(\|\| host_rule/);
+});
+
 test('thumbnails use the validated persistent cache instead of direct remote rendering', () => {
   assert.match(app, /invoke\("resolve_thumbnail", \{ url \}\)/);
   assert.match(app, /resolveCachedThumbnail\(requestedThumbnail\)/);
