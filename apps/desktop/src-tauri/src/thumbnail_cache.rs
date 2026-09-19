@@ -225,22 +225,25 @@ fn validate_remote_url(value: &str) -> Result<Url, String> {
     {
         return Err("thumbnail_invalid_url".to_owned());
     }
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "thumbnail_invalid_url".to_owned())?
-        .trim_end_matches('.')
-        .to_ascii_lowercase();
-    if host == "localhost"
-        || host.ends_with(".localhost")
-        || host.ends_with(".local")
-        || host.ends_with(".internal")
-    {
-        return Err("thumbnail_local_target_blocked".to_owned());
-    }
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        if is_non_public_ip(ip) {
+    match parsed.host() {
+        Some(url::Host::Domain(host)) => {
+            let host = host.trim_end_matches('.').to_ascii_lowercase();
+            if host == "localhost"
+                || host.ends_with(".localhost")
+                || host.ends_with(".local")
+                || host.ends_with(".internal")
+            {
+                return Err("thumbnail_local_target_blocked".to_owned());
+            }
+        }
+        Some(url::Host::Ipv4(ip)) if is_non_public_ip(IpAddr::V4(ip)) => {
             return Err("thumbnail_local_target_blocked".to_owned());
         }
+        Some(url::Host::Ipv6(ip)) if is_non_public_ip(IpAddr::V6(ip)) => {
+            return Err("thumbnail_local_target_blocked".to_owned());
+        }
+        Some(_) => {}
+        None => return Err("thumbnail_invalid_url".to_owned()),
     }
     Ok(parsed)
 }
