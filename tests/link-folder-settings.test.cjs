@@ -49,6 +49,17 @@ test("Windows SMB shared folders are discovered automatically for Link", () => {
   assert.match(linkJs, /Pastas compartilhadas pelo Windows \(SMB\) também aparecem automaticamente/);
 });
 
+test("Linux Samba shares are discovered from smb.conf and usershares", () => {
+  assert.match(rust, /fn linux_smb_config_entries\(contents: &str\)/);
+  assert.match(rust, /\/etc\/samba\/smb\.conf/);
+  assert.match(rust, /\/var\/lib\/samba\/usershares/);
+  assert.match(rust, /fn linux_smb_usershare_entry/);
+  assert.match(rust, /stable_link_share_id\("linux-smb"/);
+  assert.match(rust, /chain\(linux_shared_link_shares\(\)\)/);
+  assert.match(linkJs, /Windows and Linux SMB shared folders are also discovered automatically/);
+  assert.match(linkJs, /Windows ou Linux via SMB também aparecem automaticamente/);
+});
+
 test("Link lists remain readable and settings use the available window", () => {
   assert.match(css, /#settings-dialog \{ width: min\(1360px, calc\(100vw - 20px\)\)/);
   assert.match(css, /height:clamp\(300px,42vh,460px\)/);

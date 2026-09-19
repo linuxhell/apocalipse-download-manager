@@ -953,9 +953,126 @@ fn windows_shared_link_shares() -> Vec<LinkShare> {
     Vec::new()
 }
 
+#[cfg(target_os = "linux")]
+fn linux_smb_config_entries(contents: &str) -> Vec<(String, PathBuf)> {
+    let mut result = Vec::new();
+    let mut section = String::new();
+    let mut section_path: Option<PathBuf> = None;
+
+    let mut flush = |name: &mut String, path: &mut Option<PathBuf>| {
+        let normalized = name.trim();
+        let reserved = normalized.eq_ignore_ascii_case("global")
+            || normalized.eq_ignore_ascii_case("homes")
+            || normalized.eq_ignore_ascii_case("printers")
+            || normalized.eq_ignore_ascii_case("print$");
+        if !normalized.is_empty() && !reserved && !normalized.ends_with('$') {
+            if let Some(candidate) = path.take() {
+                if candidate.is_absolute() {
+                    result.push((normalized.to_owned(), candidate));
+                }
+            }
+        } else {
+            *path = None;
+        }
+    };
+
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            flush(&mut section, &mut section_path);
+            section = line[1..line.len() - 1].trim().to_owned();
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim().eq_ignore_ascii_case("path") {
+            let value = value.trim().trim_matches('"').trim_matches(''');
+            if !value.is_empty() {
+                section_path = Some(PathBuf::from(value));
+            }
+        }
+    }
+    flush(&mut section, &mut section_path);
+    result
+}
+
+#[cfg(target_os = "linux")]
+fn linux_smb_usershare_entry(name: &str, contents: &str) -> Option<(String, PathBuf)> {
+    if name.trim().is_empty() || name.ends_with('$') {
+        return None;
+    }
+    let path = contents.lines().find_map(|raw_line| {
+        let line = raw_line.trim();
+        let (key, value) = line.split_once('=')?;
+        key.trim()
+            .eq_ignore_ascii_case("path")
+            .then(|| PathBuf::from(value.trim().trim_matches('"').trim_matches(''')))
+    })?;
+    path.is_absolute().then(|| (name.to_owned(), path))
+}
+
+#[cfg(target_os = "linux")]
+fn linux_shared_link_shares() -> Vec<LinkShare> {
+    let mut entries = Vec::<(String, PathBuf)>::new();
+
+    for config in ["/etc/samba/smb.conf", "/etc/samba/smb.conf.local"] {
+        if let Ok(contents) = fs::read_to_string(config) {
+            entries.extend(linux_smb_config_entries(&contents));
+        }
+    }
+
+    for directory in ["/var/lib/samba/usershares", "/var/lib/samba/usershare"] {
+        let Ok(items) = fs::read_dir(directory) else {
+            continue;
+        };
+        for item in items.flatten() {
+            if !item.path().is_file() {
+                continue;
+            }
+            let name = item.file_name().to_string_lossy().into_owned();
+            let Ok(contents) = fs::read_to_string(item.path()) else {
+                continue;
+            };
+            if let Some(entry) = linux_smb_usershare_entry(&name, &contents) {
+                entries.push(entry);
+            }
+        }
+    }
+
+    let mut shares = Vec::new();
+    for (name, path) in entries {
+        if shares.iter().any(|share: &LinkShare| share.path == path) {
+            continue;
+        }
+        shares.push(LinkShare {
+            id: stable_link_share_id("linux-smb", &name, &path),
+            name,
+            path,
+            // OS-discovered shares are intentionally read-only inside Link.
+            // The user can explicitly share the same folder in Apocalipse Link
+            // to grant Link's own read/write permission.
+            allow_write: false,
+            directory: true,
+        });
+    }
+    shares
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_shared_link_shares() -> Vec<LinkShare> {
+    Vec::new()
+}
+
 fn effective_link_shares(settings: &UserSettings) -> Vec<LinkShare> {
     let mut shares = settings.link_shares.clone();
-    for share in windows_shared_link_shares() {
+    for share in windows_shared_link_shares()
+        .into_iter()
+        .chain(linux_shared_link_shares())
+    {
         if shares
             .iter()
             .any(|existing| existing.path == share.path || existing.id == share.id)
