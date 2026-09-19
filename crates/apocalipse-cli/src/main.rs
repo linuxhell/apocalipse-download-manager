@@ -94,8 +94,8 @@ async fn main() -> Result<()> {
                 if event == "http.engine_plan" {
                     source_count = detail["sourceCount"].as_u64().unwrap_or(source_count);
                 } else if event == "http.performance_sample" {
-                    peak_bytes_per_second = peak_bytes_per_second
-                        .max(detail["bytesPerSecond"].as_u64().unwrap_or(0));
+                    peak_bytes_per_second =
+                        peak_bytes_per_second.max(detail["bytesPerSecond"].as_u64().unwrap_or(0));
                 } else if event == "http.segment_completed" {
                     segment_count = segment_count.saturating_add(1);
                     if detail["attempts"].as_u64().unwrap_or(1) > 1 {
