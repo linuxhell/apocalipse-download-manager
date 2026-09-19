@@ -17,7 +17,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
     time::{Duration, Instant},
 };
@@ -168,6 +168,14 @@ struct HostProfile {
     stable_connections: usize,
 }
 
+fn shared_host_profiles() -> Arc<std::sync::Mutex<HashMap<String, HostProfile>>> {
+    static PROFILES: OnceLock<Arc<std::sync::Mutex<HashMap<String, HostProfile>>>> =
+        OnceLock::new();
+    PROFILES
+        .get_or_init(|| Arc::new(std::sync::Mutex::new(HashMap::new())))
+        .clone()
+}
+
 #[derive(Clone)]
 struct CustomDnsResolver {
     resolver: TokioResolver,
@@ -195,10 +203,18 @@ struct ResumeIdentity {
 #[serde(tag = "phase", rename_all = "snake_case")]
 enum JournalPhase {
     DownloadStarted,
-    ChunkCommitted { index: usize, bytes: u64, sha256: String },
+    ChunkCommitted {
+        index: usize,
+        bytes: u64,
+        sha256: String,
+    },
     AssemblyStarted,
-    DataSynced { bytes: u64 },
-    DestinationCommitted { bytes: u64 },
+    DataSynced {
+        bytes: u64,
+    },
+    DestinationCommitted {
+        bytes: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -283,7 +299,7 @@ impl DownloadEngine {
             Self::network_client_builder(proxy_url, username, password, dns_servers)?.build()?;
         Ok(Self {
             client,
-            host_profiles: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            host_profiles: shared_host_profiles(),
         })
     }
 
@@ -734,12 +750,8 @@ impl DownloadEngine {
             prepare_resume_manifest(&request.destination, &identity).await?;
         }
         recover_transaction(&request.destination).await?;
-        let journal_sequence = append_journal(
-            &request.destination,
-            0,
-            JournalPhase::DownloadStarted,
-        )
-        .await?;
+        let journal_sequence =
+            append_journal(&request.destination, 0, JournalPhase::DownloadStarted).await?;
         let content_type = response
             .headers()
             .get(header::CONTENT_TYPE)
@@ -813,12 +825,8 @@ impl DownloadEngine {
 
         prepare_resume_manifest(&request.destination, &identity).await?;
         recover_transaction(&request.destination).await?;
-        let journal_sequence = append_journal(
-            &request.destination,
-            0,
-            JournalPhase::DownloadStarted,
-        )
-        .await?;
+        let journal_sequence =
+            append_journal(&request.destination, 0, JournalPhase::DownloadStarted).await?;
         let journal_sequence = Arc::new(AtomicU64::new(journal_sequence));
 
         for index in 0..chunk_count {
