@@ -798,7 +798,6 @@ async fn download_remote_link_file(
                 }
             }
         }
-
         return Ok(destination.to_string_lossy().into_owned());
     }
     let Some(destination) = rfd::FileDialog::new().set_file_name(file_name).save_file() else {
@@ -1599,7 +1598,6 @@ fn social_cookie_domain(url: &str) -> Option<&'static str> {
         ("b23.tv", "bilibili.com"),
         ("bili.tv", "bilibili.com"),
     ]
-
     .into_iter()
     .find_map(|(source_domain, cookie_domain)| {
         (host == source_domain || host.ends_with(&format!(".{source_domain}")))
@@ -2400,7 +2398,6 @@ fn redact_url(url: &str) -> String {
         .next()
         .unwrap_or_default()
         .split('&')
-
         .filter(|item| !item.is_empty())
         .map(|item| {
             format!(
@@ -3201,7 +3198,6 @@ async fn run_external_download(
         .ok()
         .and_then(|settings| {
             effective_credential_for_download(&settings, &task.source, task.referer.as_deref())
-
         });
     let user_agent = configured_user_agent.as_deref()
         .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_deref()))
@@ -4002,7 +3998,6 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
 
 #[tauri::command]
 fn read_ai_diagnostics(state: State<'_, AppState>) -> Vec<serde_json::Value> {
-
     state.diagnostics.ai_snapshot(750)
 }
 
@@ -4803,7 +4798,6 @@ fn remove_download_directory(state: State<'_, AppState>, path: String) -> Result
 
 #[tauri::command]
 fn clear_download_directories(state: State<'_, AppState>) -> Result<(), String> {
-
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.recent_download_directories.clear();
     save_settings(&state, &settings)
@@ -5604,7 +5598,6 @@ fn enqueue_download_impl(
                 .chars()
                 .filter(|character| !character.is_control())
                 .take(512)
-
                 .collect::<String>();
             (!value.trim().is_empty()).then(|| value.trim().to_owned())
         });
@@ -6405,7 +6398,6 @@ fn set_transfer_limits(
     settings.adaptive_efficiency = adaptive_efficiency;
     settings.global_bandwidth_limit = global_bandwidth_limit.min(10 * 1024 * 1024 * 1024);
     state
-
         .global_bandwidth_limiter
         .set_limit(settings.global_bandwidth_limit);
     save_settings(&state, &settings)?;
@@ -7206,7 +7198,6 @@ fn valid_apocalipse_release_url(value: &str) -> Option<&str> {
         .trim_end_matches('.')
         .to_ascii_lowercase();
     let path = parsed.path();
-
     (parsed.scheme() == "https"
         && host == "github.com"
         && (path == "/linuxhell/apocalipse-download-manager/releases"
@@ -8007,7 +7998,6 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                 bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}");
             }
         }
-
     } else if first.starts_with("POST /v1/clipboard-suppress ") {
         let trace = serde_json::from_str::<serde_json::Value>(body)
             .ok()
@@ -8808,7 +8798,6 @@ fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
         }
     }
     paths
-
 }
 
 fn hls_workspace_path(task: &DownloadTask) -> Option<PathBuf> {
@@ -9609,7 +9598,6 @@ mod tests {
         );
         assert!(
             canonical_facebook_video_url("https://www.facebook.com/reel/1084652417273846")
-
                 .is_none()
         );
     }
@@ -9702,4 +9690,3 @@ mod tests {
         assert!(parse_dns_servers(&["not-an-address".to_owned()]).is_err());
     }
 }
-
