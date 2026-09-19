@@ -111,3 +111,29 @@ test("Link has one address-based connection flow for loopback, LAN and Internet"
   assert.match(rust, /struct LinkIdentity\s*\{\s*id: String,\s*\}/);
   assert.doesNotMatch(rust, /struct LinkIdentity\s*\{[^}]*password:/);
 });
+
+test("Loopback Link authenticates the Windows account before exposing shares", () => {
+  assert.match(app, /function isLocalLinkTarget\(value\)/);
+  assert.match(app, /host === "127\.0\.0\.1"/);
+  assert.match(app, /invoke\("authenticate_local_link_account", \{ username, password: systemPassword \}\)/);
+  assert.match(app, /linkLocalAccountSession = true;/);
+  assert.match(app, /linkLocalAccountSession[\s\S]*invoke\("list_local_link_files"/);
+  assert.match(app, /invoke\("get_local_link_share_capabilities"/);
+  assert.match(app, /systemPassword = "";/);
+  assert.match(app, /passwordField\.value = "";/);
+  assert.match(rust, /fn authenticate_local_link_account\([\s\S]*password\.zeroize\(\)/);
+  assert.match(rust, /fn verify_system_account\([\s\S]*LogonUserW/);
+  assert.match(rust, /Some\("\."\.to_owned\(\)\)/);
+  assert.match(rust, /MicrosoftAccount/);
+});
+
+test("Loopback Link file operations bypass the legacy remote transport", () => {
+  assert.match(app, /linkLocalAccountSession[\s\S]*delete_local_shared_link_item/);
+  assert.match(app, /linkLocalAccountSession[\s\S]*download_local_shared_link_item/);
+  assert.match(app, /linkLocalAccountSession[\s\S]*upload_local_shared_link_item/);
+  assert.match(rust, /fn delete_local_shared_link_item/);
+  assert.match(rust, /fn download_local_shared_link_item/);
+  assert.match(rust, /fn upload_local_shared_link_item/);
+  assert.match(rust, /copy_local_link_directory/);
+  assert.match(rust, /link_write_not_allowed/);
+});
