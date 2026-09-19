@@ -695,17 +695,6 @@ async fn get_remote_link_capabilities(
 }
 
 #[tauri::command]
-fn regenerate_link_password(state: State<'_, AppState>) -> Result<String, String> {
-    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    let password = default_link_password();
-    vault_store_verified(VAULT_LINK_PASSWORD, &password)?;
-    settings.link_password.zeroize();
-    settings.link_password = password;
-    save_settings(&state, &settings)?;
-    Ok(settings.link_password.clone())
-}
-
-#[tauri::command]
 fn list_local_link_files(
     state: State<'_, AppState>,
     path: String,
@@ -8864,7 +8853,6 @@ fn main() {
             inspect_media_formats,
             inspect_torrent_metadata,
             get_link_identity,
-            regenerate_link_password,
             list_link_shares,
             add_link_share,
             add_link_file_share,
