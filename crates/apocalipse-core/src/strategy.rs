@@ -127,6 +127,11 @@ pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<Strategy
                 "media_extractor_missing"
             },
         },
+        DownloadKind::Metalink => StrategyPlan {
+            primary: Engine::NativeHttp,
+            fallbacks: Vec::new(),
+            reason: "metalink_manifest",
+        },
         DownloadKind::Hls => StrategyPlan {
             primary: if capabilities.n_m3u8dl_re {
                 Engine::NM3u8dlRe
