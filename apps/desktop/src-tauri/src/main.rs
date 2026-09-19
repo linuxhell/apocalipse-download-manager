@@ -6328,7 +6328,11 @@ fn remove_host_rule(
     let pattern = normalize_host_rule_pattern(&pattern)?;
     vault_delete(&host_rule_vault_account(&pattern))?;
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    for rule in settings.host_rules.iter_mut().filter(|rule| rule.pattern == pattern_key) {
+    for rule in settings
+        .host_rules
+        .iter_mut()
+        .filter(|rule| rule.pattern == pattern)
+    {
         rule.password.zeroize();
     }
     settings.host_rules.retain(|rule| rule.pattern != pattern);
