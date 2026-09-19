@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use hickory_resolver::{
     config::{NameServerConfigGroup, ResolverConfig},
@@ -470,6 +471,24 @@ impl DownloadEngine {
                         {
                             bail!("expected size mismatch: remote={total}");
                         }
+                        if request.expected_sha256.is_none() {
+                            let discovered = head
+                                .as_ref()
+                                .and_then(|response| advertised_sha256(response.headers()))
+                                .or_else(|| advertised_repr_sha256(probe.headers()));
+                            if let Some((sha256, source)) = discovered {
+                                request.expected_sha256 = Some(sha256);
+                                let _ = events.try_send(DownloadEvent::Diagnostic {
+                                    event: "http.remote_checksum",
+                                    detail: serde_json::json!({
+                                        "algorithm": "sha256",
+                                        "source": source,
+                                        "originAdvertised": true,
+                                        "trust": "transport_integrity_not_publisher_authentication"
+                                    }),
+                                });
+                            }
+                        }
                         let identity = resume_identity_from_headers(probe.headers(), total);
                         let useful_connections = adaptive_connection_count(total, requested);
                         if useful_connections > 1 {
@@ -653,18 +672,14 @@ impl DownloadEngine {
                 .get(header::LAST_MODIFIED)
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_owned),
-            digest: headers
-                .get("digest")
-                .or_else(|| headers.get("content-md5"))
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_owned),
+            digest: advertised_repr_sha256(headers).map(|(digest, _)| digest),
             elapsed: started.elapsed(),
         })
     }
 
     async fn download_single(
         &self,
-        request: DownloadRequest,
+        mut request: DownloadRequest,
         events: mpsc::Sender<DownloadEvent>,
     ) -> Result<()> {
         let partial = partial_path(&request.destination);
@@ -759,6 +774,25 @@ impl DownloadEngine {
         });
         let response = response.error_for_status()?;
         let start = if resumed { resume_from } else { 0 };
+        if request.expected_sha256.is_none() {
+            let discovered = if start == 0 {
+                advertised_sha256(response.headers())
+            } else {
+                advertised_repr_sha256(response.headers())
+            };
+            if let Some((sha256, source)) = discovered {
+                request.expected_sha256 = Some(sha256);
+                let _ = events.try_send(DownloadEvent::Diagnostic {
+                    event: "http.remote_checksum",
+                    detail: serde_json::json!({
+                        "algorithm": "sha256",
+                        "source": source,
+                        "originAdvertised": true,
+                        "trust": "transport_integrity_not_publisher_authentication"
+                    }),
+                });
+            }
+        }
         let total = if resumed {
             response
                 .headers()
@@ -1405,6 +1439,74 @@ fn chunk_bounds(index: usize, chunk_size: u64, total: u64) -> (u64, u64, u64) {
     (start, end, end - start + 1)
 }
 
+fn advertised_sha256(
+    headers: &reqwest::header::HeaderMap,
+) -> Option<(String, &'static str)> {
+    for (name, label) in [
+        ("repr-digest", "repr-digest"),
+        ("content-digest", "content-digest"),
+        ("digest", "digest"),
+    ] {
+        if let Some(value) = headers.get(name).and_then(|value| value.to_str().ok()) {
+            if let Some(digest) = parse_sha256_digest_field(value) {
+                return Some((digest, label));
+            }
+        }
+    }
+    for (name, label) in [
+        ("x-amz-checksum-sha256", "x-amz-checksum-sha256"),
+        ("x-ms-content-sha256", "x-ms-content-sha256"),
+    ] {
+        if let Some(value) = headers.get(name).and_then(|value| value.to_str().ok()) {
+            if let Some(digest) = decode_sha256_value(value) {
+                return Some((digest, label));
+            }
+        }
+    }
+    None
+}
+
+fn advertised_repr_sha256(
+    headers: &reqwest::header::HeaderMap,
+) -> Option<(String, &'static str)> {
+    let value = headers
+        .get("repr-digest")
+        .and_then(|value| value.to_str().ok())?;
+    parse_sha256_digest_field(value).map(|digest| (digest, "repr-digest"))
+}
+
+fn parse_sha256_digest_field(value: &str) -> Option<String> {
+    value.split(',').find_map(|entry| {
+        let (algorithm, encoded) = entry.trim().split_once('=')?;
+        let normalized = algorithm
+            .trim()
+            .trim_matches('"')
+            .to_ascii_lowercase()
+            .replace('_', "-");
+        if normalized != "sha-256" && normalized != "sha256" {
+            return None;
+        }
+        decode_sha256_value(encoded)
+    })
+}
+
+fn decode_sha256_value(value: &str) -> Option<String> {
+    let trimmed = value
+        .trim()
+        .trim_matches('"')
+        .trim()
+        .trim_matches(':')
+        .trim();
+    if trimmed.len() == 64 && trimmed.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Some(trimmed.to_ascii_lowercase());
+    }
+    let decoded = BASE64.decode(trimmed.as_bytes()).ok()?;
+    if decoded.len() != 32 {
+        return None;
+    }
+    Some(decoded.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
 fn content_range_parts(value: &str) -> Option<(u64, u64, u64)> {
     let value = value.trim().strip_prefix("bytes ")?;
     let (range, total) = value.split_once('/')?;
@@ -1921,6 +2023,45 @@ mod tests {
         assert!(!destination.exists());
         assert!(partial.exists());
         let _ = fs::remove_dir_all(root).await;
+    }
+
+    #[test]
+    fn remote_sha256_parser_accepts_rfc9530_and_cloud_forms() {
+        let digest = Sha256::digest(b"payload");
+        let encoded = BASE64.encode(digest);
+        let expected = format!("{:x}", Sha256::digest(b"payload"));
+
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "repr-digest",
+            format!("sha-256=:{encoded}:").parse().unwrap(),
+        );
+        assert_eq!(
+            advertised_repr_sha256(&headers).map(|item| item.0),
+            Some(expected.clone())
+        );
+
+        headers.clear();
+        headers.insert(
+            "x-amz-checksum-sha256",
+            encoded.parse().unwrap(),
+        );
+        assert_eq!(
+            advertised_sha256(&headers).map(|item| item.0),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn partial_content_digest_is_not_used_as_whole_object_identity() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "content-digest",
+            "sha-256=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:"
+                .parse()
+                .unwrap(),
+        );
+        assert!(advertised_repr_sha256(&headers).is_none());
     }
 
     #[test]
