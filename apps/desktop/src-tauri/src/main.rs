@@ -990,7 +990,7 @@ fn linux_smb_config_entries(contents: &str) -> Vec<(String, PathBuf)> {
             continue;
         };
         if key.trim().eq_ignore_ascii_case("path") {
-            let value = value.trim().trim_matches('"').trim_matches(''');
+            let value = value.trim().trim_matches('"');
             if !value.is_empty() {
                 section_path = Some(PathBuf::from(value));
             }
@@ -1010,7 +1010,7 @@ fn linux_smb_usershare_entry(name: &str, contents: &str) -> Option<(String, Path
         let (key, value) = line.split_once('=')?;
         key.trim()
             .eq_ignore_ascii_case("path")
-            .then(|| PathBuf::from(value.trim().trim_matches('"').trim_matches(''')))
+            .then(|| PathBuf::from(value.trim().trim_matches('"')))
     })?;
     path.is_absolute().then(|| (name.to_owned(), path))
 }
