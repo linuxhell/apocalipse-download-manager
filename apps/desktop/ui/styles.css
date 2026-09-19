@@ -1366,3 +1366,19 @@ body.link-window #link-share-list {
     height: calc(100vh - 116px);
   }
 }
+
+.about-media-missing {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:12px;
+  flex-wrap:wrap;
+  min-height:72px;
+  padding:14px 18px;
+  border:1px dashed var(--border);
+  border-radius:var(--corner-radius);
+  text-align:center;
+}
+.about-media-missing[hidden] { display:none; }
+.about-media-missing span { opacity:.82; }
+.about-media-missing button { min-height:38px; padding:8px 16px; }

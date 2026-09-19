@@ -537,6 +537,13 @@ struct LinkIdentity {
     id: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AboutMedia {
+    photo_data_url: Option<String>,
+    audio_data_url: Option<String>,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LinkCapabilities {
@@ -559,6 +566,90 @@ fn safe_link_path(path: &str) -> Result<PathBuf, String> {
         }
     }
     Ok(result)
+}
+
+
+fn about_media_root(state: &AppState) -> PathBuf {
+    state
+        .settings_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf()
+}
+
+fn copy_about_media_if_present(root: &Path, file_name: &str) {
+    let destination = root.join(file_name);
+    if destination.is_file() {
+        return;
+    }
+    let Ok(executable) = std::env::current_exe() else {
+        return;
+    };
+    let Some(parent) = executable.parent() else {
+        return;
+    };
+    let source = parent.join(file_name);
+    if source.is_file() {
+        let _ = fs::copy(source, destination);
+    }
+}
+
+fn about_data_url(path: &Path, mime: &str, maximum_size: u64) -> Option<String> {
+    let metadata = fs::metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > maximum_size {
+        return None;
+    }
+    let bytes = fs::read(path).ok()?;
+    Some(format!("data:{mime};base64,{}", BASE64.encode(bytes)))
+}
+
+fn about_media_snapshot(state: &AppState) -> AboutMedia {
+    let root = about_media_root(state);
+    copy_about_media_if_present(&root, "about-creator.jpg");
+    copy_about_media_if_present(&root, "about-theme.mp4");
+    AboutMedia {
+        photo_data_url: about_data_url(
+            &root.join("about-creator.jpg"),
+            "image/jpeg",
+            12 * 1024 * 1024,
+        ),
+        audio_data_url: about_data_url(
+            &root.join("about-theme.mp4"),
+            "audio/mp4",
+            40 * 1024 * 1024,
+        ),
+    }
+}
+
+#[tauri::command]
+fn get_about_media(state: State<'_, AppState>) -> AboutMedia {
+    about_media_snapshot(&state)
+}
+
+#[tauri::command]
+fn select_about_photo(state: State<'_, AppState>) -> Result<AboutMedia, String> {
+    let Some(source) = rfd::FileDialog::new()
+        .add_filter("JPEG", &["jpg", "jpeg"])
+        .pick_file()
+    else {
+        return Err("cancelled".to_owned());
+    };
+    let destination = about_media_root(&state).join("about-creator.jpg");
+    fs::copy(source, destination).map_err(|error| error.to_string())?;
+    Ok(about_media_snapshot(&state))
+}
+
+#[tauri::command]
+fn select_about_audio(state: State<'_, AppState>) -> Result<AboutMedia, String> {
+    let Some(source) = rfd::FileDialog::new()
+        .add_filter("MP4 / M4A", &["mp4", "m4a"])
+        .pick_file()
+    else {
+        return Err("cancelled".to_owned());
+    };
+    let destination = about_media_root(&state).join("about-theme.mp4");
+    fs::copy(source, destination).map_err(|error| error.to_string())?;
+    Ok(about_media_snapshot(&state))
 }
 
 fn link_roots() -> Vec<LinkFileEntry> {
@@ -10003,6 +10094,9 @@ fn main() {
             inspect_media_formats,
             inspect_torrent_metadata,
             get_link_identity,
+            get_about_media,
+            select_about_photo,
+            select_about_audio,
             open_link_window,
             authenticate_local_link_account,
             authenticate_remote_link_account,
