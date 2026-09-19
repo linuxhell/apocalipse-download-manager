@@ -295,7 +295,7 @@ fn sniff_image(bytes: &[u8]) -> Option<ImageKind> {
     }
     if bytes.len() >= 12
         && &bytes[4..8] == b"ftyp"
-        && matches!(&bytes[8..12], b"avif" | b"avis")
+        && (&bytes[8..12] == b"avif" || &bytes[8..12] == b"avis")
     {
         return Some(ImageKind {
             extension: "avif",
