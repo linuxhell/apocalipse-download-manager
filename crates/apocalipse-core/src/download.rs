@@ -253,7 +253,8 @@ impl DownloadEngine {
         events: mpsc::Sender<DownloadEvent>,
     ) -> Result<()> {
         let source = request.url.clone();
-        self.download_from_sources(request, vec![source], events).await
+        self.download_from_sources(request, vec![source], events)
+            .await
     }
 
     /// Download from one or more already-verified sources. When byte ranges are
@@ -272,9 +273,7 @@ impl DownloadEngine {
         }
 
         let mut seen = HashSet::new();
-        sources.retain(|source| {
-            source.starts_with("http://") || source.starts_with("https://")
-        });
+        sources.retain(|source| source.starts_with("http://") || source.starts_with("https://"));
         sources.retain(|source| seen.insert(source.clone()));
         if sources.is_empty() {
             sources.push(request.url.clone());
@@ -591,7 +590,9 @@ impl DownloadEngine {
         if let Some(identity) = identity {
             let mut journal = SingleResumeJournal {
                 version: JOURNAL_VERSION,
-                generation: saved_resume.as_ref().map_or(0, |journal| journal.generation),
+                generation: saved_resume
+                    .as_ref()
+                    .map_or(0, |journal| journal.generation),
                 identity,
             };
             persist_single_resume_journal(&request.destination, &mut journal).await?;
@@ -896,7 +897,10 @@ fn content_range_parts(value: &str) -> Option<(u64, u64, u64)> {
     Some((start.parse().ok()?, end.parse().ok()?, total.parse().ok()?))
 }
 
-fn resume_identity_from_headers(headers: &reqwest::header::HeaderMap, total: u64) -> ResumeIdentity {
+fn resume_identity_from_headers(
+    headers: &reqwest::header::HeaderMap,
+    total: u64,
+) -> ResumeIdentity {
     ResumeIdentity {
         total,
         etag: headers
@@ -923,7 +927,10 @@ fn resume_identity_matches(saved: &ResumeIdentity, current: &ResumeIdentity) -> 
         return false;
     }
     match (
-        saved.etag.as_deref().filter(|etag| !etag.trim_start().starts_with("W/")),
+        saved
+            .etag
+            .as_deref()
+            .filter(|etag| !etag.trim_start().starts_with("W/")),
         current
             .etag
             .as_deref()
@@ -1343,7 +1350,9 @@ mod tests {
             "https://mirror.test/file",
             &headers,
         );
-        assert!(!filtered.iter().any(|(name, _)| name.eq_ignore_ascii_case("cookie")));
+        assert!(!filtered
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("cookie")));
         assert!(!filtered
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("authorization")));
