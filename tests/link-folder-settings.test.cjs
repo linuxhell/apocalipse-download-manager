@@ -84,7 +84,7 @@ test("Link remote guidance follows the selected language", () => {
   assert.doesNotMatch(app, /O acesso autorizado mostra todas as unidades e pastas/);
 });
 
-test("Link exposes only system-account fields in the remote login", () => {
+test("Link keeps system-account fields for future encrypted remote login without requiring them for loopback", () => {
   assert.match(html, /id="link-remote-username"/);
   assert.match(html, /data-i18n="linkRemoteUsername"/);
   assert.match(html, /data-i18n="linkRemoteSystemPassword"/);
@@ -98,8 +98,9 @@ test("Link exposes only system-account fields in the remote login", () => {
   assert.equal((app.match(/linkRemoteSystemPassword:/g) || []).length, 3);
   assert.equal((app.match(/linkCredentialsRequired:/g) || []).length, 3);
   assert.equal((app.match(/linkNativeAuthPending:/g) || []).length, 3);
-  assert.match(app, /const username = document\.querySelector\("#link-remote-username"\)\.value\.trim\(\);/);
   assert.match(app, /passwordField\.value = "";/);
+  assert.doesNotMatch(app, /invoke\("authenticate_local_link_account"/);
+  assert.doesNotMatch(linkJs, /invoke\("authenticate_local_link_account"/);
   assert.doesNotMatch(app, /linkRemotePassword/);
 });
 
@@ -115,15 +116,19 @@ test("Link has one address-based connection flow for loopback, LAN and Internet"
   assert.doesNotMatch(rust, /struct LinkIdentity\s*\{[^}]*password:/);
 });
 
-test("Loopback Link authenticates the native OS account before exposing shares", () => {
+test("Loopback Link opens explicit shares without a Windows password round-trip", () => {
   assert.match(app, /function isLocalLinkTarget\(value\)/);
   assert.match(app, /host === "127\.0\.0\.1"/);
-  assert.match(app, /invoke\("authenticate_local_link_account", \{ username, password: systemPassword \}\)/);
-  assert.match(app, /linkLocalAccountSession = true;/);
-  assert.match(app, /linkLocalAccountSession[\s\S]*invoke\("list_local_link_files"/);
-  assert.match(app, /invoke\("get_local_link_share_capabilities"/);
-  assert.match(app, /systemPassword = "";/);
-  assert.match(app, /passwordField\.value = "";/);
+  assert.match(app, /if \(\!isLocalLinkTarget\(id\)\)[\s\S]*linkNativeAuthPending/);
+  assert.match(app, /linkRemoteId = id;[\s\S]*linkLocalAccountSession = true;[\s\S]*await openRemoteLink\(""\)/);
+  assert.match(linkJs, /linkRemoteId = id;[\s\S]*linkLocalAccountSession = true;[\s\S]*await openRemoteLink\(""\)/);
+  assert.doesNotMatch(app, /invoke\("authenticate_local_link_account"/);
+  assert.doesNotMatch(linkJs, /invoke\("authenticate_local_link_account"/);
+  assert.match(rust, /fn list_local_link_files\([\s\S]*list_shared_link_directory/);
+  assert.match(rust, /fn list_shared_link_directory\([\s\S]*link_share_entries\(settings\)/);
+});
+
+test("Native system-account authentication remains available for encrypted remote Link transport", () => {
   assert.match(rust, /fn authenticate_local_link_account\([\s\S]*password\.zeroize\(\)/);
   assert.match(rust, /#\[cfg\(windows\)\][\s\S]*fn verify_system_account\([\s\S]*LogonUserW/);
   assert.match(rust, /Some\("\."\.to_owned\(\)\)/);
@@ -159,6 +164,9 @@ test("About page is localized, sits immediately below PayPal and keeps the main 
   assert.match(app, /aboutAudio\.pause\(\)/);
   assert.match(app, /aboutAudio\.currentTime = 0/);
   assert.match(app, /aboutAudio\.play\(\)/);
+  assert.match(app, /document\.querySelector\("#add"\)\.hidden = activePage === "about"/);
+  assert.ok(fs.existsSync(path.join(root, "apps/desktop/ui/assets/about-creator.jpg")));
+  assert.ok(fs.existsSync(path.join(root, "apps/desktop/ui/assets/about-theme.mp4")));
   assert.match(css, /\.about-creator-line[\s\S]*font-size: 20px/);
   assert.match(css, /nav \{ min-height: 0; overflow-y: auto;/);
 });

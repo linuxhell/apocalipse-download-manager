@@ -97,7 +97,7 @@ const catalogs = {
     linkCredentialsRequired: "Enter the remote IP/host, operating-system username and account password.",
     linkAuthenticating: "Authenticating system account…",
     linkAuthenticationFailed: "System account authentication failed",
-    linkLocalSessionReady: "Authenticated locally. Shared items are available below.",
+    linkLocalSessionReady: "Connected to this Apocalipse. Shared items are available below.",
     linkNativeAuthPending: "LAN/Internet account login is waiting for the encrypted Link protocol. Your system password will not be sent through the legacy unencrypted transport.",
     linkRemoteAuthPlan: "Remote access uses one login: IP/host + operating-system username + account password.",
     linkRemoteAccountFormats: "Windows: use the local/domain/Microsoft account name (for example juliano or MicrosoftAccount\\name@hotmail.com). Linux and macOS: use the local system username (for example juliano). Windows Hello PIN is not a remote password. The system password is never saved.",
@@ -305,7 +305,7 @@ const catalogs = {
     linkCredentialsRequired: "Informe o IP/host remoto, o usuário do sistema operacional e a senha da conta.",
     linkAuthenticating: "Autenticando conta do sistema…",
     linkAuthenticationFailed: "Falha na autenticação da conta do sistema",
-    linkLocalSessionReady: "Autenticado localmente. Os compartilhamentos estão disponíveis abaixo.",
+    linkLocalSessionReady: "Conectado a este Apocalipse. Os compartilhamentos estão disponíveis abaixo.",
     linkNativeAuthPending: "O login por conta pela LAN/Internet aguarda o protocolo criptografado do Link. Sua senha do sistema não será enviada pelo transporte legado sem criptografia.",
     linkRemoteAuthPlan: "O acesso remoto usa um único login: IP/host + usuário do sistema operacional + senha da conta.",
     linkRemoteAccountFormats: "Windows: use o usuário da conta local, domínio ou Microsoft (por exemplo juliano ou MicrosoftAccount\\nome@hotmail.com). Linux e macOS: use o usuário local do sistema (por exemplo juliano). O PIN do Windows Hello não é uma senha remota. A senha do sistema nunca é salva.",
@@ -512,7 +512,7 @@ const catalogs = {
     linkCredentialsRequired: "请输入远程 IP/主机、操作系统用户名和账户密码。",
     linkAuthenticating: "正在验证系统账户…",
     linkAuthenticationFailed: "系统账户身份验证失败",
-    linkLocalSessionReady: "本机身份验证成功。共享项目已显示在下方。",
+    linkLocalSessionReady: "已连接到本机 Apocalipse。共享项目已显示在下方。",
     linkNativeAuthPending: "局域网/互联网账户登录需等待加密的 Link 协议。系统密码不会通过旧的未加密传输发送。",
     linkRemoteAuthPlan: "远程访问使用一次登录：IP/主机 + 操作系统用户名 + 账户密码。",
     linkRemoteAccountFormats: "Windows：使用本地、域或 Microsoft 账户用户名（例如 juliano 或 MicrosoftAccount\\name@hotmail.com）。Linux 和 macOS：使用本地系统用户名（例如 juliano）。Windows Hello PIN 不是远程密码。系统密码绝不会保存。",
@@ -1147,6 +1147,7 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector("#themes-panel").hidden = activePage !== "themes";
     document.querySelector("#language-panel").hidden = activePage !== "language";
     document.querySelector("#about-panel").hidden = activePage !== "about";
+    document.querySelector("#add").hidden = activePage === "about";
     const aboutAudio = document.querySelector("#about-audio");
     if (activePage === "about") {
       aboutAudio.currentTime = 0;
@@ -1325,11 +1326,10 @@ document.querySelector("#link-share-file").onclick = async () => { try { renderL
 document.querySelector("#link-share-folder").onclick = async () => { try { renderLinkShares(await invoke("add_link_share")); await refreshVisibleLinkPanels({ resetToRoot: true }); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
 document.querySelector("#link-connect").onclick = async () => {
   const id = document.querySelector("#link-remote-id").value.trim();
-  const username = document.querySelector("#link-remote-username").value.trim();
   const passwordField = document.querySelector("#link-remote-password");
-  let systemPassword = passwordField.value;
-  if (!id || !username || !systemPassword) {
-    document.querySelector("#link-status").textContent = t("linkCredentialsRequired");
+  const status = document.querySelector("#link-status");
+  if (!id) {
+    status.textContent = t("linkCredentialsRequired");
     return;
   }
   linkRemoteId = "";
@@ -1337,21 +1337,20 @@ document.querySelector("#link-connect").onclick = async () => {
   linkLocalAccountSession = false;
   try {
     if (!isLocalLinkTarget(id)) {
-      document.querySelector("#link-status").textContent = t("linkNativeAuthPending");
+      status.textContent = t("linkNativeAuthPending");
       return;
     }
-    document.querySelector("#link-status").textContent = t("linkAuthenticating");
-    await invoke("authenticate_local_link_account", { username, password: systemPassword });
+    // Loopback is the same running Apocalipse process. Do not ask Windows to
+    // re-authenticate the current user just to display this app's explicit shares.
     linkRemoteId = id;
     linkLocalAccountSession = true;
     await openRemoteLink("");
-    document.querySelector("#link-status").textContent = t("linkLocalSessionReady");
+    status.textContent = t("linkLocalSessionReady");
   } catch (error) {
     linkRemoteId = "";
     linkLocalAccountSession = false;
-    document.querySelector("#link-status").textContent = `${t("linkAuthenticationFailed")}: ${error}`;
+    status.textContent = `${t("linkConnectionFailed")}: ${error}`;
   } finally {
-    systemPassword = "";
     passwordField.value = "";
     updateLinkTransferButtons();
   }
