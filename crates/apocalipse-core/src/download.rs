@@ -1439,9 +1439,7 @@ fn chunk_bounds(index: usize, chunk_size: u64, total: u64) -> (u64, u64, u64) {
     (start, end, end - start + 1)
 }
 
-fn advertised_sha256(
-    headers: &reqwest::header::HeaderMap,
-) -> Option<(String, &'static str)> {
+fn advertised_sha256(headers: &reqwest::header::HeaderMap) -> Option<(String, &'static str)> {
     for (name, label) in [
         ("repr-digest", "repr-digest"),
         ("content-digest", "content-digest"),
@@ -1466,9 +1464,7 @@ fn advertised_sha256(
     None
 }
 
-fn advertised_repr_sha256(
-    headers: &reqwest::header::HeaderMap,
-) -> Option<(String, &'static str)> {
+fn advertised_repr_sha256(headers: &reqwest::header::HeaderMap) -> Option<(String, &'static str)> {
     let value = headers
         .get("repr-digest")
         .and_then(|value| value.to_str().ok())?;
@@ -2042,10 +2038,7 @@ mod tests {
         );
 
         headers.clear();
-        headers.insert(
-            "x-amz-checksum-sha256",
-            encoded.parse().unwrap(),
-        );
+        headers.insert("x-amz-checksum-sha256", encoded.parse().unwrap());
         assert_eq!(
             advertised_sha256(&headers).map(|item| item.0),
             Some(expected)
