@@ -7,6 +7,8 @@ const root = path.resolve(__dirname, "..");
 const app = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8");
 const html = fs.readFileSync(path.join(root, "apps/desktop/ui/index.html"), "utf8");
 const css = fs.readFileSync(path.join(root, "apps/desktop/ui/styles.css"), "utf8");
+const linkHtml = fs.readFileSync(path.join(root, "apps/desktop/ui/link.html"), "utf8");
+const linkJs = fs.readFileSync(path.join(root, "apps/desktop/ui/link.js"), "utf8");
 const rust = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
 const workflow = fs.readFileSync(path.join(root, ".github/workflows/validate-portable.yml"), "utf8");
 
@@ -143,4 +145,52 @@ test("Loopback Link file operations bypass the legacy remote transport", () => {
   assert.match(rust, /fn upload_local_shared_link_item/);
   assert.match(rust, /copy_local_link_directory/);
   assert.match(rust, /link_write_not_allowed/);
+});
+
+
+test("About page is localized, sits immediately below PayPal and keeps the main window size", () => {
+  assert.match(html, /id="donate-paypal"[\s\S]*data-page="about"/);
+  assert.match(html, /id="about-panel"/);
+  assert.match(html, /assets\/about-creator\.jpg/);
+  assert.match(html, /assets\/about-theme\.mp4/);
+  assert.match(app, /about: "About"/);
+  assert.match(app, /about: "Sobre"/);
+  assert.match(app, /about: "关于"/);
+  assert.match(app, /aboutAudio\.pause\(\)/);
+  assert.match(app, /aboutAudio\.currentTime = 0/);
+  assert.match(app, /aboutAudio\.play\(\)/);
+  assert.match(css, /\.about-creator-line[\s\S]*font-size: 20px/);
+  assert.match(css, /nav \{ min-height: 0; overflow-y: auto;/);
+});
+
+test("Apocalipse Link opens as a dedicated maximized native window with normal controls", () => {
+  assert.match(app, /invoke\("open_link_window"\)/);
+  assert.match(rust, /async fn open_link_window/);
+  assert.match(rust, /WebviewUrl::App\("link\.html"\.into\(\)\)/);
+  assert.match(rust, /\.maximized\(true\)/);
+  assert.match(rust, /\.decorations\(true\)/);
+  assert.match(rust, /\.resizable\(true\)/);
+  assert.match(rust, /window\.label\(\) == "main"/);
+  assert.match(linkHtml, /class="link-window"/);
+  assert.match(linkJs, /loadLinkIdentity\(\)/);
+  assert.match(css, /body\.link-window[\s\S]*height: 100vh/);
+});
+
+test("Windows Link retries Microsoft and Azure account forms after ERROR_LOGON_FAILURE", () => {
+  assert.match(rust, /fn windows_logon_candidates/);
+  assert.match(rust, /Some\("MicrosoftAccount"\.to_owned\(\)\)/);
+  assert.match(rust, /Some\("AzureAD"\.to_owned\(\)\)/);
+  assert.match(rust, /for logon_type in \[3_u32, 2_u32\]/);
+  assert.match(linkJs, /system_auth_failed:1326/);
+  assert.match(linkJs, /Windows Hello PIN/);
+});
+
+test("Linux validation covers Debian Fedora Arch and publishes an AppImage", () => {
+  assert.match(workflow, /Debian 12/);
+  assert.match(workflow, /fedora:latest/);
+  assert.match(workflow, /archlinux:latest/);
+  assert.match(workflow, /cargo check --locked -p apocalipse-desktop/);
+  assert.match(workflow, /@tauri-apps\/cli@2 build --bundles appimage/);
+  assert.match(workflow, /apocalipse-download-manager-linux-x64\.AppImage/);
+  assert.match(workflow, /ubuntu-22\.04/);
 });
