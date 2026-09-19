@@ -189,13 +189,15 @@ async function inspectMediaTrack(item) {
   const key = mediaStartUrl(item.url);
   const cached = inspectedMediaTracks.get(key);
   if (cached && Date.now() - cached.at < 120_000) return cached.value;
-  let value = { kind: /^audio\//i.test(item.contentType || "") ? "audio" : "unknown", duration: null };
+  let value = { kind: /^audio\//i.test(item.contentType || "") ? "audio" : /^video\//i.test(item.contentType || "") ? "video" : "unknown", duration: null };
   try {
     // Keep every signed query parameter exactly as captured. TikTok includes
     // range fields in the CDN signature; removing them invalidates the URL and
     // made inspection return "unknown" even though popup playback succeeded.
     const response = await fetch(item.url, { credentials: "include", redirect: "follow", headers: { Range: "bytes=0-262143" } });
     if (response.ok || response.status === 206) {
+      const responseType = String(response.headers.get("content-type") || item.contentType || "").toLowerCase();
+      const headerKind = /^audio\//i.test(responseType) ? "audio" : /^video\//i.test(responseType) ? "video" : "unknown";
       const reader = response.body?.getReader();
       const chunks = [];
       let length = 0;
@@ -211,7 +213,10 @@ async function inspectMediaTrack(item) {
       const prefix = new Uint8Array(length);
       let offset = 0;
       for (const chunk of chunks) { prefix.set(chunk, offset); offset += chunk.byteLength; }
-      value = mp4TrackInfo(prefix);
+      const inspected = mp4TrackInfo(prefix);
+      value = inspected.kind !== "unknown"
+        ? inspected
+        : { kind: headerKind, duration: inspected.duration };
     }
   } catch {}
   inspectedMediaTracks.set(key, { at: Date.now(), value });
@@ -317,21 +322,34 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 async function hlsDuration(url, depth = 0) {
-  if (depth > 1) return { duration: null, requestUrls: [url] };
+  if (depth > 1) return { duration: null, requestUrls: [url], mediaKind: null };
   const response = await fetch(url, { credentials: "include", redirect: "follow" });
-  if (!response.ok) return { duration: null, requestUrls: [url] };
+  if (!response.ok) return { duration: null, requestUrls: [url], mediaKind: null };
   const text = await response.text();
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const variant = lines.findIndex((line) => line.startsWith("#EXT-X-STREAM-INF"));
   if (variant >= 0) {
     const child = lines.slice(variant + 1).find((line) => !line.startsWith("#"));
-    if (!child) return { duration: null, requestUrls: [url] };
+    if (!child) return { duration: null, requestUrls: [url], mediaKind: null };
     const result = await hlsDuration(new URL(child, url).href, depth + 1);
-    return { duration: result.duration, requestUrls: [url, ...result.requestUrls] };
+    return { duration: result.duration, requestUrls: [url, ...result.requestUrls], mediaKind: result.mediaKind || null };
   }
   const durations = lines.filter((line) => line.startsWith("#EXTINF:"))
     .map((line) => Number.parseFloat(line.slice(8))).filter(Number.isFinite);
-  return { duration: durations.length ? durations.reduce((total, value) => total + value, 0) : null, requestUrls: [url] };
+  const segment = lines.find((line) => !line.startsWith("#"));
+  let mediaKind = null;
+  if (segment) {
+    const segmentUrl = new URL(segment, url).href;
+    const inspected = await inspectMediaTrack({ url: segmentUrl, contentType: "" }).catch(() => ({ kind: "unknown" }));
+    mediaKind = inspected.kind === "audio" ? "audio"
+      : inspected.kind === "video" || inspected.kind === "muxed" ? "video"
+      : null;
+  }
+  return {
+    duration: durations.length ? durations.reduce((total, value) => total + value, 0) : null,
+    requestUrls: [url],
+    mediaKind,
+  };
 }
 
 async function analyzeHls(urls, expectedDuration) {
