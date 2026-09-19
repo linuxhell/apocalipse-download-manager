@@ -49,3 +49,9 @@ test("per-site rules own new credentials and expose removal", () => {
   assert.match(app, /invoke\("remove_host_rule"/);
   assert.match(app, /remove\.className = "danger-action"/);
 });
+
+test("Link share mutations refresh local and self-test panels at the share root", () => {
+  assert.match(app, /refreshVisibleLinkPanels\(\{ resetToRoot: true \}\)/);
+  assert.match(app, /const localPath = resetToRoot \? "" : linkLocalPath;/);
+  assert.match(app, /const remotePath = resetToRoot \? "" : linkRemotePath;/);
+});

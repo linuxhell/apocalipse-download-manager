@@ -27,3 +27,8 @@ test('Facebook and TikTok resolver cannot intercept YouTube rows', () => {
 test('page preview is bounded so an ongoing live can open', () => {
   assert.match(preview, /"--download-sections",\s*"\*0-30"/);
 });
+
+test('YouTube prefers the current video id thumbnail over stale page metadata', () => {
+  assert.match(content, /const thumbnail = videoId[\s\S]*i\.ytimg\.com\/vi\/\$\{videoId\}\/hqdefault\.jpg/);
+  assert.doesNotMatch(content, /add\(youtubeUrl, "video", video, document\.querySelector\('meta\[property="og:image"\]'\)/);
+});

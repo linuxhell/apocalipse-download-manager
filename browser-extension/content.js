@@ -768,7 +768,10 @@
         const b = right.getBoundingClientRect?.() || { width: 0, height: 0 };
         return (b.width * b.height) - (a.width * a.height);
       })[0] || null;
-      add(youtubeUrl, "video", video, document.querySelector('meta[property="og:image"]')?.content || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ""), {
+      const thumbnail = videoId
+        ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+        : (document.querySelector('meta[property="og:image"]')?.content || "");
+      add(youtubeUrl, "video", video, thumbnail, {
         ...playerContext(video),
         pageExtractor: true,
         recommended: true,
