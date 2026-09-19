@@ -6197,6 +6197,142 @@ fn remove_website_credential(
         .collect())
 }
 
+fn host_rule_summaries(settings: &UserSettings) -> Vec<HostRuleSummary> {
+    settings
+        .host_rules
+        .iter()
+        .map(|rule| HostRuleSummary {
+            pattern: rule.pattern.clone(),
+            username: rule.username.clone().unwrap_or_default(),
+            has_password: !rule.password.is_empty(),
+            user_agent: rule.user_agent.clone().unwrap_or_default(),
+            connections: rule.connections,
+            bandwidth_limit: rule.bandwidth_limit,
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn list_host_rules(state: State<'_, AppState>) -> Result<Vec<HostRuleSummary>, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    Ok(host_rule_summaries(&settings))
+}
+
+#[tauri::command]
+fn save_host_rule(
+    state: State<'_, AppState>,
+    pattern: String,
+    username: String,
+    password: String,
+    user_agent: String,
+    connections: Option<usize>,
+    bandwidth_limit: Option<u64>,
+    clear_password: bool,
+) -> Result<Vec<HostRuleSummary>, String> {
+    let pattern = normalize_host_rule_pattern(&pattern)?;
+    let username = username.trim();
+    let user_agent = user_agent.trim();
+    if username.len() > 512
+        || password.len() > 2048
+        || user_agent.len() > 1024
+        || [username, password.as_str(), user_agent]
+            .iter()
+            .any(|value| value.chars().any(|character| matches!(character, '\r' | '\n')))
+        || connections.is_some_and(|value| !(1..=32).contains(&value))
+    {
+        return Err("invalid_host_rule".to_owned());
+    }
+
+    let account = host_rule_vault_account(&pattern);
+    let mut secret = vault_load(&account)?.unwrap_or_default();
+    if clear_password {
+        vault_delete(&account)?;
+        secret.zeroize();
+    }
+    if !password.is_empty() {
+        vault_store_verified(&account, &password)?;
+        secret.zeroize();
+        secret = password;
+    }
+
+    let username = (!username.is_empty()).then(|| username.to_owned());
+    if username.is_some() != !secret.is_empty() {
+        secret.zeroize();
+        return Err("host_rule_credentials_must_have_username_and_password".to_owned());
+    }
+    let user_agent = (!user_agent.is_empty()).then(|| user_agent.to_owned());
+    let bandwidth_limit = bandwidth_limit.filter(|value| *value > 0);
+    if username.is_none()
+        && user_agent.is_none()
+        && connections.is_none()
+        && bandwidth_limit.is_none()
+    {
+        secret.zeroize();
+        return Err("empty_host_rule".to_owned());
+    }
+
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    if let Some(existing) = settings
+        .host_rules
+        .iter_mut()
+        .find(|rule| rule.pattern == pattern)
+    {
+        existing.password.zeroize();
+        existing.username = username;
+        existing.password = secret;
+        existing.user_agent = user_agent;
+        existing.connections = connections;
+        existing.bandwidth_limit = bandwidth_limit;
+    } else {
+        settings.host_rules.push(HostRule {
+            pattern,
+            username,
+            password: secret,
+            user_agent,
+            connections,
+            bandwidth_limit,
+        });
+    }
+    settings.host_rules.sort_by(|left, right| {
+        let left_exact = !left.pattern.starts_with("*.");
+        let right_exact = !right.pattern.starts_with("*.");
+        right_exact
+            .cmp(&left_exact)
+            .then_with(|| right.pattern.len().cmp(&left.pattern.len()))
+            .then_with(|| left.pattern.cmp(&right.pattern))
+    });
+    save_settings(&state, &settings)?;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "host_rule.updated",
+        &format!("pattern={} password_stored={}", settings.host_rules.iter().find(|rule| rule.pattern == pattern).map(|rule| rule.pattern.as_str()).unwrap_or("unknown"), settings.host_rules.iter().find(|rule| rule.pattern == pattern).is_some_and(|rule| !rule.password.is_empty())),
+    );
+    Ok(host_rule_summaries(&settings))
+}
+
+#[tauri::command]
+fn remove_host_rule(
+    state: State<'_, AppState>,
+    pattern: String,
+) -> Result<Vec<HostRuleSummary>, String> {
+    let pattern = normalize_host_rule_pattern(&pattern)?;
+    vault_delete(&host_rule_vault_account(&pattern))?;
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    for rule in settings.host_rules.iter_mut().filter(|rule| rule.pattern == pattern) {
+        rule.password.zeroize();
+    }
+    settings.host_rules.retain(|rule| rule.pattern != pattern);
+    save_settings(&state, &settings)?;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "host_rule.removed",
+        &format!("pattern={pattern}"),
+    );
+    Ok(host_rule_summaries(&settings))
+}
+
 #[tauri::command]
 fn set_proxy_setting(
     state: State<'_, AppState>,
@@ -8321,6 +8457,9 @@ fn main() {
             list_website_credentials,
             save_website_credential,
             remove_website_credential,
+            list_host_rules,
+            save_host_rule,
+            remove_host_rule,
             get_dns_setting,
             set_dns_setting,
             get_bridge_pairing,
@@ -8648,6 +8787,59 @@ mod tests {
                 DownloadKind::Http
             ),
             "download"
+        );
+    }
+
+    #[test]
+    fn host_rules_prefer_exact_then_most_specific_wildcard_without_spoofing() {
+        let mut settings = UserSettings::default();
+        settings.host_rules = vec![
+            HostRule {
+                pattern: "*.example.com".into(),
+                username: None,
+                password: String::new(),
+                user_agent: Some("wild".into()),
+                connections: Some(6),
+                bandwidth_limit: None,
+            },
+            HostRule {
+                pattern: "*.cdn.example.com".into(),
+                username: None,
+                password: String::new(),
+                user_agent: Some("specific".into()),
+                connections: Some(10),
+                bandwidth_limit: None,
+            },
+            HostRule {
+                pattern: "media.cdn.example.com".into(),
+                username: None,
+                password: String::new(),
+                user_agent: Some("exact".into()),
+                connections: Some(12),
+                bandwidth_limit: None,
+            },
+        ];
+
+        assert_eq!(
+            host_rule_for_url(&settings, "https://media.cdn.example.com/file")
+                .and_then(|rule| rule.connections),
+            Some(12)
+        );
+        assert_eq!(
+            host_rule_for_url(&settings, "https://other.cdn.example.com/file")
+                .and_then(|rule| rule.connections),
+            Some(10)
+        );
+        assert_eq!(
+            host_rule_for_url(&settings, "https://www.example.com/file")
+                .and_then(|rule| rule.connections),
+            Some(6)
+        );
+        assert!(host_rule_for_url(&settings, "https://example.com.evil.test/file").is_none());
+        assert!(normalize_host_rule_pattern("foo.*.example.com").is_err());
+        assert_eq!(
+            normalize_host_rule_pattern("*.Example.COM").as_deref(),
+            Ok("*.example.com")
         );
     }
 
