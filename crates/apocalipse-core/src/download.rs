@@ -307,28 +307,17 @@ impl DownloadEngine {
                     .send(),
             )
             .await;
-            let accepted = match h3 {
-                Ok(Ok(response)) if response.status() == StatusCode::PARTIAL_CONTENT => {
-                    expected.is_none_or(|(start, end, total)| {
+            if let Ok(Ok(response)) = h3 {
+                let accepted = response.status() == StatusCode::PARTIAL_CONTENT
+                    && expected.map_or(true, |(start, end, total)| {
                         response
                             .headers()
                             .get(header::CONTENT_RANGE)
                             .and_then(|value| value.to_str().ok())
                             .and_then(content_range_parts)
                             .is_some_and(|actual| actual == (start, end, total))
-                    })
-                }
-                _ => false,
-            };
-            if accepted {
-                if let Ok(Ok(response)) = tokio::time::timeout(
-                    Duration::from_millis(1800),
-                    apply_headers(http3.get(url), headers)
-                        .header(header::RANGE, range)
-                        .send(),
-                )
-                .await
-                {
+                    });
+                if accepted {
                     return Ok((response, true, attempts));
                 }
             }
