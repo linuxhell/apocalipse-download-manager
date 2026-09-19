@@ -6271,11 +6271,12 @@ fn save_host_rule(
         return Err("empty_host_rule".to_owned());
     }
 
+    let pattern_key = pattern.clone();
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     if let Some(existing) = settings
         .host_rules
         .iter_mut()
-        .find(|rule| rule.pattern == pattern)
+        .find(|rule| rule.pattern == pattern_key)
     {
         existing.password.zeroize();
         existing.username = username;
@@ -6306,7 +6307,15 @@ fn save_host_rule(
         &state,
         "INFO",
         "host_rule.updated",
-        &format!("pattern={} password_stored={}", settings.host_rules.iter().find(|rule| rule.pattern == pattern).map(|rule| rule.pattern.as_str()).unwrap_or("unknown"), settings.host_rules.iter().find(|rule| rule.pattern == pattern).is_some_and(|rule| !rule.password.is_empty())),
+        &format!(
+            "pattern={} password_stored={}",
+            pattern_key,
+            settings
+                .host_rules
+                .iter()
+                .find(|rule| rule.pattern == pattern_key)
+                .is_some_and(|rule| !rule.password.is_empty())
+        ),
     );
     Ok(host_rule_summaries(&settings))
 }
@@ -6319,7 +6328,7 @@ fn remove_host_rule(
     let pattern = normalize_host_rule_pattern(&pattern)?;
     vault_delete(&host_rule_vault_account(&pattern))?;
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    for rule in settings.host_rules.iter_mut().filter(|rule| rule.pattern == pattern) {
+    for rule in settings.host_rules.iter_mut().filter(|rule| rule.pattern == pattern_key) {
         rule.password.zeroize();
     }
     settings.host_rules.retain(|rule| rule.pattern != pattern);
