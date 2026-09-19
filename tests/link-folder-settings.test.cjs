@@ -31,7 +31,9 @@ test("Link exposes only explicit shares with per-share write permission", () => 
   assert.match(rust, /resolve_link_share/);
   assert.match(rust, /DELETE \/v1\/link\/item/);
   assert.match(rust, /link_write_not_allowed/);
-  assert.match(html, /linkWindowsLoginNotice/);
+  assert.match(html, /linkRemoteAuthPlan/);
+  assert.match(html, /linkRemoteAccountFormats/);
+  assert.match(html, /linkRemoteSecurityNotice/);
 });
 
 test("Link lists remain readable and settings use the available window", () => {
@@ -73,4 +75,19 @@ test("explicit Link shares remain visible even if metadata is temporarily unavai
   assert.match(rust, /share\.directory = metadata\.is_dir\(\);/);
   assert.match(rust, /directory: true/);
   assert.match(rust, /directory: false/);
+});
+
+test("Link remote guidance follows the selected language", () => {
+  assert.match(html, /data-i18n="linkCurrentPassword"/);
+  assert.match(html, /data-i18n="linkAccessNotice"/);
+  assert.match(html, /data-i18n="linkRemoteAuthPlan"/);
+  assert.match(html, /data-i18n="linkRemoteAccountFormats"/);
+  assert.match(html, /data-i18n="linkRemoteSecurityNotice"/);
+  assert.equal((app.match(/linkCurrentPassword:/g) || []).length, 3);
+  assert.equal((app.match(/linkRemoteAuthPlan:/g) || []).length, 3);
+  assert.equal((app.match(/linkRemoteAccountFormats:/g) || []).length, 3);
+  assert.equal((app.match(/linkRemoteSecurityNotice:/g) || []).length, 3);
+  assert.doesNotMatch(app, /linkWindowsLoginNotice:/);
+  assert.doesNotMatch(app, /Authorized access shows all drives and folders/);
+  assert.doesNotMatch(app, /O acesso autorizado mostra todas as unidades e pastas/);
 });
