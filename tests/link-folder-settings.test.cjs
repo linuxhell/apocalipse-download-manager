@@ -141,9 +141,9 @@ test("Link has one address-based connection flow for loopback, LAN and Internet"
 });
 
 test("Loopback Link opens explicit shares without a Windows password round-trip", () => {
-  assert.match(app, /function isLocalLinkTarget\(value\)/);
+  assert.match(app, /async function isLocalLinkTarget\(value\)/);
   assert.match(app, /host === "127\.0\.0\.1"/);
-  assert.match(app, /if \(isLocalLinkTarget\(id\)\)/);
+  assert.match(app, /if \(await isLocalLinkTarget\(id\)\)/);
   assert.match(app, /linkRemoteId = id;[\s\S]*linkLocalAccountSession = true;[\s\S]*await openRemoteLink\(""\)/);
   assert.match(linkJs, /linkRemoteId = id;[\s\S]*linkLocalAccountSession = true;[\s\S]*await openRemoteLink\(""\)/);
   assert.doesNotMatch(app, /invoke\("authenticate_local_link_account"/);
@@ -160,6 +160,9 @@ test("LAN and Internet Link use TLS with TOFU pinning and system-account authent
   assert.match(rust, /fn read_link_http_response[\s\S]*?bridge_content_length/);
   assert.match(rust, /link_trusted_certificates/);
   assert.match(rust, /link_tls_certificate_changed/);
+  assert.match(rust, /fn is_local_link_target/);
+  assert.match(rust, /peer_fingerprint == link_certificate_fingerprint/);
+  assert.match(rust, /UdpSocket::bind\("0\.0\.0\.0:0"\)/);
   assert.match(rust, /POST \/v1\/link\/auth/);
   assert.match(rust, /fn authenticate_remote_link_account/);
   assert.match(rust, /verify_system_account\(&request\.username, &request\.password\)/);
@@ -215,6 +218,7 @@ test("About page is localized, sits immediately below PayPal and keeps the main 
   assert.match(app, /document\.querySelector\("#add"\)\.hidden = activePage === "about"/);
   assert.match(css, /\.about-creator-line[\s\S]*font-size: 20px/);
   assert.match(app, /option\(select, "original", pendingMediaKind === "audio"/);
+  assert.match(css, /\.media-inspection:has\(> img\[hidden\]\)[^}]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(app, /\["mp3", "m4a", "opus", "flac", "wav"\]/);
   assert.match(app, /option\(select, `audio:\$\{format\}`/);
   assert.match(css, /nav \{ min-height: 0; overflow-y: auto;/);
