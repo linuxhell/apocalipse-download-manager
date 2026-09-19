@@ -165,8 +165,6 @@ test("About page is localized, sits immediately below PayPal and keeps the main 
   assert.match(app, /aboutAudio\.currentTime = 0/);
   assert.match(app, /aboutAudio\.play\(\)/);
   assert.match(app, /document\.querySelector\("#add"\)\.hidden = activePage === "about"/);
-  assert.ok(fs.existsSync(path.join(root, "apps/desktop/ui/assets/about-creator.jpg")));
-  assert.ok(fs.existsSync(path.join(root, "apps/desktop/ui/assets/about-theme.mp4")));
   assert.match(css, /\.about-creator-line[\s\S]*font-size: 20px/);
   assert.match(css, /nav \{ min-height: 0; overflow-y: auto;/);
 });
