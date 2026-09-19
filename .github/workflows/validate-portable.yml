@@ -105,7 +105,7 @@ jobs:
         shell: bash
         run: |
           . "$HOME/.cargo/env"
-          cargo check --locked -p apocalipse-desktop
+          cargo check -p apocalipse-desktop
 
   build:
     name: ${{ matrix.name }}
@@ -143,12 +143,12 @@ jobs:
         shell: bash
         run: |
           cargo fmt --all -- --check
-          cargo test --workspace --locked
+          cargo test --workspace
       - name: Verify prepared media with FFmpeg and FFprobe
         if: runner.os == 'Linux'
-        run: cargo test -p apocalipse-desktop --locked paired_preview_uses_real_mux_and_probe -- --ignored
+        run: cargo test -p apocalipse-desktop paired_preview_uses_real_mux_and_probe -- --ignored
       - name: Build desktop candidate
-        run: cargo build --release --locked -p apocalipse-desktop
+        run: cargo build --release -p apocalipse-desktop
       - uses: actions/setup-node@v4
         if: runner.os == 'Linux'
         with:

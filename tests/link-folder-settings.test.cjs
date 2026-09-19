@@ -16,9 +16,9 @@ test("Apocalipse Link selects and transfers both files and folders", () => {
   assert.match(app, /linkSelectedLocal = entry;/);
   assert.match(app, /linkSelectedRemote = entry;/);
   assert.match(app, /directory: linkSelectedRemote\.directory/);
-  assert.match(rust, /PUT \/v1\/link\/directory\?path=/);
+  assert.match(rust, /"PUT"[\s\S]*\/v1\/link\/directory\?path=\{encoded\}/);
   assert.match(rust, /tokio::fs::create_dir_all\(&destination\)/);
-  assert.match(rust, /send_link_directory\(&id, &password, &remote_path\)/);
+  assert.match(rust, /send_link_directory\(&state, &id, &password, &remote_path\)/);
 });
 
 test("Link exposes only explicit shares with per-share write permission", () => {
@@ -105,7 +105,7 @@ test("Link remote guidance follows the selected language", () => {
   assert.doesNotMatch(app, /O acesso autorizado mostra todas as unidades e pastas/);
 });
 
-test("Link keeps system-account fields for future encrypted remote login without requiring them for loopback", () => {
+test("Link keeps system-account fields for encrypted remote login without requiring them for loopback", () => {
   assert.match(html, /id="link-remote-username"/);
   assert.match(html, /data-i18n="linkRemoteUsername"/);
   assert.match(html, /data-i18n="linkRemoteSystemPassword"/);
@@ -118,8 +118,10 @@ test("Link keeps system-account fields for future encrypted remote login without
   assert.equal((app.match(/linkRemoteUsername:/g) || []).length, 3);
   assert.equal((app.match(/linkRemoteSystemPassword:/g) || []).length, 3);
   assert.equal((app.match(/linkCredentialsRequired:/g) || []).length, 3);
-  assert.equal((app.match(/linkNativeAuthPending:/g) || []).length, 3);
+  assert.equal((app.match(/linkRemoteSessionReady:/g) || []).length, 3);
   assert.match(app, /passwordField\.value = "";/);
+  assert.match(app, /invoke\("authenticate_remote_link_account"/);
+  assert.match(linkJs, /invoke\("authenticate_remote_link_account"/);
   assert.doesNotMatch(app, /invoke\("authenticate_local_link_account"/);
   assert.doesNotMatch(linkJs, /invoke\("authenticate_local_link_account"/);
   assert.doesNotMatch(app, /linkRemotePassword/);
@@ -140,7 +142,7 @@ test("Link has one address-based connection flow for loopback, LAN and Internet"
 test("Loopback Link opens explicit shares without a Windows password round-trip", () => {
   assert.match(app, /function isLocalLinkTarget\(value\)/);
   assert.match(app, /host === "127\.0\.0\.1"/);
-  assert.match(app, /if \(\!isLocalLinkTarget\(id\)\)[\s\S]*linkNativeAuthPending/);
+  assert.match(app, /if \(isLocalLinkTarget\(id\)\)/);
   assert.match(app, /linkRemoteId = id;[\s\S]*linkLocalAccountSession = true;[\s\S]*await openRemoteLink\(""\)/);
   assert.match(linkJs, /linkRemoteId = id;[\s\S]*linkLocalAccountSession = true;[\s\S]*await openRemoteLink\(""\)/);
   assert.doesNotMatch(app, /invoke\("authenticate_local_link_account"/);
@@ -191,14 +193,21 @@ test("Loopback Link file operations bypass the legacy remote transport", () => {
 test("About page is localized, sits immediately below PayPal and keeps the main window size", () => {
   assert.match(html, /id="donate-paypal"[\s\S]*data-page="about"/);
   assert.match(html, /id="about-panel"/);
-  assert.match(html, /assets\/about-creator\.jpg/);
-  assert.match(html, /assets\/about-theme\.mp4/);
+  assert.match(html, /id="about-creator-photo"/);
+  assert.match(html, /id="about-select-photo"/);
+  assert.match(html, /id="about-select-audio"/);
   assert.match(app, /about: "About"/);
   assert.match(app, /about: "Sobre"/);
   assert.match(app, /about: "关于"/);
   assert.match(app, /aboutAudio\.pause\(\)/);
   assert.match(app, /aboutAudio\.currentTime = 0/);
   assert.match(app, /aboutAudio\.play\(\)/);
+  assert.match(app, /invoke\("get_about_media"\)/);
+  assert.match(app, /invoke\("select_about_photo"\)/);
+  assert.match(app, /invoke\("select_about_audio"\)/);
+  assert.match(rust, /fn about_media_snapshot/);
+  assert.match(rust, /about-creator\.jpg/);
+  assert.match(rust, /about-theme\.mp4/);
   assert.match(app, /document\.querySelector\("#add"\)\.hidden = activePage === "about"/);
   assert.match(css, /\.about-creator-line[\s\S]*font-size: 20px/);
   assert.match(css, /nav \{ min-height: 0; overflow-y: auto;/);
@@ -230,7 +239,7 @@ test("Linux validation covers Debian Fedora Arch and publishes an AppImage", () 
   assert.match(workflow, /Debian 12/);
   assert.match(workflow, /fedora:latest/);
   assert.match(workflow, /archlinux:latest/);
-  assert.match(workflow, /cargo check --locked -p apocalipse-desktop/);
+  assert.match(workflow, /cargo check -p apocalipse-desktop/);
   assert.match(workflow, /@tauri-apps\/cli@2 build --bundles appimage/);
   assert.match(workflow, /apocalipse-download-manager-linux-x64\.AppImage/);
   assert.match(workflow, /ubuntu-22\.04/);

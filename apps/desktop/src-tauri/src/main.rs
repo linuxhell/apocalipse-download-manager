@@ -12,14 +12,14 @@ use apocalipse_core::{
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use rustls::{
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime},
     ClientConfig, ClientConnection, DigitallySignedStruct, ServerConfig, ServerConnection,
     SignatureScheme, StreamOwned,
 };
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -567,7 +567,6 @@ fn safe_link_path(path: &str) -> Result<PathBuf, String> {
     }
     Ok(result)
 }
-
 
 fn about_media_root(state: &AppState) -> PathBuf {
     state
@@ -1368,7 +1367,6 @@ fn delete_local_link_item(path: String) -> Result<(), String> {
     remove_link_path(&path)
 }
 
-
 #[derive(Debug)]
 struct LinkServerCertVerifier;
 
@@ -1438,7 +1436,8 @@ fn load_or_create_link_tls_config(directory: &Path) -> Result<Arc<ServerConfig>,
             let _ = fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600));
         }
     }
-    let certificate = CertificateDer::from(fs::read(&cert_path).map_err(|error| error.to_string())?);
+    let certificate =
+        CertificateDer::from(fs::read(&cert_path).map_err(|error| error.to_string())?);
     let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
         fs::read(&key_path).map_err(|error| error.to_string())?,
     ));
@@ -1491,7 +1490,8 @@ fn connect_link_tls(
     id: &str,
 ) -> Result<(LinkTlsStream, String, bool, String), String> {
     let (host, port, authority) = link_remote_parts(id)?;
-    let mut socket = TcpStream::connect((host.as_str(), port)).map_err(|error| error.to_string())?;
+    let mut socket =
+        TcpStream::connect((host.as_str(), port)).map_err(|error| error.to_string())?;
     socket
         .set_read_timeout(Some(Duration::from_secs(45)))
         .map_err(|error| error.to_string())?;
@@ -1595,7 +1595,11 @@ fn link_http_request(
         stream.write_all(body).map_err(|error| error.to_string())?;
     }
     stream.flush().map_err(|error| error.to_string())?;
-    Ok((read_link_http_response(&mut stream)?, fingerprint, first_trust))
+    Ok((
+        read_link_http_response(&mut stream)?,
+        fingerprint,
+        first_trust,
+    ))
 }
 
 fn ensure_link_http_success(response: &LinkHttpResponse) -> Result<(), String> {
@@ -1606,9 +1610,7 @@ fn ensure_link_http_success(response: &LinkHttpResponse) -> Result<(), String> {
     }
 }
 
-fn read_link_download_head<S: Read>(
-    stream: &mut S,
-) -> Result<(u16, usize, Vec<u8>), String> {
+fn read_link_download_head<S: Read>(stream: &mut S) -> Result<(u16, usize, Vec<u8>), String> {
     let mut buffer = Vec::with_capacity(8192);
     let mut chunk = [0_u8; 8192];
     let header_end = loop {
@@ -3209,11 +3211,7 @@ fn handle_link_connection<S: Read + Write>(app: &tauri::AppHandle, mut stream: S
     }
 }
 
-fn run_link_server(
-    app: tauri::AppHandle,
-    listener: TcpListener,
-    tls_config: Arc<ServerConfig>,
-) {
+fn run_link_server(app: tauri::AppHandle, listener: TcpListener, tls_config: Arc<ServerConfig>) {
     for stream in listener.incoming().flatten() {
         let app = app.clone();
         let tls_config = tls_config.clone();
