@@ -5,8 +5,9 @@ mod prepared_preview;
 mod tiktok_preview;
 
 use apocalipse_core::{
-    classify_url, cleanup_chunk_artifacts, contextual_media_page, partial_path, plan_download,
-    BandwidthLimiter, Capabilities, DownloadEngine, DownloadEvent, DownloadId, DownloadKind,
+    classify_url, cleanup_chunk_artifacts, contextual_media_page, parse_metalink, partial_path,
+    plan_download, BandwidthLimiter, Capabilities, DownloadEngine, DownloadEvent, DownloadId,
+    DownloadKind,
     DownloadRequest, DownloadState, DownloadTask,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -4873,6 +4874,7 @@ fn enqueue_download_impl(
     priority: Option<i8>,
     bandwidth_limit: Option<u64>,
     connections_override: Option<usize>,
+    expected_sha256: Option<String>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
     let diagnostic_trace = context.as_ref().and_then(|c| c.trace_id.clone());
@@ -4903,8 +4905,11 @@ fn enqueue_download_impl(
         .unwrap_or_default()
         .into_iter()
         .filter(|mirror| mirror.starts_with("https://") || mirror.starts_with("http://"))
-        .take(10)
+        .take(32)
         .collect();
+    task.sha256 = expected_sha256
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()));
     task.priority = priority.unwrap_or_default().clamp(-10, 10);
     task.bandwidth_limit = bandwidth_limit.filter(|limit| *limit > 0);
     let pixeldrain_single_connection = host_from_url(&url)
@@ -5038,6 +5043,7 @@ fn enqueue_download(
         priority,
         bandwidth_limit,
         connections_override,
+        None,
         context,
     )
 }
@@ -5047,6 +5053,254 @@ fn queued_task_for_start(queue: &[DownloadTask], id: DownloadId) -> Option<Downl
         .iter()
         .find(|item| item.id == id && item.state == DownloadState::Queued)
         .cloned()
+}
+
+async fn run_metalink_manifest(
+    app: tauri::AppHandle,
+    id: DownloadId,
+    task: DownloadTask,
+    mut cancellation: oneshot::Receiver<()>,
+) {
+    let state = app.state::<AppState>();
+    diagnostic_log(
+        &state,
+        "INFO",
+        "metalink.inspect_started",
+        &format!("task={id} url={}", redact_url(&task.source)),
+    );
+    update_task(&app, id, true, |item| item.state = DownloadState::Inspecting);
+
+    let (proxy, dns, identity, credential) = {
+        let settings = match state.settings.lock() {
+            Ok(settings) => settings.clone(),
+            Err(error) => {
+                update_task(&app, id, true, |item| {
+                    item.state = DownloadState::Failed {
+                        message: error.to_string(),
+                    }
+                });
+                return;
+            }
+        };
+        let proxy = settings.proxy_enabled.then(|| {
+            (
+                settings.proxy_url.clone(),
+                settings.proxy_username.clone(),
+                settings.proxy_password.clone(),
+            )
+        });
+        let dns = if settings.dns_enabled {
+            settings.dns_servers.clone()
+        } else {
+            Vec::new()
+        };
+        let identity = state
+            .request_identities
+            .lock()
+            .ok()
+            .and_then(|items| items.get(&id).cloned());
+        let credential =
+            website_credential_for_download(&settings, &task.source, task.referer.as_deref())
+                .cloned();
+        (proxy, dns, identity, credential)
+    };
+
+    let builder = match proxy {
+        Some((url, username, password)) => DownloadEngine::network_client_builder(
+            url.as_deref(),
+            username.as_deref(),
+            password.as_deref(),
+            &dns,
+        ),
+        None => DownloadEngine::network_client_builder(None, None, None, &dns),
+    };
+    let client = match builder.and_then(|builder| builder.build().map_err(Into::into)) {
+        Ok(client) => client,
+        Err(error) => {
+            update_task(&app, id, true, |item| {
+                item.state = DownloadState::Failed {
+                    message: error.to_string(),
+                }
+            });
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    };
+
+    let mut request = client.get(&task.source);
+    if let Some(referer) = task.referer.as_deref() {
+        request = request.header("Referer", referer);
+    }
+    if let Some(user_agent) = identity.as_ref().and_then(|item| item.user_agent.as_deref()) {
+        request = request.header("User-Agent", user_agent);
+    }
+    if let Some(cookie) = identity
+        .as_ref()
+        .and_then(|item| item.cookie_header.as_deref())
+    {
+        request = request.header("Cookie", cookie);
+    }
+    if let Some(credential) = credential {
+        request = request.basic_auth(credential.username, Some(credential.password));
+    }
+
+    let response = tokio::select! {
+        _ = &mut cancellation => {
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+        response = request.send() => response
+    };
+    let response = match response.and_then(|response| response.error_for_status()) {
+        Ok(response) => response,
+        Err(error) => {
+            diagnostic_log(&state, "ERROR", "metalink.inspect_failed", &error.to_string());
+            update_task(&app, id, true, |item| {
+                item.state = DownloadState::Failed {
+                    message: format!("metalink_fetch_failed: {error}"),
+                }
+            });
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    };
+
+    let bytes = match response.bytes().await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            update_task(&app, id, true, |item| {
+                item.state = DownloadState::Failed {
+                    message: format!("metalink_read_failed: {error}"),
+                }
+            });
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    };
+    let files = match parse_metalink(&bytes, Some(&task.source)) {
+        Ok(files) => files,
+        Err(error) => {
+            diagnostic_log(&state, "ERROR", "metalink.invalid", &error.to_string());
+            update_task(&app, id, true, |item| {
+                item.state = DownloadState::Failed {
+                    message: format!("metalink_invalid: {error}"),
+                }
+            });
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    };
+
+    let destination_directory = task
+        .destination
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_string_lossy()
+        .into_owned();
+    let mut prepared = Vec::new();
+    for file in files.into_iter().take(256) {
+        let Some(primary) = file.urls.first().cloned() else {
+            continue;
+        };
+        let fallback_name = suggested_name(&primary);
+        let name = file
+            .name
+            .filter(|name| validate_file_name(name).is_ok())
+            .unwrap_or(fallback_name);
+        prepared.push((
+            primary,
+            name,
+            file.urls.into_iter().skip(1).take(31).collect::<Vec<_>>(),
+            file.sha256,
+        ));
+    }
+    if prepared.is_empty() {
+        update_task(&app, id, true, |item| {
+            item.state = DownloadState::Failed {
+                message: "metalink_contains_no_downloads".to_owned(),
+            }
+        });
+        if let Ok(mut workers) = state.workers.lock() {
+            workers.remove(&id);
+        }
+        start_next_queued(&app);
+        return;
+    }
+
+    {
+        let mut queue = match state.queue.lock() {
+            Ok(queue) => queue,
+            Err(error) => {
+                update_task(&app, id, true, |item| {
+                    item.state = DownloadState::Failed {
+                        message: error.to_string(),
+                    }
+                });
+                return;
+            }
+        };
+        queue.retain(|item| item.id != id);
+        if let Err(error) = save_queue(&state, &queue) {
+            diagnostic_log(&state, "ERROR", "metalink.queue_replace_failed", &error);
+            return;
+        }
+    }
+    if let Ok(mut identities) = state.request_identities.lock() {
+        identities.remove(&id);
+    }
+    if let Ok(mut workers) = state.workers.lock() {
+        workers.remove(&id);
+    }
+
+    let total_children = prepared.len();
+    let mut accepted = 0_usize;
+    for (primary, name, mirrors, sha256) in prepared {
+        match enqueue_download_impl(
+            app.clone(),
+            &state,
+            primary,
+            Some(destination_directory.clone()),
+            Some(name),
+            None,
+            None,
+            Some(mirrors),
+            Some(task.priority),
+            task.bandwidth_limit,
+            task.connections_override,
+            sha256,
+            None,
+        ) {
+            Ok(_) => accepted += 1,
+            Err(error) => diagnostic_log(
+                &state,
+                "ERROR",
+                "metalink.child_rejected",
+                &format!("error={error}"),
+            ),
+        }
+    }
+    diagnostic_log(
+        &state,
+        "INFO",
+        "metalink.expanded",
+        &format!("task={id} children={accepted}/{total_children}"),
+    );
+    start_next_queued(&app);
 }
 
 fn start_download(
@@ -5082,6 +5336,15 @@ fn start_download(
         "task.dispatched",
         &format!("task={} engine={kind:?}", task.id),
     );
+    if kind == DownloadKind::Metalink {
+        tauri::async_runtime::spawn(run_metalink_manifest(
+            app.clone(),
+            task.id,
+            task,
+            cancelled,
+        ));
+        return Ok(());
+    }
     if kind == DownloadKind::Http && task.companion_audio_url.is_some() {
         tauri::async_runtime::spawn(run_adaptive_social_download(
             app.clone(),
@@ -6224,6 +6487,7 @@ fn queue_from_bridge(
             None,
             None,
             Some(10),
+            None,
             None,
             None,
             Some(context),
