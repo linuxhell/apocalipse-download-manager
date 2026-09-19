@@ -7,6 +7,7 @@ pub enum DownloadKind {
     Magnet,
     Torrent,
     Hls,
+    Metalink,
     MediaPage,
     Ftp,
 }
@@ -26,6 +27,11 @@ pub fn classify_url(input: &str) -> Option<DownloadKind> {
     if !input.contains("://") && local_path.ends_with(".m3u8") {
         return Some(DownloadKind::Hls);
     }
+    if !input.contains("://")
+        && (local_path.ends_with(".meta4") || local_path.ends_with(".metalink"))
+    {
+        return Some(DownloadKind::Metalink);
+    }
     let url = Url::parse(input).ok()?;
     if matches!(url.scheme(), "ftp" | "sftp") {
         return Some(DownloadKind::Ftp);
@@ -38,6 +44,8 @@ pub fn classify_url(input: &str) -> Option<DownloadKind> {
         Some(DownloadKind::Torrent)
     } else if path.ends_with(".m3u8") {
         Some(DownloadKind::Hls)
+    } else if path.ends_with(".meta4") || path.ends_with(".metalink") {
+        Some(DownloadKind::Metalink)
     } else if matches!(
         url.domain(),
         Some(
@@ -74,6 +82,14 @@ mod tests {
         assert_eq!(
             classify_url("https://cdn.test/live/master.m3u8?token=x"),
             Some(DownloadKind::Hls)
+        );
+        assert_eq!(
+            classify_url("https://downloads.example/image.meta4"),
+            Some(DownloadKind::Metalink)
+        );
+        assert_eq!(
+            classify_url("C:\\Downloads\\release.metalink"),
+            Some(DownloadKind::Metalink)
         );
         assert_eq!(
             classify_url("https://youtu.be/abc"),
