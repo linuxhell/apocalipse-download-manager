@@ -200,11 +200,11 @@ test('AI UI retrieves privacy-safe engine diagnostics and passes the selected la
 });
 
 test('thumbnails use the validated persistent cache instead of direct remote rendering', () => {
-  assert.match(appJs, /invoke\("resolve_thumbnail", \{ url \}\)/);
-  assert.match(appJs, /resolveCachedThumbnail\(requestedThumbnail\)/);
-  assert.match(appJs, /loadPreviewThumbnail\(image, thumbnail\)/);
-  assert.doesNotMatch(appJs, /thumbnail\.src = task\.thumbnail/);
-  assert.doesNotMatch(appJs, /image\.src = thumbnail/);
+  assert.match(app, /invoke\("resolve_thumbnail", \{ url \}\)/);
+  assert.match(app, /resolveCachedThumbnail\(requestedThumbnail\)/);
+  assert.match(app, /loadPreviewThumbnail\(image, thumbnail\)/);
+  assert.doesNotMatch(app, /thumbnail\.src = task\.thumbnail/);
+  assert.doesNotMatch(app, /image\.src = thumbnail/);
   assert.match(desktop, /mod thumbnail_cache;/);
   assert.match(desktop, /async fn resolve_thumbnail_internal/);
   assert.match(desktop, /prefetch_thumbnail\(app\.clone\(\), thumbnail\)/);
