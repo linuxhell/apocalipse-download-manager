@@ -1050,6 +1050,8 @@ struct DownloadContext {
     thumbnail: Option<String>,
     #[serde(default)]
     audio_url: Option<String>,
+    #[serde(default)]
+    expected_size: Option<u64>,
     cookie_header: Option<String>,
     user_agent: Option<String>,
     request_method: Option<String>,
@@ -4874,6 +4876,7 @@ fn enqueue_download_impl(
     priority: Option<i8>,
     bandwidth_limit: Option<u64>,
     connections_override: Option<usize>,
+    expected_size: Option<u64>,
     expected_sha256: Option<String>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
@@ -4916,7 +4919,11 @@ fn enqueue_download_impl(
         .as_deref()
         .is_some_and(|value| value == "pixeldrain.com" || value.ends_with(".pixeldrain.com"));
     task.connections_override = site_connection_override(&url, connections_override);
+    task.expected_size = expected_size.filter(|value| *value > 0);
     if let Some(context) = context {
+        if task.expected_size.is_none() {
+            task.expected_size = context.expected_size.filter(|value| *value > 0);
+        }
         task.referer = context
             .referer
             .filter(|url| url.starts_with("https://") || url.starts_with("http://"));
@@ -5043,6 +5050,7 @@ fn enqueue_download(
         priority,
         bandwidth_limit,
         connections_override,
+        None,
         None,
         context,
     )
@@ -5226,6 +5234,7 @@ async fn run_metalink_manifest(
             primary,
             name,
             file.urls.into_iter().skip(1).take(31).collect::<Vec<_>>(),
+            file.size,
             file.sha256,
         ));
     }
@@ -5269,7 +5278,7 @@ async fn run_metalink_manifest(
 
     let total_children = prepared.len();
     let mut accepted = 0_usize;
-    for (primary, name, mirrors, sha256) in prepared {
+    for (primary, name, mirrors, expected_size, sha256) in prepared {
         match enqueue_download_impl(
             app.clone(),
             &state,
@@ -5282,6 +5291,7 @@ async fn run_metalink_manifest(
             Some(task.priority),
             task.bandwidth_limit,
             task.connections_override,
+            expected_size,
             sha256,
             None,
         ) {
@@ -5426,6 +5436,7 @@ fn start_download(
                 .unwrap_or_else(|| "GET".to_owned()),
             body: identity.and_then(|item| item.request_body.map(String::into_bytes)),
             headers,
+            expected_size: task.expected_size,
             expected_sha256: task.sha256.clone(),
             limiters: {
                 let mut limiters = vec![state.global_bandwidth_limiter.clone()];
@@ -6471,6 +6482,7 @@ fn queue_from_bridge(
             title: request.title,
             thumbnail: request.thumbnail,
             audio_url: request.audio_url,
+            expected_size: request.expected_size,
             cookie_header: request.cookie_header,
             user_agent: request.user_agent,
             request_method: request.request_method,
@@ -6487,6 +6499,7 @@ fn queue_from_bridge(
             None,
             None,
             Some(10),
+            None,
             None,
             None,
             None,
