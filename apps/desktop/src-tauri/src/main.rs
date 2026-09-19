@@ -3805,10 +3805,29 @@ async fn run_external_download(
                     command.arg("-http_proxy").arg(proxy_url);
                 }
                 command.arg("-y");
+                command.arg("-user_agent").arg(&user_agent);
+                if let Some(referer) = task.referer.as_deref() {
+                    command.arg("-referer").arg(referer);
+                }
+                let mut request_headers = String::new();
                 if let Some(credential) = website_credential.as_ref() {
                     let basic =
                         BASE64.encode(format!("{}:{}", credential.username, credential.password));
-                    command.args(["-headers", &format!("Authorization: Basic {basic}\r\n")]);
+                    request_headers.push_str(&format!("Authorization: Basic {basic}\r\n"));
+                }
+                if let Some(cookie) = identity
+                    .as_ref()
+                    .and_then(|value| value.cookie_header.as_deref())
+                {
+                    request_headers.push_str(&format!("Cookie: {cookie}\r\n"));
+                }
+                if let Some(referer) = task.referer.as_deref() {
+                    if let Some(origin) = http_origin(referer) {
+                        request_headers.push_str(&format!("Origin: {origin}\r\n"));
+                    }
+                }
+                if !request_headers.is_empty() {
+                    command.arg("-headers").arg(request_headers);
                 }
                 command.arg("-i").arg(&task.source).arg("-vn");
                 match audio_format {
