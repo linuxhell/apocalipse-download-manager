@@ -63,6 +63,50 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  linux-compatibility:
+    name: Linux compatibility · ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debian 12
+            image: debian:bookworm
+          - name: Fedora
+            image: fedora:latest
+          - name: Arch Linux
+            image: archlinux:latest
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Debian dependencies
+        if: matrix.name == 'Debian 12'
+        shell: bash
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential curl pkg-config libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libpam0g-dev libssl-dev
+      - name: Install Fedora dependencies
+        if: matrix.name == 'Fedora'
+        shell: bash
+        run: |
+          dnf install -y gcc gcc-c++ make curl pkgconf-pkg-config webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel pam-devel openssl-devel
+      - name: Install Arch dependencies
+        if: matrix.name == 'Arch Linux'
+        shell: bash
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed base-devel curl pkgconf webkit2gtk-4.1 libappindicator-gtk3 librsvg pam openssl
+      - name: Install Rust
+        shell: bash
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Check desktop on distro
+        shell: bash
+        run: |
+          . "$HOME/.cargo/env"
+          cargo check --locked -p apocalipse-desktop
+
   build:
     name: ${{ matrix.name }}
     strategy:
@@ -74,7 +118,7 @@ jobs:
             artifact: apocalipse-windows-x64-candidate
             output: apocalipse-download-manager-windows-x64-portable.zip
           - name: Linux x64 portable
-            os: ubuntu-latest
+            os: ubuntu-22.04
             artifact: apocalipse-linux-x64-candidate
             output: apocalipse-download-manager-linux-x64-portable.tar.gz
           - name: macOS portable
@@ -100,6 +144,16 @@ jobs:
         run: cargo test -p apocalipse-desktop --locked paired_preview_uses_real_mux_and_probe -- --ignored
       - name: Build desktop candidate
         run: cargo build --release --locked -p apocalipse-desktop
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: '22'
+      - name: Build Linux AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cd apps/desktop
+          npx --yes @tauri-apps/cli@2 build --bundles appimage
       - name: Stage Windows portable
         if: runner.os == 'Windows'
         shell: pwsh
@@ -117,6 +171,9 @@ jobs:
           mkdir -p "$package"
           install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
           cp README.md LICENSE "$package/"
+          appimage="$(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "$appimage"
+          install -m 755 "$appimage" 'dist/apocalipse-download-manager-linux-x64.AppImage'
           tar -C dist -czf 'dist/${{ matrix.output }}' 'Apocalipse Download Manager'
       - name: Stage macOS portable
         if: runner.os == 'macOS'
@@ -139,6 +196,7 @@ jobs:
           name: ${{ matrix.artifact }}
           path: |
             dist/${{ matrix.output }}
+            dist/apocalipse-download-manager-linux-x64.AppImage
             dist/build-commit.txt
           retention-days: 14
           if-no-files-found: error
