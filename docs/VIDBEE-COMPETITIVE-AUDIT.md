@@ -155,3 +155,29 @@ Best competitive strategy:
 6. local media library + transcription;
 7. optional AI over transcripts;
 8. complete the previously approved next-generation transfer-engine priorities as a separate milestone.
+
+
+## Thumbnail handling — implemented improvement over VidBee
+
+VidBee has a strong desktop thumbnail cache: it resolves remote thumbnails through the main process, validates image content and keeps local copies so the renderer does not depend directly on remote hosts.
+
+Apocalipse previously rendered task and preview thumbnails directly from the remote URL. That was weaker for expiring social/CDN URLs.
+
+The current branch replaces that path with a stronger native cache:
+
+- remote thumbnails are fetched by the native backend, not painted directly from the remote URL;
+- JPEG, PNG, GIF, WebP, AVIF, BMP and ICO are accepted only after byte-signature validation;
+- HTML/login/error payloads pretending to be images are rejected;
+- payload size is capped at 8 MiB;
+- redirects are bounded and revalidated;
+- obvious localhost/private-IP thumbnail targets are rejected;
+- the original thumbnail URL is SHA-256 keyed and is never persisted in cache metadata, protecting expiring CDN tokens;
+- image content is SHA-256 addressed, so identical thumbnails from different URLs are deduplicated on disk;
+- cached bytes are re-sniffed and re-hashed before reuse;
+- the cache is bounded and pruned automatically;
+- the renderer receives a validated local data URL;
+- downloads prefetch their thumbnails immediately when queued, including while the application is hidden in the tray;
+- the download list and media-analysis preview both use the cache;
+- diagnostics record cache hit/fetch/failure without storing the source thumbnail URL.
+
+This keeps VidBee's useful persistent-thumbnail idea while improving privacy, deduplication, validation and expiring-social-CDN behavior.
