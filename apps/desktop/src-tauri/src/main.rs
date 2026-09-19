@@ -568,87 +568,23 @@ fn safe_link_path(path: &str) -> Result<PathBuf, String> {
     Ok(result)
 }
 
-fn about_media_root(state: &AppState) -> PathBuf {
-    state
-        .settings_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf()
+const ABOUT_CREATOR_JPEG: &[u8] = include_bytes!("../assets/about-creator.jpg");
+const ABOUT_THEME_MP4: &[u8] = include_bytes!("../assets/about-theme.mp4");
+
+fn about_data_url(bytes: &[u8], mime: &str) -> String {
+    format!("data:{mime};base64,{}", BASE64.encode(bytes))
 }
 
-fn copy_about_media_if_present(root: &Path, file_name: &str) {
-    let destination = root.join(file_name);
-    if destination.is_file() {
-        return;
-    }
-    let Ok(executable) = std::env::current_exe() else {
-        return;
-    };
-    let Some(parent) = executable.parent() else {
-        return;
-    };
-    let source = parent.join(file_name);
-    if source.is_file() {
-        let _ = fs::copy(source, destination);
-    }
-}
-
-fn about_data_url(path: &Path, mime: &str, maximum_size: u64) -> Option<String> {
-    let metadata = fs::metadata(path).ok()?;
-    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > maximum_size {
-        return None;
-    }
-    let bytes = fs::read(path).ok()?;
-    Some(format!("data:{mime};base64,{}", BASE64.encode(bytes)))
-}
-
-fn about_media_snapshot(state: &AppState) -> AboutMedia {
-    let root = about_media_root(state);
-    copy_about_media_if_present(&root, "about-creator.jpg");
-    copy_about_media_if_present(&root, "about-theme.mp4");
+fn about_media_snapshot() -> AboutMedia {
     AboutMedia {
-        photo_data_url: about_data_url(
-            &root.join("about-creator.jpg"),
-            "image/jpeg",
-            12 * 1024 * 1024,
-        ),
-        audio_data_url: about_data_url(
-            &root.join("about-theme.mp4"),
-            "audio/mp4",
-            40 * 1024 * 1024,
-        ),
+        photo_data_url: Some(about_data_url(ABOUT_CREATOR_JPEG, "image/jpeg")),
+        audio_data_url: Some(about_data_url(ABOUT_THEME_MP4, "audio/mp4")),
     }
 }
 
 #[tauri::command]
-fn get_about_media(state: State<'_, AppState>) -> AboutMedia {
-    about_media_snapshot(&state)
-}
-
-#[tauri::command]
-fn select_about_photo(state: State<'_, AppState>) -> Result<AboutMedia, String> {
-    let Some(source) = rfd::FileDialog::new()
-        .add_filter("JPEG", &["jpg", "jpeg"])
-        .pick_file()
-    else {
-        return Err("cancelled".to_owned());
-    };
-    let destination = about_media_root(&state).join("about-creator.jpg");
-    fs::copy(source, destination).map_err(|error| error.to_string())?;
-    Ok(about_media_snapshot(&state))
-}
-
-#[tauri::command]
-fn select_about_audio(state: State<'_, AppState>) -> Result<AboutMedia, String> {
-    let Some(source) = rfd::FileDialog::new()
-        .add_filter("MP4 / M4A", &["mp4", "m4a"])
-        .pick_file()
-    else {
-        return Err("cancelled".to_owned());
-    };
-    let destination = about_media_root(&state).join("about-theme.mp4");
-    fs::copy(source, destination).map_err(|error| error.to_string())?;
-    Ok(about_media_snapshot(&state))
+fn get_about_media() -> AboutMedia {
+    about_media_snapshot()
 }
 
 fn link_roots() -> Vec<LinkFileEntry> {
@@ -1547,24 +1483,44 @@ struct LinkHttpResponse {
 }
 
 fn read_link_http_response<S: Read>(stream: &mut S) -> Result<LinkHttpResponse, String> {
-    let mut response = Vec::new();
-    stream
-        .read_to_end(&mut response)
-        .map_err(|error| error.to_string())?;
-    let header_end = response
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .ok_or_else(|| "invalid_link_http_response".to_owned())?;
-    let headers = String::from_utf8_lossy(&response[..header_end + 4]);
+    let mut response = Vec::with_capacity(8_192);
+    let mut chunk = [0_u8; 8_192];
+    let header_end = loop {
+        let count = stream.read(&mut chunk).map_err(|error| error.to_string())?;
+        if count == 0 || response.len() + count > 65_536 {
+            return Err("invalid_link_http_response".to_owned());
+        }
+        response.extend_from_slice(&chunk[..count]);
+        if let Some(position) = response.windows(4).position(|window| window == b"\r\n\r\n") {
+            break position;
+        }
+    };
+    let body_start = header_end + 4;
+    let headers = String::from_utf8_lossy(&response[..body_start]);
     let status = headers
         .lines()
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
         .and_then(|value| value.parse::<u16>().ok())
         .ok_or_else(|| "invalid_link_http_status".to_owned())?;
+    let content_length = bridge_content_length(&headers);
+    if content_length > 16 * 1024 * 1024 {
+        return Err("link_http_response_too_large".to_owned());
+    }
+    while response.len() < body_start + content_length {
+        let remaining = body_start + content_length - response.len();
+        let read_size = remaining.min(chunk.len());
+        let count = stream
+            .read(&mut chunk[..read_size])
+            .map_err(|error| error.to_string())?;
+        if count == 0 {
+            return Err("incomplete_link_http_response".to_owned());
+        }
+        response.extend_from_slice(&chunk[..count]);
+    }
     Ok(LinkHttpResponse {
         status,
-        body: response[header_end + 4..].to_vec(),
+        body: response[body_start..body_start + content_length].to_vec(),
     })
 }
 
@@ -10093,8 +10049,6 @@ fn main() {
             inspect_torrent_metadata,
             get_link_identity,
             get_about_media,
-            select_about_photo,
-            select_about_audio,
             open_link_window,
             authenticate_local_link_account,
             authenticate_remote_link_account,
