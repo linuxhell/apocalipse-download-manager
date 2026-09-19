@@ -119,6 +119,8 @@ pub enum DownloadEvent {
 #[derive(Clone)]
 pub struct DownloadEngine {
     client: Client,
+    http3_client: Option<Client>,
+    http3_disabled_hosts: Arc<Mutex<HashSet<String>>>,
 }
 
 #[derive(Clone)]
@@ -216,7 +218,27 @@ impl DownloadEngine {
     ) -> Result<Self> {
         let client =
             Self::network_client_builder(proxy_url, username, password, dns_servers)?.build()?;
-        Ok(Self { client })
+        let proxy_configured = proxy_url
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty());
+        let http3_client = if proxy_configured {
+            None
+        } else {
+            Self::network_client_builder(None, None, None, dns_servers)
+                .ok()
+                .and_then(|builder| {
+                    builder
+                        .http3_prior_knowledge()
+                        .http3_max_idle_timeout(Duration::from_secs(30))
+                        .build()
+                        .ok()
+                })
+        };
+        Ok(Self {
+            client,
+            http3_client,
+            http3_disabled_hosts: Arc::new(Mutex::new(HashSet::new())),
+        })
     }
 
     /// Shared proxy/DNS settings with a caller-controlled redirect policy for preview.
@@ -252,6 +274,75 @@ impl DownloadEngine {
             builder = builder.dns_resolver(Arc::new(CustomDnsResolver { resolver }));
         }
         Ok(builder)
+    }
+
+    async fn send_range_with_fallback(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+        range: &str,
+        expected: Option<(u64, u64, u64)>,
+        allow_http3: bool,
+    ) -> Result<(reqwest::Response, bool, usize)> {
+        let mut attempts = 0_usize;
+        let host = reqwest::Url::parse(url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_ascii_lowercase));
+        let http3_allowed = allow_http3
+            && url.starts_with("https://")
+            && self.http3_client.is_some()
+            && if let Some(host) = host.as_deref() {
+                !self.http3_disabled_hosts.lock().await.contains(host)
+            } else {
+                false
+            };
+
+        if http3_allowed {
+            attempts += 1;
+            let http3 = self.http3_client.as_ref().expect("checked above");
+            let h3 = tokio::time::timeout(
+                Duration::from_millis(1800),
+                apply_headers(http3.get(url), headers)
+                    .header(header::RANGE, range)
+                    .send(),
+            )
+            .await;
+            let accepted = match h3 {
+                Ok(Ok(response)) if response.status() == StatusCode::PARTIAL_CONTENT => {
+                    expected.is_none_or(|(start, end, total)| {
+                        response
+                            .headers()
+                            .get(header::CONTENT_RANGE)
+                            .and_then(|value| value.to_str().ok())
+                            .and_then(content_range_parts)
+                            .is_some_and(|actual| actual == (start, end, total))
+                    })
+                }
+                _ => false,
+            };
+            if accepted {
+                if let Ok(Ok(response)) = tokio::time::timeout(
+                    Duration::from_millis(1800),
+                    apply_headers(http3.get(url), headers)
+                        .header(header::RANGE, range)
+                        .send(),
+                )
+                .await
+                {
+                    return Ok((response, true, attempts));
+                }
+            }
+            if let Some(host) = host {
+                self.http3_disabled_hosts.lock().await.insert(host);
+            }
+        }
+
+        attempts += 1;
+        let response = apply_headers(self.client.get(url), headers)
+            .header(header::RANGE, range)
+            .send()
+            .await?;
+        Ok((response, false, attempts))
     }
 
     pub async fn download(
@@ -298,26 +389,33 @@ impl DownloadEngine {
                 .send()
                 .await
                 .ok();
-            let mut probe = apply_headers(self.client.get(&probe_url), &probe_headers)
-                .header(header::RANGE, "bytes=0-0")
-                .send()
+            let mut probe = self
+                .send_range_with_fallback(&probe_url, &probe_headers, "bytes=0-0", None, true)
                 .await;
             if probe
                 .as_ref()
-                .is_ok_and(|response| is_optional_referer_rejection(response.status()))
+                .is_ok_and(|(response, _, _)| is_optional_referer_rejection(response.status()))
                 && remove_header(&mut probe_headers, "referer")
             {
                 head = apply_headers(self.client.head(&probe_url), &probe_headers)
                     .send()
                     .await
                     .ok();
-                probe = apply_headers(self.client.get(&probe_url), &probe_headers)
-                    .header(header::RANGE, "bytes=0-0")
-                    .send()
+                probe = self
+                    .send_range_with_fallback(&probe_url, &probe_headers, "bytes=0-0", None, true)
                     .await;
             }
             let total = head.as_ref().and_then(|response| response.content_length());
-            if let Ok(probe) = probe {
+            if let Ok((probe, http3_selected, transport_attempts)) = probe {
+                let _ = events.try_send(DownloadEvent::Diagnostic {
+                    event: "http.transport_probe",
+                    detail: serde_json::json!({
+                        "http3Available": self.http3_client.is_some(),
+                        "http3Selected": http3_selected,
+                        "transportAttempts": transport_attempts,
+                        "transport": format!("{:?}", probe.version())
+                    }),
+                });
                 if probe.status() == StatusCode::PARTIAL_CONTENT {
                     let range_total = probe
                         .headers()
@@ -362,6 +460,7 @@ impl DownloadEngine {
                                         attempt_connections,
                                         sources.clone(),
                                         identity.clone(),
+                                        http3_selected,
                                     )
                                     .await;
                                 match segmented {
@@ -696,6 +795,7 @@ impl DownloadEngine {
         connections: usize,
         sources: Vec<String>,
         identity: ResumeIdentity,
+        prefer_http3: bool,
     ) -> Result<()> {
         let chunk_size = adaptive_chunk_size(total, connections);
         let chunk_count = total.div_ceil(chunk_size) as usize;
@@ -770,7 +870,7 @@ impl DownloadEngine {
 
         let mut jobs = FuturesUnordered::new();
         for worker_index in 0..worker_count {
-            let client = self.client.clone();
+            let engine = self.clone();
             let primary_url = request.url.clone();
             let headers = request.headers.clone();
             let destination = request.destination.clone();
@@ -806,14 +906,20 @@ impl DownloadEngine {
                         let source = &sources[source_index];
                         let source_headers = headers_for_source(&primary_url, source, &headers);
                         let attempt_started = Instant::now();
-                        let response = match apply_headers(client.get(source), &source_headers)
-                            .header(header::RANGE, format!("bytes={start}-{end}"))
-                            .send()
+                        let range = format!("bytes={start}-{end}");
+                        let (response, used_http3, transport_attempts) = match engine
+                            .send_range_with_fallback(
+                                source,
+                                &source_headers,
+                                &range,
+                                Some((start, end, total)),
+                                prefer_http3,
+                            )
                             .await
                         {
-                            Ok(response) => response,
+                            Ok(result) => result,
                             Err(error) => {
-                                last_error = Some(anyhow::anyhow!(error));
+                                last_error = Some(error);
                                 continue;
                             }
                         };
@@ -907,6 +1013,9 @@ impl DownloadEngine {
                                 "sourceIndex": source_index,
                                 "sourceCount": sources.len(),
                                 "attempts": source_offset + 1,
+                                "transportAttempts": transport_attempts,
+                                "http3Preferred": prefer_http3,
+                                "http3Used": used_http3,
                                 "elapsedMs": elapsed_ms,
                                 "bytesPerSecond": if elapsed_ms > 0 {
                                     expected.saturating_mul(1000) / elapsed_ms
