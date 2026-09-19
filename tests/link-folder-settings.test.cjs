@@ -158,3 +158,15 @@ test("About page is localized, sits below PayPal and resets its audio when leavi
   assert.match(app, /aboutAudio\.play\(\)/);
   assert.match(css, /\.about-creator-line[\s\S]*font-size: 20px/);
 });
+
+test("Audio HLS handoffs expose conversion choices before saving", () => {
+  assert.match(app, /audioOriginal: "Keep original audio container"/);
+  assert.match(app, /audioOriginal: "Manter contêiner de áudio original"/);
+  assert.match(app, /audioOriginal: "保留原始音频容器"/);
+  assert.match(app, /function populateAudioConversionOptions/);
+  assert.match(app, /"mp3", "m4a", "opus", "flac", "wav"/);
+  assert.match(app, /host === "soundcloud\.com"/);
+  assert.match(app, /isAudioFocusedBridgeRequest\(request\)/);
+  assert.match(app, /plan\.primary === "NM3u8DlRe"/);
+  assert.match(app, /document\.querySelector\("#enqueue"\)\.hidden = false/);
+});
