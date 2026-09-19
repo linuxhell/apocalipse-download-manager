@@ -152,10 +152,7 @@ mod tests {
         let digest = cache.put(b"private chunk").await.unwrap();
         let stored = fs::read(cache.path(&digest).unwrap()).await.unwrap();
         assert!(!stored.windows(13).any(|window| window == b"private chunk"));
-        assert_eq!(
-            cache.get(&digest).await.unwrap().unwrap(),
-            b"private chunk"
-        );
+        assert_eq!(cache.get(&digest).await.unwrap().unwrap(), b"private chunk");
         let _ = fs::remove_dir_all(root).await;
     }
 }
