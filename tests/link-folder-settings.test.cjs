@@ -156,6 +156,8 @@ test("LAN and Internet Link use TLS with TOFU pinning and system-account authent
   assert.match(rust, /TcpListener::bind\(\("0\.0\.0\.0", LINK_PORT\)\)/);
   assert.match(rust, /ServerConnection::new/);
   assert.match(rust, /ClientConnection::new/);
+  assert.doesNotMatch(rust, /fn read_link_http_response[\s\S]*?read_to_end/);
+  assert.match(rust, /fn read_link_http_response[\s\S]*?bridge_content_length/);
   assert.match(rust, /link_trusted_certificates/);
   assert.match(rust, /link_tls_certificate_changed/);
   assert.match(rust, /POST \/v1\/link\/auth/);
@@ -195,8 +197,9 @@ test("About page is localized, sits immediately below PayPal and keeps the main 
   assert.match(html, /id="donate-paypal"[\s\S]*data-page="about"/);
   assert.match(html, /id="about-panel"/);
   assert.match(html, /id="about-creator-photo"/);
-  assert.match(html, /id="about-select-photo"/);
-  assert.match(html, /id="about-select-audio"/);
+  assert.match(html, /id="about-play-pause"/);
+  assert.match(html, /id="about-stop"/);
+  assert.match(html, /id="about-volume"/);
   assert.match(app, /about: "About"/);
   assert.match(app, /about: "Sobre"/);
   assert.match(app, /about: "关于"/);
@@ -204,13 +207,16 @@ test("About page is localized, sits immediately below PayPal and keeps the main 
   assert.match(app, /aboutAudio\.currentTime = 0/);
   assert.match(app, /aboutAudio\.play\(\)/);
   assert.match(app, /invoke\("get_about_media"\)/);
-  assert.match(app, /invoke\("select_about_photo"\)/);
-  assert.match(app, /invoke\("select_about_audio"\)/);
+  assert.doesNotMatch(app, /invoke\("select_about_photo"\)/);
+  assert.doesNotMatch(app, /invoke\("select_about_audio"\)/);
   assert.match(rust, /fn about_media_snapshot/);
-  assert.match(rust, /about-creator\.jpg/);
-  assert.match(rust, /about-theme\.mp4/);
+  assert.match(rust, /include_bytes!\("\.\.\/assets\/about-creator\.jpg"\)/);
+  assert.match(rust, /include_bytes!\("\.\.\/assets\/about-theme\.mp4"\)/);
   assert.match(app, /document\.querySelector\("#add"\)\.hidden = activePage === "about"/);
   assert.match(css, /\.about-creator-line[\s\S]*font-size: 20px/);
+  assert.match(app, /option\(select, "original", pendingMediaKind === "audio"/);
+  assert.match(app, /\["mp3", "m4a", "opus", "flac", "wav"\]/);
+  assert.match(app, /option\(select, `audio:\$\{format\}`/);
   assert.match(css, /nav \{ min-height: 0; overflow-y: auto;/);
 });
 
