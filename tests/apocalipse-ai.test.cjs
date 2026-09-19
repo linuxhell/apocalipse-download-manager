@@ -209,7 +209,25 @@ test('per-site transfer rules are exposed in all three languages and wired to th
   assert.match(desktop, /fn host_rule_for_url/);
   assert.match(desktop, /fn effective_credential_for_download/);
   assert.match(desktop, /host_rule_vault_account/);
-  assert.match(desktop, /task\.connections_override\s*\.or_else\(\|\| host_rule/);
+  assert.match(desktop, /connections_override[\s\S]{0,180}host_rule[\s\S]{0,120}connections/);
+});
+
+test('Apocalipse AI blinks the alien for new releases and exposes a safe clickable Releases link', () => {
+  assert.equal(AI.say('pt-BR', 'updateReleaseLink'), 'Abrir Releases oficial');
+  assert.equal(AI.say('en', 'updateReleaseLink'), 'Open official Releases');
+  assert.equal(AI.say('zh-CN', 'updateReleaseLink'), '打开官方 Releases');
+  assert.match(aiUi, /UPDATE_INTERVAL_MS = 6 \* 60 \* 60 \* 1000/);
+  assert.match(aiUi, /ai-update-available/);
+  assert.match(aiUi, /UPDATE_ACK_KEY/);
+  assert.match(aiUi, /kind === "update_available"/);
+  assert.match(aiUi, /open_apocalipse_releases/);
+  assert.match(aiUi, /github\.com\/linuxhell\/apocalipse-download-manager\/releases/);
+  assert.match(css, /@keyframes ai-update-alien/);
+  assert.match(css, /\.ai-message-link/);
+  assert.match(desktop, /release_url: String/);
+  assert.match(desktop, /fn valid_apocalipse_release_url/);
+  assert.match(desktop, /fn open_apocalipse_releases/);
+  assert.match(desktop, /path\.starts_with\("\/linuxhell\/apocalipse-download-manager\/releases\/"\)/);
 });
 
 test('thumbnails use the validated persistent cache instead of direct remote rendering', () => {
