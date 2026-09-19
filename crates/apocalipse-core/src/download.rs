@@ -12,11 +12,11 @@ use reqwest::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -24,7 +24,7 @@ use std::{
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufWriter},
-    sync::{mpsc, Mutex},
+    sync::{mpsc, Mutex, Notify},
 };
 
 use crate::validation::{validate_payload, PayloadExpectation};
@@ -34,6 +34,57 @@ const MAX_SEGMENT_CHUNK_SIZE: u64 = 32 * 1024 * 1024;
 const TARGET_CHUNKS_PER_WORKER: u64 = 8;
 const WORKER_START_INTERVAL_MS: u64 = 35;
 const JOURNAL_VERSION: u8 = 1;
+const RANGE_STEAL_INTERVAL_MS: u64 = 400;
+const RANGE_STEAL_COOLDOWN_MS: u64 = 800;
+const MIN_STEAL_TAIL_BYTES: u64 = 4 * 1024 * 1024;
+const RANGE_STEAL_ALIGNMENT: u64 = 64 * 1024;
+
+#[derive(Debug, Clone, Copy)]
+struct SegmentWork {
+    parent_index: usize,
+    start: u64,
+    end: u64,
+}
+
+struct AdaptiveWorkerState {
+    active: AtomicBool,
+    parent_index: AtomicUsize,
+    current: AtomicU64,
+    desired_end: AtomicU64,
+    window_bytes: AtomicU64,
+    last_progress_ms: AtomicU64,
+    last_steal_ms: AtomicU64,
+}
+
+impl AdaptiveWorkerState {
+    fn new() -> Self {
+        Self {
+            active: AtomicBool::new(false),
+            parent_index: AtomicUsize::new(usize::MAX),
+            current: AtomicU64::new(0),
+            desired_end: AtomicU64::new(0),
+            window_bytes: AtomicU64::new(0),
+            last_progress_ms: AtomicU64::new(0),
+            last_steal_ms: AtomicU64::new(0),
+        }
+    }
+
+    fn begin(&self, work: SegmentWork, now_ms: u64) {
+        self.parent_index
+            .store(work.parent_index, Ordering::Release);
+        self.current.store(work.start, Ordering::Release);
+        self.desired_end.store(work.end, Ordering::Release);
+        self.window_bytes.store(0, Ordering::Release);
+        self.last_progress_ms.store(now_ms, Ordering::Release);
+        self.active.store(true, Ordering::Release);
+    }
+
+    fn finish(&self) {
+        self.active.store(false, Ordering::Release);
+        self.parent_index.store(usize::MAX, Ordering::Release);
+        self.window_bytes.store(0, Ordering::Release);
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct DownloadRequest {
@@ -791,8 +842,6 @@ impl DownloadEngine {
     ) -> Result<()> {
         let chunk_size = adaptive_chunk_size(total, connections);
         let chunk_count = total.div_ceil(chunk_size) as usize;
-        let worker_count = connections.min(chunk_count).max(1);
-        let next_chunk = Arc::new(AtomicUsize::new(0));
         let partial = partial_path(&request.destination);
 
         fs::create_dir_all(chunk_directory(&request.destination)).await?;
@@ -847,9 +896,37 @@ impl DownloadEngine {
                 }
             }),
         });
+
+        let mut initial_work = VecDeque::new();
+        let mut initial_parts = Vec::with_capacity(chunk_count);
+        for index in 0..chunk_count {
+            if journal.completed[index] {
+                initial_parts.push(AtomicUsize::new(0));
+                continue;
+            }
+            let (start, end, _) = chunk_bounds(index, chunk_size, total);
+            initial_work.push_back(SegmentWork {
+                parent_index: index,
+                start,
+                end,
+            });
+            initial_parts.push(AtomicUsize::new(1));
+        }
+
+        let remaining_parts = Arc::new(AtomicUsize::new(initial_work.len()));
+        let parent_parts = Arc::new(initial_parts);
+        let work_queue = Arc::new(Mutex::new(initial_work));
+        let notify = Arc::new(Notify::new());
         let progress = Arc::new(AtomicU64::new(resumed));
         let journal = Arc::new(Mutex::new(journal));
         let sources = Arc::new(sources);
+        let worker_count = connections.min(chunk_count).max(1);
+        let worker_states = Arc::new(
+            (0..worker_count)
+                .map(|_| AdaptiveWorkerState::new())
+                .collect::<Vec<_>>(),
+        );
+        let transfer_started = Instant::now();
 
         let _ = events
             .send(DownloadEvent::Started {
@@ -860,6 +937,186 @@ impl DownloadEngine {
             })
             .await;
 
+        if remaining_parts.load(Ordering::Acquire) == 0 {
+            let output = fs::OpenOptions::new().write(true).open(&partial).await?;
+            output.sync_all().await?;
+            clear_segment_journal(&request.destination).await;
+            cleanup_chunk_artifacts(&request.destination).await?;
+            return finish_download(&request, &partial, total, Some(total), &events).await;
+        }
+
+        let scheduler_done = Arc::new(AtomicBool::new(false));
+        let scheduler = {
+            let queue = work_queue.clone();
+            let notify = notify.clone();
+            let states = worker_states.clone();
+            let parts = parent_parts.clone();
+            let outstanding = remaining_parts.clone();
+            let sender = events.clone();
+            let done = scheduler_done.clone();
+            tokio::spawn(async move {
+                let mut ewma_rates = vec![0_f64; states.len()];
+                let mut interval =
+                    tokio::time::interval(Duration::from_millis(RANGE_STEAL_INTERVAL_MS));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+                while !done.load(Ordering::Acquire) {
+                    interval.tick().await;
+                    if outstanding.load(Ordering::Acquire) == 0 {
+                        break;
+                    }
+
+                    let now_ms = transfer_started.elapsed().as_millis() as u64;
+                    for (index, state) in states.iter().enumerate() {
+                        let bytes = state.window_bytes.swap(0, Ordering::AcqRel);
+                        let rate = bytes as f64 * 1000.0 / RANGE_STEAL_INTERVAL_MS as f64;
+                        if rate > 0.0 {
+                            ewma_rates[index] = if ewma_rates[index] > 0.0 {
+                                0.35 * rate + 0.65 * ewma_rates[index]
+                            } else {
+                                rate
+                            };
+                        }
+                    }
+
+                    if !queue.lock().await.is_empty() {
+                        continue;
+                    }
+                    let idle_workers = states
+                        .iter()
+                        .filter(|state| !state.active.load(Ordering::Acquire))
+                        .count();
+                    if idle_workers == 0 {
+                        continue;
+                    }
+
+                    let mut victim = None::<(usize, u64, f64, bool)>;
+                    let positive_rates = ewma_rates
+                        .iter()
+                        .copied()
+                        .filter(|rate| *rate > 0.0)
+                        .collect::<Vec<_>>();
+                    let median_rate = if positive_rates.is_empty() {
+                        0.0
+                    } else {
+                        let mut sorted = positive_rates;
+                        sorted.sort_by(|left, right| left.total_cmp(right));
+                        sorted[sorted.len() / 2]
+                    };
+
+                    for (index, state) in states.iter().enumerate() {
+                        if !state.active.load(Ordering::Acquire) {
+                            continue;
+                        }
+                        let current = state.current.load(Ordering::Acquire);
+                        let end = state.desired_end.load(Ordering::Acquire);
+                        if current > end {
+                            continue;
+                        }
+                        let remaining = end - current + 1;
+                        if remaining < MIN_STEAL_TAIL_BYTES.saturating_mul(2) {
+                            continue;
+                        }
+                        let last_steal = state.last_steal_ms.load(Ordering::Acquire);
+                        if now_ms.saturating_sub(last_steal) < RANGE_STEAL_COOLDOWN_MS {
+                            continue;
+                        }
+                        let last_progress = state.last_progress_ms.load(Ordering::Acquire);
+                        let stalled = now_ms.saturating_sub(last_progress) >= 1_500;
+                        let rate = ewma_rates[index];
+                        let eta = if stalled || rate <= 0.0 {
+                            f64::INFINITY
+                        } else {
+                            remaining as f64 / rate
+                        };
+                        let degraded = median_rate > 0.0 && rate > 0.0 && rate < median_rate * 0.60;
+                        let score = if stalled {
+                            f64::INFINITY
+                        } else if degraded {
+                            eta * 1.5
+                        } else {
+                            eta
+                        };
+                        if victim
+                            .as_ref()
+                            .is_none_or(|(_, _, best_score, _)| score > *best_score)
+                        {
+                            victim = Some((index, remaining, score, stalled || degraded));
+                        }
+                    }
+
+                    let Some((victim_index, remaining, _, degraded)) = victim else {
+                        continue;
+                    };
+                    let state = &states[victim_index];
+                    let current = state.current.load(Ordering::Acquire);
+                    let old_end = state.desired_end.load(Ordering::Acquire);
+                    if current > old_end || old_end - current + 1 != remaining {
+                        continue;
+                    }
+
+                    let half = remaining / 2;
+                    let mut tail_start = current.saturating_add(half);
+                    tail_start = tail_start
+                        .div_ceil(RANGE_STEAL_ALIGNMENT)
+                        .saturating_mul(RANGE_STEAL_ALIGNMENT);
+                    if tail_start <= current
+                        || tail_start > old_end
+                        || old_end - tail_start + 1 < MIN_STEAL_TAIL_BYTES
+                    {
+                        continue;
+                    }
+                    let new_end = tail_start - 1;
+                    if new_end - current + 1 < MIN_STEAL_TAIL_BYTES {
+                        continue;
+                    }
+
+                    let parent = state.parent_index.load(Ordering::Acquire);
+                    if parent >= parts.len() {
+                        continue;
+                    }
+
+                    parts[parent].fetch_add(1, Ordering::AcqRel);
+                    if state
+                        .desired_end
+                        .compare_exchange(old_end, new_end, Ordering::AcqRel, Ordering::Acquire)
+                        .is_err()
+                    {
+                        parts[parent].fetch_sub(1, Ordering::AcqRel);
+                        continue;
+                    }
+
+                    outstanding.fetch_add(1, Ordering::AcqRel);
+                    queue.lock().await.push_back(SegmentWork {
+                        parent_index: parent,
+                        start: tail_start,
+                        end: old_end,
+                    });
+                    state.last_steal_ms.store(now_ms, Ordering::Release);
+                    notify.notify_one();
+
+                    let _ = sender.try_send(DownloadEvent::Diagnostic {
+                        event: "http.range_stolen",
+                        detail: serde_json::json!({
+                            "victimWorker": victim_index,
+                            "parentChunk": parent,
+                            "headEnd": new_end,
+                            "tailStart": tail_start,
+                            "tailEnd": old_end,
+                            "stolenBytes": old_end - tail_start + 1,
+                            "victimBytesPerSecond": ewma_rates[victim_index] as u64,
+                            "medianBytesPerSecond": median_rate as u64,
+                            "reason": if degraded {
+                                "degraded_or_stalled_connection"
+                            } else {
+                                "tail_equalization"
+                            }
+                        }),
+                    });
+                }
+            })
+        };
+
         let mut jobs = FuturesUnordered::new();
         for worker_index in 0..worker_count {
             let engine = self.clone();
@@ -869,10 +1126,14 @@ impl DownloadEngine {
             let partial = partial.clone();
             let sender = events.clone();
             let shared = progress.clone();
-            let cursor = next_chunk.clone();
             let limiters = request.limiters.clone();
             let journal = journal.clone();
             let sources = sources.clone();
+            let queue = work_queue.clone();
+            let notify = notify.clone();
+            let outstanding = remaining_parts.clone();
+            let parts = parent_parts.clone();
+            let states = worker_states.clone();
             jobs.push(async move {
                 if worker_index > 0 {
                     tokio::time::sleep(Duration::from_millis(
@@ -882,29 +1143,39 @@ impl DownloadEngine {
                 }
 
                 loop {
-                    let index = cursor.fetch_add(1, Ordering::Relaxed);
-                    if index >= chunk_count {
-                        break;
-                    }
-                    if journal.lock().await.completed[index] {
-                        continue;
-                    }
+                    let work = loop {
+                        if let Some(work) = queue.lock().await.pop_front() {
+                            break work;
+                        }
+                        if outstanding.load(Ordering::Acquire) == 0 {
+                            return Result::<()>::Ok(());
+                        }
+                        states[worker_index].finish();
+                        tokio::select! {
+                            _ = notify.notified() => {}
+                            _ = tokio::time::sleep(Duration::from_millis(250)) => {}
+                        }
+                    };
 
-                    let (start, end, expected) = chunk_bounds(index, chunk_size, total);
+                    let now_ms = transfer_started.elapsed().as_millis() as u64;
+                    let state = &states[worker_index];
+                    state.begin(work, now_ms);
+
                     let mut last_error = None;
                     let mut completed = false;
                     for source_offset in 0..sources.len() {
-                        let source_index = (index + worker_index + source_offset) % sources.len();
+                        let source_index =
+                            (work.parent_index + worker_index + source_offset) % sources.len();
                         let source = &sources[source_index];
                         let source_headers = headers_for_source(&primary_url, source, &headers);
                         let attempt_started = Instant::now();
-                        let range = format!("bytes={start}-{end}");
+                        let range = format!("bytes={}-{}", work.start, work.end);
                         let (response, used_http3, transport_attempts) = match engine
                             .send_range_with_fallback(
                                 source,
                                 &source_headers,
                                 &range,
-                                Some((start, end, total)),
+                                Some((work.start, work.end, total)),
                                 prefer_http3,
                             )
                             .await
@@ -917,8 +1188,10 @@ impl DownloadEngine {
                         };
                         if response.status() != StatusCode::PARTIAL_CONTENT {
                             last_error = Some(anyhow::anyhow!(
-                                "server stopped supporting byte ranges: status {} for bytes={start}-{end}",
-                                response.status()
+                                "server stopped supporting byte ranges: status {} for bytes={}-{}",
+                                response.status(),
+                                work.start,
+                                work.end
                             ));
                             continue;
                         }
@@ -928,11 +1201,15 @@ impl DownloadEngine {
                             .and_then(|value| value.to_str().ok())
                             .and_then(content_range_parts)
                             .is_some_and(|(actual_start, actual_end, actual_total)| {
-                                actual_start == start && actual_end == end && actual_total == total
+                                actual_start == work.start
+                                    && actual_end == work.end
+                                    && actual_total == total
                             })
                         {
                             last_error = Some(anyhow::anyhow!(
-                                "invalid content-range for bytes={start}-{end}"
+                                "invalid content-range for bytes={}-{}",
+                                work.start,
+                                work.end
                             ));
                             continue;
                         }
@@ -942,40 +1219,62 @@ impl DownloadEngine {
                             .write(true)
                             .open(&partial)
                             .await?;
-                        file.seek(std::io::SeekFrom::Start(start)).await?;
+                        file.seek(std::io::SeekFrom::Start(work.start)).await?;
                         let mut stream = response.bytes_stream();
                         let mut downloaded = 0_u64;
+                        let mut absolute = work.start;
                         let mut attempt_error = None;
+
                         while let Some(chunk) = stream.next().await {
                             match chunk {
                                 Ok(chunk) => {
-                                    apply_bandwidth_limits(&limiters, chunk.len()).await;
-                                    if downloaded + chunk.len() as u64 > expected {
-                                        attempt_error = Some(anyhow::anyhow!(
-                                            "segment exceeded expected length"
-                                        ));
+                                    let desired_end = state.desired_end.load(Ordering::Acquire);
+                                    if absolute > desired_end {
                                         break;
                                     }
-                                    if let Err(error) = file.write_all(&chunk).await {
+                                    let allowed = (desired_end - absolute + 1)
+                                        .min(chunk.len() as u64)
+                                        as usize;
+                                    if allowed == 0 {
+                                        break;
+                                    }
+                                    apply_bandwidth_limits(&limiters, allowed).await;
+                                    if let Err(error) = file.write_all(&chunk[..allowed]).await {
                                         attempt_error = Some(error.into());
                                         break;
                                     }
-                                    downloaded += chunk.len() as u64;
+                                    downloaded += allowed as u64;
+                                    absolute += allowed as u64;
+                                    let now_ms = transfer_started.elapsed().as_millis() as u64;
+                                    state.current.store(absolute, Ordering::Release);
+                                    state
+                                        .window_bytes
+                                        .fetch_add(allowed as u64, Ordering::Relaxed);
+                                    state.last_progress_ms.store(now_ms, Ordering::Release);
                                     let received =
-                                        shared.fetch_add(chunk.len() as u64, Ordering::Relaxed)
-                                            + chunk.len() as u64;
+                                        shared.fetch_add(allowed as u64, Ordering::Relaxed)
+                                            + allowed as u64;
                                     let _ = sender.try_send(DownloadEvent::Progress {
                                         received,
                                         total: Some(total),
                                     });
+                                    if allowed < chunk.len()
+                                        || absolute > state.desired_end.load(Ordering::Acquire)
+                                    {
+                                        break;
+                                    }
                                 }
                                 Err(error) => {
-                                    attempt_error =
-                                        Some(anyhow::anyhow!("segmented network stream failed: {error}"));
+                                    attempt_error = Some(anyhow::anyhow!(
+                                        "segmented network stream failed: {error}"
+                                    ));
                                     break;
                                 }
                             }
                         }
+
+                        let final_end = state.desired_end.load(Ordering::Acquire);
+                        let expected = final_end - work.start + 1;
                         if downloaded != expected && attempt_error.is_none() {
                             attempt_error = Some(anyhow::anyhow!(
                                 "incomplete segment: received {downloaded} of {expected} bytes"
@@ -985,23 +1284,40 @@ impl DownloadEngine {
                             if downloaded > 0 {
                                 shared.fetch_sub(downloaded, Ordering::Relaxed);
                             }
+                            state.current.store(work.start, Ordering::Release);
                             last_error = Some(error);
                             continue;
                         }
                         file.flush().await?;
 
-                        {
-                            let mut state = journal.lock().await;
-                            state.completed[index] = true;
-                            persist_segment_journal(&destination, &mut state).await?;
+                        let remaining_for_parent =
+                            parts[work.parent_index].fetch_sub(1, Ordering::AcqRel) - 1;
+                        if remaining_for_parent == 0 {
+                            let mut journal_state = journal.lock().await;
+                            journal_state.completed[work.parent_index] = true;
+                            persist_segment_journal(&destination, &mut journal_state).await?;
                         }
+
+                        let left = outstanding.fetch_sub(1, Ordering::AcqRel) - 1;
+                        if left == 0 {
+                            notify.notify_waiters();
+                        } else {
+                            notify.notify_one();
+                        }
+
                         let elapsed_ms = attempt_started.elapsed().as_millis() as u64;
+                        let final_end = state.desired_end.load(Ordering::Acquire);
+                        let completed_bytes = final_end - work.start + 1;
+                        let original_bounds = chunk_bounds(work.parent_index, chunk_size, total);
                         let _ = sender.try_send(DownloadEvent::Diagnostic {
                             event: "http.segment_completed",
                             detail: serde_json::json!({
-                                "chunkIndex": index,
+                                "chunkIndex": work.parent_index,
                                 "chunkCount": chunk_count,
-                                "bytes": expected,
+                                "rangeStart": work.start,
+                                "rangeEnd": final_end,
+                                "splitRange": work.start != original_bounds.0 || final_end != original_bounds.1,
+                                "bytes": completed_bytes,
                                 "sourceIndex": source_index,
                                 "sourceCount": sources.len(),
                                 "attempts": source_offset + 1,
@@ -1010,9 +1326,9 @@ impl DownloadEngine {
                                 "http3Used": used_http3,
                                 "elapsedMs": elapsed_ms,
                                 "bytesPerSecond": if elapsed_ms > 0 {
-                                    expected.saturating_mul(1000) / elapsed_ms
+                                    completed_bytes.saturating_mul(1000) / elapsed_ms
                                 } else {
-                                    expected
+                                    completed_bytes
                                 },
                                 "transport": protocol
                             }),
@@ -1021,18 +1337,31 @@ impl DownloadEngine {
                         break;
                     }
 
+                    state.finish();
                     if !completed {
                         return Err(last_error.unwrap_or_else(|| {
-                            anyhow::anyhow!("all verified mirrors failed for segment {index}")
+                            anyhow::anyhow!(
+                                "all verified mirrors failed for segment {}",
+                                work.parent_index
+                            )
                         }));
                     }
                 }
-                Result::<()>::Ok(())
             });
         }
 
+        let mut worker_error = None;
         while let Some(result) = jobs.next().await {
-            result?;
+            if let Err(error) = result {
+                worker_error = Some(error);
+                break;
+            }
+        }
+        scheduler_done.store(true, Ordering::Release);
+        notify.notify_waiters();
+        scheduler.abort();
+        if let Some(error) = worker_error {
+            return Err(error);
         }
 
         {
