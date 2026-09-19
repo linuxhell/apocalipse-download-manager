@@ -196,10 +196,11 @@ function linkHost(value) {
   return authority.split(":")[0].toLowerCase();
 }
 
-function isLocalLinkTarget(value) {
+async function isLocalLinkTarget(value) {
   const host = linkHost(value);
   const ownHost = linkHost(linkLocalIdentity);
-  return host === "127.0.0.1" || host === "localhost" || host === "::1" || Boolean(ownHost && host === ownHost);
+  if (host === "127.0.0.1" || host === "localhost" || host === "::1" || Boolean(ownHost && host === ownHost)) return true;
+  return invoke("is_local_link_target", { id: value });
 }
 
 function updateLinkTransferButtons() {
@@ -343,7 +344,7 @@ document.querySelector("#link-connect").onclick = async () => {
   linkRemoteTransportToken = "";
   linkLocalAccountSession = false;
   try {
-    if (isLocalLinkTarget(id)) {
+    if (await isLocalLinkTarget(id)) {
       linkRemoteId = id;
       linkLocalAccountSession = true;
       await openRemoteLink("");

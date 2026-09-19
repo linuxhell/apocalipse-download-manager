@@ -1259,10 +1259,11 @@ function linkHost(value) {
   if (authority === "::1" || (authority.match(/:/g) || []).length > 1) return authority.toLowerCase();
   return authority.split(":")[0].toLowerCase();
 }
-function isLocalLinkTarget(value) {
+async function isLocalLinkTarget(value) {
   const host = linkHost(value);
   const ownHost = linkHost(linkLocalIdentity);
-  return host === "127.0.0.1" || host === "localhost" || host === "::1" || Boolean(ownHost && host === ownHost);
+  if (host === "127.0.0.1" || host === "localhost" || host === "::1" || Boolean(ownHost && host === ownHost)) return true;
+  return invoke("is_local_link_target", { id: value });
 }
 function updateLinkTransferButtons() {
   document.querySelector("#link-upload-local").disabled = !linkSelectedLocal || !linkRemoteId || !linkRemotePath || !linkRemoteAllowWrite;
@@ -1369,7 +1370,7 @@ document.querySelector("#link-connect").onclick = async () => {
   linkRemoteTransportToken = "";
   linkLocalAccountSession = false;
   try {
-    if (isLocalLinkTarget(id)) {
+    if (await isLocalLinkTarget(id)) {
       linkRemoteId = id;
       linkLocalAccountSession = true;
       await openRemoteLink("");
@@ -2266,7 +2267,7 @@ document.querySelector("#analyze").onclick = async () => {
     else if (plan.primary === "NM3u8DlRe") {
       const select = document.querySelector("#media-format");
       select.replaceChildren();
-      option(select, "original", pendingMediaKind === "audio" ? "Original · MP4/M4A" : t("bestQuality"));
+      option(select, "original", pendingMediaKind === "audio" ? "Original (MP4/M4A)" : t("bestQuality"));
       for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
         option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
       showCapturedPreview({ title: pendingTitle || "HLS", thumbnail: pendingThumbnail, kind: "M3U8 / HLS", duration: pendingDuration, size: pendingExpectedSize, showFormats: true });
