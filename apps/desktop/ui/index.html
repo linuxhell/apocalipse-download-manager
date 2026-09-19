@@ -142,16 +142,14 @@
       </section>
       <section id="about-panel" class="about-page" hidden>
         <article class="about-card">
-          <img id="about-creator-photo" class="about-creator-photo" alt="Juliano" hidden />
-          <div id="about-photo-missing" class="about-media-missing">
-            <span data-i18n="aboutPhotoMissing">Creator photo is not configured yet.</span>
-            <button id="about-select-photo" type="button" data-i18n="aboutSelectPhoto">Choose photo</button>
-          </div>
+          <img id="about-creator-photo" class="about-creator-photo" alt="Juliano" />
           <p class="about-creator-line" data-i18n="aboutCreator">Creator: Juliano - Brazil - Sátia Mortadela</p>
-          <audio id="about-audio" controls preload="metadata" hidden></audio>
-          <div id="about-audio-missing" class="about-media-missing">
-            <span data-i18n="aboutAudioMissing">About-page music is not configured yet.</span>
-            <button id="about-select-audio" type="button" data-i18n="aboutSelectAudio">Choose music</button>
+          <audio id="about-audio" preload="auto"></audio>
+          <div class="about-audio-controls">
+            <button id="about-play-pause" type="button" data-i18n="aboutPause">Pause</button>
+            <button id="about-stop" type="button" data-i18n="aboutStop">Stop</button>
+            <label for="about-volume" data-i18n="aboutVolume">Volume</label>
+            <input id="about-volume" type="range" min="0" max="1" step="0.05" value="0.7" />
           </div>
         </article>
       </section>

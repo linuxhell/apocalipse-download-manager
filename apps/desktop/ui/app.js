@@ -28,7 +28,7 @@ const catalogs = {
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
     toolbox: "TOOLBOX", update: "Update", mediaPlayer: "VLC / mpv / media player",
     donatePaypal: "Donate via PayPal",
-    about: "About", aboutDescription: "About the creator of Apocalipse Download Manager.", aboutCreator: "Creator: Juliano - Brazil - Sátia Mortadela", aboutPhotoMissing: "Creator photo is not configured yet.", aboutSelectPhoto: "Choose photo", aboutAudioMissing: "About-page music is not configured yet.", aboutSelectAudio: "Choose music",
+    about: "About", aboutDescription: "About the creator of Apocalipse Download Manager.", aboutCreator: "Creator: Juliano - Brazil - Sátia Mortadela", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume",
     overview: "OVERVIEW",
     engineReady: "Engine ready",
     addDownload: "Add download",
@@ -236,7 +236,7 @@ const catalogs = {
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
     toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", mediaPlayer: "VLC / mpv / reprodutor de mídia",
     donatePaypal: "Faça uma doação pelo PayPal",
-    about: "Sobre", aboutDescription: "Sobre o criador do Apocalipse Download Manager.", aboutCreator: "Criador: Juliano - Brasil - Sátia Mortadela", aboutPhotoMissing: "A foto do criador ainda não foi configurada.", aboutSelectPhoto: "Escolher foto", aboutAudioMissing: "A música da página Sobre ainda não foi configurada.", aboutSelectAudio: "Escolher música",
+    about: "Sobre", aboutDescription: "Sobre o criador do Apocalipse Download Manager.", aboutCreator: "Criador: Juliano - Brasil - Sátia Mortadela", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume",
     overview: "VISÃO GERAL",
     engineReady: "Motor pronto",
     addDownload: "Adicionar download",
@@ -444,7 +444,7 @@ const catalogs = {
     settingsDescription: "配置外观、集成、网络和应用行为。",
     toolbox: "工具箱", update: "更新", mediaPlayer: "VLC / mpv / 媒体播放器",
     donatePaypal: "通过 PayPal 捐赠",
-    about: "关于", aboutDescription: "关于 Apocalipse Download Manager 的创作者。", aboutCreator: "创作者：Juliano - 巴西 - Sátia Mortadela", aboutPhotoMissing: "尚未配置创作者照片。", aboutSelectPhoto: "选择照片", aboutAudioMissing: "尚未配置“关于”页面音乐。", aboutSelectAudio: "选择音乐",
+    about: "关于", aboutDescription: "关于 Apocalipse Download Manager 的创作者。", aboutCreator: "创作者：Juliano - 巴西 - Sátia Mortadela", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量",
     overview: "概览",
     engineReady: "引擎已就绪",
     addDownload: "添加下载",
@@ -1130,54 +1130,34 @@ document.querySelector("#import-list").onclick = async (event) => {
 };
 async function applyAboutMedia(media) {
   const photo = document.querySelector("#about-creator-photo");
-  const photoMissing = document.querySelector("#about-photo-missing");
   const audio = document.querySelector("#about-audio");
-  const audioMissing = document.querySelector("#about-audio-missing");
-  const hasPhoto = Boolean(media?.photoDataUrl);
-  const hasAudio = Boolean(media?.audioDataUrl);
-  if (hasPhoto) photo.src = media.photoDataUrl;
-  else photo.removeAttribute("src");
-  photo.hidden = !hasPhoto;
-  photoMissing.hidden = hasPhoto;
-  if (hasAudio) {
-    if (audio.src !== media.audioDataUrl) {
-      audio.src = media.audioDataUrl;
-      audio.load();
-    }
-  } else {
-    audio.pause();
-    audio.removeAttribute("src");
+  if (media?.photoDataUrl) photo.src = media.photoDataUrl;
+  if (media?.audioDataUrl && audio.src !== media.audioDataUrl) {
+    audio.src = media.audioDataUrl;
     audio.load();
   }
-  audio.hidden = !hasAudio;
-  audioMissing.hidden = hasAudio;
 }
 
 async function loadAboutMedia() {
   await applyAboutMedia(await invoke("get_about_media"));
 }
 
-document.querySelector("#about-select-photo").onclick = async () => {
-  try {
-    await applyAboutMedia(await invoke("select_about_photo"));
-  } catch (error) {
-    if (String(error) !== "cancelled") console.error(error);
-  }
+const aboutAudio = document.querySelector("#about-audio");
+const aboutPlayPause = document.querySelector("#about-play-pause");
+aboutAudio.volume = Number(document.querySelector("#about-volume").value);
+aboutPlayPause.onclick = () => {
+  if (aboutAudio.paused) aboutAudio.play().catch(() => {});
+  else aboutAudio.pause();
 };
-
-document.querySelector("#about-select-audio").onclick = async () => {
-  try {
-    const media = await invoke("select_about_audio");
-    await applyAboutMedia(media);
-    if (activePage === "about" && media.audioDataUrl) {
-      const audio = document.querySelector("#about-audio");
-      audio.currentTime = 0;
-      audio.play().catch(() => {});
-    }
-  } catch (error) {
-    if (String(error) !== "cancelled") console.error(error);
-  }
+document.querySelector("#about-stop").onclick = () => {
+  aboutAudio.pause();
+  aboutAudio.currentTime = 0;
 };
+document.querySelector("#about-volume").oninput = (event) => {
+  aboutAudio.volume = Number(event.target.value);
+};
+aboutAudio.onplay = () => { aboutPlayPause.textContent = t("aboutPause"); };
+aboutAudio.onpause = () => { aboutPlayPause.textContent = t("aboutPlay"); };
 
 loadAboutMedia().catch(console.error);
 
@@ -1201,8 +1181,7 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector("#language-panel").hidden = activePage !== "language";
     document.querySelector("#about-panel").hidden = activePage !== "about";
     document.querySelector("#add").hidden = activePage === "about";
-    const aboutAudio = document.querySelector("#about-audio");
-    if (activePage === "about" && !aboutAudio.hidden && aboutAudio.src) {
+    if (activePage === "about" && aboutAudio.src) {
       aboutAudio.currentTime = 0;
       aboutAudio.play().catch(() => {});
     } else {
@@ -2287,7 +2266,7 @@ document.querySelector("#analyze").onclick = async () => {
     else if (plan.primary === "NM3u8DlRe") {
       const select = document.querySelector("#media-format");
       select.replaceChildren();
-      option(select, "", t("bestQuality"));
+      option(select, "original", pendingMediaKind === "audio" ? "Original · MP4/M4A" : t("bestQuality"));
       for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
         option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
       showCapturedPreview({ title: pendingTitle || "HLS", thumbnail: pendingThumbnail, kind: "M3U8 / HLS", duration: pendingDuration, size: pendingExpectedSize, showFormats: true });

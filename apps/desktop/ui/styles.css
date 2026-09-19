@@ -1304,9 +1304,19 @@ nav { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
   line-height: 1.4;
 }
 #about-audio {
+  display: none;
+}
+.about-audio-controls {
   width: min(520px, 100%);
+  display: grid;
+  grid-template-columns: auto auto auto minmax(120px, 1fr);
+  align-items: center;
+  gap: 12px;
   accent-color: var(--accent);
 }
+.about-audio-controls button { min-height: 42px; padding: 9px 18px; }
+.about-audio-controls label { font-weight: 700; }
+.about-audio-controls input { width: 100%; }
 
 /* Dedicated Apocalipse Link window: maximized native window, same selected theme. */
 body.link-window {
@@ -1367,18 +1377,6 @@ body.link-window #link-share-list {
   }
 }
 
-.about-media-missing {
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:12px;
-  flex-wrap:wrap;
-  min-height:72px;
-  padding:14px 18px;
-  border:1px dashed var(--border);
-  border-radius:var(--corner-radius);
-  text-align:center;
+@media (max-width: 620px) {
+  .about-audio-controls { grid-template-columns: 1fr 1fr; }
 }
-.about-media-missing[hidden] { display:none; }
-.about-media-missing span { opacity:.82; }
-.about-media-missing button { min-height:38px; padding:8px 16px; }
