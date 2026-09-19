@@ -73,12 +73,15 @@
     return versions.at(-1) || document.querySelector("#extension-version")?.textContent?.match(/[0-9]+(?:\.[0-9]+)+/)?.[0] || "—";
   }
   async function context() {
-    const [events, tasks] = await Promise.all([
+    const [events, engineEvents, tasks] = await Promise.all([
       invoke("read_general_log").catch(() => ""),
+      invoke("read_ai_diagnostics").catch(() => []),
       invoke("list_downloads").catch(() => []),
     ]);
     return {
-      locale: language(), events, downloads: tasks, corrections, messages,
+      // The application-selected language is authoritative. Apocalipse AI must
+      // never switch output language by guessing from the user's sentence.
+      locale: language(), events, engineEvents, downloads: tasks, corrections, messages,
       appVersion: document.querySelector("#app-version")?.textContent?.replace(/^v/, "") || "—",
       extensionVersion: parseExtensionVersion(events),
     };
