@@ -44,6 +44,7 @@ async fn main() -> Result<()> {
         method: "GET".to_owned(),
         body: None,
         headers: Vec::new(),
+        expected_size: None,
         expected_sha256: None,
         limiters: Vec::new(),
     };
