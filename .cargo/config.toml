@@ -1,0 +1,5 @@
+# reqwest 0.12 gates its HTTP/3 API behind this cfg in addition to the Cargo
+# feature. Keep the opt-in explicit and repository-wide so release/CI builds
+# exercise the same transport code.
+[build]
+rustflags = ["--cfg", "reqwest_unstable"]
