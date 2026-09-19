@@ -78,16 +78,31 @@ test("explicit Link shares remain visible even if metadata is temporarily unavai
 });
 
 test("Link remote guidance follows the selected language", () => {
-  assert.match(html, /data-i18n="linkCurrentPassword"/);
   assert.match(html, /data-i18n="linkAccessNotice"/);
   assert.match(html, /data-i18n="linkRemoteAuthPlan"/);
   assert.match(html, /data-i18n="linkRemoteAccountFormats"/);
   assert.match(html, /data-i18n="linkRemoteSecurityNotice"/);
-  assert.equal((app.match(/linkCurrentPassword:/g) || []).length, 3);
   assert.equal((app.match(/linkRemoteAuthPlan:/g) || []).length, 3);
   assert.equal((app.match(/linkRemoteAccountFormats:/g) || []).length, 3);
   assert.equal((app.match(/linkRemoteSecurityNotice:/g) || []).length, 3);
   assert.doesNotMatch(app, /linkWindowsLoginNotice:/);
   assert.doesNotMatch(app, /Authorized access shows all drives and folders/);
   assert.doesNotMatch(app, /O acesso autorizado mostra todas as unidades e pastas/);
+});
+
+test("Link uses system-account fields instead of a user-facing temporary password", () => {
+  assert.match(html, /id="link-remote-username"/);
+  assert.match(html, /data-i18n="linkRemoteUsername"/);
+  assert.match(html, /data-i18n="linkRemoteSystemPassword"/);
+  assert.doesNotMatch(html, /id="link-own-password"/);
+  assert.doesNotMatch(html, /id="link-new-password"/);
+  assert.doesNotMatch(html, /linkCurrentPassword/);
+  assert.doesNotMatch(html, /linkNewPassword/);
+  assert.equal((app.match(/linkRemoteUsername:/g) || []).length, 3);
+  assert.equal((app.match(/linkRemoteSystemPassword:/g) || []).length, 3);
+  assert.equal((app.match(/linkCredentialsRequired:/g) || []).length, 3);
+  assert.equal((app.match(/linkNativeAuthPending:/g) || []).length, 3);
+  assert.match(app, /const username = document\.querySelector\("#link-remote-username"\)\.value\.trim\(\);/);
+  assert.match(app, /passwordField\.value = "";/);
+  assert.doesNotMatch(app, /linkRemotePassword/);
 });

@@ -74,7 +74,6 @@ const catalogs = {
     linkThisComputer: "This computer",
     linkRemoteControl: "Remote connection",
     linkRemoteId: "Remote IP / host",
-    linkNewPassword: "New temporary Link password",
     linkAccessNotice: "Only explicitly shared files, folders and drives are exposed. Each share keeps its read-only or read/write permission.",
     linkConnect: "Connect",
     linkSelfTest: "Test on this PC",
@@ -92,10 +91,13 @@ const catalogs = {
     linkShareNotice: "Share a file, folder or mapped drive and choose its permission for it to appear in Apocalipse Link.",
     linkRemoteShareNotice: "Only files, folders and drives shared by the other user appear below.",
     linkNoShares: "No shared files, folders or drives yet. Share an item above to make it appear here.",
-    linkCurrentPassword: "Temporary Apocalipse Link password",
-    linkRemoteAuthPlan: "Secure remote access will use one login: IP/host + operating-system username + account password. Native system authentication is being prepared; the current build still uses the temporary Apocalipse Link password.",
+    linkRemoteUsername: "Operating-system username",
+    linkRemoteSystemPassword: "System account password",
+    linkCredentialsRequired: "Enter the remote IP/host, operating-system username and account password.",
+    linkNativeAuthPending: "System-account login is configured for the new secure Link protocol. This build will not send your system password through the legacy unencrypted Link transport.",
+    linkRemoteAuthPlan: "Remote access uses one login: IP/host + operating-system username + account password.",
     linkRemoteAccountFormats: "Windows examples: MicrosoftAccount\\name@hotmail.com, hotmail.com\\name, AzureAD\\name@company.com, PC-NAME\\name. Windows Hello PIN is not a remote password. The system password will not be saved.",
-    linkRemoteSecurityNotice: "Remote access will only be enabled after encrypted transport and native account authentication are active. Only explicitly shared items remain visible, with their read-only or read/write permission.",
+    linkRemoteSecurityNotice: "The system password is never saved. It must only be used with encrypted native authentication. Only explicitly shared items remain visible, with their read-only or read/write permission.",
     linkShareFile: "Share file", linkShareFolder: "Share folder or drive", linkReadOnly: "Read only", linkReadWrite: "Read and write", linkStopSharing: "Stop sharing",
     linkDelete: "Delete",
     linkDeleteConfirm: "Permanently delete {name}?",
@@ -276,7 +278,6 @@ const catalogs = {
     linkThisComputer: "Este computador",
     linkRemoteControl: "Conexão remota",
     linkRemoteId: "IP / host remoto",
-    linkNewPassword: "Nova senha temporária do Link",
     linkAccessNotice: "Somente arquivos, pastas e unidades compartilhados explicitamente ficam expostos. Cada compartilhamento mantém sua permissão de Somente leitura ou Leitura e gravação.",
     linkConnect: "Conectar",
     linkSelfTest: "Testar neste PC",
@@ -294,10 +295,13 @@ const catalogs = {
     linkShareNotice: "Compartilhe um arquivo, pasta ou unidade mapeada e escolha a permissão para que apareça no Apocalipse Link.",
     linkRemoteShareNotice: "Abaixo aparecem somente arquivos, pastas e unidades compartilhados pelo outro usuário.",
     linkNoShares: "Nenhum arquivo, pasta ou unidade foi compartilhado. Compartilhe um item acima para ele aparecer aqui.",
-    linkCurrentPassword: "Senha temporária do Apocalipse Link",
-    linkRemoteAuthPlan: "O acesso remoto seguro usará um único login: IP/host + usuário do sistema operacional + senha da conta. A autenticação nativa do sistema está sendo preparada; a versão atual ainda usa a senha temporária do Apocalipse Link.",
+    linkRemoteUsername: "Usuário do sistema operacional",
+    linkRemoteSystemPassword: "Senha da conta do sistema",
+    linkCredentialsRequired: "Informe o IP/host remoto, o usuário do sistema operacional e a senha da conta.",
+    linkNativeAuthPending: "O login pela conta do sistema está configurado para o novo protocolo seguro do Link. Esta versão não enviará sua senha do sistema pelo transporte legado não criptografado.",
+    linkRemoteAuthPlan: "O acesso remoto usa um único login: IP/host + usuário do sistema operacional + senha da conta.",
     linkRemoteAccountFormats: "Exemplos no Windows: MicrosoftAccount\\nome@hotmail.com, hotmail.com\\nome, AzureAD\\nome@empresa.com, NOME-PC\\nome. O PIN do Windows Hello não é uma senha remota. A senha do sistema não será salva.",
-    linkRemoteSecurityNotice: "O acesso remoto só será liberado quando o transporte criptografado e a autenticação nativa da conta estiverem ativos. Continuam visíveis apenas os itens compartilhados explicitamente, respeitando Somente leitura ou Leitura e gravação.",
+    linkRemoteSecurityNotice: "A senha do sistema nunca é salva. Ela só pode ser usada com autenticação nativa criptografada. Continuam visíveis apenas os itens compartilhados explicitamente, respeitando Somente leitura ou Leitura e gravação.",
     linkShareFile: "Compartilhar arquivo", linkShareFolder: "Compartilhar pasta ou unidade", linkReadOnly: "Somente leitura", linkReadWrite: "Leitura e gravação", linkStopSharing: "Parar de compartilhar",
     linkDelete: "Apagar",
     linkDeleteConfirm: "Apagar permanentemente {name}?",
@@ -477,7 +481,6 @@ const catalogs = {
     linkThisComputer: "此电脑",
     linkRemoteControl: "远程连接",
     linkRemoteId: "远程 IP / 主机",
-    linkNewPassword: "新的临时 Link 密码",
     linkAccessNotice: "只会公开明确共享的文件、文件夹和驱动器。每个共享项都保留只读或读写权限。",
     linkConnect: "连接",
     linkSelfTest: "在此电脑上测试",
@@ -495,10 +498,13 @@ const catalogs = {
     linkShareNotice: "共享文件、文件夹或映射驱动器并选择权限后，它才会显示在 Apocalipse Link 中。",
     linkRemoteShareNotice: "下方仅显示对方用户共享的文件、文件夹和驱动器。",
     linkNoShares: "尚未共享文件、文件夹或驱动器。请先在上方共享项目。",
-    linkCurrentPassword: "临时 Apocalipse Link 密码",
-    linkRemoteAuthPlan: "安全远程访问将使用一次登录：IP/主机 + 操作系统用户名 + 账户密码。原生系统身份验证正在准备中；当前版本仍使用临时 Apocalipse Link 密码。",
+    linkRemoteUsername: "操作系统用户名",
+    linkRemoteSystemPassword: "系统账户密码",
+    linkCredentialsRequired: "请输入远程 IP/主机、操作系统用户名和账户密码。",
+    linkNativeAuthPending: "系统账户登录已为新的安全 Link 协议配置。此版本不会通过旧的未加密 Link 传输发送系统密码。",
+    linkRemoteAuthPlan: "远程访问使用一次登录：IP/主机 + 操作系统用户名 + 账户密码。",
     linkRemoteAccountFormats: "Windows 示例：MicrosoftAccount\\name@hotmail.com、hotmail.com\\name、AzureAD\\name@company.com、PC-NAME\\name。Windows Hello PIN 不是远程密码。系统密码不会被保存。",
-    linkRemoteSecurityNotice: "只有在加密传输和原生账户身份验证启用后，才会开放远程访问。仍只显示明确共享的项目，并遵守只读或读写权限。",
+    linkRemoteSecurityNotice: "系统密码绝不会被保存，只能通过加密的原生身份验证使用。仍只显示明确共享的项目，并遵守只读或读写权限。",
     linkShareFile: "共享文件", linkShareFolder: "共享文件夹或驱动器", linkReadOnly: "只读", linkReadWrite: "读写", linkStopSharing: "停止共享",
     linkDelete: "删除",
     linkDeleteConfirm: "永久删除 {name}？",
@@ -1177,7 +1183,7 @@ document.querySelector("#clear-logs").onclick = async () => { await invoke("clea
 let linkLocalPath = "";
 let linkRemotePath = "";
 let linkRemoteId = "";
-let linkRemotePassword = "";
+let linkRemoteTransportToken = "";
 let linkSelectedLocal = null;
 let linkSelectedRemote = null;
 let linkRemoteAllowWrite = false;
@@ -1233,12 +1239,12 @@ async function openRemoteLink(path = "") {
   document.querySelector("#link-remote-path").textContent = path || t("linkDrives");
   const capabilities = linkSelfTestMode
     ? await invoke("get_local_link_capabilities", { path })
-    : await invoke("get_remote_link_capabilities", { id: linkRemoteId, password: linkRemotePassword, path });
+    : await invoke("get_remote_link_capabilities", { id: linkRemoteId, password: linkRemoteTransportToken, path });
   linkRemoteAllowWrite = Boolean(capabilities.allowWrite);
   updateLinkTransferButtons();
   const entries = linkSelfTestMode
     ? await invoke("list_local_link_files", { path })
-    : await invoke("list_remote_link_files", { id: linkRemoteId, password: linkRemotePassword, path });
+    : await invoke("list_remote_link_files", { id: linkRemoteId, password: linkRemoteTransportToken, path });
   renderLinkFiles("#link-remote-files", entries, openRemoteLink, (entry) => {
     linkSelectedRemote = entry;
     updateLinkTransferButtons();
@@ -1247,15 +1253,11 @@ async function openRemoteLink(path = "") {
 async function loadLinkIdentity() {
   const identity = await invoke("get_link_identity");
   document.querySelector("#link-own-id").value = identity.id;
-  document.querySelector("#link-own-password").value = identity.password;
   renderLinkShares(await invoke("list_link_shares"));
   await openLocalLink();
   return identity;
 }
 document.querySelector('[data-page="link"]').addEventListener("click", () => loadLinkIdentity().catch(console.error));
-document.querySelector("#link-new-password").onclick = async () => {
-  document.querySelector("#link-own-password").value = await invoke("regenerate_link_password");
-};
 async function refreshVisibleLinkPanels({ resetToRoot = false } = {}) {
   const localPath = resetToRoot ? "" : linkLocalPath;
   const remotePath = resetToRoot ? "" : linkRemotePath;
@@ -1280,21 +1282,27 @@ document.querySelector("#link-share-file").onclick = async () => { try { renderL
 document.querySelector("#link-share-folder").onclick = async () => { try { renderLinkShares(await invoke("add_link_share")); await refreshVisibleLinkPanels({ resetToRoot: true }); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
 document.querySelector("#link-connect").onclick = async () => {
   linkSelfTestMode = false;
-  linkRemoteId = document.querySelector("#link-remote-id").value.trim();
-  linkRemotePassword = document.querySelector("#link-remote-password").value.trim();
-  try {
-    await openRemoteLink();
-    document.querySelector("#link-status").textContent = t("linkConnected");
+  const id = document.querySelector("#link-remote-id").value.trim();
+  const username = document.querySelector("#link-remote-username").value.trim();
+  const passwordField = document.querySelector("#link-remote-password");
+  const systemPassword = passwordField.value;
+  if (!id || !username || !systemPassword) {
+    document.querySelector("#link-status").textContent = t("linkCredentialsRequired");
+    return;
   }
-  catch (error) { document.querySelector("#link-status").textContent = `${t("linkConnectionFailed")}: ${error}`; }
+  linkRemoteId = "";
+  linkRemoteTransportToken = "";
+  passwordField.value = "";
+  document.querySelector("#link-status").textContent = t("linkNativeAuthPending");
 };
 document.querySelector("#link-self-test").onclick = async () => {
   const identity = await loadLinkIdentity();
   linkSelfTestMode = true;
   linkRemoteId = `127.0.0.1:${identity.port}`;
-  linkRemotePassword = identity.password;
+  linkRemoteTransportToken = identity.password;
   document.querySelector("#link-remote-id").value = linkRemoteId;
-  document.querySelector("#link-remote-password").value = linkRemotePassword;
+  document.querySelector("#link-remote-username").value = "";
+  document.querySelector("#link-remote-password").value = "";
   try {
     await openRemoteLink("");
     document.querySelector("#link-status").textContent = t("linkConnected");
@@ -1305,7 +1313,7 @@ document.querySelector("#link-local-up").onclick = () => openLocalLink(linkParen
 document.querySelector("#link-remote-up").onclick = () => openRemoteLink(linkParent(linkRemotePath)).catch(console.error);
 document.querySelector("#link-delete-remote").onclick = async () => {
   if (!linkSelectedRemote || !window.confirm(t("linkDeleteConfirm").replace("{name}", linkSelectedRemote.name))) return;
-  await invoke("delete_remote_link_item", { id: linkRemoteId, password: linkRemotePassword, path: linkSelectedRemote.path });
+  await invoke("delete_remote_link_item", { id: linkRemoteId, password: linkRemoteTransportToken, path: linkSelectedRemote.path });
   await openRemoteLink(linkRemotePath);
 };
 document.querySelector("#link-download-remote").onclick = async () => {
@@ -1315,7 +1323,7 @@ document.querySelector("#link-download-remote").onclick = async () => {
   try {
     const destination = await invoke("download_remote_link_file", {
       id: linkRemoteId,
-      password: linkRemotePassword,
+      password: linkRemoteTransportToken,
       path: linkSelectedRemote.path,
       directory: linkSelectedRemote.directory,
       fileName: linkSelectedRemote.name,
@@ -1332,7 +1340,7 @@ document.querySelector("#link-upload-local").onclick = async () => {
   try {
     const remotePath = await invoke("upload_remote_link_file", {
       id: linkRemoteId,
-      password: linkRemotePassword,
+      password: linkRemoteTransportToken,
       remoteDirectory: linkRemotePath,
       localPath: linkSelectedLocal.path,
     });
