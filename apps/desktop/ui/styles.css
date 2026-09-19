@@ -1264,3 +1264,41 @@ body:has(#ai-panel:not([hidden])) main { height:100vh; overflow:hidden; }
 .diagnostics-panel .diag-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 .diagnostics-panel .diag-buttons button { white-space: normal; min-height: 36px; }
 .diagnostics-panel p { margin: 4px 0 10px; line-height: 1.5; overflow-wrap: anywhere; }
+
+.about-page {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: start center;
+  padding: 8px 0 22px;
+  overflow: auto;
+}
+.about-card {
+  width: min(680px, 100%);
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--corner-radius) + 4px);
+  background: var(--surface);
+}
+.about-creator-photo {
+  width: min(360px, 70vw);
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: calc(var(--corner-radius) + 6px);
+  border: 1px solid var(--line);
+}
+.about-creator-line {
+  margin: 0;
+  text-align: center;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+#about-audio {
+  width: min(520px, 100%);
+  accent-color: var(--accent);
+}
