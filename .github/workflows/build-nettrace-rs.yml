@@ -1,0 +1,30 @@
+name: Build NetTrace RS Portable
+
+on:
+  push:
+    branches: [nettrace-rs-portable-build]
+  workflow_dispatch:
+
+jobs:
+  windows-portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Build
+        working-directory: nettrace-rs
+        run: cargo build --release --target x86_64-pc-windows-msvc
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path nettrace-rs\dist\data | Out-Null
+          Copy-Item nettrace-rs\target\x86_64-pc-windows-msvc\release\nettrace-rs.exe nettrace-rs\dist\NetTrace-RS-portable.exe
+          Copy-Item nettrace-rs\README.md nettrace-rs\dist\README.txt
+          Set-Content nettrace-rs\dist\data\targets.txt @("ipv4:google.com","ipv6:google.com") -Encoding utf8
+          Get-FileHash nettrace-rs\dist\NetTrace-RS-portable.exe -Algorithm SHA256 | Out-File nettrace-rs\dist\SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NetTrace-RS-portable-win64
+          path: nettrace-rs/dist/**
