@@ -391,8 +391,6 @@ struct MobileAddRequest {
 #[serde(rename_all = "camelCase")]
 struct LinkIdentity {
     id: String,
-    password: String,
-    port: u16,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -478,14 +476,11 @@ fn list_link_directory(path: &str) -> Result<Vec<LinkFileEntry>, String> {
 }
 
 #[tauri::command]
-fn get_link_identity(state: State<'_, AppState>) -> Result<LinkIdentity, String> {
-    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+fn get_link_identity() -> LinkIdentity {
     let ip = local_link_ip();
-    Ok(LinkIdentity {
+    LinkIdentity {
         id: format!("{ip}:{LINK_PORT}"),
-        password: settings.link_password.clone(),
-        port: LINK_PORT,
-    })
+    }
 }
 
 fn link_share_entries(settings: &UserSettings) -> Vec<LinkFileEntry> {
@@ -670,18 +665,6 @@ async fn delete_remote_link_item(id: String, password: String, path: String) -> 
         .error_for_status()
         .map_err(|error| error.to_string())?;
     Ok(())
-}
-
-#[tauri::command]
-fn get_local_link_capabilities(
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<LinkCapabilities, String> {
-    let settings = state.settings.lock().map_err(|error| error.to_string())?;
-    let allow_write = resolve_link_share(&settings, &path)
-        .map(|(_, write)| write)
-        .unwrap_or(false);
-    Ok(LinkCapabilities { allow_write })
 }
 
 #[tauri::command]
@@ -8889,7 +8872,6 @@ fn main() {
             remove_link_share,
             list_local_link_files,
             list_remote_link_files,
-            get_local_link_capabilities,
             get_remote_link_capabilities,
             download_remote_link_file,
             upload_remote_link_file,

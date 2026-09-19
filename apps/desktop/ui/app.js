@@ -74,9 +74,9 @@ const catalogs = {
     linkThisComputer: "This computer",
     linkRemoteControl: "Remote connection",
     linkRemoteId: "Remote IP / host",
+    linkRemoteAddressExamples: "Use the same connection flow for this PC (127.0.0.1), a local-network IP or a public Internet IP/host.",
     linkAccessNotice: "Only explicitly shared files, folders and drives are exposed. Each share keeps its read-only or read/write permission.",
     linkConnect: "Connect",
-    linkSelfTest: "Test on this PC",
     linkSend: "Send →",
     linkRemoteComputer: "Remote computer",
     linkDownload: "← Download",
@@ -278,9 +278,9 @@ const catalogs = {
     linkThisComputer: "Este computador",
     linkRemoteControl: "Conexão remota",
     linkRemoteId: "IP / host remoto",
+    linkRemoteAddressExamples: "Use o mesmo fluxo para este PC (127.0.0.1), um IP da rede local ou um IP/host público da Internet.",
     linkAccessNotice: "Somente arquivos, pastas e unidades compartilhados explicitamente ficam expostos. Cada compartilhamento mantém sua permissão de Somente leitura ou Leitura e gravação.",
     linkConnect: "Conectar",
-    linkSelfTest: "Testar neste PC",
     linkSend: "Enviar →",
     linkRemoteComputer: "Computador remoto",
     linkDownload: "← Baixar",
@@ -481,9 +481,9 @@ const catalogs = {
     linkThisComputer: "此电脑",
     linkRemoteControl: "远程连接",
     linkRemoteId: "远程 IP / 主机",
+    linkRemoteAddressExamples: "本机 (127.0.0.1)、局域网 IP 或公网 IP/主机都使用同一个连接流程。",
     linkAccessNotice: "只会公开明确共享的文件、文件夹和驱动器。每个共享项都保留只读或读写权限。",
     linkConnect: "连接",
-    linkSelfTest: "在此电脑上测试",
     linkSend: "发送 →",
     linkRemoteComputer: "远程电脑",
     linkDownload: "← 下载",
@@ -1187,7 +1187,6 @@ let linkRemoteTransportToken = "";
 let linkSelectedLocal = null;
 let linkSelectedRemote = null;
 let linkRemoteAllowWrite = false;
-let linkSelfTestMode = false;
 const linkParent = (path) => /^[A-Za-z]:[\\/]?$/.test(path) || /^\/shares\/[^/]+\/?$/.test(path) ? "" : path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
 function updateLinkTransferButtons() {
   document.querySelector("#link-upload-local").disabled = !linkSelectedLocal || !linkRemoteId || !linkRemotePath || !linkRemoteAllowWrite;
@@ -1237,14 +1236,10 @@ async function openRemoteLink(path = "") {
   linkSelectedRemote = null;
   updateLinkTransferButtons();
   document.querySelector("#link-remote-path").textContent = path || t("linkDrives");
-  const capabilities = linkSelfTestMode
-    ? await invoke("get_local_link_capabilities", { path })
-    : await invoke("get_remote_link_capabilities", { id: linkRemoteId, password: linkRemoteTransportToken, path });
+  const capabilities = await invoke("get_remote_link_capabilities", { id: linkRemoteId, password: linkRemoteTransportToken, path });
   linkRemoteAllowWrite = Boolean(capabilities.allowWrite);
   updateLinkTransferButtons();
-  const entries = linkSelfTestMode
-    ? await invoke("list_local_link_files", { path })
-    : await invoke("list_remote_link_files", { id: linkRemoteId, password: linkRemoteTransportToken, path });
+  const entries = await invoke("list_remote_link_files", { id: linkRemoteId, password: linkRemoteTransportToken, path });
   renderLinkFiles("#link-remote-files", entries, openRemoteLink, (entry) => {
     linkSelectedRemote = entry;
     updateLinkTransferButtons();
@@ -1255,7 +1250,6 @@ async function loadLinkIdentity() {
   document.querySelector("#link-own-id").value = identity.id;
   renderLinkShares(await invoke("list_link_shares"));
   await openLocalLink();
-  return identity;
 }
 document.querySelector('[data-page="link"]').addEventListener("click", () => loadLinkIdentity().catch(console.error));
 async function refreshVisibleLinkPanels({ resetToRoot = false } = {}) {
@@ -1281,7 +1275,6 @@ function renderLinkShares(shares) {
 document.querySelector("#link-share-file").onclick = async () => { try { renderLinkShares(await invoke("add_link_file_share")); await refreshVisibleLinkPanels({ resetToRoot: true }); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
 document.querySelector("#link-share-folder").onclick = async () => { try { renderLinkShares(await invoke("add_link_share")); await refreshVisibleLinkPanels({ resetToRoot: true }); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
 document.querySelector("#link-connect").onclick = async () => {
-  linkSelfTestMode = false;
   const id = document.querySelector("#link-remote-id").value.trim();
   const username = document.querySelector("#link-remote-username").value.trim();
   const passwordField = document.querySelector("#link-remote-password");
@@ -1294,20 +1287,6 @@ document.querySelector("#link-connect").onclick = async () => {
   linkRemoteTransportToken = "";
   passwordField.value = "";
   document.querySelector("#link-status").textContent = t("linkNativeAuthPending");
-};
-document.querySelector("#link-self-test").onclick = async () => {
-  const identity = await loadLinkIdentity();
-  linkSelfTestMode = true;
-  linkRemoteId = `127.0.0.1:${identity.port}`;
-  linkRemoteTransportToken = identity.password;
-  document.querySelector("#link-remote-id").value = linkRemoteId;
-  document.querySelector("#link-remote-username").value = "";
-  document.querySelector("#link-remote-password").value = "";
-  try {
-    await openRemoteLink("");
-    document.querySelector("#link-status").textContent = t("linkConnected");
-  }
-  catch (error) { document.querySelector("#link-status").textContent = `${t("linkConnectionFailed")}: ${error}`; }
 };
 document.querySelector("#link-local-up").onclick = () => openLocalLink(linkParent(linkLocalPath)).catch(console.error);
 document.querySelector("#link-remote-up").onclick = () => openRemoteLink(linkParent(linkRemotePath)).catch(console.error);

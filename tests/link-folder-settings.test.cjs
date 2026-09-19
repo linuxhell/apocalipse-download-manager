@@ -52,19 +52,10 @@ test("per-site rules own new credentials and expose removal", () => {
   assert.match(app, /remove\.className = "danger-action"/);
 });
 
-test("Link share mutations refresh local and self-test panels at the share root", () => {
+test("Link share mutations refresh visible panels at the share root", () => {
   assert.match(app, /refreshVisibleLinkPanels\(\{ resetToRoot: true \}\)/);
   assert.match(app, /const localPath = resetToRoot \? "" : linkLocalPath;/);
   assert.match(app, /const remotePath = resetToRoot \? "" : linkRemotePath;/);
-});
-
-test("Link self-test reads the live local share state instead of loopback HTTP", () => {
-  assert.match(app, /let linkSelfTestMode = false;/);
-  assert.match(app, /linkSelfTestMode\s*\?\s*await invoke\("get_local_link_capabilities"/);
-  assert.match(app, /linkSelfTestMode\s*\?\s*await invoke\("list_local_link_files"/);
-  assert.match(app, /linkSelfTestMode = true;/);
-  assert.match(rust, /fn get_local_link_capabilities\([\s\S]*resolve_link_share/);
-  assert.match(rust, /get_local_link_capabilities,/);
 });
 
 test("explicit Link shares remain visible even if metadata is temporarily unavailable", () => {
@@ -105,4 +96,16 @@ test("Link uses system-account fields instead of a user-facing temporary passwor
   assert.match(app, /const username = document\.querySelector\("#link-remote-username"\)\.value\.trim\(\);/);
   assert.match(app, /passwordField\.value = "";/);
   assert.doesNotMatch(app, /linkRemotePassword/);
+});
+
+test("Link has one address-based connection flow for loopback, LAN and Internet", () => {
+  assert.doesNotMatch(html, /id="link-self-test"/);
+  assert.doesNotMatch(app, /linkSelfTestMode/);
+  assert.doesNotMatch(app, /linkSelfTest:/);
+  assert.doesNotMatch(rust, /fn get_local_link_capabilities/);
+  assert.match(html, /127\.0\.0\.1:17655/);
+  assert.match(html, /data-i18n="linkRemoteAddressExamples"/);
+  assert.equal((app.match(/linkRemoteAddressExamples:/g) || []).length, 3);
+  assert.match(rust, /struct LinkIdentity\s*\{\s*id: String,\s*\}/);
+  assert.doesNotMatch(rust, /struct LinkIdentity[\s\S]*password:/);
 });
