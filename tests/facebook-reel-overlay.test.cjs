@@ -220,6 +220,11 @@ test('Facebook srcObject alone never classifies an ordinary Reel as recording-on
   assert.doesNotMatch(script, /recordingOnly:\s*Boolean\(element\.srcObject && \/\(\^\|\\\.\)facebook/);
 });
 
+test('direct HTTP players expose Download without an unusable cross-origin Record action', () => {
+  assert.match(script, /const hasDirectHttpMedia = \/\^https\?:\/i\.test\(liveMediaUrl\)/);
+  assert.match(script, /const canRecord = !isYouTubeVideo && !hasDirectHttpMedia/);
+});
+
 test('Facebook sponsored-player detection is scoped to the exact post and explicit ad markers', () => {
   assert.match(script, /const isSponsoredFacebookPlayer = \(element\) =>/);
   assert.match(script, /depth < 24/);

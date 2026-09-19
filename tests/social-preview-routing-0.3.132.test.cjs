@@ -21,10 +21,10 @@ function node({tag='DIV', r=rect(), parent=null, attrs={}, videos=[], click=null
   };
 }
 
-test('0.3.154 manifest version is exact', () => {
+test('0.3.155 manifest version is exact', () => {
   const manifest = JSON.parse(src('manifest.json'));
-  assert.equal(manifest.version, '0.3.154');
-  assert.match(manifest.version_name, /YouTube selection and preview fixes/);
+  assert.equal(manifest.version, '0.3.155');
+  assert.match(manifest.version_name, /Cross-origin media download fixes/);
 });
 
 test('0.3.132 resolved Preview and Download are dispatched explicitly, never synthetic re-click', () => {
