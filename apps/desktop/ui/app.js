@@ -128,14 +128,16 @@ const catalogs = {
     websiteCredentialsEmpty: "No site credentials saved.",
     websiteCredentialsLocalWarning: "Passwords are stored in the operating system credential vault and are not written to settings.json.",
     hostRules: "Per-site transfer rules",
-    hostRulesHint: "Apply exact hosts or wildcard subdomains such as *.example.com before global settings.",
+    hostRulesHint: "Apply exact hosts or wildcard subdomains and optionally save credentials, connections, speed and User-Agent in one rule. Existing site credentials remain compatible.",
     hostRulePattern: "Host pattern",
     hostRulePatternHint: "*.example.com",
     hostRulePasswordHint: "Leave blank to keep the saved password",
     hostRuleBandwidth: "Speed limit (MB/s)",
+    hostRuleUnlimitedHint: "0 or empty = unlimited",
     hostRuleClearPassword: "Remove the saved password for this rule",
     hostRuleAdd: "Add or update rule",
     hostRuleRemove: "Remove",
+    hostRuleRemoveConfirm: "Remove the rule for {pattern}?",
     hostRulesEmpty: "No per-site rules saved.",
     hostRulesVaultWarning: "Passwords are kept in the operating system credential vault, not in settings.json.",
     customDns: "Custom DNS",
@@ -317,14 +319,16 @@ const catalogs = {
     websiteCredentialsEmpty: "Nenhuma credencial de site salva.",
     websiteCredentialsLocalWarning: "As senhas ficam no cofre de credenciais do sistema operacional e não são gravadas no settings.json.",
     hostRules: "Regras de transferência por site",
-    hostRulesHint: "Aplique hosts exatos ou subdomínios com curinga, como *.exemplo.com, antes das configurações globais.",
+    hostRulesHint: "Aplique hosts exatos ou subdomínios com curinga e, se quiser, salve credenciais, conexões, velocidade e User-Agent na mesma regra. Credenciais antigas continuam compatíveis.",
     hostRulePattern: "Padrão de host",
     hostRulePatternHint: "*.exemplo.com",
     hostRulePasswordHint: "Deixe vazio para manter a senha salva",
     hostRuleBandwidth: "Limite de velocidade (MB/s)",
+    hostRuleUnlimitedHint: "0 ou vazio = ilimitado",
     hostRuleClearPassword: "Remover a senha salva desta regra",
     hostRuleAdd: "Adicionar ou atualizar regra",
     hostRuleRemove: "Remover",
+    hostRuleRemoveConfirm: "Remover a regra de {pattern}?",
     hostRulesEmpty: "Nenhuma regra por site salva.",
     hostRulesVaultWarning: "As senhas ficam no cofre de credenciais do sistema operacional, não no settings.json.",
     customDns: "DNS personalizado",
@@ -505,14 +509,16 @@ const catalogs = {
     websiteCredentialsEmpty: "尚未保存网站凭据。",
     websiteCredentialsLocalWarning: "密码保存在操作系统凭据保险库中，不会写入 settings.json。",
     hostRules: "按网站传输规则",
-    hostRulesHint: "在全局设置之前应用精确主机或通配子域，例如 *.example.com。",
+    hostRulesHint: "为精确主机或通配子域创建规则，并可在同一规则中保存凭据、连接数、速度和 User-Agent。现有网站凭据仍然兼容。",
     hostRulePattern: "主机模式",
     hostRulePatternHint: "*.example.com",
     hostRulePasswordHint: "留空以保留已保存的密码",
     hostRuleBandwidth: "速度限制（MB/秒）",
+    hostRuleUnlimitedHint: "0 或留空 = 不限速",
     hostRuleClearPassword: "删除此规则保存的密码",
     hostRuleAdd: "添加或更新规则",
     hostRuleRemove: "删除",
+    hostRuleRemoveConfirm: "删除 {pattern} 的规则吗？",
     hostRulesEmpty: "尚未保存按网站规则。",
     hostRulesVaultWarning: "密码保存在操作系统凭据保险库中，而不是 settings.json。",
     customDns: "自定义 DNS",
@@ -1139,8 +1145,8 @@ let linkLocalPath = "";
 let linkRemotePath = "";
 let linkRemoteId = "";
 let linkRemotePassword = "";
-let linkSelectedLocal = "";
-let linkSelectedRemote = "";
+let linkSelectedLocal = null;
+let linkSelectedRemote = null;
 const linkParent = (path) => /^[A-Za-z]:[\\/]?$/.test(path) ? "" : path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
 function updateLinkTransferButtons() {
   document.querySelector("#link-upload-local").disabled = !linkSelectedLocal || !linkRemoteId || !linkRemotePath;
@@ -1169,22 +1175,22 @@ function renderLinkFiles(target, entries, open, select) {
 }
 async function openLocalLink(path = "") {
   linkLocalPath = path;
-  linkSelectedLocal = "";
+  linkSelectedLocal = null;
   updateLinkTransferButtons();
   document.querySelector("#link-local-path").textContent = path || t("linkDrives");
   renderLinkFiles("#link-local-files", await invoke("list_local_link_files", { path }), openLocalLink, (entry) => {
-    linkSelectedLocal = entry.directory ? "" : entry.path;
+    linkSelectedLocal = entry;
     updateLinkTransferButtons();
   });
 }
 async function openRemoteLink(path = "") {
   linkRemotePath = path;
-  linkSelectedRemote = "";
+  linkSelectedRemote = null;
   updateLinkTransferButtons();
   document.querySelector("#link-remote-path").textContent = path || t("linkDrives");
   const entries = await invoke("list_remote_link_files", { id: linkRemoteId, password: linkRemotePassword, path });
   renderLinkFiles("#link-remote-files", entries, openRemoteLink, (entry) => {
-    linkSelectedRemote = entry.directory ? "" : entry.path;
+    linkSelectedRemote = entry;
     updateLinkTransferButtons();
   });
 }
@@ -1218,7 +1224,12 @@ document.querySelector("#link-download-remote").onclick = async () => {
   const status = document.querySelector("#link-status");
   status.textContent = t("linkTransferring");
   try {
-    const destination = await invoke("download_remote_link_file", { id: linkRemoteId, password: linkRemotePassword, path: linkSelectedRemote });
+    const destination = await invoke("download_remote_link_file", {
+      id: linkRemoteId,
+      password: linkRemotePassword,
+      path: linkSelectedRemote.path,
+      directory: linkSelectedRemote.directory,
+    });
     status.textContent = `${t("linkCompleted")}: ${destination}`;
   } catch (error) { if (`${error}` !== "cancelled") status.textContent = `${t("linkTransferFailed")}: ${error}`; }
 };
@@ -1229,7 +1240,12 @@ document.querySelector("#link-upload-local").onclick = async () => {
   status.textContent = t("linkSending");
   button.disabled = true;
   try {
-    const remotePath = await invoke("upload_remote_link_file", { id: linkRemoteId, password: linkRemotePassword, remoteDirectory: linkRemotePath, localPath: linkSelectedLocal });
+    const remotePath = await invoke("upload_remote_link_file", {
+      id: linkRemoteId,
+      password: linkRemotePassword,
+      remoteDirectory: linkRemotePath,
+      localPath: linkSelectedLocal.path,
+    });
     status.textContent = `${t("linkCompleted")}: ${remotePath}`;
     await openRemoteLink(linkRemotePath);
   } catch (error) {
@@ -1571,8 +1587,10 @@ function renderHostRules(rules) {
       document.querySelector("#host-rule-pattern").focus();
     };
     remove.type = "button";
+    remove.className = "danger-action";
     remove.textContent = t("hostRuleRemove");
     remove.onclick = async () => {
+      if (!window.confirm(t("hostRuleRemoveConfirm").replace("{pattern}", rule.pattern))) return;
       remove.disabled = true;
       try {
         renderHostRules(await invoke("remove_host_rule", { pattern: rule.pattern }));

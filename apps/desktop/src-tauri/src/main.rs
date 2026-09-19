@@ -441,6 +441,10 @@ fn list_link_directory(path: &str) -> Result<Vec<LinkFileEntry>, String> {
         .map_err(|error| error.to_string())?
         .flatten()
         .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            if file_type.is_symlink() {
+                return None;
+            }
             let metadata = entry.metadata().ok()?;
             let name = entry.file_name().to_string_lossy().into_owned();
             let path = directory.join(&name).to_string_lossy().into_owned();
@@ -516,20 +520,75 @@ async fn download_remote_link_file(
     id: String,
     password: String,
     path: String,
+    directory: bool,
 ) -> Result<String, String> {
     let file_name = Path::new(&path)
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("download");
-    let Some(destination) = rfd::FileDialog::new().set_file_name(file_name).save_file() else {
-        return Err("cancelled".to_owned());
-    };
     let address = if id.starts_with("http://") {
         id
     } else {
         format!("http://{id}")
     };
-    let encoded = url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>();
+    if directory {
+        let Some(destination_parent) = rfd::FileDialog::new().pick_folder() else {
+            return Err("cancelled".to_owned());
+        };
+        let destination = destination_parent.join(file_name);
+        tokio::fs::create_dir_all(&destination)
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut pending = vec![(path, destination.clone())];
+        while let Some((remote_directory, local_directory)) = pending.pop() {
+            tokio::fs::create_dir_all(&local_directory)
+                .await
+                .map_err(|error| error.to_string())?;
+            let entries = reqwest::Client::new()
+                .post(format!("{address}/v1/link/list"))
+                .json(&LinkListRequest {
+                    password: password.clone(),
+                    path: remote_directory,
+                })
+                .send()
+                .await
+                .map_err(|error| error.to_string())?
+                .error_for_status()
+                .map_err(|error| error.to_string())?
+                .json::<Vec<LinkFileEntry>>()
+                .await
+                .map_err(|error| error.to_string())?;
+            for entry in entries {
+                let local_path = local_directory.join(&entry.name);
+                if entry.directory {
+                    pending.push((entry.path, local_path));
+                } else {
+                    download_link_file_to(&address, &password, &entry.path, &local_path).await?;
+                }
+            }
+        }
+        return Ok(destination.to_string_lossy().into_owned());
+    }
+    let Some(destination) = rfd::FileDialog::new().set_file_name(file_name).save_file() else {
+        return Err("cancelled".to_owned());
+    };
+    download_link_file_to(&address, &password, &path, &destination).await?;
+    Ok(destination.to_string_lossy().into_owned())
+}
+
+async fn download_link_file_to(
+    address: &str,
+    password: &str,
+    remote_path: &str,
+    destination: &Path,
+) -> Result<(), String> {
+    if let Some(parent) = destination.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    let encoded =
+        url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
     let response = reqwest::Client::new()
         .get(format!("{address}/v1/link/file?path={encoded}"))
         .bearer_auth(password)
@@ -547,7 +606,82 @@ async fn download_remote_link_file(
             .await
             .map_err(|error| error.to_string())?;
     }
-    Ok(destination.to_string_lossy().into_owned())
+    Ok(())
+}
+
+fn remote_link_join(parent: &str, child: &str) -> String {
+    let separator = if parent.contains('\\') && !parent.contains('/') {
+        '\\'
+    } else {
+        '/'
+    };
+    format!("{}{}{}", parent.trim_end_matches(['/', '\\']), separator, child)
+}
+
+fn send_link_directory(
+    id: &str,
+    password: &str,
+    remote_path: &str,
+) -> Result<(), String> {
+    let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
+    let parsed = url::Url::parse(&if id.starts_with("http://") {
+        id.to_owned()
+    } else {
+        format!("http://{id}")
+    })
+    .map_err(|error| error.to_string())?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "invalid_remote_id".to_owned())?;
+    let port = parsed.port().unwrap_or(LINK_PORT);
+    let mut stream = TcpStream::connect((host, port)).map_err(|error| error.to_string())?;
+    let header = format!("PUT /v1/link/directory?path={encoded} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {password}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    stream
+        .write_all(header.as_bytes())
+        .map_err(|error| error.to_string())?;
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| error.to_string())?;
+    if !response.starts_with("HTTP/1.1 200") {
+        return Err("remote_directory_creation_failed".to_owned());
+    }
+    Ok(())
+}
+
+fn send_link_file(
+    id: &str,
+    password: &str,
+    source: &Path,
+    remote_path: &str,
+) -> Result<(), String> {
+    let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
+    let parsed = url::Url::parse(&if id.starts_with("http://") {
+        id.to_owned()
+    } else {
+        format!("http://{id}")
+    })
+    .map_err(|error| error.to_string())?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "invalid_remote_id".to_owned())?;
+    let port = parsed.port().unwrap_or(LINK_PORT);
+    let mut stream = TcpStream::connect((host, port)).map_err(|error| error.to_string())?;
+    let mut file = fs::File::open(source).map_err(|error| error.to_string())?;
+    let size = file.metadata().map_err(|error| error.to_string())?.len();
+    let header = format!("PUT /v1/link/file?path={encoded} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {password}\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n");
+    stream
+        .write_all(header.as_bytes())
+        .map_err(|error| error.to_string())?;
+    std::io::copy(&mut file, &mut stream).map_err(|error| error.to_string())?;
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| error.to_string())?;
+    if !response.starts_with("HTTP/1.1 200") {
+        return Err("remote_upload_failed".to_owned());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -558,28 +692,38 @@ async fn upload_remote_link_file(
     local_path: String,
 ) -> Result<String, String> {
     let source = PathBuf::from(local_path);
-    if !source.is_file() {
-        return Err("selected_local_file_not_found".to_owned());
+    if !source.is_file() && !source.is_dir() {
+        return Err("selected_local_item_not_found".to_owned());
     }
     if remote_directory.trim().is_empty() {
         return Err("select_remote_directory".to_owned());
     }
     tokio::task::spawn_blocking(move || {
         let name = source.file_name().and_then(|value| value.to_str()).ok_or_else(|| "invalid_file_name".to_owned())?;
-        let remote_path = format!("{}/{}", remote_directory.trim_end_matches(['/', '\\']), name);
-        let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
-        let parsed = url::Url::parse(&if id.starts_with("http://") { id } else { format!("http://{id}") }).map_err(|error| error.to_string())?;
-        let host = parsed.host_str().ok_or_else(|| "invalid_remote_id".to_owned())?;
-        let port = parsed.port().unwrap_or(LINK_PORT);
-        let mut stream = TcpStream::connect((host, port)).map_err(|error| error.to_string())?;
-        let mut file = fs::File::open(&source).map_err(|error| error.to_string())?;
-        let size = file.metadata().map_err(|error| error.to_string())?.len();
-        let header = format!("PUT /v1/link/file?path={encoded} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {password}\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n");
-        stream.write_all(header.as_bytes()).map_err(|error| error.to_string())?;
-        std::io::copy(&mut file, &mut stream).map_err(|error| error.to_string())?;
-        let mut response = String::new();
-        stream.read_to_string(&mut response).map_err(|error| error.to_string())?;
-        if !response.starts_with("HTTP/1.1 200") { return Err("remote_upload_failed".to_owned()); }
+        let remote_path = remote_link_join(&remote_directory, name);
+        if source.is_file() {
+            send_link_file(&id, &password, &source, &remote_path)?;
+            return Ok(remote_path);
+        }
+        send_link_directory(&id, &password, &remote_path)?;
+        let mut pending = vec![(source, remote_path.clone())];
+        while let Some((local_directory, target_directory)) = pending.pop() {
+            for entry in fs::read_dir(local_directory).map_err(|error| error.to_string())? {
+                let entry = entry.map_err(|error| error.to_string())?;
+                let file_type = entry.file_type().map_err(|error| error.to_string())?;
+                if file_type.is_symlink() {
+                    continue;
+                }
+                let entry_name = entry.file_name().to_string_lossy().into_owned();
+                let target_path = remote_link_join(&target_directory, &entry_name);
+                if file_type.is_dir() {
+                    send_link_directory(&id, &password, &target_path)?;
+                    pending.push((entry.path(), target_path));
+                } else if file_type.is_file() {
+                    send_link_file(&id, &password, &entry.path(), &target_path)?;
+                }
+            }
+        }
         Ok(remote_path)
     }).await.map_err(|error| error.to_string())?
 }
@@ -1308,6 +1452,39 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         bridge_response(&mut stream, "200 OK", None, &body);
         return;
     }
+    if headers.starts_with("PUT /v1/link/directory?") {
+        let state = app.state::<AppState>();
+        let settings = match state.settings.lock() {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        if !bridge_authorized(&headers, &settings.link_password) {
+            bridge_response(&mut stream, "401 Unauthorized", None, "");
+            return;
+        }
+        drop(settings);
+        let request_target = headers
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("");
+        let path = url::Url::parse(&format!("http://localhost{request_target}"))
+            .ok()
+            .and_then(|url| {
+                url.query_pairs()
+                    .find(|(key, _)| key == "path")
+                    .map(|(_, value)| value.into_owned())
+            });
+        let Some(path) = path.and_then(|value| safe_link_path(&value).ok()) else {
+            bridge_response(&mut stream, "400 Bad Request", None, "");
+            return;
+        };
+        match fs::create_dir_all(path) {
+            Ok(()) => bridge_response(&mut stream, "200 OK", None, "{\"ok\":true}"),
+            Err(_) => bridge_response(&mut stream, "403 Forbidden", None, ""),
+        }
+        return;
+    }
     if headers.starts_with("PUT /v1/link/file?") {
         let state = app.state::<AppState>();
         let settings = match state.settings.lock() {
@@ -1335,6 +1512,12 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             bridge_response(&mut stream, "400 Bad Request", None, "");
             return;
         };
+        if let Some(parent) = path.parent() {
+            if fs::create_dir_all(parent).is_err() {
+                bridge_response(&mut stream, "403 Forbidden", None, "");
+                return;
+            }
+        }
         let length = bridge_content_length(&headers);
         let Ok(mut file) = fs::File::create(path) else {
             bridge_response(&mut stream, "403 Forbidden", None, "");
@@ -9124,6 +9307,12 @@ mod tests {
             bridge_content_length("GET / HTTP/1.1\r\ncontent-length: 0"),
             0
         );
+    }
+
+    #[test]
+    fn joins_remote_link_paths_using_the_remote_separator() {
+        assert_eq!(remote_link_join(r"C:\Users", "Folder"), r"C:\Users\Folder");
+        assert_eq!(remote_link_join("/home/user/", "Folder"), "/home/user/Folder");
     }
 
     #[test]

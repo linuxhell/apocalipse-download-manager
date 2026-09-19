@@ -465,6 +465,8 @@ button::after,
 .website-credential-list span { display: grid; gap: 2px; min-width: 0; }
 .website-credential-list b, .website-credential-list small { overflow-wrap: anywhere; }
 .website-credential-list button { padding: 8px 13px; }
+.website-credential-list button.danger-action { border-color:#713443; color:#ff9aaa; background:#241116; }
+.website-credential-list button.danger-action:hover { border-color:#ff5f78; color:#ffd9df; }
 .compact-toggle {
   margin: 0;
 }
@@ -718,11 +720,12 @@ dialog input:focus {
 #tool-list label > div { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 #tool-list button, #check-tools { border: 1px solid #29424f; border-radius: 8px; background: #111d25; color: #bcd1d9; padding: 7px 13px; cursor: pointer; }
 #check-tools { justify-self: end; }
-#settings-dialog, #tools-dialog { width: min(1080px, calc(100vw - 40px)); overflow: hidden; }
+#settings-dialog { width: min(1360px, calc(100vw - 20px)); max-width: none; overflow: hidden; }
+#tools-dialog { width: min(1080px, calc(100vw - 40px)); overflow: hidden; }
 #settings-dialog form, #tools-dialog form {
   display: grid;
   box-sizing: border-box;
-  height: min(850px, calc(100vh - 60px));
+  height: min(920px, calc(100vh - 24px));
   max-height: none;
   overflow-y: auto;
 }
@@ -731,6 +734,8 @@ dialog input:focus {
 .settings-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; min-height: 0; }
 .settings-columns > div { min-width: 0; height: 100%; max-height: none; overflow-y: auto; padding-right: 7px; }
 .settings-columns > div + div { padding-left: 18px; border-left: 1px solid var(--line); }
+#settings-dialog .website-credential-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#settings-dialog .website-credential-form > button { width: 100%; }
 #settings-dialog .dialog-actions, #tools-dialog .dialog-actions {
   position: relative;
   z-index: 2;
@@ -883,17 +888,19 @@ footer .bridge-connected i {
 .download-list {
   padding: 8px 14px;
 }
-.link-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; }
+.link-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; min-height: 0; }
 .link-panel[hidden] { display: none; }
 .link-panel > div { display: grid; align-content: start; gap: 10px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
 .link-panel p { color: var(--muted); margin: 0 0 6px; line-height: 1.5; }
 .link-panel input { min-width: 0; padding: 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface); }
 .link-identity label,.link-connect label { display:grid; gap:6px; color:var(--muted); font-size:12px; }
-.link-files { min-height:300px; }
-.link-files header { display:flex; justify-content:space-between; align-items:center; }
+.link-files { min-height:340px; min-width:0; overflow:hidden; }
+.link-files header { display:flex; justify-content:space-between; align-items:center; gap:12px; min-width:0; }
+.link-files header > span { display:flex; gap:6px; flex-shrink:0; }
 .link-files > small { color:var(--muted); overflow-wrap:anywhere; }
-.link-files > div { display:grid; gap:4px; max-height:360px; overflow:auto; }
-.link-file { display:grid; grid-template-columns:24px minmax(0,1fr) auto; gap:8px; align-items:center; padding:9px; border:0; border-radius:7px; text-align:left; color:var(--text); background:transparent; }
+.link-files > div { display:grid; gap:4px; height:clamp(300px,42vh,460px); overflow:auto; padding:5px; border:1px solid var(--line); border-radius:9px; background:var(--surface); isolation:isolate; }
+.link-file { display:grid; grid-template-columns:24px minmax(0,1fr) auto; gap:8px; align-items:center; width:100%; min-width:0; min-height:40px; padding:9px; border:0; border-radius:7px; overflow:hidden; text-align:left; color:var(--text); background:transparent; }
+.link-file > span:nth-child(2) { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .link-file:hover { background:var(--surface-2); }
 .link-file.selected { background:color-mix(in srgb, var(--accent) 22%, var(--surface-2)); outline:1px solid var(--accent); }
 .link-file small { color:var(--muted); }
