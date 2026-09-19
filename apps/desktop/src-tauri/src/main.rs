@@ -756,6 +756,7 @@ struct AppUpdateStatus {
     current_version: String,
     latest_version: String,
     update_available: bool,
+    release_url: String,
 }
 
 fn version_numbers(value: &str) -> Vec<u64> {
@@ -889,10 +890,16 @@ async fn check_app_update() -> Result<AppUpdateStatus, String> {
         .ok_or_else(|| "release_without_tag".to_owned())?
         .trim_start_matches(['v', 'V'])
         .to_owned();
+    let release_url = payload["html_url"]
+        .as_str()
+        .and_then(valid_apocalipse_release_url)
+        .unwrap_or("https://github.com/linuxhell/apocalipse-download-manager/releases")
+        .to_owned();
     Ok(AppUpdateStatus {
         update_available: version_numbers(&latest) > version_numbers(&current),
         current_version: current,
         latest_version: latest,
+        release_url,
     })
 }
 
@@ -6686,6 +6693,35 @@ fn activate_main_window(app: tauri::AppHandle) {
     show_main_window(&app);
 }
 
+fn valid_apocalipse_release_url(value: &str) -> Option<&str> {
+    let parsed = url::Url::parse(value).ok()?;
+    let host = parsed.host_str()?.trim_end_matches('.').to_ascii_lowercase();
+    let path = parsed.path();
+    (parsed.scheme() == "https"
+        && host == "github.com"
+        && (path == "/linuxhell/apocalipse-download-manager/releases"
+            || path.starts_with("/linuxhell/apocalipse-download-manager/releases/")))
+    .then_some(value)
+}
+
+#[tauri::command]
+fn open_apocalipse_releases(url: Option<String>) -> Result<(), String> {
+    const RELEASES: &str = "https://github.com/linuxhell/apocalipse-download-manager/releases";
+    let target = url
+        .as_deref()
+        .and_then(valid_apocalipse_release_url)
+        .unwrap_or(RELEASES);
+    #[cfg(target_os = "windows")]
+    let result = Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", target])
+        .spawn();
+    #[cfg(target_os = "macos")]
+    let result = Command::new("open").arg(target).spawn();
+    #[cfg(target_os = "linux")]
+    let result = Command::new("xdg-open").arg(target).spawn();
+    result.map(|_| ()).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn open_paypal_donation() -> Result<(), String> {
     const URL: &str = "https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL";
@@ -8435,6 +8471,7 @@ fn main() {
             pick_executable,
             pick_url_list,
             activate_main_window,
+            open_apocalipse_releases,
             open_paypal_donation,
             get_tool_statuses,
             set_tool_paths,
@@ -8516,6 +8553,30 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn release_links_are_restricted_to_the_official_apocalipse_repository() {
+        assert!(valid_apocalipse_release_url(
+            "https://github.com/linuxhell/apocalipse-download-manager/releases"
+        )
+        .is_some());
+        assert!(valid_apocalipse_release_url(
+            "https://github.com/linuxhell/apocalipse-download-manager/releases/tag/v1.2.3"
+        )
+        .is_some());
+        assert!(valid_apocalipse_release_url(
+            "https://github.com/linuxhell/apocalipse-download-manager.evil.test/releases"
+        )
+        .is_none());
+        assert!(valid_apocalipse_release_url(
+            "https://evil.test/linuxhell/apocalipse-download-manager/releases"
+        )
+        .is_none());
+        assert!(valid_apocalipse_release_url(
+            "http://github.com/linuxhell/apocalipse-download-manager/releases"
+        )
+        .is_none());
+    }
+
     #[test]
     fn pixeldrain_always_uses_one_connection_without_matching_spoofed_hosts() {
         assert_eq!(
