@@ -423,6 +423,25 @@
           <div id="website-credential-list" class="website-credential-list"></div>
           <small data-i18n="websiteCredentialsLocalWarning">Passwords are stored locally in the portable data/settings.json file. Protect access to this folder.</small>
         </section>
+        <section class="pairing-settings website-credentials-settings">
+          <b data-i18n="hostRules">Per-site transfer rules</b>
+          <small data-i18n="hostRulesHint">Apply wildcard rules such as *.example.com before global settings.</small>
+          <div class="website-credential-form">
+            <label><span data-i18n="hostRulePattern">Host pattern</span><input id="host-rule-pattern" type="text" maxlength="255" autocomplete="off" data-i18n-placeholder="hostRulePatternHint" placeholder="*.example.com" /></label>
+            <label><span data-i18n="proxyUsername">Username</span><input id="host-rule-username" type="text" maxlength="512" autocomplete="off" /></label>
+            <label><span data-i18n="proxyPassword">Password</span><input id="host-rule-password" type="password" maxlength="2048" autocomplete="new-password" data-i18n-placeholder="hostRulePasswordHint" placeholder="Leave blank to keep saved password" /></label>
+            <label><span data-i18n="userAgent">User-Agent</span><input id="host-rule-user-agent" type="text" maxlength="1024" autocomplete="off" /></label>
+            <label><span data-i18n="connections">Connections per download</span><input id="host-rule-connections" type="number" min="1" max="32" step="1" /></label>
+            <label><span data-i18n="hostRuleBandwidth">Speed limit (MB/s)</span><input id="host-rule-bandwidth" type="number" min="0" step="0.1" /></label>
+            <label class="setting-toggle compact-toggle">
+              <input id="host-rule-clear-password" type="checkbox" />
+              <span><small data-i18n="hostRuleClearPassword">Remove the saved password for this rule</small></span>
+            </label>
+            <button id="save-host-rule" type="button" data-i18n="hostRuleAdd">Add or update rule</button>
+          </div>
+          <div id="host-rule-list" class="website-credential-list"></div>
+          <small data-i18n="hostRulesVaultWarning">Passwords are kept in the operating system credential vault, not in settings.json.</small>
+        </section>
         <section class="pairing-settings">
           <label class="setting-toggle compact-toggle">
             <input id="dns-enabled" type="checkbox" />
