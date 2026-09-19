@@ -28,6 +28,7 @@ const catalogs = {
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
     toolbox: "TOOLBOX", update: "Update", mediaPlayer: "VLC / mpv / media player",
     donatePaypal: "Donate via PayPal",
+    about: "About", aboutDescription: "About the creator of Apocalipse Download Manager.", aboutCreator: "Creator: Juliano - Brazil - Sátia Mortadela",
     overview: "OVERVIEW",
     engineReady: "Engine ready",
     addDownload: "Add download",
@@ -235,6 +236,7 @@ const catalogs = {
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
     toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", mediaPlayer: "VLC / mpv / reprodutor de mídia",
     donatePaypal: "Faça uma doação pelo PayPal",
+    about: "Sobre", aboutDescription: "Sobre o criador do Apocalipse Download Manager.", aboutCreator: "Criador: Juliano - Brasil - Sátia Mortadela",
     overview: "VISÃO GERAL",
     engineReady: "Motor pronto",
     addDownload: "Adicionar download",
@@ -442,6 +444,7 @@ const catalogs = {
     settingsDescription: "配置外观、集成、网络和应用行为。",
     toolbox: "工具箱", update: "更新", mediaPlayer: "VLC / mpv / 媒体播放器",
     donatePaypal: "通过 PayPal 捐赠",
+    about: "关于", aboutDescription: "关于 Apocalipse Download Manager 的创作者。", aboutCreator: "创作者：Juliano - 巴西 - Sátia Mortadela",
     overview: "概览",
     engineReady: "引擎已就绪",
     addDownload: "添加下载",
@@ -674,7 +677,7 @@ let selectionPointerActive = false;
 let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
-const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", ai: "aiDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
+const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", ai: "aiDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", about: "aboutDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
 const invoke = (command, args = {}) => {
   const bridge = window.__TAURI__?.core?.invoke;
   if (!bridge) throw new Error("Desktop bridge unavailable in preview");
@@ -1138,8 +1141,17 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector("#logs-panel").hidden = activePage !== "logs";
     document.querySelector("#themes-panel").hidden = activePage !== "themes";
     document.querySelector("#language-panel").hidden = activePage !== "language";
-    document.querySelector(".metrics").hidden = ["link", "ai", "logs", "themes", "language"].includes(activePage);
-    document.querySelector(".panel").hidden = ["link", "ai", "logs", "themes", "language"].includes(activePage);
+    document.querySelector("#about-panel").hidden = activePage !== "about";
+    const aboutAudio = document.querySelector("#about-audio");
+    if (activePage === "about") {
+      aboutAudio.currentTime = 0;
+      aboutAudio.play().catch(() => {});
+    } else {
+      aboutAudio.pause();
+      aboutAudio.currentTime = 0;
+    }
+    document.querySelector(".metrics").hidden = ["link", "ai", "logs", "themes", "language", "about"].includes(activePage);
+    document.querySelector(".panel").hidden = ["link", "ai", "logs", "themes", "language", "about"].includes(activePage);
     renderDownloads();
     invoke("record_ui_diagnostic", { level: "INFO", event: "page_opened", detail: `page=${activePage} panel_present=${activePage === "link" ? Boolean(document.querySelector("#apocalipse-link-panel")) : activePage === "logs" ? Boolean(document.querySelector("#logs-panel")) : true} duration_ms=${Math.round(performance.now() - openedAt)}` }).catch(() => {});
     if (activePage === "logs") refreshLogEvents().catch(console.error);
