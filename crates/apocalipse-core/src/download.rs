@@ -321,8 +321,7 @@ impl DownloadEngine {
                         .or(total);
                     if let Some(total) = range_total {
                         let identity = resume_identity_from_headers(probe.headers(), total);
-                        let useful_connections =
-                            adaptive_connection_count(total, requested).min(sources.len().max(1) * 16);
+                        let useful_connections = adaptive_connection_count(total, requested);
                         if useful_connections > 1 {
                             let mut attempt_connections = useful_connections;
                             loop {
@@ -858,7 +857,7 @@ impl DownloadEngine {
         let output = fs::OpenOptions::new().write(true).open(&partial).await?;
         output.sync_all().await?;
         clear_segment_journal(&request.destination).await;
-        cleanup_legacy_chunk_files(&request.destination).await?;
+        cleanup_chunk_artifacts(&request.destination).await?;
         finish_download(&request, &partial, total, Some(total), &events).await
     }
 }
@@ -1045,23 +1044,6 @@ fn headers_for_source(
         })
         .cloned()
         .collect()
-}
-
-async fn cleanup_legacy_chunk_files(destination: &Path) -> Result<()> {
-    let directory = chunk_directory(destination);
-    let mut entries = match fs::read_dir(&directory).await {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error.into()),
-    };
-    while let Some(entry) = entries.next_entry().await? {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.ends_with(".part") {
-            let _ = fs::remove_file(entry.path()).await;
-        }
-    }
-    Ok(())
 }
 
 fn apply_headers(mut builder: RequestBuilder, headers: &[(String, String)]) -> RequestBuilder {
