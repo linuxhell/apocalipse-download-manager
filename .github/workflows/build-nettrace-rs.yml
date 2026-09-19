@@ -3,6 +3,8 @@ name: Build NetTrace RS Portable
 on:
   push:
     branches: [nettrace-rs-portable-build]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
