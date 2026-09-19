@@ -412,7 +412,9 @@
     if (/(botao|button|按钮)/.test(q) && /(download|baix|下载)/.test(q)) return say(locale, scoped.length ? "missingButton" : "noEvidence");
     if (/(lent|devagar|slow|speed|veloc|performance|desempenho|mirror|espelho|retom|resume|慢|速度|性能|镜像|续传)/.test(q)
         && /(download|baix|transfer|motor|engine|torrent|下载|传输|引擎)/.test(q)) {
-      return performanceDiagnosis(context, locale);
+      return Array.isArray(context.engineEvents)
+        ? performanceDiagnosis(context, locale)
+        : say(locale, "downloadSlow");
     }
     if (/(visualizar|preview|player|播放器|预览)/.test(q)) return say(locale, "previewHelp");
     if (/(gravar|gravacao|record|capture|录制)/.test(q)) return say(locale, "recordingHelp");
