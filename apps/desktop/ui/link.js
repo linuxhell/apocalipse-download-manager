@@ -17,10 +17,10 @@ const catalogs = {
     linkAuthenticationFailed: "System account authentication failed",
     linkAuthenticationInvalidCredentials: "Windows rejected the credentials. For a Microsoft account, enter the e-mail address and the account password; Windows Hello PIN is not accepted.",
     linkLocalSessionReady: "Connected to this Apocalipse. Shared items are available below.",
-    linkNativeAuthPending: "LAN/Internet account login still requires the encrypted Link transport. The system password is not sent through the legacy unencrypted transport.",
+    linkRemoteSessionReady: "Encrypted TLS connection established. Remote shares are available below.",\n    linkRemoteFirstTrust: "First connection: this Apocalipse TLS certificate was trusted for this address.",\n    linkConnectionFailed: "Connection failed",
     linkRemoteAuthPlan: "Remote access uses one login: IP/host + operating-system username + account password.",
     linkRemoteAccountFormats: "Windows: local, domain, Microsoft or AzureAD account. Linux/macOS: local system username.",
-    linkRemoteSecurityNotice: "The system password is never saved.",
+    linkRemoteSecurityNotice: "The system password is never saved and is sent only inside the encrypted TLS channel.",
     linkShareFile: "Share file",
     linkShareFolder: "Share folder or drive",
     linkReadOnly: "Read only",
@@ -56,10 +56,10 @@ const catalogs = {
     linkAuthenticationFailed: "Falha na autenticação da conta do sistema",
     linkAuthenticationInvalidCredentials: "O Windows rejeitou as credenciais. Em conta Microsoft, informe o e-mail e a senha da conta; o PIN do Windows Hello não é aceito.",
     linkLocalSessionReady: "Conectado a este Apocalipse. Os compartilhamentos estão disponíveis abaixo.",
-    linkNativeAuthPending: "O login por conta pela LAN/Internet ainda depende do transporte criptografado do Link. A senha do sistema não é enviada pelo transporte legado sem criptografia.",
+    linkRemoteSessionReady: "Conexão TLS criptografada estabelecida. Os compartilhamentos remotos estão disponíveis abaixo.",\n    linkRemoteFirstTrust: "Primeira conexão: o certificado TLS deste Apocalipse foi confiado para este endereço.",\n    linkConnectionFailed: "Falha na conexão",
     linkRemoteAuthPlan: "O acesso remoto usa um único login: IP/host + usuário do sistema operacional + senha da conta.",
     linkRemoteAccountFormats: "Windows: conta local, domínio, Microsoft ou AzureAD. Linux/macOS: usuário local do sistema.",
-    linkRemoteSecurityNotice: "A senha do sistema nunca é salva.",
+    linkRemoteSecurityNotice: "A senha do sistema nunca é salva e só é enviada dentro do canal TLS criptografado.",
     linkShareFile: "Compartilhar arquivo",
     linkShareFolder: "Compartilhar pasta ou unidade",
     linkReadOnly: "Somente leitura",
@@ -95,10 +95,10 @@ const catalogs = {
     linkAuthenticationFailed: "系统账户身份验证失败",
     linkAuthenticationInvalidCredentials: "Windows 拒绝了凭据。Microsoft 账户请填写电子邮件和账户密码；不支持 Windows Hello PIN。",
     linkLocalSessionReady: "已连接到本机 Apocalipse。共享项目显示在下方。",
-    linkNativeAuthPending: "局域网/互联网账户登录仍需要 Link 的加密传输。系统密码不会通过旧的未加密传输发送。",
+    linkRemoteSessionReady: "TLS 加密连接已建立。远程共享项目显示在下方。",\n    linkRemoteFirstTrust: "首次连接：已信任此地址的 Apocalipse TLS 证书。",\n    linkConnectionFailed: "连接失败",
     linkRemoteAuthPlan: "远程访问使用一个登录：IP/主机 + 操作系统用户名 + 账户密码。",
     linkRemoteAccountFormats: "Windows：本地、域、Microsoft 或 AzureAD 账户。Linux/macOS：本地系统用户名。",
-    linkRemoteSecurityNotice: "系统密码永不保存。",
+    linkRemoteSecurityNotice: "系统密码永不保存，并且只会通过 TLS 加密通道发送。",
     linkShareFile: "共享文件",
     linkShareFolder: "共享文件夹或驱动器",
     linkReadOnly: "只读",
@@ -326,6 +326,7 @@ document.querySelector("#link-share-folder").onclick = async () => {
 
 document.querySelector("#link-connect").onclick = async () => {
   const id = document.querySelector("#link-remote-id").value.trim();
+  const username = document.querySelector("#link-remote-username").value.trim();
   const passwordField = document.querySelector("#link-remote-password");
   const status = document.querySelector("#link-status");
   if (!id) {
@@ -336,21 +337,40 @@ document.querySelector("#link-connect").onclick = async () => {
   linkRemoteTransportToken = "";
   linkLocalAccountSession = false;
   try {
-    if (!isLocalLinkTarget(id)) {
-      status.textContent = t("linkNativeAuthPending");
+    if (isLocalLinkTarget(id)) {
+      linkRemoteId = id;
+      linkLocalAccountSession = true;
+      await openRemoteLink("");
+      status.textContent = t("linkLocalSessionReady");
       return;
     }
-    // 127.0.0.1/localhost points back to this same app. The Tauri command
-    // already exposes only explicit Link shares, so an OS password round-trip
-    // is unnecessary and was the source of Windows ERROR_LOGON_FAILURE (1326).
+    if (!username || !passwordField.value) {
+      status.textContent = t("linkCredentialsRequired");
+      return;
+    }
+    status.textContent = t("linkAuthenticating");
+    const session = await invoke("authenticate_remote_link_account", {
+      id,
+      username,
+      password: passwordField.value,
+    });
     linkRemoteId = id;
-    linkLocalAccountSession = true;
+    linkRemoteTransportToken = session.token;
+    linkLocalAccountSession = false;
     await openRemoteLink("");
-    status.textContent = t("linkLocalSessionReady");
+    status.textContent = session.firstTrust
+      ? `${t("linkRemoteSessionReady")} ${t("linkRemoteFirstTrust")} ${session.fingerprint}`
+      : t("linkRemoteSessionReady");
   } catch (error) {
     linkRemoteId = "";
+    linkRemoteTransportToken = "";
     linkLocalAccountSession = false;
-    status.textContent = `${t("linkConnectionFailed")}: ${error}`;
+    const value = String(error);
+    status.textContent = value.includes("remote_system_auth_failed")
+      ? t("linkAuthenticationInvalidCredentials")
+      : value.includes("link_tls_certificate_changed")
+        ? `${t("linkConnectionFailed")}: TLS certificate changed`
+        : `${t("linkConnectionFailed")}: ${value}`;
   } finally {
     passwordField.value = "";
     updateLinkTransferButtons();

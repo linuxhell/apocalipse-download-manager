@@ -1326,6 +1326,7 @@ document.querySelector("#link-share-file").onclick = async () => { try { renderL
 document.querySelector("#link-share-folder").onclick = async () => { try { renderLinkShares(await invoke("add_link_share")); await refreshVisibleLinkPanels({ resetToRoot: true }); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
 document.querySelector("#link-connect").onclick = async () => {
   const id = document.querySelector("#link-remote-id").value.trim();
+  const username = document.querySelector("#link-remote-username").value.trim();
   const passwordField = document.querySelector("#link-remote-password");
   const status = document.querySelector("#link-status");
   if (!id) {
@@ -1336,20 +1337,40 @@ document.querySelector("#link-connect").onclick = async () => {
   linkRemoteTransportToken = "";
   linkLocalAccountSession = false;
   try {
-    if (!isLocalLinkTarget(id)) {
-      status.textContent = t("linkNativeAuthPending");
+    if (isLocalLinkTarget(id)) {
+      linkRemoteId = id;
+      linkLocalAccountSession = true;
+      await openRemoteLink("");
+      status.textContent = t("linkLocalSessionReady");
       return;
     }
-    // Loopback is the same running Apocalipse process. Do not ask Windows to
-    // re-authenticate the current user just to display this app's explicit shares.
+    if (!username || !passwordField.value) {
+      status.textContent = t("linkCredentialsRequired");
+      return;
+    }
+    status.textContent = t("linkAuthenticating");
+    const session = await invoke("authenticate_remote_link_account", {
+      id,
+      username,
+      password: passwordField.value,
+    });
     linkRemoteId = id;
-    linkLocalAccountSession = true;
+    linkRemoteTransportToken = session.token;
+    linkLocalAccountSession = false;
     await openRemoteLink("");
-    status.textContent = t("linkLocalSessionReady");
+    status.textContent = session.firstTrust
+      ? `${t("linkRemoteSessionReady")} ${t("linkRemoteFirstTrust")} ${session.fingerprint}`
+      : t("linkRemoteSessionReady");
   } catch (error) {
     linkRemoteId = "";
+    linkRemoteTransportToken = "";
     linkLocalAccountSession = false;
-    status.textContent = `${t("linkConnectionFailed")}: ${error}`;
+    const value = String(error);
+    status.textContent = value.includes("remote_system_auth_failed")
+      ? t("linkAuthenticationInvalidCredentials")
+      : value.includes("link_tls_certificate_changed")
+        ? `${t("linkConnectionFailed")}: TLS certificate changed`
+        : `${t("linkConnectionFailed")}: ${value}`;
   } finally {
     passwordField.value = "";
     updateLinkTransferButtons();

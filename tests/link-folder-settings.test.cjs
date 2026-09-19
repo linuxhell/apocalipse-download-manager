@@ -149,6 +149,20 @@ test("Loopback Link opens explicit shares without a Windows password round-trip"
   assert.match(rust, /fn list_shared_link_directory\([\s\S]*link_share_entries\(settings\)/);
 });
 
+test("LAN and Internet Link use TLS with TOFU pinning and system-account authentication", () => {
+  assert.match(rust, /TcpListener::bind\(\("0\.0\.0\.0", LINK_PORT\)\)/);
+  assert.match(rust, /ServerConnection::new/);
+  assert.match(rust, /ClientConnection::new/);
+  assert.match(rust, /link_trusted_certificates/);
+  assert.match(rust, /link_tls_certificate_changed/);
+  assert.match(rust, /POST \/v1\/link\/auth/);
+  assert.match(rust, /fn authenticate_remote_link_account/);
+  assert.match(rust, /verify_system_account\(&request\.username, &request\.password\)/);
+  assert.match(linkJs, /invoke\("authenticate_remote_link_account"/);
+  assert.match(linkJs, /linkRemoteSessionReady/);
+  assert.doesNotMatch(linkJs, /linkNativeAuthPending/);
+});
+
 test("Native system-account authentication remains available for encrypted remote Link transport", () => {
   assert.match(rust, /fn authenticate_local_link_account\([\s\S]*password\.zeroize\(\)/);
   assert.match(rust, /#\[cfg\(windows\)\][\s\S]*fn verify_system_account\([\s\S]*LogonUserW/);

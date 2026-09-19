@@ -14,6 +14,12 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use rustls::{
+    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime},
+    ClientConfig, ClientConnection, DigitallySignedStruct, ServerConfig, ServerConnection,
+    SignatureScheme, StreamOwned,
+};
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -303,6 +309,8 @@ struct UserSettings {
     link_password: String,
     #[serde(default)]
     link_shares: Vec<LinkShare>,
+    #[serde(default)]
+    link_trusted_certificates: HashMap<String, String>,
     #[serde(default = "default_language")]
     language: String,
     #[serde(default = "default_theme")]
@@ -338,7 +346,7 @@ fn default_bridge_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 fn default_link_password() -> String {
-    uuid::Uuid::new_v4().simple().to_string()[..8].to_ascii_uppercase()
+    uuid::Uuid::new_v4().simple().to_string()
 }
 
 impl Default for UserSettings {
@@ -371,6 +379,7 @@ impl Default for UserSettings {
             associations: HashMap::new(),
             link_password: default_link_password(),
             link_shares: Vec::new(),
+            link_trusted_certificates: HashMap::new(),
             language: default_language(),
             theme: default_theme(),
         }
@@ -494,6 +503,27 @@ struct LinkShare {
 struct LinkListRequest {
     password: String,
     path: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkAuthRequest {
+    username: String,
+    password: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkAuthResponse {
+    token: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteLinkAuthentication {
+    token: String,
+    fingerprint: String,
+    first_trust: bool,
 }
 
 #[derive(Deserialize)]
@@ -1247,50 +1277,397 @@ fn delete_local_link_item(path: String) -> Result<(), String> {
     remove_link_path(&path)
 }
 
-#[tauri::command]
-async fn delete_remote_link_item(id: String, password: String, path: String) -> Result<(), String> {
-    let address = if id.starts_with("http://") {
-        id
+
+#[derive(Debug)]
+struct LinkServerCertVerifier;
+
+impl ServerCertVerifier for LinkServerCertVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        // The exact certificate is pinned immediately after the handshake.
+        // Signature validation below proves possession of its private key.
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        let provider = rustls::crypto::ring::default_provider();
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &provider.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        let provider = rustls::crypto::ring::default_provider();
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &provider.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
+fn load_or_create_link_tls_config(directory: &Path) -> Result<Arc<ServerConfig>, String> {
+    let cert_path = directory.join("link-tls-cert.der");
+    let key_path = directory.join("link-tls-key.der");
+    if !cert_path.is_file() || !key_path.is_file() {
+        let rcgen::CertifiedKey { cert, key_pair } =
+            rcgen::generate_simple_self_signed(vec!["apocalipse-link.local".to_owned()])
+                .map_err(|error| error.to_string())?;
+        fs::write(&cert_path, cert.der().as_ref()).map_err(|error| error.to_string())?;
+        fs::write(&key_path, key_pair.serialize_der()).map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600));
+        }
+    }
+    let certificate = CertificateDer::from(fs::read(&cert_path).map_err(|error| error.to_string())?);
+    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+        fs::read(&key_path).map_err(|error| error.to_string())?,
+    ));
+    ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![certificate], key)
+        .map(Arc::new)
+        .map_err(|error| error.to_string())
+}
+
+fn link_remote_parts(id: &str) -> Result<(String, u16, String), String> {
+    let value = id.trim();
+    if value.is_empty() {
+        return Err("invalid_remote_id".to_owned());
+    }
+    let normalized = if let Some(rest) = value.strip_prefix("http://") {
+        format!("https://{rest}")
+    } else if value.starts_with("https://") {
+        value.to_owned()
     } else {
-        format!("http://{id}")
+        format!("https://{value}")
     };
-    let encoded = url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>();
-    reqwest::Client::new()
-        .delete(format!("{address}/v1/link/item?path={encoded}"))
-        .bearer_auth(password)
-        .send()
-        .await
-        .map_err(|error| error.to_string())?
-        .error_for_status()
+    let parsed = url::Url::parse(&normalized).map_err(|error| error.to_string())?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "invalid_remote_id".to_owned())?
+        .to_owned();
+    let port = parsed.port().unwrap_or(LINK_PORT);
+    let authority = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    Ok((host, port, authority))
+}
+
+fn link_certificate_fingerprint(certificate: &CertificateDer<'_>) -> String {
+    let digest = Sha256::digest(certificate.as_ref());
+    digest
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+type LinkTlsStream = StreamOwned<ClientConnection, TcpStream>;
+
+fn connect_link_tls(
+    state: &AppState,
+    id: &str,
+) -> Result<(LinkTlsStream, String, bool, String), String> {
+    let (host, port, authority) = link_remote_parts(id)?;
+    let mut socket = TcpStream::connect((host.as_str(), port)).map_err(|error| error.to_string())?;
+    socket
+        .set_read_timeout(Some(Duration::from_secs(45)))
         .map_err(|error| error.to_string())?;
+    socket
+        .set_write_timeout(Some(Duration::from_secs(45)))
+        .map_err(|error| error.to_string())?;
+    let config = ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(LinkServerCertVerifier))
+        .with_no_client_auth();
+    let server_name = ServerName::try_from("apocalipse-link.local".to_owned())
+        .map_err(|error| error.to_string())?;
+    let mut connection =
+        ClientConnection::new(Arc::new(config), server_name).map_err(|error| error.to_string())?;
+    while connection.is_handshaking() {
+        connection
+            .complete_io(&mut socket)
+            .map_err(|error| error.to_string())?;
+    }
+    let certificate = connection
+        .peer_certificates()
+        .and_then(|certificates| certificates.first())
+        .ok_or_else(|| "link_tls_certificate_missing".to_owned())?;
+    let fingerprint = link_certificate_fingerprint(certificate);
+    let host_key = authority.to_ascii_lowercase();
+    let first_trust = {
+        let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+        match settings.link_trusted_certificates.get(&host_key) {
+            Some(expected) if expected != &fingerprint => {
+                return Err("link_tls_certificate_changed".to_owned())
+            }
+            Some(_) => false,
+            None => {
+                settings
+                    .link_trusted_certificates
+                    .insert(host_key, fingerprint.clone());
+                save_settings(state, &settings)?;
+                true
+            }
+        }
+    };
+    Ok((
+        StreamOwned::new(connection, socket),
+        fingerprint,
+        first_trust,
+        authority,
+    ))
+}
+
+struct LinkHttpResponse {
+    status: u16,
+    body: Vec<u8>,
+}
+
+fn read_link_http_response<S: Read>(stream: &mut S) -> Result<LinkHttpResponse, String> {
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .map_err(|error| error.to_string())?;
+    let header_end = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or_else(|| "invalid_link_http_response".to_owned())?;
+    let headers = String::from_utf8_lossy(&response[..header_end + 4]);
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| "invalid_link_http_status".to_owned())?;
+    Ok(LinkHttpResponse {
+        status,
+        body: response[header_end + 4..].to_vec(),
+    })
+}
+
+fn link_http_request(
+    state: &AppState,
+    id: &str,
+    method: &str,
+    target: &str,
+    bearer: Option<&str>,
+    body: &[u8],
+    content_type: Option<&str>,
+) -> Result<(LinkHttpResponse, String, bool), String> {
+    let (mut stream, fingerprint, first_trust, authority) = connect_link_tls(state, id)?;
+    let authorization = bearer
+        .map(|value| format!("Authorization: Bearer {value}\r\n"))
+        .unwrap_or_default();
+    let content_type = content_type
+        .map(|value| format!("Content-Type: {value}\r\n"))
+        .unwrap_or_default();
+    let headers = format!(
+        "{method} {target} HTTP/1.1\r\nHost: {authority}\r\n{authorization}{content_type}Content-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream
+        .write_all(headers.as_bytes())
+        .map_err(|error| error.to_string())?;
+    if !body.is_empty() {
+        stream.write_all(body).map_err(|error| error.to_string())?;
+    }
+    stream.flush().map_err(|error| error.to_string())?;
+    Ok((read_link_http_response(&mut stream)?, fingerprint, first_trust))
+}
+
+fn ensure_link_http_success(response: &LinkHttpResponse) -> Result<(), String> {
+    if (200..300).contains(&response.status) {
+        Ok(())
+    } else {
+        Err(format!("remote_http_status:{}", response.status))
+    }
+}
+
+fn read_link_download_head<S: Read>(
+    stream: &mut S,
+) -> Result<(u16, usize, Vec<u8>), String> {
+    let mut buffer = Vec::with_capacity(8192);
+    let mut chunk = [0_u8; 8192];
+    let header_end = loop {
+        let count = stream.read(&mut chunk).map_err(|error| error.to_string())?;
+        if count == 0 || buffer.len() + count > 65_536 {
+            return Err("invalid_link_http_response".to_owned());
+        }
+        buffer.extend_from_slice(&chunk[..count]);
+        if let Some(position) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+            break position;
+        }
+    };
+    let headers = String::from_utf8_lossy(&buffer[..header_end + 4]).into_owned();
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| "invalid_link_http_status".to_owned())?;
+    let length = bridge_content_length(&headers);
+    Ok((status, length, buffer[header_end + 4..].to_vec()))
+}
+
+fn download_link_file_to(
+    state: &AppState,
+    id: &str,
+    password: &str,
+    remote_path: &str,
+    destination: &Path,
+) -> Result<(), String> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
+    let (mut stream, _, _, authority) = connect_link_tls(state, id)?;
+    let request = format!(
+        "GET /v1/link/file?path={encoded} HTTP/1.1\r\nHost: {authority}\r\nAuthorization: Bearer {password}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| error.to_string())?;
+    stream.flush().map_err(|error| error.to_string())?;
+    let (status, length, initial) = read_link_download_head(&mut stream)?;
+    if status != 200 {
+        return Err(format!("remote_http_status:{status}"));
+    }
+    let mut file = fs::File::create(destination).map_err(|error| error.to_string())?;
+    let initial_len = initial.len().min(length);
+    file.write_all(&initial[..initial_len])
+        .map_err(|error| error.to_string())?;
+    let remaining = length.saturating_sub(initial_len);
+    std::io::copy(
+        &mut std::io::Read::by_ref(&mut stream).take(remaining as u64),
+        &mut file,
+    )
+    .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn send_link_directory(
+    state: &AppState,
+    id: &str,
+    password: &str,
+    remote_path: &str,
+) -> Result<(), String> {
+    let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
+    let (response, _, _) = link_http_request(
+        state,
+        id,
+        "PUT",
+        &format!("/v1/link/directory?path={encoded}"),
+        Some(password),
+        &[],
+        None,
+    )?;
+    ensure_link_http_success(&response)
+}
+
+fn send_link_file(
+    state: &AppState,
+    id: &str,
+    password: &str,
+    source: &Path,
+    remote_path: &str,
+) -> Result<(), String> {
+    let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
+    let (mut stream, _, _, authority) = connect_link_tls(state, id)?;
+    let mut file = fs::File::open(source).map_err(|error| error.to_string())?;
+    let size = file.metadata().map_err(|error| error.to_string())?.len();
+    let headers = format!(
+        "PUT /v1/link/file?path={encoded} HTTP/1.1\r\nHost: {authority}\r\nAuthorization: Bearer {password}\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n"
+    );
+    stream
+        .write_all(headers.as_bytes())
+        .map_err(|error| error.to_string())?;
+    std::io::copy(&mut file, &mut stream).map_err(|error| error.to_string())?;
+    stream.flush().map_err(|error| error.to_string())?;
+    let response = read_link_http_response(&mut stream)?;
+    ensure_link_http_success(&response)
+}
+
+#[tauri::command]
+async fn delete_remote_link_item(
+    app: tauri::AppHandle,
+    id: String,
+    password: String,
+    path: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let encoded = url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>();
+        let (response, _, _) = link_http_request(
+            &state,
+            &id,
+            "DELETE",
+            &format!("/v1/link/item?path={encoded}"),
+            Some(&password),
+            &[],
+            None,
+        )?;
+        ensure_link_http_success(&response)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
 async fn get_remote_link_capabilities(
+    app: tauri::AppHandle,
     id: String,
     password: String,
     path: String,
 ) -> Result<LinkCapabilities, String> {
-    let address = if id.starts_with("http://") {
-        id
-    } else {
-        format!("http://{id}")
-    };
-    reqwest::Client::new()
-        .get(format!(
-            "{address}/v1/link/capabilities?path={}",
-            url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>()
-        ))
-        .bearer_auth(password)
-        .send()
-        .await
-        .map_err(|error| error.to_string())?
-        .error_for_status()
-        .map_err(|error| error.to_string())?
-        .json()
-        .await
-        .map_err(|error| error.to_string())
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let encoded = url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>();
+        let (response, _, _) = link_http_request(
+            &state,
+            &id,
+            "GET",
+            &format!("/v1/link/capabilities?path={encoded}"),
+            Some(&password),
+            &[],
+            None,
+        )?;
+        ensure_link_http_success(&response)?;
+        serde_json::from_slice(&response.body).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -1448,31 +1825,72 @@ async fn upload_local_shared_link_item(
 }
 
 #[tauri::command]
+async fn authenticate_remote_link_account(
+    app: tauri::AppHandle,
+    id: String,
+    username: String,
+    password: String,
+) -> Result<RemoteLinkAuthentication, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut request = LinkAuthRequest { username, password };
+        let body = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
+        request.password.zeroize();
+        let (response, fingerprint, first_trust) = link_http_request(
+            &state,
+            &id,
+            "POST",
+            "/v1/link/auth",
+            None,
+            &body,
+            Some("application/json"),
+        )?;
+        if response.status == 401 {
+            return Err("remote_system_auth_failed".to_owned());
+        }
+        ensure_link_http_success(&response)?;
+        let authenticated: LinkAuthResponse =
+            serde_json::from_slice(&response.body).map_err(|error| error.to_string())?;
+        Ok(RemoteLinkAuthentication {
+            token: authenticated.token,
+            fingerprint,
+            first_trust,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn list_remote_link_files(
+    app: tauri::AppHandle,
     id: String,
     password: String,
     path: String,
 ) -> Result<Vec<LinkFileEntry>, String> {
-    let address = if id.starts_with("http://") {
-        id
-    } else {
-        format!("http://{id}")
-    };
-    reqwest::Client::new()
-        .post(format!("{address}/v1/link/list"))
-        .json(&LinkListRequest { password, path })
-        .send()
-        .await
-        .map_err(|error| error.to_string())?
-        .error_for_status()
-        .map_err(|error| error.to_string())?
-        .json()
-        .await
-        .map_err(|error| error.to_string())
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let body = serde_json::to_vec(&LinkListRequest { password, path })
+            .map_err(|error| error.to_string())?;
+        let (response, _, _) = link_http_request(
+            &state,
+            &id,
+            "POST",
+            "/v1/link/list",
+            None,
+            &body,
+            Some("application/json"),
+        )?;
+        ensure_link_http_success(&response)?;
+        serde_json::from_slice(&response.body).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
 async fn download_remote_link_file(
+    app: tauri::AppHandle,
     id: String,
     password: String,
     path: String,
@@ -1486,87 +1904,60 @@ async fn download_remote_link_file(
     let file_name = file_name
         .as_deref()
         .filter(|value| !value.is_empty())
-        .unwrap_or(fallback_name);
-    let address = if id.starts_with("http://") {
-        id
-    } else {
-        format!("http://{id}")
-    };
+        .unwrap_or(fallback_name)
+        .to_owned();
     if directory {
         let Some(destination_parent) = rfd::FileDialog::new().pick_folder() else {
             return Err("cancelled".to_owned());
         };
-        let destination = destination_parent.join(file_name);
-        tokio::fs::create_dir_all(&destination)
-            .await
-            .map_err(|error| error.to_string())?;
-        let mut pending = vec![(path, destination.clone())];
-        while let Some((remote_directory, local_directory)) = pending.pop() {
-            tokio::fs::create_dir_all(&local_directory)
-                .await
-                .map_err(|error| error.to_string())?;
-            let entries = reqwest::Client::new()
-                .post(format!("{address}/v1/link/list"))
-                .json(&LinkListRequest {
+        let destination = destination_parent.join(&file_name);
+        return tokio::task::spawn_blocking(move || {
+            let state = app.state::<AppState>();
+            fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
+            let mut pending = vec![(path, destination.clone())];
+            while let Some((remote_directory, local_directory)) = pending.pop() {
+                fs::create_dir_all(&local_directory).map_err(|error| error.to_string())?;
+                let body = serde_json::to_vec(&LinkListRequest {
                     password: password.clone(),
                     path: remote_directory,
                 })
-                .send()
-                .await
-                .map_err(|error| error.to_string())?
-                .error_for_status()
-                .map_err(|error| error.to_string())?
-                .json::<Vec<LinkFileEntry>>()
-                .await
                 .map_err(|error| error.to_string())?;
-            for entry in entries {
-                let local_path = local_directory.join(&entry.name);
-                if entry.directory {
-                    pending.push((entry.path, local_path));
-                } else {
-                    download_link_file_to(&address, &password, &entry.path, &local_path).await?;
+                let (response, _, _) = link_http_request(
+                    &state,
+                    &id,
+                    "POST",
+                    "/v1/link/list",
+                    None,
+                    &body,
+                    Some("application/json"),
+                )?;
+                ensure_link_http_success(&response)?;
+                let entries: Vec<LinkFileEntry> =
+                    serde_json::from_slice(&response.body).map_err(|error| error.to_string())?;
+                for entry in entries {
+                    let local_path = local_directory.join(&entry.name);
+                    if entry.directory {
+                        pending.push((entry.path, local_path));
+                    } else {
+                        download_link_file_to(&state, &id, &password, &entry.path, &local_path)?;
+                    }
                 }
             }
-        }
-        return Ok(destination.to_string_lossy().into_owned());
+            Ok(destination.to_string_lossy().into_owned())
+        })
+        .await
+        .map_err(|error| error.to_string())?;
     }
-    let Some(destination) = rfd::FileDialog::new().set_file_name(file_name).save_file() else {
+    let Some(destination) = rfd::FileDialog::new().set_file_name(&file_name).save_file() else {
         return Err("cancelled".to_owned());
     };
-    download_link_file_to(&address, &password, &path, &destination).await?;
-    Ok(destination.to_string_lossy().into_owned())
-}
-
-async fn download_link_file_to(
-    address: &str,
-    password: &str,
-    remote_path: &str,
-    destination: &Path,
-) -> Result<(), String> {
-    if let Some(parent) = destination.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-    let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
-    let response = reqwest::Client::new()
-        .get(format!("{address}/v1/link/file?path={encoded}"))
-        .bearer_auth(password)
-        .send()
-        .await
-        .map_err(|error| error.to_string())?
-        .error_for_status()
-        .map_err(|error| error.to_string())?;
-    let mut file = tokio::fs::File::create(&destination)
-        .await
-        .map_err(|error| error.to_string())?;
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        file.write_all(&chunk.map_err(|error| error.to_string())?)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        download_link_file_to(&state, &id, &password, &path, &destination)?;
+        Ok(destination.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn remote_link_join(parent: &str, child: &str) -> String {
@@ -1583,97 +1974,36 @@ fn remote_link_join(parent: &str, child: &str) -> String {
     )
 }
 
-fn send_link_directory(id: &str, password: &str, remote_path: &str) -> Result<(), String> {
-    let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
-    let parsed = url::Url::parse(&if id.starts_with("http://") {
-        id.to_owned()
-    } else {
-        format!("http://{id}")
-    })
-    .map_err(|error| error.to_string())?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "invalid_remote_id".to_owned())?;
-    let port = parsed.port().unwrap_or(LINK_PORT);
-    let mut stream = TcpStream::connect((host, port)).map_err(|error| error.to_string())?;
-    let header = format!("PUT /v1/link/directory?path={encoded} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {password}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-    stream
-        .write_all(header.as_bytes())
-        .map_err(|error| error.to_string())?;
-    let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .map_err(|error| error.to_string())?;
-    if !response.starts_with("HTTP/1.1 200") {
-        return Err("remote_directory_creation_failed".to_owned());
-    }
-    Ok(())
-}
-
-fn send_link_file(
-    id: &str,
-    password: &str,
-    source: &Path,
-    remote_path: &str,
-) -> Result<(), String> {
-    let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
-    let parsed = url::Url::parse(&if id.starts_with("http://") {
-        id.to_owned()
-    } else {
-        format!("http://{id}")
-    })
-    .map_err(|error| error.to_string())?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "invalid_remote_id".to_owned())?;
-    let port = parsed.port().unwrap_or(LINK_PORT);
-    let mut stream = TcpStream::connect((host, port)).map_err(|error| error.to_string())?;
-    let mut file = fs::File::open(source).map_err(|error| error.to_string())?;
-    let size = file.metadata().map_err(|error| error.to_string())?.len();
-    let header = format!("PUT /v1/link/file?path={encoded} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {password}\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n");
-    stream
-        .write_all(header.as_bytes())
-        .map_err(|error| error.to_string())?;
-    std::io::copy(&mut file, &mut stream).map_err(|error| error.to_string())?;
-    let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .map_err(|error| error.to_string())?;
-    if !response.starts_with("HTTP/1.1 200") {
-        return Err("remote_upload_failed".to_owned());
-    }
-    Ok(())
-}
-
 #[tauri::command]
 async fn upload_remote_link_file(
-    state: State<'_, AppState>,
+    app: tauri::AppHandle,
     id: String,
     password: String,
     remote_directory: String,
     local_path: String,
 ) -> Result<String, String> {
-    let source = {
-        let settings = state.settings.lock().map_err(|error| error.to_string())?;
-        resolve_link_share(&settings, &local_path)?.0
-    };
-    if !source.is_file() && !source.is_dir() {
-        return Err("selected_local_item_not_found".to_owned());
-    }
-    if remote_directory.trim().is_empty() {
-        return Err("select_remote_directory".to_owned());
-    }
     tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let source = {
+            let settings = state.settings.lock().map_err(|error| error.to_string())?;
+            resolve_link_share(&settings, &local_path)?.0
+        };
+        if !source.is_file() && !source.is_dir() {
+            return Err("selected_local_item_not_found".to_owned());
+        }
+        if remote_directory.trim().is_empty() {
+            return Err("select_remote_directory".to_owned());
+        }
         let name = source
             .file_name()
             .and_then(|value| value.to_str())
             .ok_or_else(|| "invalid_file_name".to_owned())?;
         let remote_path = remote_link_join(&remote_directory, name);
         if source.is_file() {
-            send_link_file(&id, &password, &source, &remote_path)?;
+            send_link_file(&state, &id, &password, &source, &remote_path)?;
             return Ok(remote_path);
         }
-        send_link_directory(&id, &password, &remote_path)?;
+        send_link_directory(&state, &id, &password, &remote_path)?;
         let mut pending = vec![(source, remote_path.clone())];
         while let Some((local_directory, target_directory)) = pending.pop() {
             for entry in fs::read_dir(local_directory).map_err(|error| error.to_string())? {
@@ -1685,10 +2015,10 @@ async fn upload_remote_link_file(
                 let entry_name = entry.file_name().to_string_lossy().into_owned();
                 let target_path = remote_link_join(&target_directory, &entry_name);
                 if file_type.is_dir() {
-                    send_link_directory(&id, &password, &target_path)?;
+                    send_link_directory(&state, &id, &password, &target_path)?;
                     pending.push((entry.path(), target_path));
                 } else if file_type.is_file() {
-                    send_link_file(&id, &password, &entry.path(), &target_path)?;
+                    send_link_file(&state, &id, &password, &entry.path(), &target_path)?;
                 }
             }
         }
@@ -2376,7 +2706,7 @@ fn local_link_ip() -> std::net::IpAddr {
     "127.0.0.1".parse().expect("valid loopback")
 }
 
-fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
+fn handle_link_connection<S: Read + Write>(app: &tauri::AppHandle, mut stream: S) {
     let mut buffer = Vec::with_capacity(8192);
     let mut chunk = [0_u8; 4096];
     let header_end = loop {
@@ -2604,6 +2934,42 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         return;
     };
     let headers = String::from_utf8_lossy(&buffer[..header_end + 4]);
+    if headers.starts_with("POST /v1/link/auth ") {
+        let request = serde_json::from_slice::<LinkAuthRequest>(&buffer[header_end + 4..]);
+        let Ok(mut request) = request else {
+            bridge_response(
+                &mut stream,
+                "400 Bad Request",
+                None,
+                "{\"error\":\"invalid_request\"}",
+            );
+            return;
+        };
+        let authentication = verify_system_account(&request.username, &request.password);
+        request.password.zeroize();
+        match authentication {
+            Ok(()) => {
+                let state = app.state::<AppState>();
+                let token = match state.settings.lock() {
+                    Ok(settings) => settings.link_password.clone(),
+                    Err(_) => return,
+                };
+                let body = serde_json::to_string(&LinkAuthResponse { token })
+                    .unwrap_or_else(|_| "{\"error\":\"serialization_failed\"}".to_owned());
+                bridge_response(&mut stream, "200 OK", None, &body);
+            }
+            Err(_) => {
+                std::thread::sleep(Duration::from_millis(750));
+                bridge_response(
+                    &mut stream,
+                    "401 Unauthorized",
+                    None,
+                    "{\"error\":\"authentication_failed\"}",
+                );
+            }
+        }
+        return;
+    }
     if headers.starts_with("POST /v1/mobile/add ") {
         let state = app.state::<AppState>();
         let settings = match state.settings.lock() {
@@ -2752,12 +3118,22 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     }
 }
 
-fn run_link_server(app: tauri::AppHandle, listener: TcpListener) {
+fn run_link_server(
+    app: tauri::AppHandle,
+    listener: TcpListener,
+    tls_config: Arc<ServerConfig>,
+) {
     for stream in listener.incoming().flatten() {
         let app = app.clone();
+        let tls_config = tls_config.clone();
         let _ = std::thread::Builder::new()
             .name("apocalipse-link-client".into())
-            .spawn(move || handle_link_connection(&app, stream));
+            .spawn(move || {
+                let Ok(connection) = ServerConnection::new(tls_config) else {
+                    return;
+                };
+                handle_link_connection(&app, StreamOwned::new(connection, stream));
+            });
     }
 }
 
@@ -3073,6 +3449,11 @@ fn migrate_secret(account: &str, in_memory: &mut String) -> Result<(), String> {
 fn hydrate_and_migrate_secrets(settings: &mut UserSettings) -> Result<(), String> {
     migrate_secret(VAULT_BRIDGE_TOKEN, &mut settings.bridge_token)?;
     migrate_secret(VAULT_LINK_PASSWORD, &mut settings.link_password)?;
+    if settings.link_password.len() < 24 {
+        settings.link_password.zeroize();
+        settings.link_password = default_link_password();
+        vault_store_verified(VAULT_LINK_PASSWORD, &settings.link_password)?;
+    }
 
     if let Some(mut legacy) = settings.proxy_password.take() {
         if vault_load(VAULT_PROXY_PASSWORD)?.is_none() {
@@ -7818,7 +8199,7 @@ fn read_bridge_request(stream: &mut TcpStream) -> Option<Vec<u8>> {
     (!request.is_empty()).then_some(request)
 }
 
-fn bridge_response(stream: &mut TcpStream, status: &str, origin: Option<&str>, body: &str) {
+fn bridge_response<S: Write>(stream: &mut S, status: &str, origin: Option<&str>, body: &str) {
     let cors = origin
         .map(|value| format!("Access-Control-Allow-Origin: {value}\r\nVary: Origin\r\n"))
         .unwrap_or_else(|| "Access-Control-Allow-Origin: *\r\n".to_owned());
@@ -9495,10 +9876,13 @@ async fn remove_path_with_retry(path: &Path, allow_directory: bool) -> Result<()
 }
 
 fn main() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let app_data = portable_data_directory(app)?;
+            let link_tls_config =
+                load_or_create_link_tls_config(&app_data).map_err(std::io::Error::other)?;
             let queue_path = app_data.join("queue.json");
             let settings_path = app_data.join("settings.json");
             let log_path = app_data.join("logs").join("apocalipse.log");
@@ -9561,13 +9945,14 @@ fn main() {
                     .name("apocalipse-extension-bridge".into())
                     .spawn(move || run_extension_bridge(bridge_app, listener))?;
             }
-            // File/control access stays local by default. Exposing it to the LAN requires a
-            // separately designed authenticated transport instead of an implicit wildcard bind.
-            if let Ok(listener) = TcpListener::bind(("127.0.0.1", LINK_PORT)) {
+            // Apocalipse Link uses TLS on loopback, LAN and Internet-facing binds.
+            // Only authenticated sessions can enumerate the explicitly allowed shares.
+            if let Ok(listener) = TcpListener::bind(("0.0.0.0", LINK_PORT)) {
                 let link_app = app.handle().clone();
+                let link_tls_config = link_tls_config.clone();
                 std::thread::Builder::new()
                     .name("apocalipse-link-server".into())
-                    .spawn(move || run_link_server(link_app, listener))?;
+                    .spawn(move || run_link_server(link_app, listener, link_tls_config))?;
             }
             if let Some(source) = associated_source {
                 queue_associated_source(app.handle(), source).map_err(std::io::Error::other)?;
@@ -9620,6 +10005,7 @@ fn main() {
             get_link_identity,
             open_link_window,
             authenticate_local_link_account,
+            authenticate_remote_link_account,
             list_link_shares,
             add_link_share,
             add_link_file_share,
