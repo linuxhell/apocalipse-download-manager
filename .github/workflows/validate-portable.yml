@@ -93,12 +93,19 @@ jobs:
         shell: bash
         run: |
           cargo fmt --all -- --check
-          cargo test --workspace --locked
+          cargo test --workspace
+      - name: Export generated lockfile for dependency review
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-cargo-lock
+          path: Cargo.lock
+          retention-days: 1
       - name: Verify prepared media with FFmpeg and FFprobe
         if: runner.os == 'Linux'
-        run: cargo test -p apocalipse-desktop --locked paired_preview_uses_real_mux_and_probe -- --ignored
+        run: cargo test -p apocalipse-desktop paired_preview_uses_real_mux_and_probe -- --ignored
       - name: Build desktop candidate
-        run: cargo build --release --locked -p apocalipse-desktop
+        run: cargo build --release -p apocalipse-desktop
       - name: Stage Windows portable
         if: runner.os == 'Windows'
         shell: pwsh
