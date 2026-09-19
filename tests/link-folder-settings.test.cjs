@@ -64,3 +64,13 @@ test("Link self-test reads the live local share state instead of loopback HTTP",
   assert.match(rust, /fn get_local_link_capabilities\([\s\S]*resolve_link_share/);
   assert.match(rust, /get_local_link_capabilities,/);
 });
+
+test("explicit Link shares remain visible even if metadata is temporarily unavailable", () => {
+  assert.match(rust, /struct LinkShare[\s\S]*directory: bool/);
+  assert.match(rust, /fn link_share_entries[\s\S]*\.map\(\|share\|/);
+  assert.doesNotMatch(rust, /fn link_share_entries[\s\S]*\.filter_map\(\|share\|/);
+  assert.match(rust, /map_or\(share\.directory, \|value\| value\.is_dir\(\)\)/);
+  assert.match(rust, /share\.directory = metadata\.is_dir\(\);/);
+  assert.match(rust, /directory: true/);
+  assert.match(rust, /directory: false/);
+});

@@ -371,6 +371,8 @@ struct LinkShare {
     name: String,
     path: PathBuf,
     allow_write: bool,
+    #[serde(default)]
+    directory: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -490,18 +492,19 @@ fn link_share_entries(settings: &UserSettings) -> Vec<LinkFileEntry> {
     settings
         .link_shares
         .iter()
-        .filter_map(|share| {
-            let metadata = fs::metadata(&share.path).ok()?;
-            Some(LinkFileEntry {
+        .map(|share| {
+            let metadata = fs::metadata(&share.path).ok();
+            LinkFileEntry {
                 name: share.name.clone(),
                 path: format!("/shares/{}", share.id),
-                size: if metadata.is_file() {
-                    metadata.len()
-                } else {
-                    0
-                },
-                directory: metadata.is_dir(),
-            })
+                size: metadata
+                    .as_ref()
+                    .filter(|value| value.is_file())
+                    .map_or(0, |value| value.len()),
+                directory: metadata
+                    .as_ref()
+                    .map_or(share.directory, |value| value.is_dir()),
+            }
         })
         .collect()
 }
@@ -576,6 +579,7 @@ fn add_link_share(state: State<'_, AppState>) -> Result<Vec<LinkShare>, String> 
             name,
             path,
             allow_write: false,
+            directory: true,
         });
         save_settings(&state, &settings)?;
     }
@@ -599,6 +603,7 @@ fn add_link_file_share(state: State<'_, AppState>) -> Result<Vec<LinkShare>, Str
             name,
             path,
             allow_write: false,
+            directory: false,
         });
         save_settings(&state, &settings)?;
     }
@@ -2330,6 +2335,11 @@ fn load_settings(path: &Path) -> Result<UserSettings, String> {
         .ok()
         .and_then(|data| serde_json::from_slice(&data).ok())
         .unwrap_or_default();
+    for share in &mut settings.link_shares {
+        if let Ok(metadata) = fs::metadata(&share.path) {
+            share.directory = metadata.is_dir();
+        }
+    }
     hydrate_and_migrate_secrets(&mut settings)?;
     write_settings(path, &settings)?;
     Ok(settings)
