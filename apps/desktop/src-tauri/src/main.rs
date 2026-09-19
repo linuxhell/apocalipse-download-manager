@@ -2,6 +2,7 @@
 
 mod diagnostics_v3;
 mod prepared_preview;
+mod thumbnail_cache;
 mod tiktok_preview;
 
 use apocalipse_core::{
@@ -736,6 +737,82 @@ fn version_numbers(value: &str) -> Vec<u64> {
         })
         .map(|part| part.parse::<u64>().unwrap_or(0))
         .collect()
+}
+
+#[tauri::command]
+async fn resolve_thumbnail(
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<Option<String>, String> {
+    let (proxy, dns) = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        let proxy = settings.proxy_enabled.then(|| {
+            (
+                settings.proxy_url.clone(),
+                settings.proxy_username.clone(),
+                settings.proxy_password.clone(),
+            )
+        });
+        let dns = if settings.dns_enabled {
+            settings.dns_servers.clone()
+        } else {
+            Vec::new()
+        };
+        (proxy, dns)
+    };
+
+    let (proxy_url, proxy_username, proxy_password) = proxy.unwrap_or_default();
+    let client = DownloadEngine::network_client_builder(
+        proxy_url.as_deref(),
+        proxy_username.as_deref(),
+        proxy_password.as_deref(),
+        &dns,
+    )
+    .map_err(|error| error.to_string())?
+    .redirect(reqwest::redirect::Policy::none())
+    .timeout(Duration::from_secs(12))
+    .build()
+    .map_err(|error| error.to_string())?;
+
+    let cache_root = state
+        .queue_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("cache");
+    match thumbnail_cache::resolve(&cache_root, &client, &url).await {
+        Ok(Some(result)) => {
+            state.diagnostics.record(
+                if result.cache_hit {
+                    "thumbnail.cache_hit"
+                } else {
+                    "thumbnail.cached"
+                },
+                "INFO",
+                None,
+                None,
+                serde_json::json!({
+                    "bytes": result.bytes,
+                    "contentHashPrefix": result.content_hash.chars().take(12).collect::<String>(),
+                    "cacheVersion": 2
+                }),
+            );
+            Ok(Some(result.data_url))
+        }
+        Ok(None) => Ok(None),
+        Err(error) => {
+            state.diagnostics.record(
+                "thumbnail.cache_failed",
+                "WARN",
+                None,
+                None,
+                serde_json::json!({
+                    "error": error,
+                    "urlStored": false
+                }),
+            );
+            Ok(None)
+        }
+    }
 }
 
 #[tauri::command]
@@ -8035,6 +8112,7 @@ fn main() {
             get_media_player,
             get_app_version,
             check_app_update,
+            resolve_thumbnail,
             set_media_player,
             preview_torrent,
             update_tool,
