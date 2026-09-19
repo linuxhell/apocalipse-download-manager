@@ -216,6 +216,7 @@ impl DownloadEngine {
         request: DownloadRequest,
         events: mpsc::Sender<DownloadEvent>,
     ) -> Result<()> {
+        let mut request = request;
         if request.destination.exists() && !request.overwrite {
             bail!("destination already exists");
         }
@@ -224,7 +225,7 @@ impl DownloadEngine {
         }
         let can_segment = request.method.eq_ignore_ascii_case("GET") && request.body.is_none();
         let requested = request.connections.clamp(1, 32);
-        let head = if can_segment && requested > 1 {
+        let mut head = if can_segment && requested > 1 {
             apply_headers(self.client.head(&request.url), &request.headers)
                 .send()
                 .await
@@ -232,12 +233,29 @@ impl DownloadEngine {
         } else {
             None
         };
-        let total = head.as_ref().and_then(|response| response.content_length());
         if can_segment && requested > 1 {
-            let probe = apply_headers(self.client.get(&request.url), &request.headers)
+            let mut probe = apply_headers(self.client.get(&request.url), &request.headers)
                 .header(header::RANGE, "bytes=0-0")
                 .send()
                 .await;
+            if probe
+                .as_ref()
+                .is_ok_and(|response| is_optional_referer_rejection(response.status()))
+                && remove_header(&mut request.headers, "referer")
+            {
+                // Some cross-origin media CDNs reject the embedding page as a
+                // Referer even though the exact URL is public and succeeds in
+                // the browser. Retry once without that optional header.
+                head = apply_headers(self.client.head(&request.url), &request.headers)
+                    .send()
+                    .await
+                    .ok();
+                probe = apply_headers(self.client.get(&request.url), &request.headers)
+                    .header(header::RANGE, "bytes=0-0")
+                    .send()
+                    .await;
+            }
+            let total = head.as_ref().and_then(|response| response.content_length());
             if let Ok(probe) = probe {
                 if probe.status() == StatusCode::PARTIAL_CONTENT {
                     let range_total = probe
@@ -414,17 +432,28 @@ impl DownloadEngine {
             .unwrap_or(0);
         let method = reqwest::Method::from_bytes(request.method.as_bytes())
             .context("invalid HTTP method")?;
-        let mut builder = self.client.request(method, &request.url);
-        for (name, value) in &request.headers {
-            builder = builder.header(name.as_str(), value.as_str());
+        let send = |headers: &[(String, String)]| {
+            let mut builder =
+                apply_headers(self.client.request(method.clone(), &request.url), headers);
+            if let Some(body) = &request.body {
+                builder = builder.body(body.clone());
+            }
+            if existing > 0
+                && request.method.eq_ignore_ascii_case("GET")
+                && request.body.is_none()
+            {
+                builder = builder.header(header::RANGE, format!("bytes={existing}-"));
+            }
+            builder
+        };
+        let mut response = send(&request.headers).send().await?;
+        let mut effective_headers = request.headers.clone();
+        if is_optional_referer_rejection(response.status())
+            && remove_header(&mut effective_headers, "referer")
+        {
+            response = send(&effective_headers).send().await?;
         }
-        if let Some(body) = &request.body {
-            builder = builder.body(body.clone());
-        }
-        if existing > 0 && request.method.eq_ignore_ascii_case("GET") && request.body.is_none() {
-            builder = builder.header(header::RANGE, format!("bytes={existing}-"));
-        }
-        let response = builder.send().await?.error_for_status()?;
+        let response = response.error_for_status()?;
         let resumed = existing > 0 && response.status() == StatusCode::PARTIAL_CONTENT;
         let resume_supported = resumed
             || response
@@ -626,6 +655,16 @@ fn apply_headers(mut builder: RequestBuilder, headers: &[(String, String)]) -> R
         builder = builder.header(name.as_str(), value.as_str());
     }
     builder
+}
+
+fn is_optional_referer_rejection(status: StatusCode) -> bool {
+    matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
+}
+
+fn remove_header(headers: &mut Vec<(String, String)>, target: &str) -> bool {
+    let previous = headers.len();
+    headers.retain(|(name, _)| !name.eq_ignore_ascii_case(target));
+    headers.len() != previous
 }
 
 fn content_range_total(value: &str) -> Option<u64> {
@@ -839,6 +878,20 @@ mod tests {
         };
         assert!(same_download_identity(&primary, &duplicate, true));
         assert!(!same_download_identity(&primary, &duplicate, false));
+    }
+
+    #[test]
+    fn referer_fallback_removes_only_referer_case_insensitively() {
+        let mut headers = vec![
+            ("User-Agent".into(), "browser".into()),
+            ("ReFeReR".into(), "https://embed.example/".into()),
+            ("Cookie".into(), "session=kept".into()),
+        ];
+        assert!(remove_header(&mut headers, "referer"));
+        assert_eq!(headers.len(), 2);
+        assert!(headers.iter().any(|(name, _)| name == "User-Agent"));
+        assert!(headers.iter().any(|(name, _)| name == "Cookie"));
+        assert!(!remove_header(&mut headers, "referer"));
     }
 
     #[tokio::test]
