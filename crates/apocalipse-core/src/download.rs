@@ -477,7 +477,9 @@ impl DownloadEngine {
             .lock()
             .ok()
             .and_then(|profiles| profiles.get(&host).copied())
-            .map_or(requested, |profile| requested.min(profile.stable_connections))
+            .map_or(requested, |profile| {
+                requested.min(profile.stable_connections)
+            })
             .clamp(1, 32)
     }
 
@@ -1164,8 +1166,18 @@ mod tests {
         );
         assert_eq!(content_range_total("bytes */4096"), Some(4096));
         assert_eq!(content_range_total("bytes 0-0/*"), None);
-        assert!(content_range_matches("bytes 4096-8191/16384", 4096, 8191, 16384));
-        assert!(!content_range_matches("bytes 0-4095/16384", 4096, 8191, 16384));
+        assert!(content_range_matches(
+            "bytes 4096-8191/16384",
+            4096,
+            8191,
+            16384
+        ));
+        assert!(!content_range_matches(
+            "bytes 0-4095/16384",
+            4096,
+            8191,
+            16384
+        ));
     }
 
     #[test]
@@ -1203,7 +1215,10 @@ mod tests {
     #[test]
     fn adaptive_chunks_leave_multiple_jobs_per_worker() {
         assert_eq!(adaptive_chunk_size(8 * 1024 * 1024, 8), 4 * 1024 * 1024);
-        assert_eq!(adaptive_chunk_size(64 * 1024 * 1024 * 1024, 8), 64 * 1024 * 1024);
+        assert_eq!(
+            adaptive_chunk_size(64 * 1024 * 1024 * 1024, 8),
+            64 * 1024 * 1024
+        );
         let size = adaptive_chunk_size(1024 * 1024 * 1024, 8);
         assert!(1024 * 1024 * 1024_u64.div_ceil(size) >= 8 * 8);
     }
