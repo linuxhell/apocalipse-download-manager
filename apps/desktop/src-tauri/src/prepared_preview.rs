@@ -348,7 +348,11 @@ fn page_command(
             ));
         }
     }
-    if let Some(credential) = super::website_credential_for_url(settings, &request.url) {
+    if let Some(credential) = super::effective_credential_for_download(
+        settings,
+        &request.url,
+        request.referer.as_deref(),
+    ) {
         command
             .arg("--username")
             .arg(&credential.username)
