@@ -126,7 +126,18 @@ const catalogs = {
     websiteCredentialRemove: "Remove",
     websiteCredentialSaved: "Credential saved",
     websiteCredentialsEmpty: "No site credentials saved.",
-    websiteCredentialsLocalWarning: "Passwords are stored locally in the portable data/settings.json file. Protect access to this folder.",
+    websiteCredentialsLocalWarning: "Passwords are stored in the operating system credential vault and are not written to settings.json.",
+    hostRules: "Per-site transfer rules",
+    hostRulesHint: "Apply exact hosts or wildcard subdomains such as *.example.com before global settings.",
+    hostRulePattern: "Host pattern",
+    hostRulePatternHint: "*.example.com",
+    hostRulePasswordHint: "Leave blank to keep the saved password",
+    hostRuleBandwidth: "Speed limit (MB/s)",
+    hostRuleClearPassword: "Remove the saved password for this rule",
+    hostRuleAdd: "Add or update rule",
+    hostRuleRemove: "Remove",
+    hostRulesEmpty: "No per-site rules saved.",
+    hostRulesVaultWarning: "Passwords are kept in the operating system credential vault, not in settings.json.",
     customDns: "Custom DNS",
     customDnsHint: "Resolve native downloads without changing the operating system DNS",
     dnsProvider: "Provider",
@@ -304,7 +315,18 @@ const catalogs = {
     websiteCredentialRemove: "Remover",
     websiteCredentialSaved: "Credencial salva",
     websiteCredentialsEmpty: "Nenhuma credencial de site salva.",
-    websiteCredentialsLocalWarning: "As senhas ficam armazenadas localmente no arquivo portátil data/settings.json. Proteja o acesso a essa pasta.",
+    websiteCredentialsLocalWarning: "As senhas ficam no cofre de credenciais do sistema operacional e não são gravadas no settings.json.",
+    hostRules: "Regras de transferência por site",
+    hostRulesHint: "Aplique hosts exatos ou subdomínios com curinga, como *.exemplo.com, antes das configurações globais.",
+    hostRulePattern: "Padrão de host",
+    hostRulePatternHint: "*.exemplo.com",
+    hostRulePasswordHint: "Deixe vazio para manter a senha salva",
+    hostRuleBandwidth: "Limite de velocidade (MB/s)",
+    hostRuleClearPassword: "Remover a senha salva desta regra",
+    hostRuleAdd: "Adicionar ou atualizar regra",
+    hostRuleRemove: "Remover",
+    hostRulesEmpty: "Nenhuma regra por site salva.",
+    hostRulesVaultWarning: "As senhas ficam no cofre de credenciais do sistema operacional, não no settings.json.",
     customDns: "DNS personalizado",
     customDnsHint: "Resolver downloads nativos sem alterar o DNS do sistema operacional",
     dnsProvider: "Provedor",
@@ -481,7 +503,18 @@ const catalogs = {
     websiteCredentialRemove: "删除",
     websiteCredentialSaved: "凭据已保存",
     websiteCredentialsEmpty: "尚未保存网站凭据。",
-    websiteCredentialsLocalWarning: "密码保存在便携式 data/settings.json 文件中。请保护此文件夹的访问权限。",
+    websiteCredentialsLocalWarning: "密码保存在操作系统凭据保险库中，不会写入 settings.json。",
+    hostRules: "按网站传输规则",
+    hostRulesHint: "在全局设置之前应用精确主机或通配子域，例如 *.example.com。",
+    hostRulePattern: "主机模式",
+    hostRulePatternHint: "*.example.com",
+    hostRulePasswordHint: "留空以保留已保存的密码",
+    hostRuleBandwidth: "速度限制（MB/秒）",
+    hostRuleClearPassword: "删除此规则保存的密码",
+    hostRuleAdd: "添加或更新规则",
+    hostRuleRemove: "删除",
+    hostRulesEmpty: "尚未保存按网站规则。",
+    hostRulesVaultWarning: "密码保存在操作系统凭据保险库中，而不是 settings.json。",
     customDns: "自定义 DNS",
     customDnsHint: "解析原生下载而不更改操作系统 DNS",
     dnsProvider: "提供商",
@@ -1503,6 +1536,93 @@ function renderWebsiteCredentials(credentials) {
     list.append(row);
   }
 }
+function renderHostRules(rules) {
+  const list = document.querySelector("#host-rule-list");
+  list.replaceChildren();
+  if (!rules.length) {
+    const empty = document.createElement("small");
+    empty.textContent = t("hostRulesEmpty");
+    list.append(empty);
+    return;
+  }
+  for (const rule of rules) {
+    const row = document.createElement("div");
+    const identity = document.createElement("span");
+    const pattern = document.createElement("b");
+    const details = document.createElement("small");
+    const remove = document.createElement("button");
+    pattern.textContent = rule.pattern;
+    const parts = [];
+    if (rule.username) parts.push(rule.username);
+    if (rule.userAgent) parts.push("UA: " + rule.userAgent);
+    if (rule.connections) parts.push(t("connections") + ": " + rule.connections);
+    if (rule.bandwidthLimit) parts.push(t("hostRuleBandwidth") + ": " + (rule.bandwidthLimit / 1024 / 1024).toFixed(1));
+    if (rule.hasPassword) parts.push("🔐");
+    details.textContent = parts.join(" · ");
+    identity.append(pattern, details);
+    identity.onclick = () => {
+      document.querySelector("#host-rule-pattern").value = rule.pattern;
+      document.querySelector("#host-rule-username").value = rule.username || "";
+      document.querySelector("#host-rule-password").value = "";
+      document.querySelector("#host-rule-user-agent").value = rule.userAgent || "";
+      document.querySelector("#host-rule-connections").value = rule.connections || "";
+      document.querySelector("#host-rule-bandwidth").value = rule.bandwidthLimit ? (rule.bandwidthLimit / 1024 / 1024).toFixed(1) : "";
+      document.querySelector("#host-rule-clear-password").checked = false;
+      document.querySelector("#host-rule-pattern").focus();
+    };
+    remove.type = "button";
+    remove.textContent = t("hostRuleRemove");
+    remove.onclick = async () => {
+      remove.disabled = true;
+      try {
+        renderHostRules(await invoke("remove_host_rule", { pattern: rule.pattern }));
+      } catch (error) {
+        console.error(error);
+        remove.disabled = false;
+      }
+    };
+    row.append(identity, remove);
+    list.append(row);
+  }
+}
+
+document.querySelector("#save-host-rule").onclick = async (event) => {
+  const button = event.currentTarget;
+  const pattern = document.querySelector("#host-rule-pattern");
+  const username = document.querySelector("#host-rule-username");
+  const password = document.querySelector("#host-rule-password");
+  const userAgent = document.querySelector("#host-rule-user-agent");
+  const connections = document.querySelector("#host-rule-connections");
+  const bandwidth = document.querySelector("#host-rule-bandwidth");
+  if (![pattern, username, password, userAgent, connections, bandwidth].every((input) => input.reportValidity()) || !pattern.value.trim()) return;
+  button.disabled = true;
+  try {
+    const connectionValue = connections.value ? Number(connections.value) : null;
+    const bandwidthValue = Number(bandwidth.value) || 0;
+    renderHostRules(await invoke("save_host_rule", {
+      pattern: pattern.value,
+      username: username.value,
+      password: password.value,
+      userAgent: userAgent.value,
+      connections: connectionValue,
+      bandwidthLimit: bandwidthValue > 0 ? Math.round(bandwidthValue * 1024 * 1024) : null,
+      clearPassword: document.querySelector("#host-rule-clear-password").checked,
+    }));
+    pattern.value = "";
+    username.value = "";
+    password.value = "";
+    userAgent.value = "";
+    connections.value = "";
+    bandwidth.value = "";
+    document.querySelector("#host-rule-clear-password").checked = false;
+  } catch (error) {
+    console.error(error);
+    window.alert(String(error));
+  } finally {
+    button.disabled = false;
+  }
+};
+
 document.querySelector("#save-website-credential").onclick = async (event) => {
   const button = event.currentTarget;
   const host = document.querySelector("#website-credential-host");
@@ -1528,7 +1648,7 @@ document.querySelector("#save-website-credential").onclick = async (event) => {
 };
 const openSettings = async (target = "general") => {
   try {
-    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations, websiteCredentials] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations, websiteCredentials, hostRules] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
@@ -1540,6 +1660,7 @@ const openSettings = async (target = "general") => {
       invoke("get_dns_setting"),
       invoke("get_associations"),
       invoke("list_website_credentials"),
+      invoke("list_host_rules"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
     document.querySelector("#theme").value = document.documentElement.dataset.theme;
@@ -1580,6 +1701,7 @@ const openSettings = async (target = "general") => {
       : "custom";
     updateDnsControls();
     renderWebsiteCredentials(websiteCredentials);
+    renderHostRules(hostRules);
     updateLogEditorControls();
     settingsDialog.showModal();
     const targetElement = {
