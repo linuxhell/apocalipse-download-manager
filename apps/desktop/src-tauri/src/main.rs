@@ -579,19 +579,15 @@ async fn open_link_window(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    WebviewWindowBuilder::new(
-        &app,
-        "apocalipse-link",
-        WebviewUrl::App("link.html".into()),
-    )
-    .title("Apocalipse Link")
-    .inner_size(1400.0, 900.0)
-    .min_inner_size(960.0, 640.0)
-    .resizable(true)
-    .maximized(true)
-    .decorations(true)
-    .build()
-    .map_err(|error| error.to_string())?;
+    WebviewWindowBuilder::new(&app, "apocalipse-link", WebviewUrl::App("link.html".into()))
+        .title("Apocalipse Link")
+        .inner_size(1400.0, 900.0)
+        .min_inner_size(960.0, 640.0)
+        .resizable(true)
+        .maximized(true)
+        .decorations(true)
+        .build()
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
