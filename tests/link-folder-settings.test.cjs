@@ -144,3 +144,17 @@ test("Loopback Link file operations bypass the legacy remote transport", () => {
   assert.match(rust, /copy_local_link_directory/);
   assert.match(rust, /link_write_not_allowed/);
 });
+
+test("About page is localized, sits below PayPal and resets its audio when leaving", () => {
+  assert.match(html, /id="donate-paypal"[\s\S]*data-page="about"/);
+  assert.match(html, /id="about-panel"/);
+  assert.match(html, /assets\/about-creator\.jpg/);
+  assert.match(html, /assets\/about-theme\.m4a/);
+  assert.match(app, /about: "About"/);
+  assert.match(app, /about: "Sobre"/);
+  assert.match(app, /about: "关于"/);
+  assert.match(app, /aboutAudio\.pause\(\)/);
+  assert.match(app, /aboutAudio\.currentTime = 0/);
+  assert.match(app, /aboutAudio\.play\(\)/);
+  assert.match(css, /\.about-creator-line[\s\S]*font-size: 20px/);
+});
