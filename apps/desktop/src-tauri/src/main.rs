@@ -187,6 +187,8 @@ struct UserSettings {
     associations: HashMap<String, bool>,
     #[serde(default = "default_link_password", skip_serializing)]
     link_password: String,
+    #[serde(default)]
+    link_allow_write: bool,
     #[serde(default = "default_language")]
     language: String,
     #[serde(default = "default_theme")]
@@ -254,6 +256,7 @@ impl Default for UserSettings {
             dns_servers: Vec::new(),
             associations: HashMap::new(),
             link_password: default_link_password(),
+            link_allow_write: false,
             language: default_language(),
             theme: default_theme(),
         }
@@ -386,6 +389,13 @@ struct LinkIdentity {
     id: String,
     password: String,
     port: u16,
+    allow_write: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkCapabilities {
+    allow_write: bool,
 }
 
 fn safe_link_path(path: &str) -> Result<PathBuf, String> {
@@ -472,7 +482,57 @@ fn get_link_identity(state: State<'_, AppState>) -> Result<LinkIdentity, String>
         id: format!("{ip}:{LINK_PORT}"),
         password: settings.link_password.clone(),
         port: LINK_PORT,
+        allow_write: settings.link_allow_write,
     })
+}
+
+#[tauri::command]
+fn set_link_allow_write(state: State<'_, AppState>, enabled: bool) -> Result<bool, String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.link_allow_write = enabled;
+    save_settings(&state, &settings)?;
+    Ok(enabled)
+}
+
+fn remove_link_path(path: &str) -> Result<(), String> {
+    let path = safe_link_path(path)?;
+    if path.file_name().is_none() {
+        return Err("cannot_delete_link_root".to_owned());
+    }
+    let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+    if metadata.is_dir() {
+        fs::remove_dir_all(path).map_err(|error| error.to_string())
+    } else {
+        fs::remove_file(path).map_err(|error| error.to_string())
+    }
+}
+
+#[tauri::command]
+fn delete_local_link_item(path: String) -> Result<(), String> {
+    remove_link_path(&path)
+}
+
+#[tauri::command]
+async fn delete_remote_link_item(id: String, password: String, path: String) -> Result<(), String> {
+    let address = if id.starts_with("http://") { id } else { format!("http://{id}") };
+    let encoded = url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>();
+    reqwest::Client::new()
+        .delete(format!("{address}/v1/link/item?path={encoded}"))
+        .bearer_auth(password)
+        .send().await.map_err(|error| error.to_string())?
+        .error_for_status().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_remote_link_capabilities(id: String, password: String) -> Result<LinkCapabilities, String> {
+    let address = if id.starts_with("http://") { id } else { format!("http://{id}") };
+    reqwest::Client::new()
+        .get(format!("{address}/v1/link/capabilities"))
+        .bearer_auth(password)
+        .send().await.map_err(|error| error.to_string())?
+        .error_for_status().map_err(|error| error.to_string())?
+        .json().await.map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1452,6 +1512,40 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         bridge_response(&mut stream, "200 OK", None, &body);
         return;
     }
+    if headers.starts_with("GET /v1/link/capabilities ") {
+        let state = app.state::<AppState>();
+        let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
+        if !bridge_authorized(&headers, &settings.link_password) {
+            bridge_response(&mut stream, "401 Unauthorized", None, "");
+            return;
+        }
+        let body = serde_json::to_string(&LinkCapabilities { allow_write: settings.link_allow_write })
+            .unwrap_or_else(|_| "{\"allowWrite\":false}".to_owned());
+        bridge_response(&mut stream, "200 OK", None, &body);
+        return;
+    }
+    if headers.starts_with("DELETE /v1/link/item?") {
+        let state = app.state::<AppState>();
+        let settings = match state.settings.lock() { Ok(value) => value, Err(_) => return };
+        if !bridge_authorized(&headers, &settings.link_password) {
+            bridge_response(&mut stream, "401 Unauthorized", None, "");
+            return;
+        }
+        if !settings.link_allow_write {
+            bridge_response(&mut stream, "403 Forbidden", None, "{\"error\":\"link_write_not_allowed\"}");
+            return;
+        }
+        drop(settings);
+        let request_target = headers.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("");
+        let path = url::Url::parse(&format!("http://localhost{request_target}")).ok().and_then(|url| {
+            url.query_pairs().find(|(key, _)| key == "path").map(|(_, value)| value.into_owned())
+        });
+        match path.ok_or_else(|| "invalid_path".to_owned()).and_then(|value| remove_link_path(&value)) {
+            Ok(()) => bridge_response(&mut stream, "200 OK", None, "{\"ok\":true}"),
+            Err(_) => bridge_response(&mut stream, "400 Bad Request", None, "{\"error\":\"delete_failed\"}"),
+        }
+        return;
+    }
     if headers.starts_with("PUT /v1/link/directory?") {
         let state = app.state::<AppState>();
         let settings = match state.settings.lock() {
@@ -1460,6 +1554,10 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         };
         if !bridge_authorized(&headers, &settings.link_password) {
             bridge_response(&mut stream, "401 Unauthorized", None, "");
+            return;
+        }
+        if !settings.link_allow_write {
+            bridge_response(&mut stream, "403 Forbidden", None, "{\"error\":\"link_write_not_allowed\"}");
             return;
         }
         drop(settings);
@@ -1493,6 +1591,10 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         };
         if !bridge_authorized(&headers, &settings.link_password) {
             bridge_response(&mut stream, "401 Unauthorized", None, "");
+            return;
+        }
+        if !settings.link_allow_write {
+            bridge_response(&mut stream, "403 Forbidden", None, "{\"error\":\"link_write_not_allowed\"}");
             return;
         }
         drop(settings);
@@ -8645,10 +8747,14 @@ fn main() {
             inspect_torrent_metadata,
             get_link_identity,
             regenerate_link_password,
+            set_link_allow_write,
             list_local_link_files,
             list_remote_link_files,
+            get_remote_link_capabilities,
             download_remote_link_file,
             upload_remote_link_file,
+            delete_local_link_item,
+            delete_remote_link_item,
             list_downloads,
             enqueue_download,
             default_download_directory,

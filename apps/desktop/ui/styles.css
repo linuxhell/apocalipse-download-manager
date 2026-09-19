@@ -893,10 +893,13 @@ footer .bridge-connected i {
 .link-panel > div { display: grid; align-content: start; gap: 10px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
 .link-panel p { color: var(--muted); margin: 0 0 6px; line-height: 1.5; }
 .link-panel input { min-width: 0; padding: 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface); }
+.link-write-toggle { display:flex!important; align-items:center; gap:9px; color:var(--text)!important; font-size:13px!important; }
+.link-write-toggle input { width:18px; height:18px; padding:0; accent-color:var(--accent); }
 .link-identity label,.link-connect label { display:grid; gap:6px; color:var(--muted); font-size:12px; }
 .link-files { min-height:340px; min-width:0; overflow:hidden; }
 .link-files header { display:flex; justify-content:space-between; align-items:center; gap:12px; min-width:0; }
 .link-files header > span { display:flex; gap:6px; flex-shrink:0; }
+.link-files header button[id*="delete"] { border-color:#713443; color:#ff9aaa; }
 .link-files > small { color:var(--muted); overflow-wrap:anywhere; }
 .link-files > div { display:grid; gap:4px; height:clamp(300px,42vh,460px); overflow:auto; padding:5px; border:1px solid var(--line); border-radius:9px; background:var(--surface); isolation:isolate; }
 .link-file { display:grid; grid-template-columns:24px minmax(0,1fr) auto; gap:8px; align-items:center; width:100%; min-width:0; min-height:40px; padding:9px; border:0; border-radius:7px; overflow:hidden; text-align:left; color:var(--text); background:transparent; }

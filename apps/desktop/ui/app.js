@@ -89,6 +89,10 @@ const catalogs = {
     linkCompleted: "Completed",
     linkTransferFailed: "Transfer failed",
     linkUploadFailed: "Upload failed",
+    linkAcceptWrite: "Accept writing",
+    linkDelete: "Delete",
+    linkDeleteConfirm: "Permanently delete {name}?",
+    linkWriteDenied: "The remote computer has not enabled Accept writing.",
     linkSendTitle: "Send a file directly",
     linkSendHint: "Create a private, one-use link valid for 10 minutes on your local network.",
     linkChooseFile: "Choose file and create link",
@@ -280,6 +284,10 @@ const catalogs = {
     linkCompleted: "Concluído",
     linkTransferFailed: "Falha na transferência",
     linkUploadFailed: "Falha no envio",
+    linkAcceptWrite: "Aceitar gravação",
+    linkDelete: "Apagar",
+    linkDeleteConfirm: "Apagar permanentemente {name}?",
+    linkWriteDenied: "O computador remoto não ativou Aceitar gravação.",
     linkSendTitle: "Enviar um arquivo diretamente",
     linkSendHint: "Crie um link privado de uso único, válido por 10 minutos na sua rede local.",
     linkChooseFile: "Escolher arquivo e criar link",
@@ -470,6 +478,10 @@ const catalogs = {
     linkCompleted: "已完成",
     linkTransferFailed: "传输失败",
     linkUploadFailed: "发送失败",
+    linkAcceptWrite: "接受写入",
+    linkDelete: "删除",
+    linkDeleteConfirm: "永久删除 {name}？",
+    linkWriteDenied: "远程电脑尚未启用接受写入。",
     linkSendTitle: "直接发送文件",
     linkSendHint: "创建一个在本地网络中有效十分钟的私密一次性链接。",
     linkChooseFile: "选择文件并创建链接",
@@ -1147,10 +1159,13 @@ let linkRemoteId = "";
 let linkRemotePassword = "";
 let linkSelectedLocal = null;
 let linkSelectedRemote = null;
+let linkRemoteAllowWrite = false;
 const linkParent = (path) => /^[A-Za-z]:[\\/]?$/.test(path) ? "" : path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
 function updateLinkTransferButtons() {
-  document.querySelector("#link-upload-local").disabled = !linkSelectedLocal || !linkRemoteId || !linkRemotePath;
+  document.querySelector("#link-upload-local").disabled = !linkSelectedLocal || !linkRemoteId || !linkRemotePath || !linkRemoteAllowWrite;
   document.querySelector("#link-download-remote").disabled = !linkSelectedRemote;
+  document.querySelector("#link-delete-local").disabled = !linkSelectedLocal;
+  document.querySelector("#link-delete-remote").disabled = !linkSelectedRemote || !linkRemoteAllowWrite;
 }
 function renderLinkFiles(target, entries, open, select) {
   const root = document.querySelector(target);
@@ -1198,6 +1213,7 @@ async function loadLinkIdentity() {
   const identity = await invoke("get_link_identity");
   document.querySelector("#link-own-id").value = identity.id;
   document.querySelector("#link-own-password").value = identity.password;
+  document.querySelector("#link-allow-write").checked = Boolean(identity.allowWrite);
   await openLocalLink();
   return identity;
 }
@@ -1205,10 +1221,23 @@ document.querySelector('[data-page="link"]').addEventListener("click", () => loa
 document.querySelector("#link-new-password").onclick = async () => {
   document.querySelector("#link-own-password").value = await invoke("regenerate_link_password");
 };
+document.querySelector("#link-allow-write").onchange = async (event) => {
+  const input = event.currentTarget;
+  input.disabled = true;
+  try { input.checked = await invoke("set_link_allow_write", { enabled: input.checked }); }
+  catch (error) { input.checked = !input.checked; window.alert(String(error)); }
+  finally { input.disabled = false; }
+};
 document.querySelector("#link-connect").onclick = async () => {
   linkRemoteId = document.querySelector("#link-remote-id").value.trim();
   linkRemotePassword = document.querySelector("#link-remote-password").value.trim();
-  try { await openRemoteLink(); document.querySelector("#link-status").textContent = t("linkConnected"); }
+  try {
+    const capabilities = await invoke("get_remote_link_capabilities", { id: linkRemoteId, password: linkRemotePassword });
+    linkRemoteAllowWrite = Boolean(capabilities.allowWrite);
+    document.querySelector("#link-remote-allow-write").checked = linkRemoteAllowWrite;
+    await openRemoteLink();
+    document.querySelector("#link-status").textContent = linkRemoteAllowWrite ? t("linkConnected") : `${t("linkConnected")} · ${t("linkWriteDenied")}`;
+  }
   catch (error) { document.querySelector("#link-status").textContent = `${t("linkConnectionFailed")}: ${error}`; }
 };
 document.querySelector("#link-self-test").onclick = async () => {
@@ -1219,6 +1248,16 @@ document.querySelector("#link-self-test").onclick = async () => {
 };
 document.querySelector("#link-local-up").onclick = () => openLocalLink(linkParent(linkLocalPath)).catch(console.error);
 document.querySelector("#link-remote-up").onclick = () => openRemoteLink(linkParent(linkRemotePath)).catch(console.error);
+document.querySelector("#link-delete-local").onclick = async () => {
+  if (!linkSelectedLocal || !window.confirm(t("linkDeleteConfirm").replace("{name}", linkSelectedLocal.name))) return;
+  await invoke("delete_local_link_item", { path: linkSelectedLocal.path });
+  await openLocalLink(linkLocalPath);
+};
+document.querySelector("#link-delete-remote").onclick = async () => {
+  if (!linkSelectedRemote || !window.confirm(t("linkDeleteConfirm").replace("{name}", linkSelectedRemote.name))) return;
+  await invoke("delete_remote_link_item", { id: linkRemoteId, password: linkRemotePassword, path: linkSelectedRemote.path });
+  await openRemoteLink(linkRemotePath);
+};
 document.querySelector("#link-download-remote").onclick = async () => {
   if (!linkSelectedRemote) return;
   const status = document.querySelector("#link-status");
