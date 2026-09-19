@@ -1242,9 +1242,11 @@ document.querySelector('[data-page="link"]').addEventListener("click", () => loa
 document.querySelector("#link-new-password").onclick = async () => {
   document.querySelector("#link-own-password").value = await invoke("regenerate_link_password");
 };
-async function refreshVisibleLinkPanels() {
-  await openLocalLink(linkLocalPath).catch(() => openLocalLink(""));
-  if (linkRemoteId) await openRemoteLink(linkRemotePath).catch(() => openRemoteLink(""));
+async function refreshVisibleLinkPanels({ resetToRoot = false } = {}) {
+  const localPath = resetToRoot ? "" : linkLocalPath;
+  const remotePath = resetToRoot ? "" : linkRemotePath;
+  await openLocalLink(localPath).catch(() => openLocalLink(""));
+  if (linkRemoteId) await openRemoteLink(remotePath).catch(() => openRemoteLink(""));
 }
 function renderLinkShares(shares) {
   const root = document.querySelector("#link-share-list"); root.replaceChildren();
@@ -1254,14 +1256,14 @@ function renderLinkShares(shares) {
     const permission = document.createElement("select");
     permission.append(new Option(t("linkReadOnly"), "false"), new Option(t("linkReadWrite"), "true"));
     permission.value = String(Boolean(share.allowWrite));
-    permission.onchange = async () => { renderLinkShares(await invoke("update_link_share", { id: share.id, allowWrite: permission.value === "true" })); await refreshVisibleLinkPanels(); };
+    permission.onchange = async () => { renderLinkShares(await invoke("update_link_share", { id: share.id, allowWrite: permission.value === "true" })); await refreshVisibleLinkPanels({ resetToRoot: true }); };
     const remove = Object.assign(document.createElement("button"), { type: "button", textContent: t("linkStopSharing") });
-    remove.onclick = async () => { renderLinkShares(await invoke("remove_link_share", { id: share.id })); await refreshVisibleLinkPanels(); };
+    remove.onclick = async () => { renderLinkShares(await invoke("remove_link_share", { id: share.id })); await refreshVisibleLinkPanels({ resetToRoot: true }); };
     row.append(name, permission, remove); root.append(row);
   }
 }
-document.querySelector("#link-share-file").onclick = async () => { try { renderLinkShares(await invoke("add_link_file_share")); await refreshVisibleLinkPanels(); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
-document.querySelector("#link-share-folder").onclick = async () => { try { renderLinkShares(await invoke("add_link_share")); await refreshVisibleLinkPanels(); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
+document.querySelector("#link-share-file").onclick = async () => { try { renderLinkShares(await invoke("add_link_file_share")); await refreshVisibleLinkPanels({ resetToRoot: true }); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
+document.querySelector("#link-share-folder").onclick = async () => { try { renderLinkShares(await invoke("add_link_share")); await refreshVisibleLinkPanels({ resetToRoot: true }); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
 document.querySelector("#link-connect").onclick = async () => {
   linkRemoteId = document.querySelector("#link-remote-id").value.trim();
   linkRemotePassword = document.querySelector("#link-remote-password").value.trim();
