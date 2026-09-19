@@ -1,0 +1,9 @@
+[package]
+name = "nettrace-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Portable IPv4/IPv6 network path monitor written in Rust"
+license = "MIT"
+
+[dependencies]
+eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "glow"] }
