@@ -739,10 +739,9 @@ fn version_numbers(value: &str) -> Vec<u64> {
         .collect()
 }
 
-#[tauri::command]
-async fn resolve_thumbnail(
-    state: State<'_, AppState>,
-    url: String,
+async fn resolve_thumbnail_internal(
+    state: &AppState,
+    url: &str,
 ) -> Result<Option<String>, String> {
     let (proxy, dns) = {
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
@@ -779,7 +778,7 @@ async fn resolve_thumbnail(
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("cache");
-    match thumbnail_cache::resolve(&cache_root, &client, &url).await {
+    match thumbnail_cache::resolve(&cache_root, &client, url).await {
         Ok(Some(result)) => {
             state.diagnostics.record(
                 if result.cache_hit {
@@ -813,6 +812,27 @@ async fn resolve_thumbnail(
             Ok(None)
         }
     }
+}
+
+#[tauri::command]
+async fn resolve_thumbnail(
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<Option<String>, String> {
+    resolve_thumbnail_internal(&state, &url).await
+}
+
+fn prefetch_thumbnail(app: tauri::AppHandle, url: String) {
+    if !matches!(
+        url.split(':').next().unwrap_or_default().to_ascii_lowercase().as_str(),
+        "http" | "https"
+    ) {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let _ = resolve_thumbnail_internal(&state, &url).await;
+    });
 }
 
 #[tauri::command]
@@ -5094,6 +5114,9 @@ fn enqueue_download_impl(
             "site_rule.pixeldrain_single_connection",
             &format!("task={} host=pixeldrain.com connections=1", task.id),
         );
+    }
+    if let Some(thumbnail) = task.thumbnail.clone() {
+        prefetch_thumbnail(app.clone(), thumbnail);
     }
     start_download(&app, state, task.clone(), kind)?;
     Ok(task)
