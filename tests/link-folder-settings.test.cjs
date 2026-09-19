@@ -109,5 +109,5 @@ test("Link has one address-based connection flow for loopback, LAN and Internet"
   assert.match(html, /data-i18n="linkRemoteAddressExamples"/);
   assert.equal((app.match(/linkRemoteAddressExamples:/g) || []).length, 3);
   assert.match(rust, /struct LinkIdentity\s*\{\s*id: String,\s*\}/);
-  assert.doesNotMatch(rust, /struct LinkIdentity[\s\S]*password:/);
+  assert.doesNotMatch(rust, /struct LinkIdentity\s*\{[^}]*password:/);
 });
