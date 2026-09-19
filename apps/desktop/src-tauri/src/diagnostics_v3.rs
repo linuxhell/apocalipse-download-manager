@@ -579,6 +579,9 @@ impl Diagnostics {
                 || name.starts_with("http.performance_")
                 || name.starts_with("http.transfer_")
                 || name.starts_with("http.transport_")
+                || name.starts_with("http.range_")
+                || name.starts_with("http.remote_")
+                || name.starts_with("http.integrity_")
             {
                 transfer_engine.push(record.clone());
             }
@@ -624,6 +627,23 @@ impl Diagnostics {
             .iter()
             .filter(|record| record["detail"]["attempts"].as_u64().unwrap_or(1) > 1)
             .count();
+        let range_steals = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.range_stolen")
+            .count();
+        let stolen_bytes = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.range_stolen")
+            .filter_map(|record| record["detail"]["stolenBytes"].as_u64())
+            .sum::<u64>();
+        let remote_checksums = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.remote_checksum")
+            .count();
+        let integrity_checks = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.integrity_check")
+            .count();
         let max_source_count = transfer_engine
             .iter()
             .filter_map(|record| record["detail"]["sourceCount"].as_u64())
@@ -643,6 +663,10 @@ impl Diagnostics {
             "peakBytesPerSecond": peak_bytes_per_second,
             "averageSegmentBytesPerSecond": average_segment_bytes_per_second,
             "mirrorFallbackSegments": mirror_fallback_segments,
+            "rangeSteals": range_steals,
+            "stolenBytes": stolen_bytes,
+            "remoteChecksums": remote_checksums,
+            "integrityChecks": integrity_checks,
             "maxSourceCount": max_source_count,
             "transports": transports,
             "interpretation": "observed_transfer_metrics_not_a_cross_product_benchmark"
