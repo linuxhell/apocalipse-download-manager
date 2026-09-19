@@ -8,8 +8,7 @@ mod tiktok_preview;
 use apocalipse_core::{
     classify_url, cleanup_chunk_artifacts, contextual_media_page, parse_metalink, partial_path,
     plan_download, BandwidthLimiter, Capabilities, DownloadEngine, DownloadEvent, DownloadId,
-    DownloadKind,
-    DownloadRequest, DownloadState, DownloadTask,
+    DownloadKind, DownloadRequest, DownloadState, DownloadTask,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use futures_util::StreamExt;
@@ -739,10 +738,7 @@ fn version_numbers(value: &str) -> Vec<u64> {
         .collect()
 }
 
-async fn resolve_thumbnail_internal(
-    state: &AppState,
-    url: &str,
-) -> Result<Option<String>, String> {
+async fn resolve_thumbnail_internal(state: &AppState, url: &str) -> Result<Option<String>, String> {
     let (proxy, dns) = {
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
         let proxy = settings.proxy_enabled.then(|| {
@@ -824,7 +820,11 @@ async fn resolve_thumbnail(
 
 fn prefetch_thumbnail(app: tauri::AppHandle, url: String) {
     if !matches!(
-        url.split(':').next().unwrap_or_default().to_ascii_lowercase().as_str(),
+        url.split(':')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
         "http" | "https"
     ) {
         return;
@@ -5176,7 +5176,9 @@ async fn run_metalink_manifest(
         "metalink.inspect_started",
         &format!("task={id} url={}", redact_url(&task.source)),
     );
-    update_task(&app, id, true, |item| item.state = DownloadState::Inspecting);
+    update_task(&app, id, true, |item| {
+        item.state = DownloadState::Inspecting
+    });
 
     let (proxy, dns, identity, credential) = {
         let settings = match state.settings.lock() {
@@ -5242,7 +5244,10 @@ async fn run_metalink_manifest(
     if let Some(referer) = task.referer.as_deref() {
         request = request.header("Referer", referer);
     }
-    if let Some(user_agent) = identity.as_ref().and_then(|item| item.user_agent.as_deref()) {
+    if let Some(user_agent) = identity
+        .as_ref()
+        .and_then(|item| item.user_agent.as_deref())
+    {
         request = request.header("User-Agent", user_agent);
     }
     if let Some(cookie) = identity
@@ -5268,7 +5273,12 @@ async fn run_metalink_manifest(
     let response = match response.and_then(|response| response.error_for_status()) {
         Ok(response) => response,
         Err(error) => {
-            diagnostic_log(&state, "ERROR", "metalink.inspect_failed", &error.to_string());
+            diagnostic_log(
+                &state,
+                "ERROR",
+                "metalink.inspect_failed",
+                &error.to_string(),
+            );
             update_task(&app, id, true, |item| {
                 item.state = DownloadState::Failed {
                     message: format!("metalink_fetch_failed: {error}"),
@@ -5447,12 +5457,7 @@ fn start_download(
         &format!("task={} engine={kind:?}", task.id),
     );
     if kind == DownloadKind::Metalink {
-        tauri::async_runtime::spawn(run_metalink_manifest(
-            app.clone(),
-            task.id,
-            task,
-            cancelled,
-        ));
+        tauri::async_runtime::spawn(run_metalink_manifest(app.clone(), task.id, task, cancelled));
         return Ok(());
     }
     if kind == DownloadKind::Http && task.companion_audio_url.is_some() {
@@ -6038,7 +6043,11 @@ fn remove_website_credential(
     let host = normalize_credential_host(&host)?;
     vault_delete(&website_vault_account(&host))?;
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    for credential in settings.website_credentials.iter_mut().filter(|item| item.host == host) {
+    for credential in settings
+        .website_credentials
+        .iter_mut()
+        .filter(|item| item.host == host)
+    {
         credential.password.zeroize();
     }
     settings
