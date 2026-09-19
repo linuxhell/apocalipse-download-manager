@@ -44,6 +44,12 @@ use std::{
     os::windows::ffi::OsStrExt,
 };
 
+#[cfg(unix)]
+use std::{
+    ffi::c_void,
+    os::raw::{c_char, c_int},
+};
+
 #[cfg(windows)]
 #[link(name = "advapi32")]
 extern "system" {
@@ -61,6 +67,61 @@ extern "system" {
 #[link(name = "kernel32")]
 extern "system" {
     fn CloseHandle(object: *mut c_void) -> i32;
+}
+
+#[cfg(unix)]
+#[repr(C)]
+struct PamMessage {
+    msg_style: c_int,
+    msg: *const c_char,
+}
+
+#[cfg(unix)]
+#[repr(C)]
+struct PamResponse {
+    resp: *mut c_char,
+    resp_retcode: c_int,
+}
+
+#[cfg(unix)]
+#[repr(C)]
+struct PamConversation {
+    conv: Option<
+        unsafe extern "C" fn(
+            c_int,
+            *const *const PamMessage,
+            *mut *mut PamResponse,
+            *mut c_void,
+        ) -> c_int,
+    >,
+    appdata_ptr: *mut c_void,
+}
+
+#[cfg(unix)]
+struct PamConversationData {
+    username: Vec<u8>,
+    password: Vec<u8>,
+}
+
+#[cfg(unix)]
+#[link(name = "pam")]
+extern "C" {
+    fn pam_start(
+        service_name: *const c_char,
+        user: *const c_char,
+        pam_conversation: *const PamConversation,
+        pam_handle: *mut *mut c_void,
+    ) -> c_int;
+    fn pam_authenticate(pam_handle: *mut c_void, flags: c_int) -> c_int;
+    fn pam_acct_mgmt(pam_handle: *mut c_void, flags: c_int) -> c_int;
+    fn pam_end(pam_handle: *mut c_void, status: c_int) -> c_int;
+}
+
+#[cfg(unix)]
+extern "C" {
+    fn calloc(count: usize, size: usize) -> *mut c_void;
+    fn free(pointer: *mut c_void);
+    fn strdup(value: *const c_char) -> *mut c_char;
 }
 
 const VAULT_SERVICE: &str = "com.linuxhell.apocalipse";
@@ -582,16 +643,134 @@ fn verify_system_account(username: &str, password: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(windows))]
-fn verify_system_account(_username: &str, _password: &str) -> Result<(), String> {
-    Err("system_auth_not_implemented_for_platform".to_owned())
+#[cfg(unix)]
+unsafe fn free_pam_responses(responses: *mut PamResponse, count: usize) {
+    if responses.is_null() {
+        return;
+    }
+    for index in 0..count {
+        let response = responses.add(index);
+        if !(*response).resp.is_null() {
+            free((*response).resp.cast());
+        }
+    }
+    free(responses.cast());
+}
+
+#[cfg(unix)]
+unsafe extern "C" fn pam_link_conversation(
+    message_count: c_int,
+    messages: *const *const PamMessage,
+    responses: *mut *mut PamResponse,
+    appdata_ptr: *mut c_void,
+) -> c_int {
+    const PAM_SUCCESS: c_int = 0;
+    const PAM_PROMPT_ECHO_OFF: c_int = 1;
+    const PAM_PROMPT_ECHO_ON: c_int = 2;
+    const PAM_ERROR_MSG: c_int = 3;
+    const PAM_TEXT_INFO: c_int = 4;
+    const PAM_CONV_ERR: c_int = 19;
+
+    if message_count <= 0 || messages.is_null() || responses.is_null() || appdata_ptr.is_null() {
+        return PAM_CONV_ERR;
+    }
+    let data = &*(appdata_ptr as *const PamConversationData);
+    let count = message_count as usize;
+    let output = calloc(count, std::mem::size_of::<PamResponse>()) as *mut PamResponse;
+    if output.is_null() {
+        return PAM_CONV_ERR;
+    }
+    for index in 0..count {
+        let message = *messages.add(index);
+        if message.is_null() {
+            free_pam_responses(output, index);
+            return PAM_CONV_ERR;
+        }
+        let source = match (*message).msg_style {
+            PAM_PROMPT_ECHO_OFF => data.password.as_ptr(),
+            PAM_PROMPT_ECHO_ON => data.username.as_ptr(),
+            PAM_ERROR_MSG | PAM_TEXT_INFO => std::ptr::null(),
+            _ => {
+                free_pam_responses(output, index);
+                return PAM_CONV_ERR;
+            }
+        };
+        if !source.is_null() {
+            let copy = strdup(source.cast());
+            if copy.is_null() {
+                free_pam_responses(output, index);
+                return PAM_CONV_ERR;
+            }
+            (*output.add(index)).resp = copy;
+        }
+    }
+    *responses = output;
+    PAM_SUCCESS
+}
+
+#[cfg(unix)]
+fn pam_bytes(value: &str) -> Result<Vec<u8>, String> {
+    if value.as_bytes().contains(&0) {
+        return Err("invalid_system_credential".to_owned());
+    }
+    let mut bytes = value.as_bytes().to_vec();
+    bytes.push(0);
+    Ok(bytes)
+}
+
+#[cfg(unix)]
+fn verify_system_account(username: &str, password: &str) -> Result<(), String> {
+    const PAM_SUCCESS: c_int = 0;
+    if username.trim().is_empty() {
+        return Err("system_username_required".to_owned());
+    }
+    let mut data = PamConversationData {
+        username: pam_bytes(username.trim())?,
+        password: pam_bytes(password)?,
+    };
+    let conversation = PamConversation {
+        conv: Some(pam_link_conversation),
+        appdata_ptr: (&mut data as *mut PamConversationData).cast(),
+    };
+    let mut handle = std::ptr::null_mut();
+    let service = b"login\0";
+    let started = unsafe {
+        pam_start(
+            service.as_ptr().cast(),
+            data.username.as_ptr().cast(),
+            &conversation,
+            &mut handle,
+        )
+    };
+    let (result, final_status) = if started != PAM_SUCCESS {
+        (Err(format!("system_auth_start_failed:{started}")), started)
+    } else {
+        let authenticated = unsafe { pam_authenticate(handle, 0) };
+        if authenticated != PAM_SUCCESS {
+            (
+                Err(format!("system_auth_failed:{authenticated}")),
+                authenticated,
+            )
+        } else {
+            let account = unsafe { pam_acct_mgmt(handle, 0) };
+            if account == PAM_SUCCESS {
+                (Ok(()), PAM_SUCCESS)
+            } else {
+                (Err(format!("system_account_denied:{account}")), account)
+            }
+        }
+    };
+    if started == PAM_SUCCESS && !handle.is_null() {
+        unsafe {
+            pam_end(handle, final_status);
+        }
+    }
+    data.password.zeroize();
+    result
 }
 
 #[tauri::command]
-fn authenticate_local_link_account(
-    username: String,
-    mut password: String,
-) -> Result<(), String> {
+fn authenticate_local_link_account(username: String, mut password: String) -> Result<(), String> {
     let result = verify_system_account(&username, &password);
     password.zeroize();
     result
@@ -830,10 +1009,7 @@ fn get_local_link_share_capabilities(
 }
 
 #[tauri::command]
-fn delete_local_shared_link_item(
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<(), String> {
+fn delete_local_shared_link_item(state: State<'_, AppState>, path: String) -> Result<(), String> {
     let target = {
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
         let (target, allow_write) = resolve_link_share(&settings, &path)?;
@@ -927,8 +1103,7 @@ async fn upload_local_shared_link_item(
     let (source, destination_root) = {
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
         let source = resolve_link_share(&settings, &local_path)?.0;
-        let (destination_root, allow_write) =
-            resolve_link_share(&settings, &remote_directory)?;
+        let (destination_root, allow_write) = resolve_link_share(&settings, &remote_directory)?;
         if !allow_write {
             return Err("link_write_not_allowed".to_owned());
         }
