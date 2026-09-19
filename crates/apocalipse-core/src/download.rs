@@ -23,7 +23,7 @@ use std::{
 };
 use tokio::{
     fs,
-    io::{AsyncSeekExt, AsyncWriteExt, BufWriter},
+    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufWriter},
     sync::{mpsc, Mutex},
 };
 
@@ -44,6 +44,9 @@ pub struct DownloadRequest {
     pub method: String,
     pub body: Option<Vec<u8>>,
     pub headers: Vec<(String, String)>,
+    /// Optional trusted SHA-256. When present, the .part file is never promoted
+    /// to the final destination unless the digest matches exactly.
+    pub expected_sha256: Option<String>,
     pub limiters: Vec<Arc<BandwidthLimiter>>,
 }
 
@@ -1182,6 +1185,30 @@ async fn finish_download(
             bail!("incomplete download: received {received} of {expected} bytes");
         }
     }
+
+    if let Some(expected) = request
+        .expected_sha256
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let expected = expected.to_ascii_lowercase();
+        if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            bail!("invalid expected SHA-256");
+        }
+        let actual = sha256_file(partial).await?;
+        let _ = events.try_send(DownloadEvent::Diagnostic {
+            event: "http.integrity_check",
+            detail: serde_json::json!({
+                "algorithm": "sha256",
+                "matched": actual == expected
+            }),
+        });
+        if actual != expected {
+            bail!("sha256 mismatch");
+        }
+    }
+
     if request.overwrite && request.destination.exists() {
         fs::remove_file(&request.destination).await?;
     }
@@ -1190,6 +1217,20 @@ async fn finish_download(
         .send(DownloadEvent::Completed { bytes: received })
         .await;
     Ok(())
+}
+
+async fn sha256_file(path: &Path) -> Result<String> {
+    let mut file = fs::File::open(path).await?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    loop {
+        let read = file.read(&mut buffer).await?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 pub fn partial_path(destination: &Path) -> PathBuf {
@@ -1412,6 +1453,31 @@ mod tests {
         assert!(headers.iter().any(|(name, _)| name == "User-Agent"));
         assert!(headers.iter().any(|(name, _)| name == "Cookie"));
         assert!(!remove_header(&mut headers, "referer"));
+    }
+
+    #[tokio::test]
+    async fn expected_sha256_blocks_promotion_of_corrupted_partial() {
+        let root = std::env::temp_dir().join(format!("adm-integrity-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).await.unwrap();
+        let destination = root.join("payload.bin");
+        let partial = partial_path(&destination);
+        fs::write(&partial, b"correct payload").await.unwrap();
+        let (tx, _rx) = mpsc::channel(4);
+        let request = DownloadRequest {
+            url: "https://example.test/payload.bin".into(),
+            destination: destination.clone(),
+            overwrite: false,
+            connections: 1,
+            method: "GET".into(),
+            body: None,
+            headers: Vec::new(),
+            expected_sha256: Some("0".repeat(64)),
+            limiters: Vec::new(),
+        };
+        assert!(finish_download(&request, &partial, 15, Some(15), &tx).await.is_err());
+        assert!(!destination.exists());
+        assert!(partial.exists());
+        let _ = fs::remove_dir_all(root).await;
     }
 
     #[test]
