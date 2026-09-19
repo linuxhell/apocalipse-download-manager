@@ -895,6 +895,11 @@ footer .bridge-connected i {
 .link-panel input { min-width: 0; padding: 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface); }
 .link-write-toggle { display:flex!important; align-items:center; gap:9px; color:var(--text)!important; font-size:13px!important; }
 .link-write-toggle input { width:18px; height:18px; padding:0; accent-color:var(--accent); }
+.link-share-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+#link-share-list { display:grid; gap:6px; max-height:150px; overflow:auto; }
+#link-share-list > div { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:7px; align-items:center; padding:7px; border:1px solid var(--line); border-radius:8px; }
+#link-share-list b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#link-share-list select { min-width:120px; padding:7px; background:var(--surface); color:var(--text); border:1px solid var(--line); border-radius:7px; }
 .link-identity label,.link-connect label { display:grid; gap:6px; color:var(--muted); font-size:12px; }
 .link-files { min-height:340px; min-width:0; overflow:hidden; }
 .link-files header { display:flex; justify-content:space-between; align-items:center; gap:12px; min-width:0; }

@@ -89,7 +89,10 @@ const catalogs = {
     linkCompleted: "Completed",
     linkTransferFailed: "Transfer failed",
     linkUploadFailed: "Upload failed",
-    linkAcceptWrite: "Accept writing",
+    linkShareNotice: "Share a file, folder or mapped drive and choose its permission for it to appear in Apocalipse Link.",
+    linkRemoteShareNotice: "Only files, folders and drives shared by the other user appear below.",
+    linkWindowsLoginNotice: "On Windows, use the remote account password; the Windows Hello PIN cannot be used. Apocalipse does not save this password.",
+    linkShareFile: "Share file", linkShareFolder: "Share folder or drive", linkReadOnly: "Read only", linkReadWrite: "Read and write", linkStopSharing: "Stop sharing",
     linkDelete: "Delete",
     linkDeleteConfirm: "Permanently delete {name}?",
     linkWriteDenied: "The remote computer has not enabled Accept writing.",
@@ -284,7 +287,10 @@ const catalogs = {
     linkCompleted: "Concluído",
     linkTransferFailed: "Falha na transferência",
     linkUploadFailed: "Falha no envio",
-    linkAcceptWrite: "Aceitar gravação",
+    linkShareNotice: "Compartilhe um arquivo, pasta ou unidade mapeada e escolha a permissão para que apareça no Apocalipse Link.",
+    linkRemoteShareNotice: "Abaixo aparecem somente arquivos, pastas e unidades compartilhados pelo outro usuário.",
+    linkWindowsLoginNotice: "No Windows, use a senha da conta remota; o PIN do Windows Hello não pode ser usado. O Apocalipse não salva essa senha.",
+    linkShareFile: "Compartilhar arquivo", linkShareFolder: "Compartilhar pasta ou unidade", linkReadOnly: "Somente leitura", linkReadWrite: "Leitura e gravação", linkStopSharing: "Parar de compartilhar",
     linkDelete: "Apagar",
     linkDeleteConfirm: "Apagar permanentemente {name}?",
     linkWriteDenied: "O computador remoto não ativou Aceitar gravação.",
@@ -478,7 +484,10 @@ const catalogs = {
     linkCompleted: "已完成",
     linkTransferFailed: "传输失败",
     linkUploadFailed: "发送失败",
-    linkAcceptWrite: "接受写入",
+    linkShareNotice: "共享文件、文件夹或映射驱动器并选择权限后，它才会显示在 Apocalipse Link 中。",
+    linkRemoteShareNotice: "下方仅显示对方用户共享的文件、文件夹和驱动器。",
+    linkWindowsLoginNotice: "在 Windows 上请使用远程账户密码；Windows Hello PIN 无法使用。Apocalipse 不会保存此密码。",
+    linkShareFile: "共享文件", linkShareFolder: "共享文件夹或驱动器", linkReadOnly: "只读", linkReadWrite: "读写", linkStopSharing: "停止共享",
     linkDelete: "删除",
     linkDeleteConfirm: "永久删除 {name}？",
     linkWriteDenied: "远程电脑尚未启用接受写入。",
@@ -1160,11 +1169,10 @@ let linkRemotePassword = "";
 let linkSelectedLocal = null;
 let linkSelectedRemote = null;
 let linkRemoteAllowWrite = false;
-const linkParent = (path) => /^[A-Za-z]:[\\/]?$/.test(path) ? "" : path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
+const linkParent = (path) => /^[A-Za-z]:[\\/]?$/.test(path) || /^\/shares\/[^/]+\/?$/.test(path) ? "" : path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
 function updateLinkTransferButtons() {
   document.querySelector("#link-upload-local").disabled = !linkSelectedLocal || !linkRemoteId || !linkRemotePath || !linkRemoteAllowWrite;
   document.querySelector("#link-download-remote").disabled = !linkSelectedRemote;
-  document.querySelector("#link-delete-local").disabled = !linkSelectedLocal;
   document.querySelector("#link-delete-remote").disabled = !linkSelectedRemote || !linkRemoteAllowWrite;
 }
 function renderLinkFiles(target, entries, open, select) {
@@ -1203,6 +1211,9 @@ async function openRemoteLink(path = "") {
   linkSelectedRemote = null;
   updateLinkTransferButtons();
   document.querySelector("#link-remote-path").textContent = path || t("linkDrives");
+  const capabilities = await invoke("get_remote_link_capabilities", { id: linkRemoteId, password: linkRemotePassword, path });
+  linkRemoteAllowWrite = Boolean(capabilities.allowWrite);
+  updateLinkTransferButtons();
   const entries = await invoke("list_remote_link_files", { id: linkRemoteId, password: linkRemotePassword, path });
   renderLinkFiles("#link-remote-files", entries, openRemoteLink, (entry) => {
     linkSelectedRemote = entry;
@@ -1213,7 +1224,7 @@ async function loadLinkIdentity() {
   const identity = await invoke("get_link_identity");
   document.querySelector("#link-own-id").value = identity.id;
   document.querySelector("#link-own-password").value = identity.password;
-  document.querySelector("#link-allow-write").checked = Boolean(identity.allowWrite);
+  renderLinkShares(await invoke("list_link_shares"));
   await openLocalLink();
   return identity;
 }
@@ -1221,22 +1232,28 @@ document.querySelector('[data-page="link"]').addEventListener("click", () => loa
 document.querySelector("#link-new-password").onclick = async () => {
   document.querySelector("#link-own-password").value = await invoke("regenerate_link_password");
 };
-document.querySelector("#link-allow-write").onchange = async (event) => {
-  const input = event.currentTarget;
-  input.disabled = true;
-  try { input.checked = await invoke("set_link_allow_write", { enabled: input.checked }); }
-  catch (error) { input.checked = !input.checked; window.alert(String(error)); }
-  finally { input.disabled = false; }
-};
+function renderLinkShares(shares) {
+  const root = document.querySelector("#link-share-list"); root.replaceChildren();
+  for (const share of shares) {
+    const row = document.createElement("div");
+    const name = Object.assign(document.createElement("b"), { textContent: share.name });
+    const permission = document.createElement("select");
+    permission.append(new Option(t("linkReadOnly"), "false"), new Option(t("linkReadWrite"), "true"));
+    permission.value = String(Boolean(share.allowWrite));
+    permission.onchange = async () => renderLinkShares(await invoke("update_link_share", { id: share.id, allowWrite: permission.value === "true" }));
+    const remove = Object.assign(document.createElement("button"), { type: "button", textContent: t("linkStopSharing") });
+    remove.onclick = async () => renderLinkShares(await invoke("remove_link_share", { id: share.id }));
+    row.append(name, permission, remove); root.append(row);
+  }
+}
+document.querySelector("#link-share-file").onclick = async () => { try { renderLinkShares(await invoke("add_link_file_share")); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
+document.querySelector("#link-share-folder").onclick = async () => { try { renderLinkShares(await invoke("add_link_share")); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
 document.querySelector("#link-connect").onclick = async () => {
   linkRemoteId = document.querySelector("#link-remote-id").value.trim();
   linkRemotePassword = document.querySelector("#link-remote-password").value.trim();
   try {
-    const capabilities = await invoke("get_remote_link_capabilities", { id: linkRemoteId, password: linkRemotePassword });
-    linkRemoteAllowWrite = Boolean(capabilities.allowWrite);
-    document.querySelector("#link-remote-allow-write").checked = linkRemoteAllowWrite;
     await openRemoteLink();
-    document.querySelector("#link-status").textContent = linkRemoteAllowWrite ? t("linkConnected") : `${t("linkConnected")} · ${t("linkWriteDenied")}`;
+    document.querySelector("#link-status").textContent = t("linkConnected");
   }
   catch (error) { document.querySelector("#link-status").textContent = `${t("linkConnectionFailed")}: ${error}`; }
 };
@@ -1248,11 +1265,6 @@ document.querySelector("#link-self-test").onclick = async () => {
 };
 document.querySelector("#link-local-up").onclick = () => openLocalLink(linkParent(linkLocalPath)).catch(console.error);
 document.querySelector("#link-remote-up").onclick = () => openRemoteLink(linkParent(linkRemotePath)).catch(console.error);
-document.querySelector("#link-delete-local").onclick = async () => {
-  if (!linkSelectedLocal || !window.confirm(t("linkDeleteConfirm").replace("{name}", linkSelectedLocal.name))) return;
-  await invoke("delete_local_link_item", { path: linkSelectedLocal.path });
-  await openLocalLink(linkLocalPath);
-};
 document.querySelector("#link-delete-remote").onclick = async () => {
   if (!linkSelectedRemote || !window.confirm(t("linkDeleteConfirm").replace("{name}", linkSelectedRemote.name))) return;
   await invoke("delete_remote_link_item", { id: linkRemoteId, password: linkRemotePassword, path: linkSelectedRemote.path });
@@ -1268,6 +1280,7 @@ document.querySelector("#link-download-remote").onclick = async () => {
       password: linkRemotePassword,
       path: linkSelectedRemote.path,
       directory: linkSelectedRemote.directory,
+      fileName: linkSelectedRemote.name,
     });
     status.textContent = `${t("linkCompleted")}: ${destination}`;
   } catch (error) { if (`${error}` !== "cancelled") status.textContent = `${t("linkTransferFailed")}: ${error}`; }

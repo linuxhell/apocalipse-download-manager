@@ -18,14 +18,17 @@ test("Apocalipse Link selects and transfers both files and folders", () => {
   assert.match(rust, /send_link_directory\(&id, &password, &remote_path\)/);
 });
 
-test("Link writing and deletion require explicit destination approval", () => {
-  assert.match(html, /id="link-allow-write"/);
-  assert.match(html, /id="link-remote-allow-write"[^>]*disabled/);
-  assert.match(app, /set_link_allow_write/);
+test("Link exposes only explicit shares with per-share write permission", () => {
+  assert.doesNotMatch(html, /id="link-allow-write"/);
+  assert.match(html, /id="link-share-file"/);
+  assert.match(html, /id="link-share-folder"/);
+  assert.match(app, /update_link_share/);
   assert.match(app, /delete_remote_link_item/);
-  assert.match(rust, /if !settings\.link_allow_write/);
+  assert.match(rust, /list_shared_link_directory/);
+  assert.match(rust, /resolve_link_share/);
   assert.match(rust, /DELETE \/v1\/link\/item/);
-  assert.match(rust, /cannot_delete_link_root/);
+  assert.match(rust, /link_write_not_allowed/);
+  assert.match(html, /linkWindowsLoginNotice/);
 });
 
 test("Link lists remain readable and settings use the available window", () => {
