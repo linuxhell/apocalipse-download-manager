@@ -675,9 +675,8 @@ fn is_local_link_target(state: State<'_, AppState>, id: String) -> Result<bool, 
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("link-tls-cert.der");
-    let local_certificate = CertificateDer::from(
-        fs::read(certificate_path).map_err(|error| error.to_string())?,
-    );
+    let local_certificate =
+        CertificateDer::from(fs::read(certificate_path).map_err(|error| error.to_string())?);
     Ok(peer_fingerprint == link_certificate_fingerprint(&local_certificate))
 }
 
