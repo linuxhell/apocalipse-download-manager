@@ -2100,16 +2100,7 @@ async fn download_with_mirrors(
     events: mpsc::Sender<DownloadEvent>,
 ) -> anyhow::Result<()> {
     let sources = engine.verified_sources(&request, &mirrors).await;
-    let mut last_error = None;
-    for source in sources {
-        let mut attempt = request.clone();
-        attempt.url = source;
-        match engine.download(attempt, events.clone()).await {
-            Ok(()) => return Ok(()),
-            Err(error) => last_error = Some(error),
-        }
-    }
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no_download_source")))
+    engine.download_from_sources(request, sources, events).await
 }
 
 fn finalize_media_page_download(
