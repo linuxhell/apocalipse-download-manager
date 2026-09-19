@@ -35,6 +35,49 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::{mpsc, oneshot},
 };
+use zeroize::Zeroize;
+
+const VAULT_SERVICE: &str = "com.linuxhell.apocalipse";
+const VAULT_BRIDGE_TOKEN: &str = "extension-bridge-token";
+const VAULT_LINK_PASSWORD: &str = "apocalipse-link-password";
+const VAULT_PROXY_PASSWORD: &str = "proxy-password";
+
+fn vault_entry(account: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(VAULT_SERVICE, account).map_err(|error| error.to_string())
+}
+
+fn vault_load(account: &str) -> Result<Option<String>, String> {
+    match vault_entry(account)?.get_password() {
+        Ok(secret) => Ok(Some(secret)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn vault_store_verified(account: &str, secret: &str) -> Result<(), String> {
+    let entry = vault_entry(account)?;
+    entry
+        .set_password(secret)
+        .map_err(|error| error.to_string())?;
+    let mut recovered = entry.get_password().map_err(|error| error.to_string())?;
+    let matches = recovered == secret;
+    recovered.zeroize();
+    if !matches {
+        return Err("credential_vault_verification_failed".to_owned());
+    }
+    Ok(())
+}
+
+fn vault_delete(account: &str) -> Result<(), String> {
+    match vault_entry(account)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn website_vault_account(host: &str) -> String {
+    format!("website:{host}")
+}
 
 struct AppState {
     queue: Mutex<Vec<DownloadTask>>,
@@ -99,7 +142,7 @@ struct UserSettings {
     adaptive_efficiency: bool,
     #[serde(default)]
     global_bandwidth_limit: u64,
-    #[serde(default = "default_bridge_token")]
+    #[serde(default = "default_bridge_token", skip_serializing)]
     bridge_token: String,
     #[serde(default)]
     recent_download_directories: Vec<PathBuf>,
@@ -125,7 +168,7 @@ struct UserSettings {
     proxy_url: Option<String>,
     #[serde(default)]
     proxy_username: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     proxy_password: Option<String>,
     #[serde(default)]
     website_credentials: Vec<WebsiteCredential>,
@@ -135,7 +178,7 @@ struct UserSettings {
     dns_servers: Vec<std::net::IpAddr>,
     #[serde(default)]
     associations: HashMap<String, bool>,
-    #[serde(default = "default_link_password")]
+    #[serde(default = "default_link_password", skip_serializing)]
     link_password: String,
     #[serde(default = "default_language")]
     language: String,
@@ -213,6 +256,7 @@ impl Default for UserSettings {
 struct WebsiteCredential {
     host: String,
     username: String,
+    #[serde(default, skip_serializing)]
     password: String,
 }
 
@@ -395,7 +439,10 @@ fn get_link_identity(state: State<'_, AppState>) -> Result<LinkIdentity, String>
 #[tauri::command]
 fn regenerate_link_password(state: State<'_, AppState>) -> Result<String, String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    settings.link_password = default_link_password();
+    let password = default_link_password();
+    vault_store_verified(VAULT_LINK_PASSWORD, &password)?;
+    settings.link_password.zeroize();
+    settings.link_password = password;
     save_settings(&state, &settings)?;
     Ok(settings.link_password.clone())
 }
@@ -1624,20 +1671,58 @@ fn save_queue(state: &AppState, queue: &[DownloadTask]) -> Result<(), String> {
     result
 }
 
-fn load_settings(path: &Path) -> UserSettings {
-    let settings: UserSettings = fs::read(path)
+fn load_settings(path: &Path) -> Result<UserSettings, String> {
+    let mut settings: UserSettings = fs::read(path)
         .ok()
         .and_then(|data| serde_json::from_slice(&data).ok())
         .unwrap_or_default();
-    settings
+    hydrate_and_migrate_secrets(&mut settings)?;
+    write_settings(path, &settings)?;
+    Ok(settings)
 }
 
-fn save_settings(state: &AppState, settings: &UserSettings) -> Result<(), String> {
-    if let Some(parent) = state.settings_path.parent() {
+fn migrate_secret(account: &str, in_memory: &mut String) -> Result<(), String> {
+    if let Some(secret) = vault_load(account)? {
+        in_memory.zeroize();
+        *in_memory = secret;
+        return Ok(());
+    }
+    vault_store_verified(account, in_memory)
+}
+
+fn hydrate_and_migrate_secrets(settings: &mut UserSettings) -> Result<(), String> {
+    migrate_secret(VAULT_BRIDGE_TOKEN, &mut settings.bridge_token)?;
+    migrate_secret(VAULT_LINK_PASSWORD, &mut settings.link_password)?;
+
+    if let Some(mut legacy) = settings.proxy_password.take() {
+        if vault_load(VAULT_PROXY_PASSWORD)?.is_none() {
+            vault_store_verified(VAULT_PROXY_PASSWORD, &legacy)?;
+        }
+        legacy.zeroize();
+    }
+    settings.proxy_password = vault_load(VAULT_PROXY_PASSWORD)?;
+
+    for credential in &mut settings.website_credentials {
+        let account = website_vault_account(&credential.host);
+        if !credential.password.is_empty() && vault_load(&account)?.is_none() {
+            vault_store_verified(&account, &credential.password)?;
+        }
+        credential.password.zeroize();
+        credential.password = vault_load(&account)?.unwrap_or_default();
+    }
+    Ok(())
+}
+
+fn write_settings(path: &Path, settings: &UserSettings) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let data = serde_json::to_vec_pretty(settings).map_err(|error| error.to_string())?;
-    fs::write(&state.settings_path, data).map_err(|error| error.to_string())
+    fs::write(path, data).map_err(|error| error.to_string())
+}
+
+fn save_settings(state: &AppState, settings: &UserSettings) -> Result<(), String> {
+    write_settings(&state.settings_path, settings)
 }
 
 fn redact_url(url: &str) -> String {
@@ -5538,6 +5623,8 @@ fn save_website_credential(
     {
         return Err("invalid_website_credential".to_owned());
     }
+    let account = website_vault_account(&host);
+    vault_store_verified(&account, &password)?;
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     if let Some(existing) = settings
         .website_credentials
@@ -5545,6 +5632,7 @@ fn save_website_credential(
         .find(|credential| credential.host == host)
     {
         existing.username = username.to_owned();
+        existing.password.zeroize();
         existing.password = password;
     } else {
         settings.website_credentials.push(WebsiteCredential {
@@ -5573,7 +5661,11 @@ fn remove_website_credential(
     host: String,
 ) -> Result<Vec<WebsiteCredentialSummary>, String> {
     let host = normalize_credential_host(&host)?;
+    vault_delete(&website_vault_account(&host))?;
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    for credential in settings.website_credentials.iter_mut().filter(|item| item.host == host) {
+        credential.password.zeroize();
+    }
     settings
         .website_credentials
         .retain(|credential| credential.host != host);
@@ -5625,8 +5717,16 @@ fn set_proxy_setting(
     settings.proxy_url = (!url.is_empty()).then(|| url.to_owned());
     settings.proxy_username = (!username.is_empty()).then(|| username.to_owned());
     if clear_password {
+        vault_delete(VAULT_PROXY_PASSWORD)?;
+        if let Some(secret) = settings.proxy_password.as_mut() {
+            secret.zeroize();
+        }
         settings.proxy_password = None;
     } else if !password.is_empty() {
+        vault_store_verified(VAULT_PROXY_PASSWORD, &password)?;
+        if let Some(secret) = settings.proxy_password.as_mut() {
+            secret.zeroize();
+        }
         settings.proxy_password = Some(password);
     }
     save_settings(&state, &settings)?;
@@ -5783,7 +5883,10 @@ fn get_bridge_pairing(state: State<'_, AppState>) -> Result<BridgePairing, Strin
 fn regenerate_bridge_token(state: State<'_, AppState>) -> Result<BridgePairing, String> {
     let token = {
         let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-        settings.bridge_token = default_bridge_token();
+        let token = default_bridge_token();
+        vault_store_verified(VAULT_BRIDGE_TOKEN, &token)?;
+        settings.bridge_token.zeroize();
+        settings.bridge_token = token;
         save_settings(&state, &settings)?;
         settings.bridge_token.clone()
     };
@@ -7521,7 +7624,7 @@ fn main() {
             let queue_path = app_data.join("queue.json");
             let settings_path = app_data.join("settings.json");
             let log_path = app_data.join("logs").join("apocalipse.log");
-            let initial_settings = load_settings(&settings_path);
+            let initial_settings = load_settings(&settings_path).map_err(std::io::Error::other)?;
             let (show_label, quit_label) = tray_labels(&initial_settings.language);
             let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
