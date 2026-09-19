@@ -80,6 +80,10 @@ fn website_vault_account(host: &str) -> String {
     format!("website:{host}")
 }
 
+fn host_rule_vault_account(pattern: &str) -> String {
+    format!("host-rule:{pattern}")
+}
+
 struct AppState {
     queue: Mutex<Vec<DownloadTask>>,
     queue_path: PathBuf,
@@ -174,6 +178,8 @@ struct UserSettings {
     #[serde(default)]
     website_credentials: Vec<WebsiteCredential>,
     #[serde(default)]
+    host_rules: Vec<HostRule>,
+    #[serde(default)]
     dns_enabled: bool,
     #[serde(default)]
     dns_servers: Vec<std::net::IpAddr>,
@@ -243,6 +249,7 @@ impl Default for UserSettings {
             proxy_username: None,
             proxy_password: None,
             website_credentials: Vec::new(),
+            host_rules: Vec::new(),
             dns_enabled: false,
             dns_servers: Vec::new(),
             associations: HashMap::new(),
@@ -266,6 +273,33 @@ struct WebsiteCredential {
 struct WebsiteCredentialSummary {
     host: String,
     username: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HostRule {
+    pattern: String,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default, skip_serializing)]
+    password: String,
+    #[serde(default)]
+    user_agent: Option<String>,
+    #[serde(default)]
+    connections: Option<usize>,
+    #[serde(default)]
+    bandwidth_limit: Option<u64>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HostRuleSummary {
+    pattern: String,
+    username: String,
+    has_password: bool,
+    user_agent: String,
+    connections: Option<usize>,
+    bandwidth_limit: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -1810,6 +1844,14 @@ fn hydrate_and_migrate_secrets(settings: &mut UserSettings) -> Result<(), String
         credential.password.zeroize();
         credential.password = vault_load(&account)?.unwrap_or_default();
     }
+    for rule in &mut settings.host_rules {
+        let account = host_rule_vault_account(&rule.pattern);
+        if !rule.password.is_empty() && vault_load(&account)?.is_none() {
+            vault_store_verified(&account, &rule.password)?;
+        }
+        rule.password.zeroize();
+        rule.password = vault_load(&account)?.unwrap_or_default();
+    }
     Ok(())
 }
 
@@ -2588,7 +2630,17 @@ async fn run_external_download(
                 Vec::new(),
             )
         });
-    let task_connections = task.connections_override.unwrap_or(tools.4).clamp(1, 32);
+    let host_rule = app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .ok()
+        .and_then(|settings| host_rule_for_url(&settings, &task.source).cloned());
+    let task_connections = task
+        .connections_override
+        .or_else(|| host_rule.as_ref().and_then(|rule| rule.connections))
+        .unwrap_or(tools.4)
+        .clamp(1, 32);
     diagnostic_log(
         &app.state::<AppState>(),
         "INFO",
@@ -2608,12 +2660,16 @@ async fn run_external_download(
         .lock()
         .ok()
         .and_then(|identities| identities.get(&task.id).cloned());
-    let configured_user_agent = app
-        .state::<AppState>()
-        .settings
-        .lock()
-        .ok()
-        .and_then(|settings| settings.user_agent.clone());
+    let configured_user_agent = host_rule
+        .as_ref()
+        .and_then(|rule| rule.user_agent.clone())
+        .or_else(|| {
+            app.state::<AppState>()
+                .settings
+                .lock()
+                .ok()
+                .and_then(|settings| settings.user_agent.clone())
+        });
     let global_bandwidth_limit = app
         .state::<AppState>()
         .settings
@@ -2622,7 +2678,10 @@ async fn run_external_download(
         .unwrap_or_default();
     let bandwidth_limit = match (
         global_bandwidth_limit,
-        task.bandwidth_limit.unwrap_or_default(),
+        task
+            .bandwidth_limit
+            .or_else(|| host_rule.as_ref().and_then(|rule| rule.bandwidth_limit))
+            .unwrap_or_default(),
     ) {
         (0, task_limit) => task_limit,
         (global_limit, 0) => global_limit,
@@ -2634,8 +2693,7 @@ async fn run_external_download(
         .lock()
         .ok()
         .and_then(|settings| {
-            website_credential_for_download(&settings, &task.source, task.referer.as_deref())
-                .cloned()
+            effective_credential_for_download(&settings, &task.source, task.referer.as_deref())
         });
     let user_agent = configured_user_agent.as_deref()
         .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_deref()))
@@ -5210,8 +5268,7 @@ async fn run_metalink_manifest(
             .ok()
             .and_then(|items| items.get(&id).cloned());
         let credential =
-            website_credential_for_download(&settings, &task.source, task.referer.as_deref())
-                .cloned();
+            effective_credential_for_download(&settings, &task.source, task.referer.as_deref());
         (proxy, dns, identity, credential)
     };
 
@@ -5501,14 +5558,22 @@ fn start_download(
             } else {
                 limits.connections_per_download
             };
+        let host_rule = host_rule_for_url(&limits, &task.source).cloned();
         let connections = task
             .connections_override
-            .unwrap_or_else(|| configured_connections.clamp(1, 32));
+            .or_else(|| host_rule.as_ref().and_then(|rule| rule.connections))
+            .unwrap_or_else(|| configured_connections.clamp(1, 32))
+            .clamp(1, 32);
         let mut headers = Vec::new();
         if let Some(referer) = task.referer.as_ref() {
             headers.push(("Referer".to_owned(), referer.clone()));
         }
-        if let Some(user_agent) = identity.as_ref().and_then(|item| item.user_agent.as_ref()) {
+        if let Some(user_agent) = host_rule
+            .as_ref()
+            .and_then(|rule| rule.user_agent.as_ref())
+            .or(limits.user_agent.as_ref())
+            .or_else(|| identity.as_ref().and_then(|item| item.user_agent.as_ref()))
+        {
             headers.push(("User-Agent".to_owned(), user_agent.clone()));
         }
         if let Some(cookie) = identity
@@ -5524,7 +5589,7 @@ fn start_download(
             headers.push(("Content-Type".to_owned(), content_type.clone()));
         }
         if let Some(credential) =
-            website_credential_for_download(&limits, &task.source, task.referer.as_deref())
+            effective_credential_for_download(&limits, &task.source, task.referer.as_deref())
         {
             let basic = BASE64.encode(format!("{}:{}", credential.username, credential.password));
             headers.push(("Authorization".to_owned(), format!("Basic {basic}")));
@@ -5551,7 +5616,14 @@ fn start_download(
                         .lock()
                         .ok()
                         .and_then(|mut items| {
-                            let limit = task.bandwidth_limit.unwrap_or_default();
+                            let limit = task
+                                .bandwidth_limit
+                                .or_else(|| {
+                                    host_rule
+                                        .as_ref()
+                                        .and_then(|rule| rule.bandwidth_limit)
+                                })
+                                .unwrap_or_default();
                             if limit == 0 {
                                 items.remove(&task.id);
                                 None
@@ -5905,6 +5977,67 @@ fn get_proxy_setting(state: State<'_, AppState>) -> Result<ProxySetting, String>
             .as_ref()
             .is_some_and(|value| !value.is_empty()),
     })
+}
+
+fn normalize_host_rule_pattern(value: &str) -> Result<String, String> {
+    let value = value.trim().to_ascii_lowercase();
+    if let Some(suffix) = value.strip_prefix("*.") {
+        if suffix.contains('*') {
+            return Err("invalid_host_rule_pattern".to_owned());
+        }
+        let host = normalize_credential_host(suffix)
+            .map_err(|_| "invalid_host_rule_pattern".to_owned())?;
+        return Ok(format!("*.{host}"));
+    }
+    if value.contains('*') {
+        return Err("invalid_host_rule_pattern".to_owned());
+    }
+    normalize_credential_host(&value).map_err(|_| "invalid_host_rule_pattern".to_owned())
+}
+
+fn host_rule_matches(pattern: &str, host: &str) -> bool {
+    if let Some(suffix) = pattern.strip_prefix("*.") {
+        host != suffix && host.ends_with(&format!(".{suffix}"))
+    } else {
+        host == pattern
+    }
+}
+
+fn host_rule_for_url<'a>(settings: &'a UserSettings, source: &str) -> Option<&'a HostRule> {
+    let host = url::Url::parse(source)
+        .ok()?
+        .host_str()?
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    settings
+        .host_rules
+        .iter()
+        .filter(|rule| host_rule_matches(&rule.pattern, &host))
+        .max_by_key(|rule| {
+            (
+                usize::from(!rule.pattern.starts_with("*.")),
+                rule.pattern.trim_start_matches("*.").len(),
+            )
+        })
+}
+
+fn effective_credential_for_download(
+    settings: &UserSettings,
+    source: &str,
+    referer: Option<&str>,
+) -> Option<WebsiteCredential> {
+    if let Some(rule) = host_rule_for_url(settings, source) {
+        if let Some(username) = rule.username.as_deref().filter(|value| !value.is_empty()) {
+            if !rule.password.is_empty() {
+                return Some(WebsiteCredential {
+                    host: rule.pattern.clone(),
+                    username: username.to_owned(),
+                    password: rule.password.clone(),
+                });
+            }
+        }
+    }
+    website_credential_for_download(settings, source, referer).cloned()
 }
 
 fn normalize_credential_host(value: &str) -> Result<String, String> {
