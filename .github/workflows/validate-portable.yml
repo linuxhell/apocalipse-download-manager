@@ -97,8 +97,12 @@ jobs:
           # Temporary branch-only diagnostic: let Cargo compute the minimal
           # lockfile change required by the new reqwest HTTP/3 feature, then
           # print it so the committed Cargo.lock can be updated exactly.
+          set +e
           cargo test --workspace
+          status=$?
+          set -e
           git diff -- Cargo.lock
+          exit "$status"
       - name: Verify prepared media with FFmpeg and FFprobe
         if: runner.os == 'Linux'
         run: cargo test -p apocalipse-desktop --locked paired_preview_uses_real_mux_and_probe -- --ignored
