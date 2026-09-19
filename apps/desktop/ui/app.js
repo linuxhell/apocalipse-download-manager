@@ -683,7 +683,56 @@ function visibleDownloads() {
   return visible;
 }
 
-const failedThumbnailUrls = new Set();
+const thumbnailDataCache = new Map();
+const thumbnailPending = new Map();
+const thumbnailRetryAfter = new Map();
+
+async function resolveCachedThumbnail(url) {
+  if (!url) return null;
+  if (/^data:image\//i.test(url)) return url;
+  if (thumbnailDataCache.has(url)) return thumbnailDataCache.get(url);
+  if ((thumbnailRetryAfter.get(url) || 0) > Date.now()) return null;
+  if (thumbnailPending.has(url)) return thumbnailPending.get(url);
+
+  const pending = invoke("resolve_thumbnail", { url })
+    .then((resolved) => {
+      if (resolved) {
+        thumbnailDataCache.set(url, resolved);
+        thumbnailRetryAfter.delete(url);
+        return resolved;
+      }
+      thumbnailRetryAfter.set(url, Date.now() + 60_000);
+      return null;
+    })
+    .catch((error) => {
+      console.warn("thumbnail-cache", error);
+      thumbnailRetryAfter.set(url, Date.now() + 60_000);
+      return null;
+    })
+    .finally(() => thumbnailPending.delete(url));
+  thumbnailPending.set(url, pending);
+  return pending;
+}
+
+function loadPreviewThumbnail(image, url) {
+  image.dataset.thumbnailSource = url || "";
+  image.hidden = true;
+  image.removeAttribute("src");
+  if (!url) return;
+  resolveCachedThumbnail(url).then((resolved) => {
+    if (!resolved || image.dataset.thumbnailSource !== url) return;
+    image.src = resolved;
+    image.hidden = false;
+    image.onerror = () => {
+      if (image.dataset.thumbnailSource !== url) return;
+      image.hidden = true;
+      image.removeAttribute("src");
+      thumbnailDataCache.delete(url);
+      thumbnailRetryAfter.set(url, Date.now() + 60_000);
+    };
+  });
+}
+
 let lastDownloadRenderSignature = "";
 
 function renderDownloads(force = false) {
@@ -721,19 +770,23 @@ function renderDownloads(force = false) {
       className: "download-icon",
       textContent: "⇩",
     });
-    if (task.thumbnail && !failedThumbnailUrls.has(task.thumbnail)) {
-      const thumbnail = document.createElement("img");
-      thumbnail.className = "download-thumbnail";
-      thumbnail.alt = "";
-      thumbnail.referrerPolicy = "no-referrer";
-      thumbnail.src = task.thumbnail;
-      thumbnail.onerror = () => {
-        failedThumbnailUrls.add(task.thumbnail);
-        icon.replaceChildren(document.createTextNode("⇩"));
-        icon.classList.remove("has-thumbnail");
-      };
-      icon.replaceChildren(thumbnail);
-      icon.classList.add("has-thumbnail");
+    if (task.thumbnail) {
+      const requestedThumbnail = task.thumbnail;
+      resolveCachedThumbnail(requestedThumbnail).then((resolved) => {
+        if (!resolved || !row.isConnected) return;
+        const thumbnail = document.createElement("img");
+        thumbnail.className = "download-thumbnail";
+        thumbnail.alt = "";
+        thumbnail.src = resolved;
+        thumbnail.onerror = () => {
+          thumbnailDataCache.delete(requestedThumbnail);
+          thumbnailRetryAfter.set(requestedThumbnail, Date.now() + 60_000);
+          icon.replaceChildren(document.createTextNode("⇩"));
+          icon.classList.remove("has-thumbnail");
+        };
+        icon.replaceChildren(thumbnail);
+        icon.classList.add("has-thumbnail");
+      });
     }
     const info = Object.assign(document.createElement("div"), {
       className: "download-info",
@@ -1243,6 +1296,7 @@ function resetMediaInspection() {
   const thumbnail = document.querySelector("#media-thumbnail");
   panel.hidden = true;
   thumbnail.hidden = true;
+  thumbnail.dataset.thumbnailSource = "";
   thumbnail.removeAttribute("src");
   document.querySelector("#media-title").textContent = "";
   document.querySelector("#media-duration").textContent = "";
@@ -1262,11 +1316,7 @@ function showCapturedPreview({ title, thumbnail, kind, duration, size, showForma
     Number.isFinite(duration) && duration > 0 ? `${t("duration")}: ${secondsLabel(duration)}` : "",
   ].filter(Boolean).join(" · ");
   document.querySelector("#media-format-control").hidden = !showFormats;
-  image.hidden = !thumbnail;
-  if (thumbnail) {
-    image.src = thumbnail;
-    image.onerror = () => { image.hidden = true; image.removeAttribute("src"); };
-  } else image.removeAttribute("src");
+  loadPreviewThumbnail(image, thumbnail);
   panel.hidden = false;
 }
 
