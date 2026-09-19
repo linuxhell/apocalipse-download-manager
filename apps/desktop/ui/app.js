@@ -1967,6 +1967,7 @@ document.querySelector("#enqueue").onclick = async () => {
           title: pendingTitle,
           thumbnail: pendingThumbnail,
           audioUrl: pendingAudioUrl,
+          expectedSize: pendingExpectedSize,
           cookieHeader: pendingCookieHeader,
           userAgent: pendingUserAgent,
           requestMethod: pendingRequestMethod,
