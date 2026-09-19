@@ -10,8 +10,8 @@ const native = readFileSync(join(root, 'apps/desktop/src-tauri/src/diagnostics_v
 const popup = readFileSync(join(root, 'browser-extension/popup.js'), 'utf8');
 const desktop = readFileSync(join(root, 'apps/desktop/src-tauri/src/main.rs'), 'utf8');
 
-test('0.3.155 loads the opt-in replay before media handlers in every isolated content chain', () => {
-  assert.equal(manifest.version, '0.3.155');
+test('0.3.156 loads the opt-in replay before media handlers in every isolated content chain', () => {
+  assert.equal(manifest.version, '0.3.156');
   for (const entry of manifest.content_scripts.filter(item => item.js.includes('content.js'))) {
     assert.ok(entry.js.includes('diagnostics-media-replay.js'));
     assert.ok(entry.js.indexOf('diagnostics.js') < entry.js.indexOf('diagnostics-media-replay.js'));

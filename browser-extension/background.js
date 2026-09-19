@@ -833,16 +833,19 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     (async () => {
       if (!items.length) throw new Error("empty_batch");
       const pageUrl = await sourcePageUrl(sender);
-      const cookieHeader = await cookieHeaderFor([...items.flatMap((item) => [item.url, item.audioUrl]), sender.tab?.url]);
       const taskIds = [];
+      const failures = [];
       for (const item of items) {
         if (item.ambiguousSocialTrack && !item.audioUrl && !item.extractorUrl) continue;
-        const thumbnail = await portableThumbnail(item.thumbnail);
-        const result = await bridgeRequest("/v1/download", {
+        try {
+          const downloadUrl = item.extractorUrl || item.url;
+          const cookieHeader = await cookieHeaderFor([downloadUrl, item.audioUrl]);
+          const thumbnail = await portableThumbnail(item.thumbnail);
+          const result = await bridgeRequest("/v1/download", {
           method: "POST",
           body: JSON.stringify({
             traceId,
-            url: item.extractorUrl || item.url,
+            url: downloadUrl,
             audioUrl: item.audioUrl || null,
             fileName: mediaDownloadFileName(item),
             pageUrl,
@@ -859,11 +862,14 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
             requestContentType: null,
             startImmediately: true,
           }),
-        });
-        if (result?.taskId) taskIds.push(result.taskId);
+          });
+          if (result?.taskId) taskIds.push(result.taskId);
+        } catch (error) {
+          failures.push({ url: item.extractorUrl || item.url, error: String(error) });
+        }
       }
-      void diagnostic("popup.batch_download_handed_off", { traceId, pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { detail: `items=${items.length}` });
-      reply({ ok: true, target: "desktop", taskIds });
+      void diagnostic("popup.batch_download_handed_off", { traceId, pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { detail: `items=${items.length} accepted=${taskIds.length} failed=${failures.length}` });
+      reply({ ok: taskIds.length > 0, partial: failures.length > 0 && taskIds.length > 0, target: "desktop", taskIds, failures });
     })().catch((error) => {
       void diagnostic("popup.batch_download_failed", { traceId, pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { level: "ERROR", error: String(error), detail: `items=${items.length}` });
       reply({ ok: false, target: "error", error: String(error) });
