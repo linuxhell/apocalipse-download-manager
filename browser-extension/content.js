@@ -1255,7 +1255,7 @@
           candidate: currentUrl,
         });
         const thumbnail = await captureThumbnailFor(element, "video");
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail } }, (result) => {
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: resolved?.mediaKind || element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail } }, (result) => {
           const failed = chrome.runtime.lastError || !result?.ok;
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";
@@ -1565,11 +1565,15 @@
       audio: found.filter(v => v.kind === "audio").length, images: found.filter(v => v.kind === "image").length }, scanTrace);
     (async () => {
       let selectedItems = found;
-      const hls = found.filter((item) => item.kind === "video" && /\.m3u8(?:$|[?#])/i.test(item.url));
-      if (hls.length > 1) {
-        const analyzed = await chrome.runtime.sendMessage({ type: "APOCALIPSE_ANALYZE_HLS", urls: hls.map((item) => item.url), duration: Number.isFinite(document.querySelector("video")?.duration) ? document.querySelector("video").duration : null });
+      const hls = found.filter((item) => /\.m3u8(?:$|[?#])/i.test(item.url));
+      if (hls.length > 0) {
+        const visibleMedia = document.querySelector("video,audio");
+        const analyzed = await chrome.runtime.sendMessage({ type: "APOCALIPSE_ANALYZE_HLS", urls: hls.map((item) => item.url), duration: Number.isFinite(visibleMedia?.duration) ? visibleMedia.duration : null });
         const details = new Map((analyzed || []).map((item) => [item.url, item]));
-        selectedItems = found.map((item) => details.has(item.url) ? { ...item, ...details.get(item.url) } : item);
+        selectedItems = found.map((item) => {
+          const detail = details.get(item.url);
+          return detail ? { ...item, ...detail, kind: detail.mediaKind || item.kind } : item;
+        });
       }
       return Promise.all(selectedItems.map(async (item) => {
       try {
