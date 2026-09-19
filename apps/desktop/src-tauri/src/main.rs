@@ -25,7 +25,7 @@ use std::{
     fs,
     fs::OpenOptions,
     io::{Read, Write},
-    net::{TcpListener, TcpStream},
+    net::{IpAddr, TcpListener, TcpStream, UdpSocket},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{Arc, Mutex},
@@ -651,6 +651,34 @@ fn get_link_identity() -> LinkIdentity {
     LinkIdentity {
         id: format!("{ip}:{LINK_PORT}"),
     }
+}
+
+#[tauri::command]
+fn is_local_link_target(state: State<'_, AppState>, id: String) -> Result<bool, String> {
+    let (host, _, _) = link_remote_parts(&id)?;
+    if matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1")
+        || host
+            .parse::<IpAddr>()
+            .ok()
+            .is_some_and(|address| address.is_loopback())
+        || host.parse::<IpAddr>().ok() == Some(local_link_ip())
+    {
+        return Ok(true);
+    }
+
+    // A public address can hairpin through the router to this same machine.
+    // Compare the peer certificate with this installation's own certificate
+    // instead of trusting the address or skipping TLS authentication.
+    let (_, peer_fingerprint, _, _) = connect_link_tls(&state, &id)?;
+    let certificate_path = state
+        .settings_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("link-tls-cert.der");
+    let local_certificate = CertificateDer::from(
+        fs::read(certificate_path).map_err(|error| error.to_string())?,
+    );
+    Ok(peer_fingerprint == link_certificate_fingerprint(&local_certificate))
 }
 
 #[tauri::command]
@@ -2752,7 +2780,15 @@ const BRIDGE_PORT: u16 = 17654;
 const LINK_PORT: u16 = 17655;
 
 fn local_link_ip() -> std::net::IpAddr {
-    "127.0.0.1".parse().expect("valid loopback")
+    UdpSocket::bind("0.0.0.0:0")
+        .and_then(|socket| {
+            socket.connect("1.1.1.1:80")?;
+            socket.local_addr()
+        })
+        .ok()
+        .map(|address| address.ip())
+        .filter(|address| !address.is_unspecified() && !address.is_loopback())
+        .unwrap_or_else(|| "127.0.0.1".parse().expect("valid loopback"))
 }
 
 fn handle_link_connection<S: Read + Write>(app: &tauri::AppHandle, mut stream: S) {
@@ -10048,6 +10084,7 @@ fn main() {
             inspect_media_formats,
             inspect_torrent_metadata,
             get_link_identity,
+            is_local_link_target,
             get_about_media,
             open_link_window,
             authenticate_local_link_account,
