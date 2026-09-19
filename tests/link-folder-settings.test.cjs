@@ -81,7 +81,7 @@ test("Link remote guidance follows the selected language", () => {
   assert.doesNotMatch(app, /O acesso autorizado mostra todas as unidades e pastas/);
 });
 
-test("Link uses system-account fields instead of a user-facing temporary password", () => {
+test("Link exposes only system-account fields in the remote login", () => {
   assert.match(html, /id="link-remote-username"/);
   assert.match(html, /data-i18n="linkRemoteUsername"/);
   assert.match(html, /data-i18n="linkRemoteSystemPassword"/);
@@ -89,6 +89,8 @@ test("Link uses system-account fields instead of a user-facing temporary passwor
   assert.doesNotMatch(html, /id="link-new-password"/);
   assert.doesNotMatch(html, /linkCurrentPassword/);
   assert.doesNotMatch(html, /linkNewPassword/);
+  assert.doesNotMatch(rust, /fn regenerate_link_password/);
+  assert.doesNotMatch(rust, /regenerate_link_password,/);
   assert.equal((app.match(/linkRemoteUsername:/g) || []).length, 3);
   assert.equal((app.match(/linkRemoteSystemPassword:/g) || []).length, 3);
   assert.equal((app.match(/linkCredentialsRequired:/g) || []).length, 3);
