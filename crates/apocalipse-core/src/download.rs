@@ -1960,7 +1960,7 @@ mod tests {
     }
 
     #[test]
-    fn server_advertised_duplicate_requires_the_same_size_without_a_hash() {
+    fn server_advertised_duplicate_without_a_strong_identity_is_not_striped() {
         let primary = SourceProbe {
             total: Some(10_000),
             etag: None,
@@ -1975,7 +1975,7 @@ mod tests {
             digest: None,
             elapsed: Duration::from_millis(10),
         };
-        assert!(same_download_identity(&primary, &duplicate, true));
+        assert!(!same_download_identity(&primary, &duplicate, true));
         assert!(!same_download_identity(&primary, &duplicate, false));
     }
 
