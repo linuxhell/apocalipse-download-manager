@@ -32,9 +32,9 @@ fn xml_unescape(value: &str) -> Result<String> {
                 char::from_u32(u32::from_str_radix(&entity[2..], 16)?)
                     .context("invalid XML character")?,
             ),
-            _ if entity.starts_with('#') => output.push(
-                char::from_u32(entity[1..].parse()?).context("invalid XML character")?,
-            ),
+            _ if entity.starts_with('#') => {
+                output.push(char::from_u32(entity[1..].parse()?).context("invalid XML character")?)
+            }
             _ => bail!("unsupported XML entity"),
         }
         rest = &rest[end + 1..];
@@ -112,7 +112,10 @@ pub fn parse_metalink(xml: &[u8], base_url: Option<&str>) -> Result<Vec<Metalink
         let name = attribute(file_tag, "name")
             .map(|value| value.trim().to_owned())
             .filter(|value| {
-                !value.is_empty() && !value.chars().any(|character| matches!(character, '/' | '\\'))
+                !value.is_empty()
+                    && !value
+                        .chars()
+                        .any(|character| matches!(character, '/' | '\\'))
             });
         let size = elements(file_body, "size")
             .first()
@@ -170,12 +173,15 @@ mod tests {
     #[test]
     fn parses_meta4_mirrors_and_sha256() {
         let document = br#"<?xml version="1.0"?><metalink xmlns="urn:ietf:params:xml:ns:metalink"><file name="image.iso"><size>4096</size><hash type="sha-256">aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</hash><url>https://a.example/image.iso</url><url>mirror/image.iso?x=1&amp;y=2</url></file></metalink>"#;
-        let parsed = parse_metalink(document, Some("https://b.example/releases/file.meta4"))
-            .unwrap();
+        let parsed =
+            parse_metalink(document, Some("https://b.example/releases/file.meta4")).unwrap();
         assert_eq!(parsed[0].name.as_deref(), Some("image.iso"));
         assert_eq!(parsed[0].size, Some(4096));
         assert_eq!(parsed[0].urls.len(), 2);
-        assert_eq!(parsed[0].urls[1], "https://b.example/releases/mirror/image.iso?x=1&y=2");
+        assert_eq!(
+            parsed[0].urls[1],
+            "https://b.example/releases/mirror/image.iso?x=1&y=2"
+        );
     }
 
     #[test]
