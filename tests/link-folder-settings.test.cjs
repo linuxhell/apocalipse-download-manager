@@ -45,8 +45,8 @@ test("Windows SMB shared folders are discovered automatically for Link", () => {
   assert.match(rust, /STYPE_SPECIAL/);
   assert.match(rust, /effective_link_shares\(settings\)/);
   assert.match(rust, /stable_link_share_id\("windows"/);
-  assert.match(linkJs, /Windows SMB shared folders are also discovered automatically/);
-  assert.match(linkJs, /Pastas compartilhadas pelo Windows \(SMB\) também aparecem automaticamente/);
+  assert.match(linkJs, /Windows and Linux SMB shared folders are also discovered automatically/);
+  assert.match(linkJs, /Windows ou Linux via SMB também aparecem automaticamente/);
 });
 
 test("Linux Samba shares are discovered from smb.conf and usershares", () => {

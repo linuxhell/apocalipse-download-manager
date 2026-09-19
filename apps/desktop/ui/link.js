@@ -46,7 +46,7 @@ const catalogs = {
     linkRemoteId: "IP / host remoto",
     linkRemoteAddressExamples: "Use este PC, um IP da rede local ou um IP/host público da Internet.",
     linkAccessNotice: "Somente arquivos, pastas e unidades compartilhados explicitamente ficam expostos.",
-    linkShareNotice: "Compartilhe um arquivo, pasta ou unidade mapeada e escolha a permissão para que apareça no Apocalipse Link.",
+    linkShareNotice: "Compartilhe um arquivo, pasta ou unidade por aqui. Pastas compartilhadas pelo Windows ou Linux via SMB também aparecem automaticamente.",
     linkRemoteShareNotice: "Abaixo aparecem somente arquivos, pastas e unidades compartilhados pelo outro usuário.",
     linkNoShares: "Nenhum arquivo, pasta ou unidade compartilhado ainda.",
     linkRemoteUsername: "Usuário do sistema operacional",

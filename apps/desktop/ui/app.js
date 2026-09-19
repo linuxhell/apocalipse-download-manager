@@ -297,7 +297,7 @@ const catalogs = {
     linkCompleted: "Concluído",
     linkTransferFailed: "Falha na transferência",
     linkUploadFailed: "Falha no envio",
-    linkShareNotice: "Compartilhe um arquivo, pasta ou unidade mapeada e escolha a permissão para que apareça no Apocalipse Link.",
+    linkShareNotice: "Compartilhe um arquivo, pasta ou unidade por aqui. Pastas compartilhadas pelo Windows ou Linux via SMB também aparecem automaticamente.",
     linkRemoteShareNotice: "Abaixo aparecem somente arquivos, pastas e unidades compartilhados pelo outro usuário.",
     linkNoShares: "Nenhum arquivo, pasta ou unidade foi compartilhado. Compartilhe um item acima para ele aparecer aqui.",
     linkRemoteUsername: "Usuário do sistema operacional",
