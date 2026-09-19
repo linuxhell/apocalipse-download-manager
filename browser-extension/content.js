@@ -1054,10 +1054,14 @@
       const isTikTokVideo = Boolean(tikTokUrl);
       const url = isFacebookVideo ? facebookUrlFor(element) || location.href : tikTokUrl || downloadUrlFor(element);
       const liveMediaUrl = element.currentSrc || element.src || "";
+      const hasDirectHttpMedia = /^https?:/i.test(liveMediaUrl);
       const downloadReady = () => Boolean((downloadUrlFor(element) && /^https?:/.test(downloadUrlFor(element)))
         || /^blob:/i.test(String(element.currentSrc || element.src || '')));
       const canDownload = Boolean((url && /^https?:/.test(url)) || /^blob:/i.test(liveMediaUrl));
-      const canRecord = !isYouTubeVideo && element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
+      // A direct HTTP media URL belongs in the download path. Cross-origin
+      // players commonly reject captureStream(), so displaying Record there
+      // offers an action that cannot succeed (and duplicates Download).
+      const canRecord = !isYouTubeVideo && !hasDirectHttpMedia && element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
         && Boolean(element.captureStream || element.webkitCaptureStream);
       if (!canDownload && !canRecord) return;
       element.dataset.apocalipseButton = "1";
