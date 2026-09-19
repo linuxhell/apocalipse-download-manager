@@ -544,6 +544,7 @@ impl Diagnostics {
         let mut players = HashMap::<String, Value>::new();
         let mut decisions = Vec::new();
         let mut media_replay = Vec::new();
+        let mut transfer_engine = Vec::new();
         let mut contexts = HashSet::new();
         let mut warnings = Vec::new();
         for record in &records {
@@ -572,6 +573,15 @@ impl Diagnostics {
                 let key = format!("{}:{}", record["contextId"], name);
                 players.insert(key, record.clone());
             }
+            if name.starts_with("http.engine_")
+                || name.starts_with("http.resume_")
+                || name.starts_with("http.segment_")
+                || name.starts_with("http.performance_")
+                || name.starts_with("http.transfer_")
+                || name.starts_with("http.transport_")
+            {
+                transfer_engine.push(record.clone());
+            }
             if ["ERROR", "WARN"].contains(&record["level"].as_str().unwrap_or("")) {
                 warnings.push(record);
             }
@@ -587,6 +597,56 @@ impl Diagnostics {
             "firstSequence":items.first().map(|v| &v["serverSequence"]),
             "lastStage":items.last().map(|v| &v["event"]),"interpretation":"last_observed_stage_not_proven_root_cause"})).collect::<Vec<_>>();
         action_rows.sort_by_key(|v| v["firstSequence"].as_u64().unwrap_or(0));
+
+        let performance_samples = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.performance_sample")
+            .collect::<Vec<_>>();
+        let segment_samples = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.segment_completed")
+            .collect::<Vec<_>>();
+        let peak_bytes_per_second = performance_samples
+            .iter()
+            .filter_map(|record| record["detail"]["bytesPerSecond"].as_u64())
+            .max()
+            .unwrap_or(0);
+        let average_segment_bytes_per_second = if segment_samples.is_empty() {
+            0
+        } else {
+            segment_samples
+                .iter()
+                .filter_map(|record| record["detail"]["bytesPerSecond"].as_u64())
+                .sum::<u64>()
+                / segment_samples.len() as u64
+        };
+        let mirror_fallback_segments = segment_samples
+            .iter()
+            .filter(|record| record["detail"]["attempts"].as_u64().unwrap_or(1) > 1)
+            .count();
+        let max_source_count = transfer_engine
+            .iter()
+            .filter_map(|record| record["detail"]["sourceCount"].as_u64())
+            .max()
+            .unwrap_or(0);
+        let mut transports = HashMap::<String, u64>::new();
+        for record in &segment_samples {
+            if let Some(transport) = record["detail"]["transport"].as_str() {
+                *transports.entry(transport.to_owned()).or_default() += 1;
+            }
+        }
+        let transfer_summary = json!({
+            "telemetryVersion": 1,
+            "events": transfer_engine.len(),
+            "performanceSamples": performance_samples.len(),
+            "segmentsCompleted": segment_samples.len(),
+            "peakBytesPerSecond": peak_bytes_per_second,
+            "averageSegmentBytesPerSecond": average_segment_bytes_per_second,
+            "mirrorFallbackSegments": mirror_fallback_segments,
+            "maxSourceCount": max_source_count,
+            "transports": transports,
+            "interpretation": "observed_transfer_metrics_not_a_cross_product_benchmark"
+        });
         let mut report = format!("ADM - DIAGNOSTICO V3 / DIAGNOSTICS V3\n\nAplicativo / Application: {}\nBuild: {}\nSessao / Session: {}\nEventos / Events: {} | Contextos / Contexts: {} | WARN/ERROR: {}\n\nFATOS REGISTRADOS / RECORDED FACTS\n",
             env!("CARGO_PKG_VERSION"),option_env!("ADM_BUILD_SHA").unwrap_or("unknown"),store.config["sessionId"],records.len(),contexts.len(),warnings.len());
         if records.is_empty() {
@@ -618,6 +678,10 @@ impl Diagnostics {
             }
         }
         report.push_str(&format!(
+            "\nTELEMETRIA DO MOTOR / TRANSFER ENGINE TELEMETRY\n{}\n",
+            serde_json::to_string_pretty(&transfer_summary).unwrap_or_default()
+        ));
+        report.push_str(&format!(
             "\nSAUDE DOS COLETORES / COLLECTOR HEALTH\n{}\n",
             serde_json::to_string_pretty(&health).unwrap_or_default()
         ));
@@ -638,6 +702,14 @@ impl Diagnostics {
             ("traces/actions.jsonl".into(), jsonl(&action_rows)),
             ("traces/replay-de-midia.jsonl".into(), jsonl(&media_replay)),
             ("capture/media-decisions.jsonl".into(), jsonl(&decisions)),
+            (
+                "performance/transfer-engine.jsonl".into(),
+                jsonl(&transfer_engine),
+            ),
+            (
+                "performance/summary.json".into(),
+                serde_json::to_vec_pretty(&transfer_summary).unwrap_or_default(),
+            ),
             (
                 "state/players-popup.json".into(),
                 serde_json::to_vec_pretty(&players).unwrap_or_default(),
@@ -768,6 +840,40 @@ mod tests {
         assert!(!value.to_string().contains("PRIVATE"));
         assert!(!value.to_string().contains("SECRET"));
     }
+    #[test]
+    fn transfer_engine_events_get_a_separate_performance_export() {
+        let (diag, path) = setup();
+        diag.control("start", None).unwrap();
+        let task = uuid::Uuid::new_v4().to_string();
+        diag.record(
+            "http.performance_sample",
+            "INFO",
+            None,
+            Some(&task),
+            json!({"bytesPerSecond":125000000u64,"activeConnections":16}),
+        );
+        diag.record(
+            "http.segment_completed",
+            "INFO",
+            None,
+            Some(&task),
+            json!({"bytesPerSecond":120000000u64,"attempts":2,"sourceCount":3,"transport":"HTTP/2"}),
+        );
+        let exports = diag.export();
+        let summary = exports
+            .iter()
+            .find(|(name, _)| name == "performance/summary.json")
+            .map(|(_, bytes)| serde_json::from_slice::<Value>(bytes).unwrap())
+            .unwrap();
+        assert_eq!(summary["peakBytesPerSecond"], 125000000u64);
+        assert_eq!(summary["mirrorFallbackSegments"], 1);
+        assert_eq!(summary["maxSourceCount"], 3);
+        assert!(exports
+            .iter()
+            .any(|(name, _)| name == "performance/transfer-engine.jsonl"));
+        let _ = fs::remove_dir_all(path);
+    }
+
     #[test]
     fn clear_removes_detailed_session_and_preserves_other_files() {
         let (diag, path) = setup();
