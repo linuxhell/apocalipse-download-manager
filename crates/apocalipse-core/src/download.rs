@@ -44,6 +44,8 @@ pub struct DownloadRequest {
     pub method: String,
     pub body: Option<Vec<u8>>,
     pub headers: Vec<(String, String)>,
+    /// Optional trusted payload size, from browser capture or Metalink metadata.
+    pub expected_size: Option<u64>,
     /// Optional trusted SHA-256. When present, the .part file is never promoted
     /// to the final destination unless the digest matches exactly.
     pub expected_sha256: Option<String>,
@@ -324,6 +326,9 @@ impl DownloadEngine {
                         .and_then(content_range_total)
                         .or(total);
                     if let Some(total) = range_total {
+                        if request.expected_size.is_some_and(|expected| expected != total) {
+                            bail!("expected size mismatch: remote={total}");
+                        }
                         let identity = resume_identity_from_headers(probe.headers(), total);
                         let useful_connections = adaptive_connection_count(total, requested);
                         if useful_connections > 1 {
@@ -1185,6 +1190,11 @@ async fn finish_download(
             bail!("incomplete download: received {received} of {expected} bytes");
         }
     }
+    if let Some(expected) = request.expected_size {
+        if received != expected {
+            bail!("expected size mismatch: received {received} of {expected} bytes");
+        }
+    }
 
     if let Some(expected) = request
         .expected_sha256
@@ -1471,6 +1481,7 @@ mod tests {
             method: "GET".into(),
             body: None,
             headers: Vec::new(),
+            expected_size: Some(15),
             expected_sha256: Some("0".repeat(64)),
             limiters: Vec::new(),
         };
