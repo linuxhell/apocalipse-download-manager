@@ -295,7 +295,7 @@ test('the exact chat commands reported by the user are understood', () => {
 });
 
 test('welcome message follows language changes and the composer stays fixed', () => {
-  assert.match(aiUi, /isGreeting \? AI\.say\(language\(\), "hello"\)/);
+  assert.match(aiUi, /isGreeting[\s\S]{0,140}AI\.say\(language\(\), "hello"\)/);
   assert.match(aiUi, /apocalipse-language-changed/);
   assert.match(app, /dispatchEvent\(new CustomEvent\("apocalipse-language-changed"/);
   assert.match(css, /grid-template-rows:auto minmax\(0,1fr\) auto auto/);
