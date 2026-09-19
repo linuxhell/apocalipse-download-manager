@@ -69,6 +69,34 @@ extern "system" {
     fn CloseHandle(object: *mut c_void) -> i32;
 }
 
+#[cfg(windows)]
+#[repr(C)]
+struct WindowsShareInfo2 {
+    netname: *mut u16,
+    share_type: u32,
+    remark: *mut u16,
+    permissions: u32,
+    max_uses: u32,
+    current_uses: u32,
+    path: *mut u16,
+    password: *mut u16,
+}
+
+#[cfg(windows)]
+#[link(name = "netapi32")]
+extern "system" {
+    fn NetShareEnum(
+        server_name: *const u16,
+        level: u32,
+        buffer: *mut *mut u8,
+        preferred_maximum_length: u32,
+        entries_read: *mut u32,
+        total_entries: *mut u32,
+        resume_handle: *mut u32,
+    ) -> u32;
+    fn NetApiBufferFree(buffer: *mut c_void) -> u32;
+}
+
 #[cfg(unix)]
 #[repr(C)]
 struct PamMessage {
@@ -814,10 +842,134 @@ fn authenticate_local_link_account(username: String, mut password: String) -> Re
     result
 }
 
-fn link_share_entries(settings: &UserSettings) -> Vec<LinkFileEntry> {
-    settings
-        .link_shares
+fn stable_link_share_id(prefix: &str, name: &str, path: &Path) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(prefix.as_bytes());
+    hasher.update([0]);
+    hasher.update(name.as_bytes());
+    hasher.update([0]);
+    hasher.update(path.to_string_lossy().as_bytes());
+    let digest = hasher.finalize();
+    let suffix = digest[..12]
         .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("{prefix}-{suffix}")
+}
+
+#[cfg(windows)]
+fn windows_wide_pointer_to_string(pointer: *const u16) -> String {
+    if pointer.is_null() {
+        return String::new();
+    }
+    let mut length = 0_usize;
+    unsafe {
+        while length < 32_768 && *pointer.add(length) != 0 {
+            length += 1;
+        }
+        String::from_utf16_lossy(std::slice::from_raw_parts(pointer, length))
+    }
+}
+
+#[cfg(windows)]
+fn windows_shared_link_shares() -> Vec<LinkShare> {
+    const NERR_SUCCESS: u32 = 0;
+    const ERROR_MORE_DATA: u32 = 234;
+    const MAX_PREFERRED_LENGTH: u32 = u32::MAX;
+    const STYPE_DISKTREE: u32 = 0;
+    const STYPE_MASK: u32 = 0x0000_00ff;
+    const STYPE_SPECIAL: u32 = 0x8000_0000;
+
+    let mut shares = Vec::new();
+    let mut resume_handle = 0_u32;
+    loop {
+        let mut buffer = std::ptr::null_mut::<u8>();
+        let mut entries_read = 0_u32;
+        let mut total_entries = 0_u32;
+        let status = unsafe {
+            NetShareEnum(
+                std::ptr::null(),
+                2,
+                &mut buffer,
+                MAX_PREFERRED_LENGTH,
+                &mut entries_read,
+                &mut total_entries,
+                &mut resume_handle,
+            )
+        };
+        if status != NERR_SUCCESS && status != ERROR_MORE_DATA {
+            if !buffer.is_null() {
+                unsafe {
+                    NetApiBufferFree(buffer.cast());
+                }
+            }
+            break;
+        }
+        if !buffer.is_null() && entries_read > 0 {
+            let entries = unsafe {
+                std::slice::from_raw_parts(
+                    buffer.cast::<WindowsShareInfo2>(),
+                    entries_read as usize,
+                )
+            };
+            for entry in entries {
+                let is_disk = entry.share_type & STYPE_MASK == STYPE_DISKTREE;
+                let is_special = entry.share_type & STYPE_SPECIAL != 0;
+                if !is_disk || is_special {
+                    continue;
+                }
+                let name = windows_wide_pointer_to_string(entry.netname);
+                let path = PathBuf::from(windows_wide_pointer_to_string(entry.path));
+                if name.is_empty()
+                    || name.ends_with('$')
+                    || path.as_os_str().is_empty()
+                    || !path.is_absolute()
+                {
+                    continue;
+                }
+                shares.push(LinkShare {
+                    id: stable_link_share_id("windows", &name, &path),
+                    name,
+                    path,
+                    allow_write: false,
+                    directory: true,
+                });
+            }
+        }
+        if !buffer.is_null() {
+            unsafe {
+                NetApiBufferFree(buffer.cast());
+            }
+        }
+        if status != ERROR_MORE_DATA {
+            break;
+        }
+    }
+    shares
+}
+
+#[cfg(not(windows))]
+fn windows_shared_link_shares() -> Vec<LinkShare> {
+    Vec::new()
+}
+
+fn effective_link_shares(settings: &UserSettings) -> Vec<LinkShare> {
+    let mut shares = settings.link_shares.clone();
+    for share in windows_shared_link_shares() {
+        if shares
+            .iter()
+            .any(|existing| existing.path == share.path || existing.id == share.id)
+        {
+            continue;
+        }
+        shares.push(share);
+    }
+    shares
+}
+
+fn link_share_entries(settings: &UserSettings) -> Vec<LinkFileEntry> {
+    effective_link_shares(settings)
+        .into_iter()
         .map(|share| {
             let metadata = fs::metadata(&share.path).ok();
             LinkFileEntry {
@@ -844,12 +996,11 @@ fn resolve_link_share(
         return Err("path_not_shared".to_owned());
     }
     let id = parts.next().ok_or_else(|| "path_not_shared".to_owned())?;
-    let share = settings
-        .link_shares
-        .iter()
+    let share = effective_link_shares(settings)
+        .into_iter()
         .find(|share| share.id == id)
         .ok_or_else(|| "path_not_shared".to_owned())?;
-    let mut path = share.path.clone();
+    let mut path = share.path;
     for part in parts {
         if part.is_empty() || part == "." {
             continue;

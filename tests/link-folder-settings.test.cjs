@@ -39,6 +39,16 @@ test("Link exposes only explicit shares with per-share write permission", () => 
   assert.match(html, /linkRemoteSecurityNotice/);
 });
 
+test("Windows SMB shared folders are discovered automatically for Link", () => {
+  assert.match(rust, /fn windows_shared_link_shares\(\)/);
+  assert.match(rust, /NetShareEnum/);
+  assert.match(rust, /STYPE_SPECIAL/);
+  assert.match(rust, /effective_link_shares\(settings\)/);
+  assert.match(rust, /stable_link_share_id\("windows"/);
+  assert.match(linkJs, /Windows SMB shared folders are also discovered automatically/);
+  assert.match(linkJs, /Pastas compartilhadas pelo Windows \(SMB\) também aparecem automaticamente/);
+});
+
 test("Link lists remain readable and settings use the available window", () => {
   assert.match(css, /#settings-dialog \{ width: min\(1360px, calc\(100vw - 20px\)\)/);
   assert.match(css, /height:clamp\(300px,42vh,460px\)/);
