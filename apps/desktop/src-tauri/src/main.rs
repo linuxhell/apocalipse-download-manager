@@ -2799,7 +2799,10 @@ async fn run_external_download(
                 } else {
                     command.arg("--add-headers").arg(format!("Cookie:{cookie}"));
                 }
-            } else if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
+            } else if browser_session_site
+                || task.source.contains("youtube.com/")
+                || task.source.contains("youtu.be/")
+            {
                 command.args(["--cookies-from-browser", "chrome"]);
             }
             command.args([
