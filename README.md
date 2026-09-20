@@ -71,7 +71,7 @@ Apocalipse combines fast resumable downloads, media discovery, streaming capture
 - HLS recording to MP4/AAC where the stream and applicable law permit it
 - Native tray integration and a low-memory background mode
 - Complete UI localization: English by default, Brazilian Portuguese and Simplified Chinese, including the extension
-- Explainable strategy selection with optional Gopeed backend and automatic content validation
+- Explainable strategy selection with aria2 RPC acceleration, native HTTP fallback and automatic content validation
 - Removable per-site credentials backed by the operating system secure vault
 - Windows 10+, modern Linux distributions and macOS 13+
 
@@ -85,7 +85,7 @@ Sites protected by DRM or access controls are intentionally not bypassed. Users 
 Apocalipse already combines general downloads, browser media discovery, streaming capture, torrents, eD2k workflows, diagnostics and direct computer-to-computer transfers. Its next engineering priorities are depth and measurable reliability rather than feature count:
 
 - strengthen the native HTTP engine with adaptive range scheduling, slow-connection recovery and live mirror rebalancing;
-- publish reproducible benchmarks against Gopeed, aria2c and other download engines, including throughput, CPU, memory, retry behavior and integrity under latency and packet loss;
+- publish reproducible benchmarks for aria2 RPC and the native fallback, including throughput, CPU, memory, retry behavior and integrity under latency and packet loss;
 - improve packaging and distribution while preserving the portable builds;
 - keep refining interface consistency, accessibility and first-run behavior.
 
