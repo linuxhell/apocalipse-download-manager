@@ -1,0 +1,130 @@
+name: Diagnose Gopeed Ubuntu ISO
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gopeed-ubuntu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Reproduce with Gopeed v1.9.3
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -u
+          ROOT="$RUNNER_TEMP/gopeed-ubuntu"
+          mkdir -p "$ROOT"/storage "$ROOT"/temp "$ROOT"/downloads
+          cd "$ROOT"
+
+          echo "=== download gopeed ==="
+          curl -fL --retry 3 --connect-timeout 10 --max-time 60 \
+            -o gopeed.zip \
+            'https://gopeed.com/api/download?tpl=gopeed-web-v1.9.3-linux-amd64.zip'
+          unzip -q gopeed.zip
+          GOPEED_BIN="$(find "$ROOT" -type f -name gopeed -print -quit)"
+          echo "gopeed_bin=$GOPEED_BIN"
+          test -n "$GOPEED_BIN" || exit 10
+          chmod +x "$GOPEED_BIN"
+          "$GOPEED_BIN" --help 2>&1 | head -50
+
+          TOKEN='apocalipse-diagnostic-token'
+          PORT=19999
+          "$GOPEED_BIN" --address 127.0.0.1 --port "$PORT" \
+            --username apocalipse --password diagnostic --api-token "$TOKEN" \
+            --storage-dir "$ROOT/storage" --temp-dir "$ROOT/temp" \
+            --config "$ROOT/gopeed.json" >"$ROOT/gopeed.log" 2>&1 &
+          GPID=$!
+          trap 'kill "$GPID" 2>/dev/null || true' EXIT
+
+          echo "=== wait info ==="
+          READY=0
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 1 -H "X-Api-Token: $TOKEN" \
+              "http://127.0.0.1:$PORT/api/v1/info" >"$ROOT/info.json"; then
+              READY=1
+              echo "ready_probe=$i"
+              cat "$ROOT/info.json"
+              break
+            fi
+            sleep 0.1
+          done
+          echo "ready=$READY"
+          if [ "$READY" -ne 1 ]; then
+            cat "$ROOT/gopeed.log"
+            exit 20
+          fi
+
+          URL='https://releases.ubuntu.com/26.04.1/ubuntu-26.04.1-desktop-amd64.iso'
+          echo "=== dns ==="
+          getent ahosts releases.ubuntu.com | head -20 || true
+          echo "=== direct head ==="
+          curl -sSIL --connect-timeout 10 --max-time 20 "$URL" \
+            -o "$ROOT/head.txt" \
+            -w 'http=%{http_code} connect=%{time_connect} tls=%{time_appconnect} starttransfer=%{time_starttransfer} total=%{time_total}\n' || true
+          cat "$ROOT/head.txt" 2>/dev/null || true
+
+          python3 - <<'PY' > "$ROOT/payload.json"
+          import json, os
+          print(json.dumps({
+            "req": {
+              "rawUrl": "https://releases.ubuntu.com/26.04.1/ubuntu-26.04.1-desktop-amd64.iso",
+              "url": "https://releases.ubuntu.com/26.04.1/ubuntu-26.04.1-desktop-amd64.iso",
+              "extra": {"method":"GET","header":{},"body":""}
+            },
+            "opts": {
+              "name":"ubuntu-26.04.1-desktop-amd64.iso",
+              "path": os.environ["RUNNER_TEMP"] + "/gopeed-ubuntu/downloads",
+              "selectFiles":[],
+              "extra":{"connections":16}
+            }
+          }))
+          PY
+
+          echo "=== create task 16 connections ==="
+          START_MS="$(date +%s%3N)"
+          curl -sS --connect-timeout 5 --max-time 40 \
+            -H "X-Api-Token: $TOKEN" -H 'Content-Type: application/json' \
+            -X POST --data-binary @"$ROOT/payload.json" \
+            "http://127.0.0.1:$PORT/api/v1/tasks" \
+            >"$ROOT/create.json" 2>"$ROOT/create.stderr"
+          RC=$?
+          END_MS="$(date +%s%3N)"
+          echo "create_rc=$RC create_elapsed_ms=$((END_MS-START_MS))"
+          cat "$ROOT/create.stderr" || true
+          cat "$ROOT/create.json" || true
+
+          TASK_ID="$(python3 - <<'PY'
+          import json, os
+          try:
+              x=json.load(open(os.environ["RUNNER_TEMP"]+"/gopeed-ubuntu/create.json"))
+              d=x.get("data")
+              print(d if isinstance(d,str) else "")
+          except Exception:
+              print("")
+          PY
+          )"
+          echo "task_id=$TASK_ID"
+
+          if [ -n "$TASK_ID" ]; then
+            echo "=== poll 20 seconds ==="
+            for i in $(seq 1 10); do
+              echo "--- poll $i ---"
+              curl -sS --max-time 3 -H "X-Api-Token: $TOKEN" \
+                "http://127.0.0.1:$PORT/api/v1/tasks/$TASK_ID/status" || true
+              echo
+              curl -sS --max-time 3 -H "X-Api-Token: $TOKEN" \
+                "http://127.0.0.1:$PORT/api/v1/tasks/$TASK_ID/stats" || true
+              echo
+              sleep 2
+            done
+          fi
+
+          echo "=== gopeed backend log ==="
+          tail -300 "$ROOT/gopeed.log" || true
+          kill "$GPID" 2>/dev/null || true
+          wait "$GPID" 2>/dev/null || true
