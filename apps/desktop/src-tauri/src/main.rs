@@ -10644,7 +10644,9 @@ fn register_browser_download(
         return Ok(());
     }
 
-    let size = fs::metadata(&source).map_err(|error| error.to_string())?.len();
+    let size = fs::metadata(&source)
+        .map_err(|error| error.to_string())?
+        .len();
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     if queue.iter().any(|task| {
         task.destination == source
@@ -10724,14 +10726,18 @@ fn import_browser_assisted_download(
     };
 
     if destination_key(&destination) != destination_key(&source) {
-        fs::rename(&source, &destination).or_else(|_| {
-            fs::copy(&source, &destination)
-                .map(|_| ())
-                .and_then(|_| fs::remove_file(&source))
-        }).map_err(|error| error.to_string())?;
+        fs::rename(&source, &destination)
+            .or_else(|_| {
+                fs::copy(&source, &destination)
+                    .map(|_| ())
+                    .and_then(|_| fs::remove_file(&source))
+            })
+            .map_err(|error| error.to_string())?;
     }
 
-    let size = fs::metadata(&destination).map_err(|error| error.to_string())?.len();
+    let size = fs::metadata(&destination)
+        .map_err(|error| error.to_string())?
+        .len();
     let mut task = DownloadTask::new(&url, destination);
     task.state = DownloadState::Completed;
     task.received = size;
