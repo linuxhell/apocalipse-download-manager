@@ -2543,7 +2543,11 @@ fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
 fn configured_gopeed(settings: &UserSettings) -> PathBuf {
     configured_tool(
         &settings.gopeed_path,
-        if cfg!(windows) { "gopeed.exe" } else { "gopeed" },
+        if cfg!(windows) {
+            "gopeed.exe"
+        } else {
+            "gopeed"
+        },
     )
 }
 
@@ -4431,8 +4435,16 @@ async fn log_network_route(state: &AppState, operation: &str, engine: &str) {
 }
 
 
-fn gopeed_request_context(state: &AppState, task: &DownloadTask) -> (gopeed::RequestContext, usize) {
-    let settings = state.settings.lock().ok().map(|value| value.clone()).unwrap_or_default();
+fn gopeed_request_context(
+    state: &AppState,
+    task: &DownloadTask,
+) -> (gopeed::RequestContext, usize) {
+    let settings = state
+        .settings
+        .lock()
+        .ok()
+        .map(|value| value.clone())
+        .unwrap_or_default();
     let identity = state
         .request_identities
         .lock()
@@ -4452,7 +4464,11 @@ fn gopeed_request_context(state: &AppState, task: &DownloadTask) -> (gopeed::Req
         .as_ref()
         .and_then(|rule| rule.user_agent.as_ref())
         .or(settings.user_agent.as_ref())
-        .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_ref()))
+        .or_else(|| {
+            identity
+                .as_ref()
+                .and_then(|value| value.user_agent.as_ref())
+        })
     {
         headers.insert("User-Agent".to_owned(), user_agent.clone());
     }
@@ -4635,9 +4651,7 @@ async fn run_gopeed_download(
         &state,
         "INFO",
         "gopeed.task_started",
-        &format!(
-            "task={id} gopeed_task={gopeed_id} engine={kind:?} connections={connections}"
-        ),
+        &format!("task={id} gopeed_task={gopeed_id} engine={kind:?} connections={connections}"),
     );
     state.diagnostics.record(
         "http.engine_selected",
@@ -4865,7 +4879,11 @@ async fn run_external_download(
                 "ffmpeg".into(),
                 "yt-dlp".into(),
                 "N_m3u8DL-RE".into(),
-                if cfg!(windows) { "gopeed.exe".into() } else { "gopeed".into() },
+                if cfg!(windows) {
+                    "gopeed.exe".into()
+                } else {
+                    "gopeed".into()
+                },
                 8,
                 None,
                 None,
@@ -6456,9 +6474,7 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
         .into_iter()
         .map(|(id, executable, args)| {
             let version = if id == "gopeed" {
-                executable
-                    .is_file()
-                    .then(|| "Gopeed 2.x beta".to_owned())
+                executable.is_file().then(|| "Gopeed 2.x beta".to_owned())
             } else {
                 version_line(&executable, args)
             };
@@ -6804,7 +6820,9 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             .map_err(|error| error.to_string())?;
         let release: serde_json::Value = if id == "gopeed" {
             let releases: Vec<serde_json::Value> = client
-                .get(format!("https://api.github.com/repos/{repository}/releases?per_page=20"))
+                .get(format!(
+                    "https://api.github.com/repos/{repository}/releases?per_page=20"
+                ))
                 .send()
                 .await
                 .map_err(|error| error.to_string())?
@@ -6828,7 +6846,9 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 .ok_or_else(|| "gopeed_beta_release_not_found".to_owned())?
         } else {
             client
-                .get(format!("https://api.github.com/repos/{repository}/releases/latest"))
+                .get(format!(
+                    "https://api.github.com/repos/{repository}/releases/latest"
+                ))
                 .send()
                 .await
                 .map_err(|error| error.to_string())?
@@ -6942,7 +6962,12 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             fs::write(&ffprobe_staged, &ffprobe_replacement).map_err(|error| error.to_string())?;
         }
         let candidate_version = if id == "gopeed" {
-            if staged.metadata().map(|metadata| metadata.len()).unwrap_or(0) < 32_768 {
+            if staged
+                .metadata()
+                .map(|metadata| metadata.len())
+                .unwrap_or(0)
+                < 32_768
+            {
                 let _ = fs::remove_file(&staged);
                 return Err("downloaded_tool_validation_failed".to_owned());
             }
@@ -10387,8 +10412,7 @@ fn main() {
                 } else {
                     "gopeed"
                 }));
-                write_settings(&settings_path, &initial_settings)
-                    .map_err(std::io::Error::other)?;
+                write_settings(&settings_path, &initial_settings).map_err(std::io::Error::other)?;
             }
             let (show_label, quit_label) = tray_labels(&initial_settings.language);
             let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
