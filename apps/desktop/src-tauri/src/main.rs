@@ -4253,7 +4253,9 @@ fn html_attribute_urls(html: &str, attribute: &str) -> Vec<String> {
         let mut rest = html;
         while let Some(start) = rest.find(&needle) {
             let value = &rest[start + needle.len()..];
-            let Some(end) = value.find(quote) else { break };
+            let Some(end) = value.find(quote) else {
+                break;
+            };
             let candidate = value[..end]
                 .replace("&amp;", "&")
                 .replace("&#38;", "&");
@@ -4281,10 +4283,21 @@ fn file_host_candidate_score(adapter: &str, value: &url::Url) -> i32 {
     let path = value.path().to_ascii_lowercase();
     let host = value.host_str().unwrap_or_default().to_ascii_lowercase();
     let mut score = 0;
-    if path.contains("/download") { score += 60; }
-    if path.contains("/file/") || path.contains("/files/") { score += 20; }
-    if [".zip", ".7z", ".rar", ".tar", ".gz", ".xz", ".zst", ".iso", ".exe", ".msi", ".dmg", ".pkg", ".deb", ".rpm", ".mp4", ".mkv", ".pdf"]
-        .iter().any(|extension| path.ends_with(extension)) { score += 50; }
+    if path.contains("/download") {
+        score += 60;
+    }
+    if path.contains("/file/") || path.contains("/files/") {
+        score += 20;
+    }
+    if [
+        ".zip", ".7z", ".rar", ".tar", ".gz", ".xz", ".zst", ".iso", ".exe", ".msi", ".dmg",
+        ".pkg", ".deb", ".rpm", ".mp4", ".mkv", ".pdf",
+    ]
+    .iter()
+    .any(|extension| path.ends_with(extension))
+    {
+        score += 50;
+    }
     match adapter {
         "mediafire" if host.contains("download") || host.contains("mediafire") => score += 35,
         "gofile" if host.contains("gofile") => score += 25,
@@ -4299,10 +4312,18 @@ async fn resolve_file_host_url_internal(url: &str) -> Result<FileHostResolution,
     let parsed = url::Url::parse(url).map_err(|_| "invalid_url".to_owned())?;
     let host = parsed.host_str().ok_or_else(|| "invalid_url".to_owned())?;
     let Some(adapter) = supported_file_host(host) else {
-        return Ok(FileHostResolution { url: url.to_owned(), adapted: false, adapter: None });
+        return Ok(FileHostResolution {
+            url: url.to_owned(),
+            adapted: false,
+            adapter: None,
+        });
     };
     if adapter == "archive" && parsed.path().starts_with("/download/") {
-        return Ok(FileHostResolution { url: url.to_owned(), adapted: false, adapter: Some(adapter.to_owned()) });
+        return Ok(FileHostResolution {
+            url: url.to_owned(),
+            adapted: false,
+            adapter: Some(adapter.to_owned()),
+        });
     }
     let response = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 ApocalipseDownloadManager/0.4")
@@ -4324,16 +4345,24 @@ async fn resolve_file_host_url_internal(url: &str) -> Result<FileHostResolution,
         .chain(html_attribute_urls(&html, "data-url"))
         .chain(html_attribute_urls(&html, "data-download"))
     {
-        let Ok(candidate) = final_url.join(value.trim()) else { continue };
-        if !matches!(candidate.scheme(), "http" | "https") { continue; }
+        let Ok(candidate) = final_url.join(value.trim()) else {
+            continue;
+        };
+        if !matches!(candidate.scheme(), "http" | "https") {
+            continue;
+        }
         let candidate_host = candidate.host_str().unwrap_or_default();
-        if !file_host_candidate_trusted(adapter, candidate_host) { continue; }
+        if !file_host_candidate_trusted(adapter, candidate_host) {
+            continue;
+        }
         let score = file_host_candidate_score(adapter, &candidate);
         if score >= 50 && best.as_ref().is_none_or(|(current, _)| score > *current) {
             best = Some((score, candidate.to_string()));
         }
     }
-    let resolved = best.map(|(_, value)| value).unwrap_or_else(|| url.to_owned());
+    let resolved = best
+        .map(|(_, value)| value)
+        .unwrap_or_else(|| url.to_owned());
     Ok(FileHostResolution {
         adapted: resolved != url,
         url: resolved,
