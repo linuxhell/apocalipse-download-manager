@@ -39,6 +39,7 @@ pub struct RuntimeStatus {
     pub speed: u64,
     pub connections: u64,
     pub seeders: u64,
+    pub followed_by: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -229,6 +230,7 @@ impl Endpoint {
         selected_files: &[usize],
         context: &RequestContext,
         http_download: bool,
+        torrent_download: bool,
     ) -> Result<String, String> {
         if !context.body.is_empty()
             || (!context.method.is_empty() && !context.method.eq_ignore_ascii_case("GET"))
@@ -260,6 +262,12 @@ impl Endpoint {
                         .unwrap_or("download")
                         .to_owned(),
                 ),
+            );
+        }
+        if torrent_download {
+            options.insert(
+                "bt-prioritize-piece".into(),
+                Value::String("head=32M,tail=32M".into()),
             );
         }
         if !selected_files.is_empty() {
@@ -354,7 +362,8 @@ impl Endpoint {
             "downloadSpeed",
             "uploadSpeed",
             "connections",
-            "numSeeders"
+            "numSeeders",
+            "followedBy"
         ]);
         let value = self
             .call(
@@ -375,6 +384,17 @@ impl Endpoint {
             upload_speed: number(value.get("uploadSpeed")),
             connections: number(value.get("connections")),
             seeders: number(value.get("numSeeders")),
+            followed_by: value
+                .get("followedBy")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
     }
 
