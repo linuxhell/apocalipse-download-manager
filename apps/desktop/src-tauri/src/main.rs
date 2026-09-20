@@ -6703,6 +6703,79 @@ fn extract_zip_archive(bytes: &[u8], destination: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn extract_tar_archive(bytes: &[u8], asset_name: &str, destination: &Path) -> Result<(), String> {
+    let archive_path = destination.join(asset_name);
+    fs::write(&archive_path, bytes).map_err(|error| error.to_string())?;
+    let listing = Command::new("tar")
+        .arg("-tf")
+        .arg(&archive_path)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !listing.status.success() {
+        return Err(String::from_utf8_lossy(&listing.stderr).trim().to_owned());
+    }
+    for entry in String::from_utf8_lossy(&listing.stdout).lines() {
+        let path = Path::new(entry);
+        if path.is_absolute()
+            || path.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir | std::path::Component::Prefix(_)
+                )
+            })
+        {
+            return Err("release_archive_contains_unsafe_path".to_owned());
+        }
+    }
+    let status = Command::new("tar")
+        .arg("-xf")
+        .arg(&archive_path)
+        .arg("-C")
+        .arg(destination)
+        .status()
+        .map_err(|error| error.to_string())?;
+    let _ = fs::remove_file(&archive_path);
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "release_extraction_failed".to_owned())
+}
+
+fn extract_release_archive(
+    bytes: &[u8],
+    asset_name: &str,
+    destination: &Path,
+) -> Result<(), String> {
+    let lower = asset_name.to_ascii_lowercase();
+    if lower.ends_with(".zip") {
+        return extract_zip_archive(bytes, destination);
+    }
+    #[cfg(unix)]
+    if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") || lower.ends_with(".tar.xz") {
+        return extract_tar_archive(bytes, asset_name, destination);
+    }
+    Err(format!("unsupported_release_archive:{asset_name}"))
+}
+
+fn release_platform_architecture() -> Result<(&'static str, &'static str), String> {
+    let platform = if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        return Err("tool_update_platform_unsupported".to_owned());
+    };
+    let architecture = if cfg!(target_arch = "x86_64") {
+        "x86_64"
+    } else {
+        return Err("tool_update_architecture_unsupported".to_owned());
+    };
+    Ok((platform, architecture))
+}
+
 fn gopeed_platform_asset_markers() -> Result<[&'static str; 3], String> {
     let platform = if cfg!(target_os = "windows") {
         "windows"
@@ -6715,10 +6788,6 @@ fn gopeed_platform_asset_markers() -> Result<[&'static str; 3], String> {
     };
     let architecture = if cfg!(target_arch = "x86_64") {
         "amd64"
-    } else if cfg!(target_arch = "aarch64") {
-        "arm64"
-    } else if cfg!(target_arch = "x86") {
-        "386"
     } else {
         return Err("gopeed_update_architecture_unsupported".to_owned());
     };
@@ -6884,12 +6953,8 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         });
     }
 
-    #[cfg(not(target_os = "windows"))]
-    if id != "gopeed" {
-        return Err("automatic_binary_update_not_available_for_this_platform".to_owned());
-    }
-
     {
+        let (platform, architecture) = release_platform_architecture()?;
         let gopeed_markers = gopeed_platform_asset_markers()?;
         let (repository, executable_name, asset_markers, version_args): (
             &str,
@@ -6899,8 +6964,8 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         ) = match id.as_str() {
             "qjs" => (
                 "quickjs-ng/quickjs",
-                "qjs.exe",
-                &["qjs-windows-x86_64.exe"],
+                if cfg!(windows) { "qjs.exe" } else { "qjs" },
+                &[],
                 &["--version"],
             ),
             "gopeed" => (
@@ -6915,14 +6980,18 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             ),
             "n-m3u8dl-re" => (
                 "nilaoda/N_m3u8DL-RE",
-                "N_m3u8DL-RE.exe",
-                &["win-x64", ".zip"],
+                if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" },
+                &[],
                 &["--version"],
             ),
             "ffmpeg" => (
-                "BtbN/FFmpeg-Builds",
-                "ffmpeg.exe",
-                &["win64", "gpl", ".zip"],
+                if cfg!(target_os = "macos") {
+                    "eugeneware/ffmpeg-static"
+                } else {
+                    "BtbN/FFmpeg-Builds"
+                },
+                if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" },
+                &[],
                 &["-version"],
             ),
             _ => return Err("unknown_tool".to_owned()),
@@ -6982,8 +7051,36 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                     .unwrap_or("")
                     .to_ascii_lowercase();
                 match id.as_str() {
-                    "qjs" => name == "qjs-windows-x86_64.exe",
-                    "ffmpeg" => name.ends_with("win64-gpl.zip") && !name.contains("shared"),
+                    "qjs" => match (platform, architecture) {
+                        ("windows", "x86_64") => name == "qjs-windows-x86_64.exe",
+                        ("linux", "x86_64") => name == "qjs-linux-x86_64",
+                        ("macos", "x86_64") => name == "qjs-darwin-x86_64",
+                        _ => false,
+                    },
+                    "n-m3u8dl-re" => {
+                        let platform_marker = match platform {
+                            "windows" => "win-",
+                            "linux" => "linux-",
+                            "macos" => "osx-",
+                            _ => return false,
+                        };
+                        let arch_marker = "x64";
+                        name.contains(platform_marker)
+                            && name.contains(arch_marker)
+                            && (name.ends_with(".zip") || name.ends_with(".tar.gz"))
+                    }
+                    "ffmpeg" => match platform {
+                        "windows" => name.ends_with("win64-gpl.zip") && !name.contains("shared"),
+                        "linux" => {
+                            let marker = "linux64";
+                            name.ends_with(&format!("{marker}-gpl.tar.xz")) && !name.contains("shared")
+                        }
+                        "macos" => {
+                            let marker = "x64";
+                            name == format!("ffmpeg-darwin-{marker}")
+                        }
+                        _ => false,
+                    },
                     "gopeed" => {
                         name.starts_with("gopeed-web-")
                             && asset_markers
@@ -7017,12 +7114,41 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         let sha256 = format!("{:x}", Sha256::digest(&bytes));
         let temporary =
             std::env::temp_dir().join(format!("apocalipse-tool-update-{}", uuid::Uuid::new_v4()));
-        let (replacement, ffprobe_replacement) = if id == "qjs" {
-            (bytes.to_vec(), Vec::new())
-        } else {
+        let (replacement, ffprobe_replacement) =
+            if id == "qjs" || (id == "ffmpeg" && platform == "macos") {
+                let ffprobe_replacement = if id == "ffmpeg" {
+                    let marker = "x64";
+                    let expected = format!("ffprobe-darwin-{marker}");
+                    let probe_asset = assets
+                        .iter()
+                        .find(|asset| {
+                            asset.get("name").and_then(|value| value.as_str())
+                                == Some(expected.as_str())
+                        })
+                        .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?;
+                    let probe_url = probe_asset
+                        .get("browser_download_url")
+                        .and_then(|value| value.as_str())
+                        .ok_or_else(|| "release_asset_url_missing".to_owned())?;
+                    client
+                        .get(probe_url)
+                        .send()
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .error_for_status()
+                        .map_err(|error| error.to_string())?
+                        .bytes()
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .to_vec()
+                } else {
+                    Vec::new()
+                };
+                (bytes.to_vec(), ffprobe_replacement)
+            } else {
             let extracted = temporary.join("extracted");
             fs::create_dir_all(&extracted).map_err(|error| error.to_string())?;
-            if let Err(error) = extract_zip_archive(&bytes, &extracted) {
+            if let Err(error) = extract_release_archive(&bytes, asset_name, &extracted) {
                 let _ = fs::remove_dir_all(&temporary);
                 return Err(format!("release_extraction_failed:{error}"));
             }
@@ -7031,15 +7157,23 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             let replacement = fs::read(replacement_path).map_err(|error| error.to_string())?;
             let ffprobe_replacement = if id == "ffmpeg" {
                 fs::read(
-                    find_named_file(&extracted, "ffprobe.exe", 0)
-                        .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?,
+                    find_named_file(
+                        &extracted,
+                        if cfg!(windows) {
+                            "ffprobe.exe"
+                        } else {
+                            "ffprobe"
+                        },
+                        0,
+                    )
+                    .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?,
                 )
                 .map_err(|error| error.to_string())?
             } else {
                 Vec::new()
             };
-            (replacement, ffprobe_replacement)
-        };
+                (replacement, ffprobe_replacement)
+            };
         let _ = fs::remove_dir_all(&temporary);
         if replacement.len() < 32_768 || (id == "ffmpeg" && ffprobe_replacement.len() < 32_768) {
             return Err(format!("replacement_executable_invalid:{asset_name}"));
@@ -7053,9 +7187,10 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         let staged = parent.join(format!(".apocalipse-new-{executable_name}"));
         let backup = parent.join(format!(".{executable_name}.apocalipse-backup"));
-        let ffprobe = parent.join("ffprobe.exe");
-        let ffprobe_staged = parent.join(".apocalipse-new-ffprobe.exe");
-        let ffprobe_backup = parent.join(".ffprobe.exe.apocalipse-backup");
+        let ffprobe_name = if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" };
+        let ffprobe = parent.join(ffprobe_name);
+        let ffprobe_staged = parent.join(format!(".apocalipse-new-{ffprobe_name}"));
+        let ffprobe_backup = parent.join(format!(".{ffprobe_name}.apocalipse-backup"));
         fs::write(&staged, &replacement).map_err(|error| error.to_string())?;
         #[cfg(unix)]
         {
@@ -7065,6 +7200,12 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         }
         if id == "ffmpeg" {
             fs::write(&ffprobe_staged, &ffprobe_replacement).map_err(|error| error.to_string())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&ffprobe_staged, fs::Permissions::from_mode(0o755))
+                    .map_err(|error| error.to_string())?;
+            }
         }
         let candidate_version = if id == "gopeed" {
             if staged
