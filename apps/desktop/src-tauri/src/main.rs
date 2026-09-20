@@ -2774,7 +2774,7 @@ async fn resolve_thumbnail_internal(state: &AppState, url: &str) -> Result<Optio
                 serde_json::json!({
                     "bytes": result.bytes,
                     "contentHashPrefix": result.content_hash.chars().take(12).collect::<String>(),
-                    "cacheVersion": 2
+                    "cacheVersion": 3
                 }),
             );
             Ok(Some(result.data_url))
