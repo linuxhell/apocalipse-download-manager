@@ -4865,6 +4865,7 @@ async fn run_download(
                             task.state = DownloadState::Completed;
                             task.completed_at = Some(epoch_seconds());
                         });
+                        maybe_auto_extract_completed(&app, id);
                     },
                     Err(error) => {
                         diagnostic_log(&app.state::<AppState>(), "ERROR", "http.failed", &format!("task={id} error={error}"));
@@ -5445,6 +5446,7 @@ async fn run_aria2_download(
                             item.state = DownloadState::Completed;
                             item.completed_at = Some(epoch_seconds());
                         });
+                        maybe_auto_extract_completed(&app, id);
                         let _ = endpoint.remove_result(&gid).await;
                         if let Ok(mut items) = state.aria2_tasks.lock() {
                             items.remove(&id);
@@ -6038,6 +6040,7 @@ async fn run_external_download(
                 item.state = DownloadState::Completed;
                 item.completed_at = Some(epoch_seconds());
             });
+            maybe_auto_extract_completed(&app, id);
         }
         Err(message) => {
             diagnostic_log(
