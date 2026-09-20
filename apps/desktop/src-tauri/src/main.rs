@@ -561,12 +561,7 @@ struct LinkTransferReporter {
 }
 
 impl LinkTransferReporter {
-    fn new(
-        app: tauri::AppHandle,
-        transfer_id: String,
-        direction: &str,
-        total: u64,
-    ) -> Self {
+    fn new(app: tauri::AppHandle, transfer_id: String, direction: &str, total: u64) -> Self {
         let control = Arc::new(LinkTransferControl::default());
         if let Ok(mut transfers) = app.state::<AppState>().link_transfers.lock() {
             transfers.insert(transfer_id.clone(), control.clone());
@@ -660,7 +655,10 @@ fn pause_link_transfer(
     transfer_id: String,
     paused: bool,
 ) -> Result<(), String> {
-    let transfers = state.link_transfers.lock().map_err(|error| error.to_string())?;
+    let transfers = state
+        .link_transfers
+        .lock()
+        .map_err(|error| error.to_string())?;
     let control = transfers
         .get(&transfer_id)
         .ok_or_else(|| "link_transfer_not_found".to_owned())?;
@@ -669,11 +667,11 @@ fn pause_link_transfer(
 }
 
 #[tauri::command]
-fn cancel_link_transfer(
-    state: State<'_, AppState>,
-    transfer_id: String,
-) -> Result<(), String> {
-    let transfers = state.link_transfers.lock().map_err(|error| error.to_string())?;
+fn cancel_link_transfer(state: State<'_, AppState>, transfer_id: String) -> Result<(), String> {
+    let transfers = state
+        .link_transfers
+        .lock()
+        .map_err(|error| error.to_string())?;
     let control = transfers
         .get(&transfer_id)
         .ok_or_else(|| "link_transfer_not_found".to_owned())?;
@@ -1946,9 +1944,8 @@ fn link_path_total_size(path: &Path) -> Result<u64, String> {
             if file_type.is_dir() {
                 pending.push(entry.path());
             } else if file_type.is_file() {
-                total = total.saturating_add(
-                    entry.metadata().map_err(|error| error.to_string())?.len(),
-                );
+                total = total
+                    .saturating_add(entry.metadata().map_err(|error| error.to_string())?.len());
             }
         }
     }
@@ -2117,16 +2114,11 @@ async fn download_local_shared_link_item(
         let destination_for_copy = destination.clone();
         let progress_app = app.clone();
         tokio::task::spawn_blocking(move || {
-            let mut reporter =
-                LinkTransferReporter::new(progress_app, transfer_id, "download", 0);
+            let mut reporter = LinkTransferReporter::new(progress_app, transfer_id, "download", 0);
             reporter.checkpoint()?;
             let total = link_path_total_size(&source_for_copy)?;
             reporter.set_total(total);
-            copy_local_link_directory(
-                &source_for_copy,
-                &destination_for_copy,
-                &mut reporter,
-            )?;
+            copy_local_link_directory(&source_for_copy, &destination_for_copy, &mut reporter)?;
             reporter.finish();
             Ok::<(), String>(())
         })
@@ -2320,8 +2312,7 @@ async fn download_remote_link_file(
         return tokio::task::spawn_blocking(move || {
             let state = app.state::<AppState>();
             fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
-            let mut reporter =
-                LinkTransferReporter::new(app.clone(), transfer_id, "download", 0);
+            let mut reporter = LinkTransferReporter::new(app.clone(), transfer_id, "download", 0);
             let mut pending = vec![(path, destination.clone())];
             let mut files = Vec::<(String, PathBuf, u64)>::new();
             let mut total = 0_u64;
@@ -2365,14 +2356,7 @@ async fn download_remote_link_file(
         let state = app.state::<AppState>();
         let mut reporter = LinkTransferReporter::new(app.clone(), transfer_id, "download", 0);
         reporter.checkpoint()?;
-        download_link_file_to(
-            &state,
-            &id,
-            &password,
-            &path,
-            &destination,
-            &mut reporter,
-        )?;
+        download_link_file_to(&state, &id, &password, &path, &destination, &mut reporter)?;
         reporter.finish();
         Ok(destination.to_string_lossy().into_owned())
     })
@@ -2421,20 +2405,12 @@ async fn upload_remote_link_file(
             .and_then(|value| value.to_str())
             .ok_or_else(|| "invalid_file_name".to_owned())?;
         let remote_path = remote_link_join(&remote_directory, name);
-        let mut reporter =
-            LinkTransferReporter::new(app.clone(), transfer_id, "upload", 0);
+        let mut reporter = LinkTransferReporter::new(app.clone(), transfer_id, "upload", 0);
         reporter.checkpoint()?;
         let total = link_path_total_size(&source)?;
         reporter.set_total(total);
         if source.is_file() {
-            send_link_file(
-                &state,
-                &id,
-                &password,
-                &source,
-                &remote_path,
-                &mut reporter,
-            )?;
+            send_link_file(&state, &id, &password, &source, &remote_path, &mut reporter)?;
             reporter.finish();
             return Ok(remote_path);
         }
