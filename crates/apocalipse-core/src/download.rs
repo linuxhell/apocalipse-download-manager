@@ -31,17 +31,20 @@ use tokio::{
 use crate::validation::{validate_payload, PayloadExpectation};
 
 const MIN_SEGMENT_CHUNK_SIZE: u64 = 4 * 1024 * 1024;
-const MAX_SEGMENT_CHUNK_SIZE: u64 = 32 * 1024 * 1024;
-const TARGET_CHUNKS_PER_WORKER: u64 = 8;
+const MAX_SEGMENT_CHUNK_SIZE: u64 = 256 * 1024 * 1024;
+const TARGET_CHUNKS_PER_WORKER: u64 = 4;
 const WORKER_START_INTERVAL_MS: u64 = 35;
 const JOURNAL_VERSION: u8 = 1;
 const RANGE_STEAL_INTERVAL_MS: u64 = 400;
 const RANGE_STEAL_COOLDOWN_MS: u64 = 800;
 const MIN_STEAL_TAIL_BYTES: u64 = 4 * 1024 * 1024;
 const RANGE_STEAL_ALIGNMENT: u64 = 64 * 1024;
-const ADMISSION_SAMPLE_INTERVAL_MS: u64 = 1_200;
-const ADMISSION_MIN_GAIN_FRAC: f64 = 0.08;
+const ADMISSION_SAMPLE_INTERVAL_MS: u64 = 800;
+const ADMISSION_MIN_PROPORTIONAL_GAIN: f64 = 0.15;
 const ADMISSION_INITIAL_WORKERS: usize = 2;
+const ADMISSION_RECOVERY_FRACTION: f64 = 0.82;
+const ADMISSION_RECOVERY_SAMPLES: u8 = 2;
+const ADMISSION_REPROBE_COOLDOWN_MS: u64 = 4_000;
 
 #[derive(Debug, Clone, Copy)]
 struct SegmentWork {
@@ -99,6 +102,11 @@ pub struct DownloadRequest {
     /// Allow the native HTTP engine to ramp concurrency up to `connections`
     /// only while each newly admitted worker produces useful marginal goodput.
     pub adaptive_connections: bool,
+    /// Best sustained HTTP capacity previously observed across the user's
+    /// connection. This is a hint only; it never forces a connection count.
+    pub network_capacity_hint_bps: Option<u64>,
+    /// Best sustained capacity previously observed for this exact host.
+    pub host_capacity_hint_bps: Option<u64>,
     pub method: String,
     pub body: Option<Vec<u8>>,
     pub headers: Vec<(String, String)>,
@@ -506,6 +514,8 @@ impl DownloadEngine {
                                     "requestedConnections": requested,
                                     "activeConnections": useful_connections,
                                     "connectionMode": if request.adaptive_connections { "adaptive" } else { "fixed" },
+                                    "networkCapacityHintBytesPerSecond": request.network_capacity_hint_bps,
+                                    "hostCapacityHintBytesPerSecond": request.host_capacity_hint_bps,
                                     "chunkBytes": planned_chunk_size,
                                     "chunkCount": total.div_ceil(planned_chunk_size),
                                     "sourceCount": sources.len(),
@@ -1004,11 +1014,19 @@ impl DownloadEngine {
             let active_limit = active_worker_limit.clone();
             let shared_progress = progress.clone();
             let adaptive_admission = request.adaptive_connections;
+            let network_capacity_hint = request.network_capacity_hint_bps.unwrap_or(0) as f64;
+            let host_capacity_hint = request.host_capacity_hint_bps.unwrap_or(0) as f64;
             tokio::spawn(async move {
                 let mut ewma_rates = vec![0_f64; states.len()];
                 let mut admission_baseline: Option<(usize, f64)> = None;
                 let mut admission_settled =
                     !adaptive_admission || initial_active_workers >= states.len();
+                let mut admission_held_rate: Option<f64> = None;
+                let mut admission_skip_sample = adaptive_admission && !admission_settled;
+                let mut recovery_low_samples = 0_u8;
+                let mut last_reprobe_ms = 0_u64;
+                let mut stable_capacity = host_capacity_hint;
+                let mut previous_interval_rate: Option<f64> = None;
                 let mut last_admission_ms = 0_u64;
                 let mut last_admission_bytes = shared_progress.load(Ordering::Acquire);
                 let mut interval =
@@ -1047,7 +1065,7 @@ impl DownloadEngine {
                         }),
                     });
 
-                    if !admission_settled
+                    if adaptive_admission
                         && now_ms.saturating_sub(last_admission_ms) >= ADMISSION_SAMPLE_INTERVAL_MS
                     {
                         let current_bytes = shared_progress.load(Ordering::Acquire);
@@ -1057,22 +1075,88 @@ impl DownloadEngine {
                         last_admission_ms = now_ms;
                         last_admission_bytes = current_bytes;
 
+                        if let Some(previous) = previous_interval_rate {
+                            let confirmed = previous.min(interval_rate);
+                            if confirmed > stable_capacity {
+                                stable_capacity = confirmed;
+                                let _ = sender.try_send(DownloadEvent::Diagnostic {
+                                    event: "http.capacity_observed",
+                                    detail: serde_json::json!({
+                                        "sustainedBytesPerSecond": stable_capacity as u64,
+                                        "networkHintBytesPerSecond": network_capacity_hint as u64,
+                                        "hostHintBytesPerSecond": host_capacity_hint as u64
+                                    }),
+                                });
+                            }
+                        }
+                        previous_interval_rate = Some(interval_rate);
+
                         let current_limit = active_limit.load(Ordering::Acquire).max(1);
-                        if let Some((baseline_limit, baseline_rate)) = admission_baseline {
+                        if admission_settled {
+                            let recovery_target = stable_capacity.max(host_capacity_hint);
+                            if current_limit < states.len()
+                                && recovery_target > 0.0
+                                && interval_rate < recovery_target * ADMISSION_RECOVERY_FRACTION
+                            {
+                                recovery_low_samples = recovery_low_samples.saturating_add(1);
+                            } else if recovery_target == 0.0
+                                || interval_rate >= recovery_target * 0.90
+                            {
+                                recovery_low_samples = 0;
+                            }
+
+                            if recovery_low_samples >= ADMISSION_RECOVERY_SAMPLES
+                                && current_limit < states.len()
+                                && now_ms.saturating_sub(last_reprobe_ms)
+                                    >= ADMISSION_REPROBE_COOLDOWN_MS
+                            {
+                                let next = next_admission_level(current_limit, states.len());
+                                admission_baseline = Some((current_limit, interval_rate));
+                                admission_settled = false;
+                                admission_held_rate = None;
+                                admission_skip_sample = true;
+                                recovery_low_samples = 0;
+                                last_reprobe_ms = now_ms;
+                                active_limit.store(next, Ordering::Release);
+                                notify.notify_waiters();
+                                let _ = sender.try_send(DownloadEvent::Diagnostic {
+                                    event: "http.connection_admission",
+                                    detail: serde_json::json!({
+                                        "decision": "reprobe_after_capacity_drop",
+                                        "previousConnections": current_limit,
+                                        "admittedConnections": next,
+                                        "baselineBytesPerSecond": interval_rate as u64,
+                                        "targetBytesPerSecond": recovery_target as u64,
+                                        "recoveryFraction": ADMISSION_RECOVERY_FRACTION,
+                                        "settled": false
+                                    }),
+                                });
+                            }
+                        } else if admission_skip_sample {
+                            // Hydra-style warm-up: do not judge a newly admitted
+                            // connection while it is still handshaking/slow-starting.
+                            admission_skip_sample = false;
+                            admission_held_rate = None;
+                        } else if admission_held_rate.take().is_none() {
+                            // First clean window is held back. The second window is
+                            // closer to steady state and becomes the actual sample.
+                            admission_held_rate = Some(interval_rate);
+                        } else if let Some((baseline_limit, baseline_rate)) = admission_baseline {
                             if current_limit > baseline_limit {
-                                let gain_frac = if baseline_rate > 0.0 {
-                                    (interval_rate - baseline_rate) / baseline_rate
-                                } else if interval_rate > 0.0 {
-                                    1.0
-                                } else {
-                                    0.0
-                                };
-                                if gain_frac >= ADMISSION_MIN_GAIN_FRAC {
+                                let gain_frac = proportional_admission_gain(
+                                    baseline_limit,
+                                    baseline_rate,
+                                    current_limit,
+                                    interval_rate,
+                                );
+                                if gain_frac >= ADMISSION_MIN_PROPORTIONAL_GAIN {
                                     admission_baseline = Some((current_limit, interval_rate));
+                                    stable_capacity = stable_capacity.max(interval_rate);
                                     if current_limit < states.len() {
-                                        let next = current_limit + 1;
+                                        let next = next_admission_level(current_limit, states.len());
                                         active_limit.store(next, Ordering::Release);
                                         notify.notify_waiters();
+                                        admission_skip_sample = true;
                                         let _ = sender.try_send(DownloadEvent::Diagnostic {
                                             event: "http.connection_admission",
                                             detail: serde_json::json!({
@@ -1082,8 +1166,8 @@ impl DownloadEngine {
                                                 "measuredConnections": current_limit,
                                                 "baselineBytesPerSecond": baseline_rate as u64,
                                                 "measuredBytesPerSecond": interval_rate as u64,
-                                                "marginalGainFraction": gain_frac,
-                                                "minimumGainFraction": ADMISSION_MIN_GAIN_FRAC,
+                                                "proportionalGainFraction": gain_frac,
+                                                "minimumProportionalGainFraction": ADMISSION_MIN_PROPORTIONAL_GAIN,
                                                 "settled": false
                                             }),
                                         });
@@ -1103,16 +1187,17 @@ impl DownloadEngine {
                                     active_limit.store(baseline_limit, Ordering::Release);
                                     notify.notify_waiters();
                                     admission_settled = true;
+                                    recovery_low_samples = 0;
                                     let _ = sender.try_send(DownloadEvent::Diagnostic {
                                         event: "http.connection_admission",
                                         detail: serde_json::json!({
-                                            "decision": "reject_marginal_worker",
+                                            "decision": "reject_marginal_level",
                                             "admittedConnections": baseline_limit,
                                             "measuredConnections": current_limit,
                                             "baselineBytesPerSecond": baseline_rate as u64,
                                             "measuredBytesPerSecond": interval_rate as u64,
-                                            "marginalGainFraction": gain_frac,
-                                            "minimumGainFraction": ADMISSION_MIN_GAIN_FRAC,
+                                            "proportionalGainFraction": gain_frac,
+                                            "minimumProportionalGainFraction": ADMISSION_MIN_PROPORTIONAL_GAIN,
                                             "settled": true
                                         }),
                                     });
@@ -1120,10 +1205,12 @@ impl DownloadEngine {
                             }
                         } else {
                             admission_baseline = Some((current_limit, interval_rate));
+                            stable_capacity = stable_capacity.max(interval_rate);
                             if current_limit < states.len() {
-                                let next = current_limit + 1;
+                                let next = next_admission_level(current_limit, states.len());
                                 active_limit.store(next, Ordering::Release);
                                 notify.notify_waiters();
+                                admission_skip_sample = true;
                                 let _ = sender.try_send(DownloadEvent::Diagnostic {
                                     event: "http.connection_admission",
                                     detail: serde_json::json!({
@@ -1131,7 +1218,7 @@ impl DownloadEngine {
                                         "previousConnections": current_limit,
                                         "admittedConnections": next,
                                         "baselineBytesPerSecond": interval_rate as u64,
-                                        "minimumGainFraction": ADMISSION_MIN_GAIN_FRAC,
+                                        "minimumProportionalGainFraction": ADMISSION_MIN_PROPORTIONAL_GAIN,
                                         "settled": false
                                     }),
                                 });
@@ -1552,6 +1639,27 @@ impl DownloadEngine {
         cleanup_chunk_artifacts(&request.destination).await?;
         finish_download(&request, &partial, total, Some(total), &events).await
     }
+}
+
+fn next_admission_level(current: usize, maximum: usize) -> usize {
+    current.saturating_mul(2).min(maximum).max(1)
+}
+
+fn proportional_admission_gain(
+    previous_connections: usize,
+    previous_rate: f64,
+    current_connections: usize,
+    current_rate: f64,
+) -> f64 {
+    if previous_connections == 0
+        || current_connections <= previous_connections
+        || previous_rate <= 0.0
+    {
+        return if current_rate > 0.0 { 1.0 } else { 0.0 };
+    }
+    let ideal = previous_rate * current_connections as f64 / previous_connections as f64;
+    let headroom = (ideal - previous_rate).max(1.0);
+    (current_rate - previous_rate) / headroom
 }
 
 fn adaptive_connection_count(total: u64, requested: usize) -> usize {
@@ -2149,6 +2257,8 @@ mod tests {
             overwrite: false,
             connections: 1,
             adaptive_connections: false,
+            network_capacity_hint_bps: None,
+            host_capacity_hint_bps: None,
             method: "GET".into(),
             body: None,
             headers: Vec::new(),
@@ -2162,6 +2272,18 @@ mod tests {
         assert!(!destination.exists());
         assert!(partial.exists());
         let _ = fs::remove_dir_all(root).await;
+    }
+
+    #[test]
+    fn hydra_style_admission_doubles_and_scores_proportional_gain() {
+        assert_eq!(next_admission_level(2, 16), 4);
+        assert_eq!(next_admission_level(8, 16), 16);
+        assert_eq!(next_admission_level(16, 16), 16);
+
+        let useful = proportional_admission_gain(2, 100.0, 4, 120.0);
+        assert!((useful - 0.20).abs() < 0.0001);
+        let saturated = proportional_admission_gain(4, 120.0, 8, 122.0);
+        assert!(saturated < ADMISSION_MIN_PROPORTIONAL_GAIN);
     }
 
     #[test]
