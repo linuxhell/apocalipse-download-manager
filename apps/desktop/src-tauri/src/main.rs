@@ -7961,12 +7961,12 @@ fn start_download(
     }
     if !native_http_compatibility
         && matches!(
-        kind,
-        DownloadKind::Http
-            | DownloadKind::AcceleratedHttp
-            | DownloadKind::Torrent
-            | DownloadKind::Magnet
-            | DownloadKind::Ftp
+            kind,
+            DownloadKind::Http
+                | DownloadKind::AcceleratedHttp
+                | DownloadKind::Torrent
+                | DownloadKind::Magnet
+                | DownloadKind::Ftp
         )
     {
         diagnostic_log(
