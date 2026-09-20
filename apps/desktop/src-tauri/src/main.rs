@@ -5716,55 +5716,55 @@ fn parse_aria2_size(value: &str) -> Option<u64> {
 fn parse_aria2_progress(text: &str) -> Option<(u64, u64, f64, u64, u64, u64, u64, Option<String>)> {
     text.rsplit(|character| character == '\r' || character == '\n')
         .find_map(|line| {
-        let ratio = line.split_whitespace().find_map(|token| {
-            let slash = token.find('/')?;
-            let open = token[slash + 1..]
-                .find('(')
-                .map(|index| slash + 1 + index)?;
-            let close = token[open + 1..].find('%').map(|index| open + 1 + index)?;
-            let received = parse_aria2_size(&token[..slash])?;
-            let total = parse_aria2_size(&token[slash + 1..open])?;
-            let percent = token[open + 1..close].parse::<f64>().ok()?;
-            if total > 0 && received <= total && (0.0..=100.0).contains(&percent) {
-                Some((received, total, percent))
-            } else {
-                None
-            }
-        })?;
-        let field = |prefix: &str| {
-            line.split_whitespace()
-                .find_map(|token| token.strip_prefix(prefix).and_then(parse_aria2_size))
-                .unwrap_or(0)
-        };
-        let count = |prefix: &str| {
-            line.split_whitespace()
-                .find_map(|token| {
-                    token
-                        .strip_prefix(prefix)?
-                        .trim_end_matches(']')
-                        .parse::<u64>()
-                        .ok()
-                })
-                .unwrap_or(0)
-        };
-        let connections = count("CN:");
-        let seeders = count("SD:");
-        let eta = line.split_whitespace().find_map(|token| {
-            token
-                .strip_prefix("ETA:")
-                .map(|value| value.trim_end_matches(']').to_owned())
-        });
-        Some((
-            ratio.0,
-            ratio.1,
-            ratio.2,
-            field("DL:"),
-            field("UL:"),
-            seeders,
-            connections.saturating_sub(seeders),
-            eta,
-        ))
-    })
+            let ratio = line.split_whitespace().find_map(|token| {
+                let slash = token.find('/')?;
+                let open = token[slash + 1..]
+                    .find('(')
+                    .map(|index| slash + 1 + index)?;
+                let close = token[open + 1..].find('%').map(|index| open + 1 + index)?;
+                let received = parse_aria2_size(&token[..slash])?;
+                let total = parse_aria2_size(&token[slash + 1..open])?;
+                let percent = token[open + 1..close].parse::<f64>().ok()?;
+                if total > 0 && received <= total && (0.0..=100.0).contains(&percent) {
+                    Some((received, total, percent))
+                } else {
+                    None
+                }
+            })?;
+            let field = |prefix: &str| {
+                line.split_whitespace()
+                    .find_map(|token| token.strip_prefix(prefix).and_then(parse_aria2_size))
+                    .unwrap_or(0)
+            };
+            let count = |prefix: &str| {
+                line.split_whitespace()
+                    .find_map(|token| {
+                        token
+                            .strip_prefix(prefix)?
+                            .trim_end_matches(']')
+                            .parse::<u64>()
+                            .ok()
+                    })
+                    .unwrap_or(0)
+            };
+            let connections = count("CN:");
+            let seeders = count("SD:");
+            let eta = line.split_whitespace().find_map(|token| {
+                token
+                    .strip_prefix("ETA:")
+                    .map(|value| value.trim_end_matches(']').to_owned())
+            });
+            Some((
+                ratio.0,
+                ratio.1,
+                ratio.2,
+                field("DL:"),
+                field("UL:"),
+                seeders,
+                connections.saturating_sub(seeders),
+                eta,
+            ))
+        })
 }
 
 fn parse_external_progress(text: &str) -> Option<f64> {
