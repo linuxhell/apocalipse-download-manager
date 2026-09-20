@@ -2295,6 +2295,17 @@ struct ToolStatus {
     version: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Aria2RpcSettingsStatus {
+    enabled: bool,
+    auto_start: bool,
+    configured_port: Option<u16>,
+    connected: bool,
+    active_port: Option<u16>,
+    version: Option<String>,
+}
+
 #[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MediaPreviewRequest {
@@ -6559,6 +6570,89 @@ fn set_tool_paths(
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
     settings.aria2_path = optional_path(aria2);
     save_settings(&state, &settings)
+}
+
+#[tauri::command]
+async fn get_aria2_rpc_settings(
+    state: State<'_, AppState>,
+) -> Result<Aria2RpcSettingsStatus, String> {
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let (connected, active_port, endpoint) = {
+        let mut runtime = state
+            .aria2_runtime
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let connected = runtime.as_mut().is_some_and(aria2::Runtime::is_running);
+        let active_port = if connected {
+            runtime.as_ref().map(aria2::Runtime::port)
+        } else {
+            None
+        };
+        let endpoint = if connected {
+            runtime.as_ref().map(aria2::Runtime::endpoint)
+        } else {
+            None
+        };
+        (connected, active_port, endpoint)
+    };
+    let version = match endpoint {
+        Some(endpoint) => endpoint.version().await.ok(),
+        None => None,
+    };
+    Ok(Aria2RpcSettingsStatus {
+        enabled: settings.aria2_rpc_enabled,
+        auto_start: settings.aria2_rpc_auto_start,
+        configured_port: settings.aria2_rpc_port,
+        connected,
+        active_port,
+        version,
+    })
+}
+
+#[tauri::command]
+fn set_aria2_rpc_settings(
+    state: State<'_, AppState>,
+    enabled: bool,
+    auto_start: bool,
+    port: Option<u16>,
+) -> Result<(), String> {
+    if port.is_some_and(|port| port < 1024) {
+        return Err("aria2_rpc_port_invalid".to_owned());
+    }
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    let changed = settings.aria2_rpc_enabled != enabled
+        || settings.aria2_rpc_auto_start != auto_start
+        || settings.aria2_rpc_port != port;
+    settings.aria2_rpc_enabled = enabled;
+    settings.aria2_rpc_auto_start = auto_start;
+    settings.aria2_rpc_port = port;
+    save_settings(&state, &settings)?;
+    drop(settings);
+    if changed {
+        stop_aria2_runtime(&state);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn test_aria2_rpc(state: State<'_, AppState>) -> Result<Aria2RpcSettingsStatus, String> {
+    let endpoint = aria2_endpoint(&state, true).await?;
+    endpoint.version().await?;
+    get_aria2_rpc_settings(state).await
+}
+
+#[tauri::command]
+fn regenerate_aria2_rpc_token(state: State<'_, AppState>) -> Result<(), String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.aria2_rpc_secret = default_aria2_rpc_secret();
+    save_settings(&state, &settings)?;
+    drop(settings);
+    stop_aria2_runtime(&state);
+    Ok(())
 }
 
 #[tauri::command]
@@ -10839,6 +10933,10 @@ fn main() {
             open_paypal_donation,
             get_tool_statuses,
             set_tool_paths,
+            get_aria2_rpc_settings,
+            set_aria2_rpc_settings,
+            test_aria2_rpc,
+            regenerate_aria2_rpc_token,
             get_media_player,
             get_app_version,
             check_app_update,
