@@ -1381,13 +1381,32 @@ nav { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .about-audio-controls label { font-size: 12px; font-weight: 700; }
 .about-audio-controls input { width: 100%; }
 .about-scene {
+  position: relative;
   min-height: 0;
   width: 100%;
+  overflow: hidden;
   background-color: #07120d;
   background-image: var(--about-background);
   background-position: center;
   background-size: contain;
   background-repeat: no-repeat;
+}
+/* The source artwork originally contained a baked-in music card in its upper-right
+   corner. Replace only that rectangle with another architectural crop from the
+   same artwork so the scene remains unobstructed beneath the real ADM controls. */
+.about-scene::after {
+  content: "";
+  position: absolute;
+  top: 2.5%;
+  right: 1.6%;
+  width: 26.1%;
+  height: 19.3%;
+  pointer-events: none;
+  background-image: var(--about-background);
+  background-repeat: no-repeat;
+  background-size: 384% 523%;
+  background-position: 89% 29%;
+  box-shadow: inset 0 0 18px rgba(0, 0, 0, .12);
 }
 
 @media (max-width: 760px) {
