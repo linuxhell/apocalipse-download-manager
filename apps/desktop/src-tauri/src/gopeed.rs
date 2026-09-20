@@ -143,32 +143,29 @@ impl Runtime {
             return Err("gopeed_not_found".to_owned());
         }
         let storage = runtime_root.join("storage");
-        let temporary = runtime_root.join("temp");
         fs::create_dir_all(&storage).map_err(|error| error.to_string())?;
-        fs::create_dir_all(&temporary).map_err(|error| error.to_string())?;
         let port = reserve_loopback_port()?;
         let token = uuid::Uuid::new_v4().simple().to_string();
-        // Keep Web credentials populated together with the API token. This is
-        // accepted by the stable backend and keeps the loopback API private.
+        // Gopeed Web v1.9.3 only exposes the short CLI flags. Newer versions
+        // keep these aliases, so use the short form for backward/forward
+        // compatibility with the backend bundled by ADM.
         let web_password = uuid::Uuid::new_v4().simple().to_string();
         let config = runtime_root.join("apocalipse-gopeed.json");
         let mut command = Command::new(executable);
         command
-            .arg("--address")
+            .arg("-A")
             .arg("127.0.0.1")
-            .arg("--port")
+            .arg("-P")
             .arg(port.to_string())
-            .arg("--username")
+            .arg("-u")
             .arg("apocalipse")
-            .arg("--password")
+            .arg("-p")
             .arg(&web_password)
-            .arg("--api-token")
+            .arg("-T")
             .arg(&token)
-            .arg("--storage-dir")
+            .arg("-d")
             .arg(&storage)
-            .arg("--temp-dir")
-            .arg(&temporary)
-            .arg("--config")
+            .arg("-c")
             .arg(&config)
             .stdout(Stdio::null())
             .stderr(Stdio::null());
