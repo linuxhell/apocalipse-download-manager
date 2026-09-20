@@ -142,17 +142,20 @@
       </section>
       <section id="about-panel" class="about-page" hidden>
         <article class="about-card">
-          <div class="about-creator">
-            <img id="about-creator-photo" class="about-creator-photo" alt="Juliano" />
-            <p class="about-creator-line" data-i18n="aboutCreator">Creator: Juliano - Brazil - Sátia Mortadela</p>
-          </div>
           <audio id="about-audio" preload="auto"></audio>
-          <div class="about-audio-controls">
-            <button id="about-play-pause" type="button" data-i18n="aboutPause">Pause</button>
-            <button id="about-stop" type="button" data-i18n="aboutStop">Stop</button>
-            <label for="about-volume" data-i18n="aboutVolume">Volume</label>
-            <input id="about-volume" type="range" min="0" max="1" step="0.05" value="0.7" />
+          <div class="about-toolbar">
+            <div class="about-audio-controls">
+              <button id="about-play-pause" type="button" data-i18n="aboutPause">Pause</button>
+              <button id="about-stop" type="button" data-i18n="aboutStop">Stop</button>
+              <label for="about-volume" data-i18n="aboutVolume">Volume</label>
+              <input id="about-volume" type="range" min="0" max="1" step="0.05" value="0.7" />
+            </div>
+            <div class="about-creator">
+              <p class="about-creator-line" data-i18n="aboutCreator">Creator: Juliano - Brazil - Sátia Mortadela</p>
+              <img id="about-creator-photo" class="about-creator-photo" alt="Juliano" />
+            </div>
           </div>
+          <div class="about-scene" aria-hidden="true"></div>
         </article>
       </section>
       <section id="language-panel" class="appearance-page language-page" hidden>
