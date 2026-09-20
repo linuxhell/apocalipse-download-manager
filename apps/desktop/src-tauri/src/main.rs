@@ -12183,7 +12183,7 @@ mod tests {
 
     #[test]
     fn diagnostic_details_remove_credentials() {
-        assert_eq!(sanitize_log_detail("Cookie: secret"), "<redacted>");
+        assert_eq!(sanitize_log_detail("Cookie: secret"), "<redacted-sensitive-line>");
         assert_eq!(
             sanitize_log_detail("url=https://example.com/a?h=secret&e=123"),
             "url=https://example.com/a?h=<redacted>&e=<redacted>",
