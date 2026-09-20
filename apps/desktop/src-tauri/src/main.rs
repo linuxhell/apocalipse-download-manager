@@ -6508,7 +6508,7 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
             ["--version"].as_slice(),
         ),
         (
-            "gopeed",
+            "aria2",
             configured_aria2(&settings),
             ["--version"].as_slice(),
         ),
@@ -6516,19 +6516,7 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
     Ok(definitions
         .into_iter()
         .map(|(id, executable, args)| {
-            let version = if id == "gopeed" {
-                let marker = executable
-                    .parent()
-                    .map(|parent| parent.join(".gopeed-version"))
-                    .and_then(|path| fs::read_to_string(path).ok())
-                    .map(|value| value.trim().to_owned())
-                    .filter(|value| !value.is_empty());
-                executable
-                    .is_file()
-                    .then(|| marker.unwrap_or_else(|| "Gopeed stable".to_owned()))
-            } else {
-                version_line(&executable, args)
-            };
+            let version = version_line(&executable, args);
             ToolStatus {
                 id: id.to_owned(),
                 path: executable.to_string_lossy().into_owned(),
@@ -6562,14 +6550,14 @@ fn set_tool_paths(
     yt_dlp: String,
     qjs: String,
     n_m3u8dl_re: String,
-    gopeed: String,
+    aria2: String,
 ) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.ffmpeg_path = optional_path(ffmpeg);
     settings.yt_dlp_path = optional_path(yt_dlp);
     settings.qjs_path = optional_path(qjs);
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
-    settings.gopeed_path = optional_path(gopeed);
+    settings.aria2_path = optional_path(aria2);
     save_settings(&state, &settings)
 }
 
