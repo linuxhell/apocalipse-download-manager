@@ -10054,7 +10054,7 @@ fn main() {
                 .on_tray_icon_event(|tray, event| {
                     if matches!(
                         event,
-                        TrayIconEvent::DoubleClick {
+                        TrayIconEvent::Click {
                             button: MouseButton::Left,
                             ..
                         }
