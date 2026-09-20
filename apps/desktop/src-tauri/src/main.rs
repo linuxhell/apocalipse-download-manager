@@ -6658,15 +6658,8 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
             ["--version"].as_slice(),
         ),
         (
-            "aria2",
-            configured_tool(
-                &settings.aria2_path,
-                if cfg!(windows) {
-                    "aria2c.exe"
-                } else {
-                    "aria2c"
-                },
-            ),
+            "gopeed",
+            configured_gopeed(&settings),
             ["--version"].as_slice(),
         ),
     ];
@@ -6707,14 +6700,14 @@ fn set_tool_paths(
     yt_dlp: String,
     qjs: String,
     n_m3u8dl_re: String,
-    aria2: String,
+    gopeed: String,
 ) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.ffmpeg_path = optional_path(ffmpeg);
     settings.yt_dlp_path = optional_path(yt_dlp);
     settings.qjs_path = optional_path(qjs);
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
-    settings.aria2_path = optional_path(aria2);
+    settings.gopeed_path = optional_path(gopeed);
     save_settings(&state, &settings)
 }
 
@@ -6916,14 +6909,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &settings.qjs_path,
                 if cfg!(windows) { "qjs.exe" } else { "qjs" },
             ),
-            "aria2" => configured_tool(
-                &settings.aria2_path,
-                if cfg!(windows) {
-                    "aria2c.exe"
-                } else {
-                    "aria2c"
-                },
-            ),
+            "gopeed" => configured_gopeed(&settings),
             "n-m3u8dl-re" => configured_tool(
                 &settings.n_m3u8dl_re_path,
                 if cfg!(windows) {
@@ -6991,10 +6977,10 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &["qjs-windows-x86_64.exe"],
                 &["--version"],
             ),
-            "aria2" => (
-                "aria2/aria2",
-                "aria2c.exe",
-                &["win", "64bit", ".zip"],
+            "gopeed" => (
+                "GopeedLab/gopeed",
+                "gopeed.exe",
+                &["gopeed-web-", "windows-amd64", ".zip"],
                 &["--version"],
             ),
             "n-m3u8dl-re" => (
@@ -7013,21 +6999,46 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         };
         let before =
             version_line(&executable, version_args).unwrap_or_else(|| "unknown".to_owned());
-        let api = format!("https://api.github.com/repos/{repository}/releases/latest");
         let client = reqwest::Client::builder()
             .user_agent("Apocalipse-Download-Manager")
             .build()
             .map_err(|error| error.to_string())?;
-        let release: serde_json::Value = client
-            .get(api)
-            .send()
-            .await
-            .map_err(|error| error.to_string())?
-            .error_for_status()
-            .map_err(|error| error.to_string())?
-            .json()
-            .await
-            .map_err(|error| error.to_string())?;
+        let release: serde_json::Value = if id == "gopeed" {
+            let releases: Vec<serde_json::Value> = client
+                .get(format!("https://api.github.com/repos/{repository}/releases?per_page=20"))
+                .send()
+                .await
+                .map_err(|error| error.to_string())?
+                .error_for_status()
+                .map_err(|error| error.to_string())?
+                .json()
+                .await
+                .map_err(|error| error.to_string())?;
+            releases
+                .into_iter()
+                .find(|release| {
+                    release
+                        .get("prerelease")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                        && !release
+                            .get("draft")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false)
+                })
+                .ok_or_else(|| "gopeed_beta_release_not_found".to_owned())?
+        } else {
+            client
+                .get(format!("https://api.github.com/repos/{repository}/releases/latest"))
+                .send()
+                .await
+                .map_err(|error| error.to_string())?
+                .error_for_status()
+                .map_err(|error| error.to_string())?
+                .json()
+                .await
+                .map_err(|error| error.to_string())?
+        };
         let tag = release
             .get("tag_name")
             .and_then(|value| value.as_str())
@@ -7114,6 +7125,9 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         let _ = fs::remove_dir_all(&temporary);
         if replacement.len() < 32_768 || (id == "ffmpeg" && ffprobe_replacement.len() < 32_768) {
             return Err(format!("replacement_executable_invalid:{asset_name}"));
+        }
+        if id == "gopeed" {
+            stop_gopeed_runtime(&state);
         }
         let parent = executable
             .parent()
