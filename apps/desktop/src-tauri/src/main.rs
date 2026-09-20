@@ -2985,17 +2985,32 @@ fn configured_aria2(settings: &UserSettings) -> PathBuf {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ExtractorKind { SevenZip, Rar, Unrar, Unar, Bsdtar, Tar }
+enum ExtractorKind {
+    SevenZip,
+    Rar,
+    Unrar,
+    Unar,
+    Bsdtar,
+    Tar,
+}
 
 fn extractor_kind(path: &Path) -> Option<ExtractorKind> {
     let name = path.file_stem()?.to_string_lossy().to_ascii_lowercase();
-    if matches!(name.as_str(), "7z" | "7zz" | "7zr" | "7za") { Some(ExtractorKind::SevenZip) }
-    else if matches!(name.as_str(), "winrar" | "rar") { Some(ExtractorKind::Rar) }
-    else if name == "unrar" { Some(ExtractorKind::Unrar) }
-    else if name == "unar" { Some(ExtractorKind::Unar) }
-    else if name == "bsdtar" { Some(ExtractorKind::Bsdtar) }
-    else if name == "tar" { Some(ExtractorKind::Tar) }
-    else { None }
+    if matches!(name.as_str(), "7z" | "7zz" | "7zr" | "7za") {
+        Some(ExtractorKind::SevenZip)
+    } else if matches!(name.as_str(), "winrar" | "rar") {
+        Some(ExtractorKind::Rar)
+    } else if name == "unrar" {
+        Some(ExtractorKind::Unrar)
+    } else if name == "unar" {
+        Some(ExtractorKind::Unar)
+    } else if name == "bsdtar" {
+        Some(ExtractorKind::Bsdtar)
+    } else if name == "tar" {
+        Some(ExtractorKind::Tar)
+    } else {
+        None
+    }
 }
 
 fn extractor_version(executable: &Path, kind: ExtractorKind) -> Option<String> {
@@ -3019,30 +3034,56 @@ fn extractor_version(executable: &Path, kind: ExtractorKind) -> Option<String> {
 }
 
 fn archive_name_without_extensions(path: &Path) -> String {
-    let mut name = path.file_name().and_then(|v| v.to_str()).unwrap_or("archive").to_owned();
-    for suffix in [".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tgz", ".tbz2", ".txz", ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".zst", ".cab", ".arj", ".lha", ".lzh"] {
+    let mut name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("archive")
+        .to_owned();
+    for suffix in [
+        ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tgz", ".tbz2", ".txz", ".zip",
+        ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".zst", ".cab", ".arj", ".lha",
+        ".lzh",
+    ] {
         if name.to_ascii_lowercase().ends_with(suffix) {
             name.truncate(name.len() - suffix.len());
             break;
         }
     }
-    if name.trim().is_empty() { "archive".to_owned() } else { name }
+    if name.trim().is_empty() {
+        "archive".to_owned()
+    } else {
+        name
+    }
 }
 
 fn is_archive_file_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    [".zip", ".7z", ".rar", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst", ".gz", ".bz2", ".xz", ".zst", ".cab", ".arj", ".lha", ".lzh"]
-        .iter().any(|suffix| lower.ends_with(suffix))
+    [
+        ".zip", ".7z", ".rar", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz",
+        ".txz", ".tar.zst", ".gz", ".bz2", ".xz", ".zst", ".cab", ".arj", ".lha", ".lzh",
+    ]
+    .iter()
+    .any(|suffix| lower.ends_with(suffix))
 }
 
 fn extraction_args(kind: ExtractorKind, archive: &Path, destination: &Path) -> Vec<String> {
-    let a = archive.to_string_lossy().into_owned();
-    let d = destination.to_string_lossy().into_owned();
+    let archive = archive.to_string_lossy().into_owned();
+    let destination = destination.to_string_lossy().into_owned();
     match kind {
-        ExtractorKind::SevenZip => vec!["x".into(), a, format!("-o{d}"), "-y".into()],
-        ExtractorKind::Rar | ExtractorKind::Unrar => vec!["x".into(), "-o+".into(), "-y".into(), a, format!("{d}{}", std::path::MAIN_SEPARATOR)],
-        ExtractorKind::Unar => vec!["-f".into(), "-o".into(), d, a],
-        ExtractorKind::Bsdtar | ExtractorKind::Tar => vec!["-xf".into(), a, "-C".into(), d],
+        ExtractorKind::SevenZip => {
+            vec!["x".into(), archive, format!("-o{destination}"), "-y".into()]
+        }
+        ExtractorKind::Rar | ExtractorKind::Unrar => vec![
+            "x".into(),
+            "-o+".into(),
+            "-y".into(),
+            archive,
+            format!("{destination}{}", std::path::MAIN_SEPARATOR),
+        ],
+        ExtractorKind::Unar => vec!["-f".into(), "-o".into(), destination, archive],
+        ExtractorKind::Bsdtar | ExtractorKind::Tar => {
+            vec!["-xf".into(), archive, "-C".into(), destination]
+        }
     }
 }
 
@@ -3052,7 +3093,12 @@ fn archive_member_is_safe(name: &str) -> bool {
         return false;
     }
     let path = Path::new(&normalized);
-    path.components().all(|component| matches!(component, std::path::Component::Normal(_) | std::path::Component::CurDir))
+    path.components().all(|component| {
+        matches!(
+            component,
+            std::path::Component::Normal(_) | std::path::Component::CurDir
+        )
+    })
 }
 
 fn collect_lsar_names(value: &serde_json::Value, output: &mut Vec<String>) {
@@ -3074,10 +3120,17 @@ fn collect_lsar_names(value: &serde_json::Value, output: &mut Vec<String>) {
     }
 }
 
-fn list_archive_members(executable: &Path, kind: ExtractorKind, archive: &Path) -> Result<Vec<String>, String> {
+fn list_archive_members(
+    executable: &Path,
+    kind: ExtractorKind,
+    archive: &Path,
+) -> Result<Vec<String>, String> {
     let mut command = match kind {
         ExtractorKind::Unar => {
-            let sibling = executable.parent().unwrap_or_else(|| Path::new(".")).join(if cfg!(windows) { "lsar.exe" } else { "lsar" });
+            let sibling = executable
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(if cfg!(windows) { "lsar.exe" } else { "lsar" });
             if !sibling.is_file() {
                 return Err("archive_listing_tool_missing:lsar".to_owned());
             }
@@ -3088,9 +3141,15 @@ fn list_archive_members(executable: &Path, kind: ExtractorKind, archive: &Path) 
         _ => {
             let mut command = Command::new(executable);
             match kind {
-                ExtractorKind::SevenZip => { command.args(["l", "-slt"]).arg(archive); }
-                ExtractorKind::Rar | ExtractorKind::Unrar => { command.args(["lb"]).arg(archive); }
-                ExtractorKind::Bsdtar | ExtractorKind::Tar => { command.args(["-tf"]).arg(archive); }
+                ExtractorKind::SevenZip => {
+                    command.args(["l", "-slt"]).arg(archive);
+                }
+                ExtractorKind::Rar | ExtractorKind::Unrar => {
+                    command.args(["lb"]).arg(archive);
+                }
+                ExtractorKind::Bsdtar | ExtractorKind::Tar => {
+                    command.args(["-tf"]).arg(archive);
+                }
                 ExtractorKind::Unar => unreachable!(),
             }
             command
@@ -3118,19 +3177,29 @@ fn list_archive_members(executable: &Path, kind: ExtractorKind, archive: &Path) 
                 if !inside_members {
                     continue;
                 }
-                if let Some(name) = line.strip_prefix("Path = ").map(str::trim).filter(|name| !name.is_empty()) {
+                if let Some(name) = line
+                    .strip_prefix("Path = ")
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                {
                     members.push(name.to_owned());
                 }
             }
             members
         }
         ExtractorKind::Unar => {
-            let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
+            let value: serde_json::Value =
+                serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
             let mut names = Vec::new();
             collect_lsar_names(&value, &mut names);
             names
         }
-        _ => text.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned).collect(),
+        _ => text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned)
+            .collect(),
     };
     names.sort();
     names.dedup();
@@ -3161,27 +3230,41 @@ fn move_tree(source: &Path, destination: &Path) -> Result<(), String> {
             }
             fs::remove_file(destination).map_err(|error| error.to_string())?;
         }
-        fs::rename(source, destination).or_else(|_| {
-            fs::copy(source, destination)
-                .map(|_| ())
-                .and_then(|_| fs::remove_file(source))
-        }).map_err(|error| error.to_string())?;
+        fs::rename(source, destination)
+            .or_else(|_| {
+                fs::copy(source, destination)
+                    .map(|_| ())
+                    .and_then(|_| fs::remove_file(source))
+            })
+            .map_err(|error| error.to_string())?;
     }
     Ok(())
 }
 
 fn extract_archive_safely(settings: &UserSettings, archive: &Path) -> Result<PathBuf, String> {
-    if !archive.is_file() || !archive.file_name().and_then(|value| value.to_str()).is_some_and(is_archive_file_name) {
+    if !archive.is_file()
+        || !archive
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(is_archive_file_name)
+    {
         return Err("not_archive_file".to_owned());
     }
-    let executable = settings.extractor_path.clone().ok_or_else(|| "archive_extractor_not_configured".to_owned())?;
-    let kind = extractor_kind(&executable).ok_or_else(|| "unsupported_archive_extractor".to_owned())?;
+    let executable = settings
+        .extractor_path
+        .clone()
+        .ok_or_else(|| "archive_extractor_not_configured".to_owned())?;
+    let kind =
+        extractor_kind(&executable).ok_or_else(|| "unsupported_archive_extractor".to_owned())?;
     if !executable.is_file() {
         return Err("archive_extractor_not_found".to_owned());
     }
     let _members = list_archive_members(&executable, kind, archive)?;
     let parent = archive.parent().unwrap_or_else(|| Path::new("."));
-    let staging = parent.join(format!(".apocalipse-extract-{}", uuid::Uuid::new_v4().simple()));
+    let staging = parent.join(format!(
+        ".apocalipse-extract-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
     fs::create_dir_all(&staging).map_err(|error| error.to_string())?;
     let mut command = Command::new(&executable);
     command.args(extraction_args(kind, archive, &staging));
@@ -3193,11 +3276,24 @@ fn extract_archive_safely(settings: &UserSettings, archive: &Path) -> Result<Pat
     let output = command.output().map_err(|error| error.to_string())?;
     if !output.status.success() {
         let _ = fs::remove_dir_all(&staging);
-        let detail = String::from_utf8_lossy(if output.stderr.is_empty() { &output.stdout } else { &output.stderr }).trim().to_owned();
-        return Err(if detail.is_empty() { "archive_extraction_failed".to_owned() } else { format!("archive_extraction_failed:{detail}") });
+        let detail = String::from_utf8_lossy(if output.stderr.is_empty() {
+            &output.stdout
+        } else {
+            &output.stderr
+        })
+        .trim()
+        .to_owned();
+        return Err(if detail.is_empty() {
+            "archive_extraction_failed".to_owned()
+        } else {
+            format!("archive_extraction_failed:{detail}")
+        });
     }
-    let entries = fs::read_dir(&staging).map_err(|error| error.to_string())?
-        .filter_map(Result::ok).map(|entry| entry.path()).collect::<Vec<_>>();
+    let entries = fs::read_dir(&staging)
+        .map_err(|error| error.to_string())?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
     if entries.is_empty() {
         let _ = fs::remove_dir_all(&staging);
         return Err("archive_extraction_empty".to_owned());
@@ -3228,17 +3324,39 @@ fn extract_archive_safely(settings: &UserSettings, archive: &Path) -> Result<Pat
 
 fn maybe_auto_extract_completed(app: &tauri::AppHandle, id: DownloadId) {
     let state = app.state::<AppState>();
-    let task = state.queue.lock().ok().and_then(|queue| queue.iter().find(|task| task.id == id).cloned());
-    let Some(task) = task.filter(|task| task.auto_extract && task.state == DownloadState::Completed) else { return; };
-    let settings = match state.settings.lock() { Ok(settings) => settings.clone(), Err(_) => return };
+    let task = state.queue.lock().ok().and_then(|queue| {
+        queue
+            .iter()
+            .find(|task| task.id == id)
+            .cloned()
+    });
+    let Some(task) =
+        task.filter(|task| task.auto_extract && task.state == DownloadState::Completed)
+    else {
+        return;
+    };
+    let settings = match state.settings.lock() {
+        Ok(settings) => settings.clone(),
+        Err(_) => return,
+    };
     let destination = task.destination.clone();
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let result = extract_archive_safely(&settings, &destination);
         let state = app.state::<AppState>();
         match &result {
-            Ok(path) => diagnostic_log(&state, "INFO", "archive.auto_extract_completed", &format!("task={id} output={}", path.display())),
-            Err(error) => diagnostic_log(&state, "ERROR", "archive.auto_extract_failed", &format!("task={id} error={error}")),
+            Ok(path) => diagnostic_log(
+                &state,
+                "INFO",
+                "archive.auto_extract_completed",
+                &format!("task={id} output={}", path.display()),
+            ),
+            Err(error) => diagnostic_log(
+                &state,
+                "ERROR",
+                "archive.auto_extract_failed",
+                &format!("task={id} error={error}"),
+            ),
         }
     });
 }
