@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod diagnostics_v3;
-mod gopeed;
+mod aria2;
 mod prepared_preview;
 mod thumbnail_cache;
 mod tiktok_preview;
@@ -217,8 +217,8 @@ struct AppState {
     blob_uploads: Mutex<HashMap<uuid::Uuid, BlobUpload>>,
     recording_stops: Mutex<HashSet<DownloadId>>,
     request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
-    gopeed_runtime: Mutex<Option<gopeed::Runtime>>,
-    gopeed_tasks: Mutex<HashMap<DownloadId, String>>,
+    aria2_runtime: Mutex<Option<aria2::Runtime>>,
+    aria2_tasks: Mutex<HashMap<DownloadId, String>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
     diagnostics: diagnostics_v3::Diagnostics,
@@ -268,17 +268,10 @@ fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize
 
 fn requires_native_http_compatibility(url: &str) -> bool {
     host_from_url(url).as_deref().is_some_and(|value| {
-        value == "download.microsoft.com"
-            || value.ends_with(".download.microsoft.com")
-            || value == "software.download.prss.microsoft.com"
-            || value.ends_with(".download.prss.microsoft.com")
-            // ChatGPT file links are short-lived signed URLs. Gopeed's task
-            // creation can stall on the captured browser context until the URL
-            // expires, so keep these transfers on ADM's native HTTP engine.
-            || value == "oaiusercontent.com"
-            || value.ends_with(".oaiusercontent.com")
+        value == "oaiusercontent.com" || value.ends_with(".oaiusercontent.com")
     })
 }
+
 
 #[derive(Clone, Deserialize, Serialize)]
 struct UserSettings {
@@ -310,7 +303,15 @@ struct UserSettings {
     #[serde(default)]
     n_m3u8dl_re_path: Option<PathBuf>,
     #[serde(default)]
-    gopeed_path: Option<PathBuf>,
+    aria2_path: Option<PathBuf>,
+    #[serde(default = "default_true")]
+    aria2_rpc_enabled: bool,
+    #[serde(default = "default_true")]
+    aria2_rpc_auto_start: bool,
+    #[serde(default)]
+    aria2_rpc_port: Option<u16>,
+    #[serde(default = "default_aria2_rpc_secret", skip_serializing)]
+    aria2_rpc_secret: String,
     #[serde(default)]
     media_player_path: Option<PathBuf>,
     #[serde(default)]
@@ -367,10 +368,13 @@ const fn default_max_active() -> usize {
     3
 }
 const fn default_connections() -> usize {
-    8
+    16
 }
 const fn default_true() -> bool {
     true
+}
+fn default_aria2_rpc_secret() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
 }
 fn default_bridge_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
@@ -396,7 +400,11 @@ impl Default for UserSettings {
             yt_dlp_path: None,
             qjs_path: None,
             n_m3u8dl_re_path: None,
-            gopeed_path: None,
+            aria2_path: None,
+            aria2_rpc_enabled: true,
+            aria2_rpc_auto_start: true,
+            aria2_rpc_port: None,
+            aria2_rpc_secret: default_aria2_rpc_secret(),
             media_player_path: None,
             user_agent: None,
             log_editor_path: None,
