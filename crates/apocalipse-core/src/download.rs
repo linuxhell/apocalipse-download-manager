@@ -33,6 +33,7 @@ use crate::validation::{validate_payload, PayloadExpectation};
 const MIN_SEGMENT_CHUNK_SIZE: u64 = 4 * 1024 * 1024;
 const MAX_SEGMENT_CHUNK_SIZE: u64 = 512 * 1024 * 1024;
 const TARGET_CHUNKS_PER_WORKER: u64 = 4;
+const MAX_NATIVE_HTTP_CONNECTIONS: usize = 8;
 const WORKER_START_INTERVAL_MS: u64 = 35;
 const JOURNAL_VERSION: u8 = 1;
 const RANGE_STEAL_INTERVAL_MS: u64 = 400;
@@ -464,7 +465,9 @@ impl DownloadEngine {
         }
 
         let can_segment = request.method.eq_ignore_ascii_case("GET") && request.body.is_none();
-        let requested = request.connections.clamp(1, 32);
+        let requested = request
+            .connections
+            .clamp(1, MAX_NATIVE_HTTP_CONNECTIONS);
         if can_segment && requested > 1 {
             let probe_url = sources[0].clone();
             let mut probe_headers = headers_for_source(&request.url, &probe_url, &request.headers);
@@ -2828,6 +2831,13 @@ mod tests {
         assert!(states[1].enabled.load(Ordering::Acquire));
         assert!(!states[2].enabled.load(Ordering::Acquire));
         assert!(states[3].enabled.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn native_http_connection_count_never_exceeds_eight() {
+        assert_eq!(adaptive_connection_count(64 * 1024 * 1024, 32), 4);
+        assert_eq!(adaptive_connection_count(512 * 1024 * 1024, 32), 8);
+        assert_eq!(adaptive_connection_count(8 * 1024 * 1024 * 1024, 32), 8);
     }
 
     #[test]
