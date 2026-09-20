@@ -2192,11 +2192,7 @@ async fn upload_local_shared_link_item(
         let total = link_path_total_size(&source_for_copy)?;
         reporter.set_total(total);
         if source_for_copy.is_dir() {
-            copy_local_link_directory(
-                &source_for_copy,
-                &destination_for_copy,
-                &mut reporter,
-            )?;
+            copy_local_link_directory(&source_for_copy, &destination_for_copy, &mut reporter)?;
         } else {
             copy_local_link_file(&source_for_copy, &destination_for_copy, &mut reporter)?;
         }
