@@ -20,6 +20,9 @@ fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as u64)
 }
+fn local_timestamp() -> String {
+    chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
 fn uuid(value: &str) -> bool {
     uuid::Uuid::parse_str(value).is_ok()
 }
@@ -271,6 +274,7 @@ impl Diagnostics {
         store.server_sequence += 1;
         event["serverSequence"] = json!(store.server_sequence);
         event["receivedAt"] = json!(now());
+        event["receivedAtLocal"] = json!(local_timestamp());
         let mut options = OpenOptions::new();
         options.create(true).append(true);
         #[cfg(unix)]
@@ -309,7 +313,7 @@ impl Diagnostics {
         let record = json!({"schemaVersion":3,"id":uuid::Uuid::new_v4().to_string(),"sessionId":store.config["sessionId"],
             "traceId":trace,"taskId":task.filter(|v| uuid(v)),"event":event,"level":level,"component":"desktop",
             "version":env!("CARGO_PKG_VERSION"),"build":option_env!("ADM_BUILD_SHA").unwrap_or("unknown"),
-            "clientTimestamp":now(),"detail":safe_detail(&detail,salt,"",0)});
+            "clientTimestamp":now(),"clientTimestampLocal":local_timestamp(),"detail":safe_detail(&detail,salt,"",0)});
         self.append(store, record);
     }
     pub(super) fn record(
@@ -534,7 +538,7 @@ impl Diagnostics {
         let (records, parse_errors) = self.records_locked(&store.config["sessionId"]);
         let health = json!({"formatVersion":3,"sessionId":store.config["sessionId"],"active":Self::active(&store),
             "startedAt":store.config["startedAt"],"expiresAt":store.config["expiresAt"],"endedAt":store.config["endedAt"],
-            "exportedAt":now(),"eventsInSnapshot":records.len(),"receivedThisProcess":store.received,"rejected":store.rejected,
+            "exportedAt":now(),"exportedAtLocal":local_timestamp(),"eventsInSnapshot":records.len(),"receivedThisProcess":store.received,"rejected":store.rejected,
             "duplicates":store.duplicates,"rotationsThisProcess":store.rotated,"writeErrors":store.write_errors,"parseErrors":parse_errors,
             "clientHealth":store.client_health,"maxBytesPerFile":MAX_FILE,"filesRetained":2,
             "limitations":["webRequest_does_not_observe_memory_cache","cross_world_probe_is_not_trusted_page_evidence",
@@ -638,6 +642,23 @@ impl Diagnostics {
             "latestPlatformScans": social_platforms,
             "interpretation": "structured_observations_not_guesses"
         });
+
+        let mut timeline = records.clone();
+        timeline.sort_by_key(|record| (
+            record["receivedAt"].as_u64().unwrap_or(0),
+            record["serverSequence"].as_u64().unwrap_or(0)
+        ));
+        let timeline_rows = timeline.iter().map(|record| json!({
+            "localTime": record["receivedAtLocal"],
+            "utcEpochMs": record["receivedAt"],
+            "sequence": record["serverSequence"],
+            "level": record["level"],
+            "event": record["event"],
+            "component": record["component"],
+            "traceId": record["traceId"],
+            "taskId": record["taskId"],
+            "detail": record["detail"]
+        })).collect::<Vec<_>>();
 
         let performance_samples = transfer_engine
             .iter()
@@ -840,6 +861,7 @@ impl Diagnostics {
             ("traces/actions.jsonl".into(), jsonl(&action_rows)),
             ("traces/replay-de-midia.jsonl".into(), jsonl(&media_replay)),
             ("capture/media-decisions.jsonl".into(), jsonl(&decisions)),
+            ("timeline/events-local.jsonl".into(), jsonl(&timeline_rows)),
             ("social/player-debugger.jsonl".into(), jsonl(&social_debugger)),
             (
                 "social/summary.json".into(),
