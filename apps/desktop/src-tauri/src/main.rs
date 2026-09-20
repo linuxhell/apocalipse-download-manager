@@ -3810,6 +3810,19 @@ fn sanitize_log_detail(detail: &str) -> String {
         .join(" ")
 }
 
+fn read_sanitized_log_tail(path: &Path, max_bytes: usize) -> Option<Vec<u8>> {
+    let bytes = fs::read(path).ok()?;
+    let start = bytes.len().saturating_sub(max_bytes);
+    let text = String::from_utf8_lossy(&bytes[start..]);
+    Some(
+        text.lines()
+            .map(sanitize_log_detail)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into_bytes(),
+    )
+}
+
 fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
     state.diagnostics.observe_legacy(level, event, detail);
     let _write_guard = match state.log_write_lock.lock() {
@@ -4731,6 +4744,11 @@ async fn run_gopeed_download(
                         "totalPeers": stats.total_peers,
                         "seeders": stats.seeders,
                         "leechers": stats.leechers,
+                        "connectionDownloads": stats.connections.iter().map(|connection| connection.downloaded).collect::<Vec<_>>(),
+                        "connectionTotals": stats.connections.iter().map(|connection| connection.total).collect::<Vec<_>>(),
+                        "connectionCompleted": stats.connections.iter().map(|connection| connection.completed).collect::<Vec<_>>(),
+                        "connectionFailed": stats.connections.iter().map(|connection| connection.failed).collect::<Vec<_>>(),
+                        "connectionRetries": stats.connections.iter().map(|connection| connection.retry_times).collect::<Vec<_>>(),
                         "sampleWindowMs": 350
                     }),
                 );
@@ -5667,6 +5685,26 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
     ));
     let guide = b"Apocalipse diagnostic bundle v3\nStart with RELATORIO_PARA_IA.txt, traces/replay-de-midia.jsonl and health/collectors.json. Legacy v2 files are preserved. A missing event is not proof of no activity. Review legacy logs before sharing.\n";
     entries.push(("README.txt".to_owned(), guide.to_vec()));
+
+    let gopeed_log_dir = state
+        .queue_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("gopeed-runtime")
+        .join("storage")
+        .join("logs");
+    for (source, name) in [
+        (gopeed_log_dir.join("core.log"), "logs/gopeed/core.log"),
+        (
+            gopeed_log_dir.join("extension.log"),
+            "logs/gopeed/extension.log",
+        ),
+    ] {
+        if let Some(contents) = read_sanitized_log_tail(&source, 4 * 1024 * 1024) {
+            entries.push((name.to_owned(), contents));
+        }
+    }
+
     entries.extend(state.diagnostics.export());
     write_diagnostic_zip(&path, entries)?;
     diagnostic_log(
