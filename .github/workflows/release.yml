@@ -119,7 +119,6 @@ jobs:
           mkdir -p "$package/data/tools/aria2"
           install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
           install -m 755 dist/aria2-backend/aria2c "$package/data/tools/aria2/aria2c"
-          cp dist/aria2-backend/aria2c "$package/data/tools/aria2/aria2c"
           cp README.md LICENSE "$package/"
           tar -C dist -czf "dist/${{ matrix.output }}" "Apocalipse Download Manager"
 
@@ -132,7 +131,6 @@ jobs:
           cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
           chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
           install -m 755 dist/aria2-backend/aria2c "$app/Contents/MacOS/data/tools/aria2/aria2c"
-          cp dist/aria2-backend/aria2c "$app/Contents/MacOS/data/tools/aria2/aria2c"
           cp packaging/macos/Info.plist "$app/Contents/Info.plist"
           python3 - "$app/Contents/Info.plist" <<'PYMAC'
           import plistlib
