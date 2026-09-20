@@ -47,6 +47,7 @@ const ADMISSION_RECOVERY_EWMA_ALPHA: f64 = 0.25;
 const ADMISSION_RECOVERY_MIN_BELOW_MS: u64 = 3_200;
 const ADMISSION_REPROBE_COOLDOWN_MS: u64 = 4_000;
 const ADMISSION_REJECT_BACKOFF_MS: u64 = 20_000;
+const DOWNSCALE_DRAIN_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy)]
 struct SegmentWork {
@@ -76,6 +77,7 @@ impl Drop for AbortOnDropTask {
 }
 
 struct AdaptiveWorkerState {
+    enabled: AtomicBool,
     active: AtomicBool,
     parent_index: AtomicUsize,
     current: AtomicU64,
@@ -88,6 +90,7 @@ struct AdaptiveWorkerState {
 impl AdaptiveWorkerState {
     fn new() -> Self {
         Self {
+            enabled: AtomicBool::new(false),
             active: AtomicBool::new(false),
             parent_index: AtomicUsize::new(usize::MAX),
             current: AtomicU64::new(0),
@@ -489,7 +492,7 @@ impl DownloadEngine {
                         "http3Available": self.http3_client.is_some(),
                         "http3Selected": http3_selected,
                         "transportAttempts": transport_attempts,
-                        "transport": format!("{:?}", probe.version())
+                        "transport": transport_name(probe.version())
                     }),
                 });
                 if probe.status() == StatusCode::PARTIAL_CONTENT {
@@ -544,7 +547,7 @@ impl DownloadEngine {
                                     "requestedConnections": requested,
                                     "activeConnections": useful_connections,
                                     "initialConnections": initial_connections,
-                                    "connectionMode": if request.adaptive_connections { "adaptive" } else { "fixed" },
+                                    "mode": if request.adaptive_connections { "adaptive" } else { "fixed" },
                                     "networkCapacityHintBytesPerSecond": request.network_capacity_hint_bps,
                                     "hostCapacityHintBytesPerSecond": request.host_capacity_hint_bps,
                                     "chunkBytes": planned_chunk_size,
@@ -1022,6 +1025,9 @@ impl DownloadEngine {
                 .map(|_| AdaptiveWorkerState::new())
                 .collect::<Vec<_>>(),
         );
+        for state in worker_states.iter().take(initial_active_workers) {
+            state.enabled.store(true, Ordering::Release);
+        }
         let transfer_started = Instant::now();
 
         let _ = events
@@ -1082,11 +1088,19 @@ impl DownloadEngine {
                     }
 
                     let now_ms = transfer_started.elapsed().as_millis() as u64;
-                    let admitted_workers = active_limit.load(Ordering::Acquire).min(states.len());
+                    let enabled_indices = states
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, state)| {
+                            state.enabled.load(Ordering::Acquire).then_some(index)
+                        })
+                        .collect::<Vec<_>>();
+                    let admitted_workers = enabled_indices.len();
                     let mut aggregate_window_bytes = 0_u64;
                     let mut active_workers = 0_usize;
                     let mut worker_samples = Vec::new();
-                    for (index, state) in states.iter().take(admitted_workers).enumerate() {
+                    for index in enabled_indices.iter().copied() {
+                        let state = &states[index];
                         let bytes = state.window_bytes.swap(0, Ordering::AcqRel);
                         aggregate_window_bytes = aggregate_window_bytes.saturating_add(bytes);
                         let rate = bytes as f64 * 1000.0 / RANGE_STEAL_INTERVAL_MS as f64;
@@ -1234,12 +1248,14 @@ impl DownloadEngine {
                                     admission_held_rate = None;
                                     admission_skip_sample = true;
                                     recovery_ewma_rate = None;
-                                    active_limit.store(next, Ordering::Release);
+                                    let newly_enabled = enable_workers_to(&states, next);
+                                    active_limit.store(count_enabled_workers(&states), Ordering::Release);
                                     notify.notify_waiters();
                                     let _ = sender.try_send(DownloadEvent::Diagnostic {
                                         event: "http.connection_admission",
                                         detail: serde_json::json!({
                                             "decision": "reprobe_after_sustained_capacity_drop",
+                                            "newlyEnabledWorkers": newly_enabled,
                                             "previousConnections": current_limit,
                                             "admittedConnections": next,
                                             "baselineBytesPerSecond": recovery_rate as u64,
@@ -1276,13 +1292,15 @@ impl DownloadEngine {
                                     if current_limit < states.len() {
                                         let next =
                                             next_admission_level(current_limit, states.len());
-                                        active_limit.store(next, Ordering::Release);
+                                        let newly_enabled = enable_workers_to(&states, next);
+                                        active_limit.store(count_enabled_workers(&states), Ordering::Release);
                                         notify.notify_waiters();
                                         admission_skip_sample = true;
                                         let _ = sender.try_send(DownloadEvent::Diagnostic {
                                             event: "http.connection_admission",
                                             detail: serde_json::json!({
                                                 "decision": "accept_and_probe_next",
+                                                "newlyEnabledWorkers": newly_enabled,
                                                 "previousConnections": baseline_limit,
                                                 "admittedConnections": next,
                                                 "measuredConnections": current_limit,
@@ -1306,7 +1324,62 @@ impl DownloadEngine {
                                         });
                                     }
                                 } else {
-                                    active_limit.store(baseline_limit, Ordering::Release);
+                                    let (retained_workers, disabled_workers) =
+                                        retain_fastest_workers(&states, &ewma_rates, baseline_limit);
+                                    active_limit.store(retained_workers.len(), Ordering::Release);
+                                    let mut drained_workers = Vec::new();
+                                    for worker_index in disabled_workers.iter().copied() {
+                                        let state = &states[worker_index];
+                                        if !state.active.load(Ordering::Acquire) {
+                                            continue;
+                                        }
+                                        let current = state.current.load(Ordering::Acquire);
+                                        let old_end = state.desired_end.load(Ordering::Acquire);
+                                        if current > old_end {
+                                            continue;
+                                        }
+                                        let remaining = old_end - current + 1;
+                                        if remaining <= DOWNSCALE_DRAIN_BYTES
+                                            .saturating_add(MIN_STEAL_TAIL_BYTES)
+                                        {
+                                            continue;
+                                        }
+                                        let new_end = current
+                                            .saturating_add(DOWNSCALE_DRAIN_BYTES)
+                                            .saturating_sub(1)
+                                            .min(old_end);
+                                        let tail_start = new_end.saturating_add(1);
+                                        if tail_start > old_end
+                                            || old_end - tail_start + 1 < MIN_STEAL_TAIL_BYTES
+                                        {
+                                            continue;
+                                        }
+                                        let parent = state.parent_index.load(Ordering::Acquire);
+                                        if parent >= parts.len() {
+                                            continue;
+                                        }
+                                        parts[parent].fetch_add(1, Ordering::AcqRel);
+                                        if state
+                                            .desired_end
+                                            .compare_exchange(
+                                                old_end,
+                                                new_end,
+                                                Ordering::AcqRel,
+                                                Ordering::Acquire,
+                                            )
+                                            .is_err()
+                                        {
+                                            parts[parent].fetch_sub(1, Ordering::AcqRel);
+                                            continue;
+                                        }
+                                        outstanding.fetch_add(1, Ordering::AcqRel);
+                                        queue.lock().await.push_front(SegmentWork {
+                                            parent_index: parent,
+                                            start: tail_start,
+                                            end: old_end,
+                                        });
+                                        drained_workers.push(worker_index);
+                                    }
                                     notify.notify_waiters();
                                     admission_settled = true;
                                     recovery_ewma_rate = None;
@@ -1316,7 +1389,10 @@ impl DownloadEngine {
                                         event: "http.connection_admission",
                                         detail: serde_json::json!({
                                             "decision": "reject_marginal_level",
-                                            "admittedConnections": baseline_limit,
+                                            "admittedConnections": retained_workers.len(),
+                                            "retainedWorkers": retained_workers,
+                                            "disabledWorkers": disabled_workers,
+                                            "drainedWorkers": drained_workers,
                                             "measuredConnections": current_limit,
                                             "baselineBytesPerSecond": baseline_rate as u64,
                                             "measuredBytesPerSecond": interval_rate as u64,
@@ -1332,13 +1408,15 @@ impl DownloadEngine {
                             stable_capacity = stable_capacity.max(interval_rate);
                             if current_limit < states.len() {
                                 let next = next_admission_level(current_limit, states.len());
-                                active_limit.store(next, Ordering::Release);
+                                let newly_enabled = enable_workers_to(&states, next);
+                                active_limit.store(count_enabled_workers(&states), Ordering::Release);
                                 notify.notify_waiters();
                                 admission_skip_sample = true;
                                 let _ = sender.try_send(DownloadEvent::Diagnostic {
                                     event: "http.connection_admission",
                                     detail: serde_json::json!({
                                         "decision": "probe_next",
+                                        "newlyEnabledWorkers": newly_enabled,
                                         "previousConnections": current_limit,
                                         "admittedConnections": next,
                                         "baselineBytesPerSecond": interval_rate as u64,
@@ -1355,20 +1433,18 @@ impl DownloadEngine {
                     if !queue.lock().await.is_empty() {
                         continue;
                     }
-                    let idle_workers = states
+                    let idle_workers = enabled_indices
                         .iter()
-                        .take(admitted_workers)
-                        .filter(|state| !state.active.load(Ordering::Acquire))
+                        .filter(|index| !states[**index].active.load(Ordering::Acquire))
                         .count();
                     if idle_workers == 0 {
                         continue;
                     }
 
                     let mut victim = None::<(usize, u64, f64, bool)>;
-                    let positive_rates = ewma_rates
+                    let positive_rates = enabled_indices
                         .iter()
-                        .take(admitted_workers)
-                        .copied()
+                        .map(|index| ewma_rates[*index])
                         .filter(|rate| *rate > 0.0)
                         .collect::<Vec<_>>();
                     let median_rate = if positive_rates.is_empty() {
@@ -1379,7 +1455,8 @@ impl DownloadEngine {
                         sorted[sorted.len() / 2]
                     };
 
-                    for (index, state) in states.iter().take(admitted_workers).enumerate() {
+                    for index in enabled_indices.iter().copied() {
+                        let state = &states[index];
                         if !state.active.load(Ordering::Acquire) {
                             continue;
                         }
@@ -1509,7 +1586,6 @@ impl DownloadEngine {
             let outstanding = remaining_parts.clone();
             let parts = parent_parts.clone();
             let states = worker_states.clone();
-            let active_limit = active_worker_limit.clone();
             jobs.push(async move {
                 if worker_index > 0 {
                     tokio::time::sleep(Duration::from_millis(
@@ -1520,7 +1596,7 @@ impl DownloadEngine {
 
                 let mut previous_segment_completed: Option<Instant> = None;
                 loop {
-                    while worker_index >= active_limit.load(Ordering::Acquire) {
+                    while !states[worker_index].enabled.load(Ordering::Acquire) {
                         previous_segment_completed = None;
                         if outstanding.load(Ordering::Acquire) == 0 {
                             return Result::<()>::Ok(());
@@ -1604,8 +1680,8 @@ impl DownloadEngine {
                             continue;
                         }
 
-                        let protocol = format!("{:?}", response.version());
-                        let response_header_ms = attempt_started.elapsed().as_millis() as u64;
+                        let protocol = transport_name(response.version());
+                        let response_latency_ms = attempt_started.elapsed().as_millis() as u64;
                         let _ = sender.try_send(DownloadEvent::Diagnostic {
                             event: "http.segment_started",
                             detail: serde_json::json!({
@@ -1618,7 +1694,7 @@ impl DownloadEngine {
                                 "transportAttempts": transport_attempts,
                                 "http3Preferred": prefer_http3,
                                 "http3Used": used_http3,
-                                "responseHeaderMs": response_header_ms,
+                                "responseLatencyMs": response_latency_ms,
                                 "transport": protocol
                             }),
                         });
@@ -1741,7 +1817,7 @@ impl DownloadEngine {
                                 "http3Preferred": prefer_http3,
                                 "http3Used": used_http3,
                                 "elapsedMs": elapsed_ms,
-                                "responseHeaderMs": response_header_ms,
+                                "responseLatencyMs": response_latency_ms,
                                 "firstByteWaitMs": first_byte_wait_ms,
                                 "transitionGapMs": transition_gap_ms,
                                 "bytesPerSecond": if elapsed_ms > 0 {
@@ -1795,6 +1871,78 @@ impl DownloadEngine {
         clear_segment_journal(&request.destination).await;
         cleanup_chunk_artifacts(&request.destination).await?;
         finish_download(&request, &partial, total, Some(total), &events).await
+    }
+}
+
+fn count_enabled_workers(states: &[AdaptiveWorkerState]) -> usize {
+    states
+        .iter()
+        .filter(|state| state.enabled.load(Ordering::Acquire))
+        .count()
+}
+
+fn enable_workers_to(states: &[AdaptiveWorkerState], desired: usize) -> Vec<usize> {
+    let desired = desired.min(states.len());
+    let mut enabled = count_enabled_workers(states);
+    let mut added = Vec::new();
+    if enabled >= desired {
+        return added;
+    }
+    for (index, state) in states.iter().enumerate() {
+        if enabled >= desired {
+            break;
+        }
+        if !state.enabled.swap(true, Ordering::AcqRel) {
+            enabled += 1;
+            added.push(index);
+        }
+    }
+    added
+}
+
+fn retain_fastest_workers(
+    states: &[AdaptiveWorkerState],
+    ewma_rates: &[f64],
+    desired: usize,
+) -> (Vec<usize>, Vec<usize>) {
+    let mut enabled = states
+        .iter()
+        .enumerate()
+        .filter_map(|(index, state)| {
+            state.enabled.load(Ordering::Acquire).then_some(index)
+        })
+        .collect::<Vec<_>>();
+    enabled.sort_by(|left, right| {
+        ewma_rates[*right]
+            .total_cmp(&ewma_rates[*left])
+            .then_with(|| left.cmp(right))
+    });
+    let keep = desired.min(enabled.len()).max(1);
+    let retained = enabled.iter().take(keep).copied().collect::<Vec<_>>();
+    let retained_set = retained.iter().copied().collect::<HashSet<_>>();
+    let disabled = enabled
+        .iter()
+        .filter(|index| !retained_set.contains(index))
+        .copied()
+        .collect::<Vec<_>>();
+    for (index, state) in states.iter().enumerate() {
+        if state.enabled.load(Ordering::Acquire) {
+            state
+                .enabled
+                .store(retained_set.contains(&index), Ordering::Release);
+        }
+    }
+    (retained, disabled)
+}
+
+fn transport_name(version: reqwest::Version) -> &'static str {
+    match version {
+        reqwest::Version::HTTP_09 => "http09",
+        reqwest::Version::HTTP_10 => "http10",
+        reqwest::Version::HTTP_11 => "http11",
+        reqwest::Version::HTTP_2 => "http2",
+        reqwest::Version::HTTP_3 => "http3",
+        _ => "unknown",
     }
 }
 
@@ -2534,6 +2682,24 @@ mod tests {
                 .unwrap(),
         );
         assert!(advertised_repr_sha256(&headers).is_none());
+    }
+
+    #[test]
+    fn adaptive_downscale_retains_the_fastest_workers() {
+        let states = (0..4)
+            .map(|_| AdaptiveWorkerState::new())
+            .collect::<Vec<_>>();
+        for state in &states {
+            state.enabled.store(true, Ordering::Release);
+        }
+        let rates = vec![1.0, 90.0, 5.0, 70.0];
+        let (retained, disabled) = retain_fastest_workers(&states, &rates, 2);
+        assert_eq!(retained, vec![1, 3]);
+        assert_eq!(disabled, vec![2, 0]);
+        assert!(!states[0].enabled.load(Ordering::Acquire));
+        assert!(states[1].enabled.load(Ordering::Acquire));
+        assert!(!states[2].enabled.load(Ordering::Acquire));
+        assert!(states[3].enabled.load(Ordering::Acquire));
     }
 
     #[test]
