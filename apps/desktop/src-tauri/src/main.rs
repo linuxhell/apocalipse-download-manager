@@ -10567,7 +10567,10 @@ async fn remove_downloads(
         .collect::<Vec<_>>();
 
     let gopeed_targets = {
-        let gopeed_tasks = state.gopeed_tasks.lock().map_err(|error| error.to_string())?;
+        let gopeed_tasks = state
+            .gopeed_tasks
+            .lock()
+            .map_err(|error| error.to_string())?;
         removed
             .iter()
             .filter_map(|task| {
