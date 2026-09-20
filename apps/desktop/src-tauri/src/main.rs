@@ -3335,7 +3335,7 @@ fn run_link_server(app: tauri::AppHandle, listener: TcpListener, tls_config: Arc
 #[tauri::command]
 fn inspect_url(url: String) -> Result<PlanResponse, String> {
     let capabilities = Capabilities {
-        gopeed: true,
+        aria2: true,
         yt_dlp: true,
         n_m3u8dl_re: true,
         torrent: false,
@@ -4598,13 +4598,11 @@ async fn run_gopeed_download(
         }
     };
     let (context, connections) = gopeed_request_context(&state, &task);
-    let existing_task = task.gopeed_task_id.clone().or_else(|| {
-        state
-            .gopeed_tasks
-            .lock()
-            .ok()
-            .and_then(|items| items.get(&id).cloned())
-    });
+    let existing_task = state
+        .gopeed_tasks
+        .lock()
+        .ok()
+        .and_then(|items| items.get(&id).cloned());
     let gopeed_id = match existing_task {
         Some(gopeed_id) => {
             if let Err(error) = endpoint.resume(&gopeed_id).await {
@@ -4673,10 +4671,6 @@ async fn run_gopeed_download(
                     if let Ok(mut items) = state.gopeed_tasks.lock() {
                         items.insert(id, gopeed_id.clone());
                     }
-                    let persisted_id = gopeed_id.clone();
-                    update_task(&app, id, true, |item| {
-                        item.gopeed_task_id = Some(persisted_id.clone());
-                    });
                     gopeed_id
                 }
                 Err(error) => {
@@ -10572,14 +10566,18 @@ async fn remove_downloads(
         .cloned()
         .collect::<Vec<_>>();
 
-    let gopeed_targets = removed
-        .iter()
-        .filter_map(|task| {
-            task.gopeed_task_id
-                .clone()
-                .map(|gopeed_id| (task.clone(), gopeed_id))
-        })
-        .collect::<Vec<_>>();
+    let gopeed_targets = {
+        let gopeed_tasks = state.gopeed_tasks.lock().map_err(|error| error.to_string())?;
+        removed
+            .iter()
+            .filter_map(|task| {
+                gopeed_tasks
+                    .get(&task.id)
+                    .cloned()
+                    .map(|gopeed_id| (task.clone(), gopeed_id))
+            })
+            .collect::<Vec<_>>()
+    };
     let mut torrent_payload_cleanup = false;
     if !gopeed_targets.is_empty() {
         let endpoint = gopeed_endpoint(&state).await?;
@@ -10615,11 +10613,11 @@ async fn remove_downloads(
     }
     if torrent_payload_cleanup {
         let other_gopeed_tasks_remain = state
-            .queue
+            .gopeed_tasks
             .lock()
             .map_err(|error| error.to_string())?
-            .iter()
-            .any(|task| !ids.contains(&task.id) && task.gopeed_task_id.is_some());
+            .keys()
+            .any(|task_id| !ids.contains(task_id));
         if !other_gopeed_tasks_remain {
             // Gopeed is a shared local backend. If the removed torrent was the
             // last Gopeed task, terminate it before deleting the payload so
