@@ -2593,6 +2593,7 @@ document.querySelector("#enqueue").onclick = async () => {
         connectionsOverride: taskConnectionsManuallyChanged
           ? Number(document.querySelector("#task-connections").value) || 16
           : null,
+        autoExtract: document.querySelector("#auto-extract-option").hidden ? false : document.querySelector("#auto-extract").checked,
         context: {
           traceId: pendingDiagnosticTrace,
           referer: pendingReferer,
@@ -2616,6 +2617,8 @@ document.querySelector("#enqueue").onclick = async () => {
     document.querySelector("#mirrors").value = "";
     document.querySelector("#priority").value = "0";
     document.querySelector("#download-bandwidth-limit").value = "0";
+    document.querySelector("#auto-extract").checked = false;
+    document.querySelector("#auto-extract-option").hidden = true;
     resetTaskConnections();
     pendingTitle = null;
     pendingThumbnail = null;
