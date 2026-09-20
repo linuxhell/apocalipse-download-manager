@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod diagnostics_v3;
 mod aria2;
+mod diagnostics_v3;
 mod prepared_preview;
 mod thumbnail_cache;
 mod tiktok_preview;
@@ -275,7 +275,6 @@ fn requires_native_http_compatibility(url: &str) -> bool {
         value == "oaiusercontent.com" || value.ends_with(".oaiusercontent.com")
     })
 }
-
 
 #[derive(Clone, Deserialize, Serialize)]
 struct UserSettings {
@@ -4824,10 +4823,7 @@ async fn log_network_route(state: &AppState, operation: &str, engine: &str) {
     }
 }
 
-fn aria2_request_context(
-    state: &AppState,
-    task: &DownloadTask,
-) -> (aria2::RequestContext, usize) {
+fn aria2_request_context(state: &AppState, task: &DownloadTask) -> (aria2::RequestContext, usize) {
     let settings = state
         .settings
         .lock()
@@ -4853,7 +4849,11 @@ fn aria2_request_context(
         .as_ref()
         .and_then(|rule| rule.user_agent.as_ref())
         .or(settings.user_agent.as_ref())
-        .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_ref()))
+        .or_else(|| {
+            identity
+                .as_ref()
+                .and_then(|value| value.user_agent.as_ref())
+        })
     {
         headers.insert("User-Agent".to_owned(), user_agent.clone());
     }
@@ -7324,7 +7324,11 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             ),
             "aria2" => (
                 "Kenshin9977/aria2",
-                if cfg!(windows) { "aria2c.exe" } else { "aria2c" },
+                if cfg!(windows) {
+                    "aria2c.exe"
+                } else {
+                    "aria2c"
+                },
                 aria2_markers.as_slice(),
                 &["--version"],
             ),
@@ -7691,7 +7695,9 @@ async fn inspect_torrent_metadata(
         .join("aria2-metadata-inspection")
         .join(uuid::Uuid::new_v4().simple().to_string());
     fs::create_dir_all(&inspection_root).map_err(|error| error.to_string())?;
-    let gid = endpoint.add_metadata_only(&source, &inspection_root).await?;
+    let gid = endpoint
+        .add_metadata_only(&source, &inspection_root)
+        .await?;
     let mut resolved_files = Vec::new();
     for _ in 0..120 {
         if let Ok(files) = endpoint.files(&gid).await {
@@ -8260,7 +8266,10 @@ fn start_download(
             .and_then(|items| items.get(&task.id).cloned())
             .is_some_and(|identity| {
                 !identity.request_method.eq_ignore_ascii_case("GET")
-                    || identity.request_body.as_deref().is_some_and(|body| !body.is_empty())
+                    || identity
+                        .request_body
+                        .as_deref()
+                        .is_some_and(|body| !body.is_empty())
             });
     let native_http_compatibility = kind == DownloadKind::Http
         && (requires_native_http_compatibility(&task.source) || special_http_request);
