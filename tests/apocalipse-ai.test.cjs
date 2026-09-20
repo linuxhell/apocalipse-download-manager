@@ -76,7 +76,10 @@ test('direct downloads use automatic high-speed defaults without bypassing site 
   assert.match(app, /taskConnectionsManuallyChanged\s*\?\s*Number/);
   assert.match(app, /taskConnectionsManuallyChanged = false/);
   assert.match(desktop, /limits\.connections_per_download\.max\(16\)/);
-  assert.match(downloadCore, /SEGMENT_CHUNK_SIZE: u64 = 64 \* 1024 \* 1024/);
+  assert.match(downloadCore, /MIN_SEGMENT_CHUNK_SIZE: u64 = 4 \* 1024 \* 1024/);
+  assert.match(downloadCore, /MAX_SEGMENT_CHUNK_SIZE: u64 = 512 \* 1024 \* 1024/);
+  assert.match(downloadCore, /adaptive_chunk_size/);
+  assert.match(downloadCore, /download_from_sources/);
   assert.match(downloadCore, /WORKER_START_INTERVAL_MS: u64 = 35/);
   assert.match(desktop, /task\.connections_override = site_connection_override\(&url, connections_override\)/);
 });
@@ -151,6 +154,95 @@ test('answers stay in English and Simplified Chinese when selected', () => {
   assert.match(AI.respond('隐私怎么样？', { locale: 'zh-CN' }).text, /本地运行/);
 });
 
+test('Apocalipse AI always obeys the application-selected language, not the question language', () => {
+  const engineEvents = [
+    { event: 'http.transfer_started', detail: { activeConnections: 16 } },
+    { event: 'http.engine_plan', detail: { activeConnections: 16, sourceCount: 2 } },
+    { event: 'http.performance_sample', detail: { bytesPerSecond: 100 * 1024 * 1024, activeConnections: 16 } },
+    { event: 'http.performance_sample', detail: { bytesPerSecond: 50 * 1024 * 1024, activeConnections: 16 } },
+    { event: 'http.segment_completed', detail: { bytesPerSecond: 80 * 1024 * 1024, attempts: 2, sourceCount: 2, transport: 'HTTP/2' } },
+  ];
+
+  const englishUi = AI.respond('por que meu download está lento?', { locale: 'en', engineEvents });
+  assert.match(englishUi.text, /^The transfer-engine telemetry/);
+  assert.doesNotMatch(englishUi.text, /^A telemetria do motor/);
+
+  const portugueseUi = AI.respond('why is my download slow?', { locale: 'pt-BR', engineEvents });
+  assert.match(portugueseUi.text, /^A telemetria do motor/);
+
+  const chineseUi = AI.respond('why is my download slow?', { locale: 'zh-CN', engineEvents });
+  assert.match(chineseUi.text, /^传输引擎遥测/);
+});
+
+test('Apocalipse AI explains measured slowdown and mirror recovery from engine telemetry', () => {
+  const engineEvents = [
+    { event: 'http.engine_plan', detail: { activeConnections: 16, sourceCount: 3 } },
+    { event: 'http.performance_sample', detail: { bytesPerSecond: 120 * 1024 * 1024, activeConnections: 16 } },
+    { event: 'http.performance_sample', detail: { bytesPerSecond: 48 * 1024 * 1024, activeConnections: 16 } },
+    { event: 'http.segment_completed', detail: { attempts: 2, sourceCount: 3, transport: 'HTTP/2' } },
+  ];
+  const answer = AI.respond('meu download está lento, qual o gargalo?', { locale: 'pt-BR', engineEvents }).text;
+  assert.match(answer, /48\.0 MB\/s/);
+  assert.match(answer, /120 MB\/s/);
+  assert.match(answer, /16 conexão/);
+  assert.match(answer, /3 fonte/);
+  assert.match(answer, /HTTP\/2/);
+  assert.match(answer, /40% do pico/);
+  assert.match(answer, /fallback de mirrors/);
+});
+
+test('AI UI retrieves privacy-safe engine diagnostics and passes the selected language', () => {
+  assert.match(aiUi, /invoke\("read_ai_diagnostics"\)/);
+  assert.match(aiUi, /locale: language\(\)/);
+  assert.match(aiUi, /application-selected language is authoritative/);
+  assert.match(desktop, /fn read_ai_diagnostics/);
+  assert.match(desktop, /ai_snapshot\(750\)/);
+});
+
+test('per-site transfer rules are exposed in all three languages and wired to the vault-backed backend', () => {
+  assert.match(app, /hostRules: "Per-site transfer rules"/);
+  assert.match(app, /hostRules: "Regras de transferência por site"/);
+  assert.match(app, /hostRules: "按网站传输规则"/);
+  assert.match(app, /invoke\("list_host_rules"\)/);
+  assert.match(app, /invoke\("save_host_rule"/);
+  assert.match(app, /invoke\("remove_host_rule"/);
+  assert.match(desktop, /fn host_rule_for_url/);
+  assert.match(desktop, /fn effective_credential_for_download/);
+  assert.match(desktop, /host_rule_vault_account/);
+  assert.match(desktop, /connections_override[\s\S]{0,180}host_rule[\s\S]{0,120}connections/);
+});
+
+test('Apocalipse AI blinks the alien for new releases and exposes a safe clickable Releases link', () => {
+  assert.equal(AI.say('pt-BR', 'updateReleaseLink'), 'Abrir Releases oficial');
+  assert.equal(AI.say('en', 'updateReleaseLink'), 'Open official Releases');
+  assert.equal(AI.say('zh-CN', 'updateReleaseLink'), '打开官方 Releases');
+  assert.match(aiUi, /UPDATE_INTERVAL_MS = 6 \* 60 \* 60 \* 1000/);
+  assert.match(aiUi, /ai-update-available/);
+  assert.match(aiUi, /UPDATE_ACK_KEY/);
+  assert.match(aiUi, /kind === "update_available"/);
+  assert.match(aiUi, /open_apocalipse_releases/);
+  assert.match(aiUi, /github\.com\/linuxhell\/apocalipse-download-manager\/releases/);
+  assert.match(css, /@keyframes ai-update-alien/);
+  assert.match(css, /\.ai-message-link/);
+  assert.match(desktop, /release_url: String/);
+  assert.match(desktop, /fn valid_apocalipse_release_url/);
+  assert.match(desktop, /fn open_apocalipse_releases/);
+  assert.match(desktop, /path\.starts_with\("\/linuxhell\/apocalipse-download-manager\/releases\/"\)/);
+});
+
+test('thumbnails use the validated persistent cache instead of direct remote rendering', () => {
+  assert.match(app, /invoke\("resolve_thumbnail", \{ url \}\)/);
+  assert.match(app, /resolveCachedThumbnail\(requestedThumbnail\)/);
+  assert.match(app, /loadPreviewThumbnail\(image, thumbnail\)/);
+  assert.doesNotMatch(app, /thumbnail\.src = task\.thumbnail/);
+  assert.doesNotMatch(app, /image\.src = thumbnail/);
+  assert.match(desktop, /mod thumbnail_cache;/);
+  assert.match(desktop, /async fn resolve_thumbnail_internal/);
+  assert.match(desktop, /prefetch_thumbnail\(app\.clone\(\), thumbnail\)/);
+  assert.match(desktop, /thumbnail\.cache_hit/);
+  assert.match(desktop, /thumbnail\.cached/);
+});
+
 test('site credential commands use the existing secure settings action', () => {
   const pt = AI.respond('adicione uma regra para o site https://exemplo.com nome de usuário juliano e senha segredo forte', { locale: 'pt-BR' });
   assert.equal(pt.intent, 'credential_save');
@@ -203,7 +295,7 @@ test('the exact chat commands reported by the user are understood', () => {
 });
 
 test('welcome message follows language changes and the composer stays fixed', () => {
-  assert.match(aiUi, /isGreeting \? AI\.say\(language\(\), "hello"\)/);
+  assert.match(aiUi, /isGreeting[\s\S]{0,140}AI\.say\(language\(\), "hello"\)/);
   assert.match(aiUi, /apocalipse-language-changed/);
   assert.match(app, /dispatchEvent\(new CustomEvent\("apocalipse-language-changed"/);
   assert.match(css, /grid-template-rows:auto minmax\(0,1fr\) auto auto/);

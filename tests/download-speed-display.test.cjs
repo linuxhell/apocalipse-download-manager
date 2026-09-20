@@ -16,6 +16,23 @@ const tauri = JSON.parse(
 const desktopHtml = fs.readFileSync(path.join(root, "apps/desktop/ui/index.html"), "utf8");
 const desktopCss = fs.readFileSync(path.join(root, "apps/desktop/ui/styles.css"), "utf8");
 
+test("native HTTP speed uses a multi-second EWMA instead of noisy quarter-second jumps", () => {
+  assert.match(ui, /const SPEED_EWMA_SECONDS = 2\.0/);
+  assert.match(ui, /1 - Math\.exp\(-elapsed \/ SPEED_EWMA_SECONDS\)/);
+  assert.match(desktop, /smoothedBytesPerSecond/);
+  assert.match(desktop, /bytes_per_second as f64 >= display_rate_ewma/);
+  assert.match(desktop, /0\.80/);
+  assert.match(desktop, /0\.35/);
+  assert.match(desktop, /task\.download_speed = Some\(smoothed_bytes_per_second\)/);
+});
+
+test("list-and-files removal passes a fixed true flag instead of a dataset-derived mode", () => {
+  assert.match(desktopHtml, /id="clear-list-and-files"[^>]*data-clear-mode="files"/);
+  assert.match(ui, /removeSelectedDownloads\(event\.currentTarget, true\)/);
+  assert.match(desktop, /"task\.removal_disk_cleanup"/);
+  assert.match(desktop, /chunkArtifactsRemaining/);
+});
+
 test("active downloads keep the engine-reported speed visible", () => {
   assert.match(
     ui,
@@ -62,12 +79,11 @@ test("removing a media task terminates yt-dlp and every child process", () => {
   assert.match(desktop, /child\.wait\(\)\.await/);
 });
 
-test("Facebook composite links are canonicalized and downloads use segmented aria2", () => {
+test("Facebook composite links are canonicalized without an aria2 dependency", () => {
   assert.match(desktop, /fn canonical_facebook_video_url/);
   assert.match(desktop, /Some\(format!\("https:\/\/www\.facebook\.com\/watch\/\?v=\{video_id\}"\)\)/);
-  assert.match(desktop, /\.arg\("--downloader"\)\s*\.arg\(&tools\.3\)/);
-  assert.match(desktop, /aria2c:-x\{media_connections\} -s\{media_connections\} -k1M/);
-  assert.match(desktop, /parse_aria2_progress\(&progress_buffer\)/);
+  assert.doesNotMatch(desktop, /aria2c|parse_aria2_progress|Aria2Rpc/);
+  assert.match(desktop, /run_gopeed_download/);
 });
 
 test("streamed browser recordings publish a global core speed", () => {

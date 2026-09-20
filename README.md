@@ -71,14 +71,25 @@ Apocalipse combines fast resumable downloads, media discovery, streaming capture
 - HLS recording to MP4/AAC where the stream and applicable law permit it
 - Native tray integration and a low-memory background mode
 - Complete UI localization: English by default, Brazilian Portuguese and Simplified Chinese, including the extension
-- Explainable strategy selection with optional aria2 RPC and automatic content validation
+- Explainable strategy selection with optional Gopeed backend and automatic content validation
 - Removable per-site credentials backed by the operating system secure vault
 - Windows 10+, modern Linux distributions and macOS 13+
 
 Sites protected by DRM or access controls are intentionally not bypassed. Users are responsible for downloading only content they are authorized to save.
 
-> [!WARNING]
-> The current Apocalipse Link transport is not end-to-end encrypted. Use it only on a trusted local network or through a trusted VPN. Internet relay, transport encryption and resumable transfers remain planned hardening work.
+> [!IMPORTANT]
+> Apocalipse Link uses an encrypted TLS transport, operating-system account authentication and trust on first use (TOFU) certificate pinning. Only explicitly shared files, folders and drives are exposed with their configured read-only or read/write permission. For an Internet connection, the listening port must still be reachable through the firewall/router or a trusted VPN.
+
+## Competitive engineering priorities
+
+Apocalipse already combines general downloads, browser media discovery, streaming capture, torrents, eD2k workflows, diagnostics and direct computer-to-computer transfers. Its next engineering priorities are depth and measurable reliability rather than feature count:
+
+- strengthen the native HTTP engine with adaptive range scheduling, slow-connection recovery and live mirror rebalancing;
+- publish reproducible benchmarks against Gopeed, aria2c and other download engines, including throughput, CPU, memory, retry behavior and integrity under latency and packet loss;
+- improve packaging and distribution while preserving the portable builds;
+- keep refining interface consistency, accessibility and first-run behavior.
+
+Benchmark claims will only be published with repeatable scripts, identical connection counts, verified output hashes and raw results. Vendor-authored benchmark numbers are treated as hypotheses until independently reproduced.
 
 ## Architecture
 

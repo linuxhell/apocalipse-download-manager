@@ -544,6 +544,7 @@ impl Diagnostics {
         let mut players = HashMap::<String, Value>::new();
         let mut decisions = Vec::new();
         let mut media_replay = Vec::new();
+        let mut transfer_engine = Vec::new();
         let mut contexts = HashSet::new();
         let mut warnings = Vec::new();
         for record in &records {
@@ -572,6 +573,21 @@ impl Diagnostics {
                 let key = format!("{}:{}", record["contextId"], name);
                 players.insert(key, record.clone());
             }
+            if name.starts_with("http.engine_")
+                || name.starts_with("http.resume_")
+                || name.starts_with("http.segment_")
+                || name.starts_with("http.performance_")
+                || name.starts_with("http.scheduler_")
+                || name.starts_with("http.connection_")
+                || name.starts_with("http.capacity_")
+                || name.starts_with("http.transfer_")
+                || name.starts_with("http.transport_")
+                || name.starts_with("http.range_")
+                || name.starts_with("http.remote_")
+                || name.starts_with("http.integrity_")
+            {
+                transfer_engine.push(record.clone());
+            }
             if ["ERROR", "WARN"].contains(&record["level"].as_str().unwrap_or("")) {
                 warnings.push(record);
             }
@@ -587,6 +603,153 @@ impl Diagnostics {
             "firstSequence":items.first().map(|v| &v["serverSequence"]),
             "lastStage":items.last().map(|v| &v["event"]),"interpretation":"last_observed_stage_not_proven_root_cause"})).collect::<Vec<_>>();
         action_rows.sort_by_key(|v| v["firstSequence"].as_u64().unwrap_or(0));
+
+        let performance_samples = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.performance_sample")
+            .collect::<Vec<_>>();
+        let scheduler_samples = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.scheduler_sample")
+            .collect::<Vec<_>>();
+        let admission_events = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.connection_admission")
+            .collect::<Vec<_>>();
+        let capacity_events = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.capacity_observed")
+            .collect::<Vec<_>>();
+        let segment_samples = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.segment_completed")
+            .collect::<Vec<_>>();
+        let mut performance_rates = performance_samples
+            .iter()
+            .filter_map(|record| record["detail"]["bytesPerSecond"].as_u64())
+            .collect::<Vec<_>>();
+        performance_rates.sort_unstable();
+        let peak_bytes_per_second = performance_rates.iter().copied().max().unwrap_or(0);
+        let minimum_bytes_per_second = performance_rates.iter().copied().min().unwrap_or(0);
+        let average_performance_bytes_per_second = if performance_rates.is_empty() {
+            0
+        } else {
+            performance_rates.iter().sum::<u64>() / performance_rates.len() as u64
+        };
+        let median_performance_bytes_per_second = if performance_rates.is_empty() {
+            0
+        } else {
+            performance_rates[performance_rates.len() / 2]
+        };
+        let average_segment_bytes_per_second = if segment_samples.is_empty() {
+            0
+        } else {
+            segment_samples
+                .iter()
+                .filter_map(|record| record["detail"]["bytesPerSecond"].as_u64())
+                .sum::<u64>()
+                / segment_samples.len() as u64
+        };
+        let mirror_fallback_segments = segment_samples
+            .iter()
+            .filter(|record| record["detail"]["attempts"].as_u64().unwrap_or(1) > 1)
+            .count();
+        let range_steals = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.range_stolen")
+            .count();
+        let stolen_bytes = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.range_stolen")
+            .filter_map(|record| record["detail"]["stolenBytes"].as_u64())
+            .sum::<u64>();
+        let remote_checksums = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.remote_checksum")
+            .count();
+        let integrity_checks = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.integrity_check")
+            .count();
+        let max_source_count = transfer_engine
+            .iter()
+            .filter_map(|record| record["detail"]["sourceCount"].as_u64())
+            .max()
+            .unwrap_or(0);
+        let transition_gaps = segment_samples
+            .iter()
+            .filter_map(|record| record["detail"]["transitionGapMs"].as_u64())
+            .collect::<Vec<_>>();
+        let average_transition_gap_ms = if transition_gaps.is_empty() {
+            0
+        } else {
+            transition_gaps.iter().sum::<u64>() / transition_gaps.len() as u64
+        };
+        let max_transition_gap_ms = transition_gaps.iter().copied().max().unwrap_or(0);
+        let reprobes_after_capacity_drop = admission_events
+            .iter()
+            .filter(|record| {
+                matches!(
+                    record["detail"]["decision"].as_str(),
+                    Some("reprobe_after_capacity_drop")
+                        | Some("reprobe_after_sustained_capacity_drop")
+                )
+            })
+            .count();
+        let rejected_admission_levels = admission_events
+            .iter()
+            .filter(|record| record["detail"]["decision"] == "reject_marginal_level")
+            .count();
+        let suppressed_recent_reprobes = admission_events
+            .iter()
+            .filter(|record| record["detail"]["decision"] == "reprobe_suppressed_recent_rejection")
+            .count();
+        let worker_stall_snapshots = scheduler_samples
+            .iter()
+            .filter(|record| {
+                record["detail"]["workers"]
+                    .as_array()
+                    .is_some_and(|workers| {
+                        workers.iter().any(|worker| {
+                            worker["lastProgressAgeMs"].as_u64().unwrap_or(0) >= 1_500
+                        })
+                    })
+            })
+            .count();
+        let mut transports = HashMap::<String, u64>::new();
+        for record in &segment_samples {
+            if let Some(transport) = record["detail"]["transport"].as_str() {
+                *transports.entry(transport.to_owned()).or_default() += 1;
+            }
+        }
+        let transfer_summary = json!({
+            "telemetryVersion": 2,
+            "events": transfer_engine.len(),
+            "performanceSamples": performance_samples.len(),
+            "schedulerSamples": scheduler_samples.len(),
+            "connectionAdmissionEvents": admission_events.len(),
+            "capacityObservations": capacity_events.len(),
+            "segmentsCompleted": segment_samples.len(),
+            "minimumPerformanceBytesPerSecond": minimum_bytes_per_second,
+            "averagePerformanceBytesPerSecond": average_performance_bytes_per_second,
+            "medianPerformanceBytesPerSecond": median_performance_bytes_per_second,
+            "peakBytesPerSecond": peak_bytes_per_second,
+            "averageSegmentBytesPerSecond": average_segment_bytes_per_second,
+            "averageTransitionGapMs": average_transition_gap_ms,
+            "maxTransitionGapMs": max_transition_gap_ms,
+            "reprobesAfterCapacityDrop": reprobes_after_capacity_drop,
+            "rejectedAdmissionLevels": rejected_admission_levels,
+            "suppressedRecentReprobes": suppressed_recent_reprobes,
+            "workerStallSnapshots": worker_stall_snapshots,
+            "mirrorFallbackSegments": mirror_fallback_segments,
+            "rangeSteals": range_steals,
+            "stolenBytes": stolen_bytes,
+            "remoteChecksums": remote_checksums,
+            "integrityChecks": integrity_checks,
+            "maxSourceCount": max_source_count,
+            "transports": transports,
+            "interpretation": "observed_transfer_metrics_not_a_cross_product_benchmark"
+        });
         let mut report = format!("ADM - DIAGNOSTICO V3 / DIAGNOSTICS V3\n\nAplicativo / Application: {}\nBuild: {}\nSessao / Session: {}\nEventos / Events: {} | Contextos / Contexts: {} | WARN/ERROR: {}\n\nFATOS REGISTRADOS / RECORDED FACTS\n",
             env!("CARGO_PKG_VERSION"),option_env!("ADM_BUILD_SHA").unwrap_or("unknown"),store.config["sessionId"],records.len(),contexts.len(),warnings.len());
         if records.is_empty() {
@@ -618,6 +781,10 @@ impl Diagnostics {
             }
         }
         report.push_str(&format!(
+            "\nTELEMETRIA DO MOTOR / TRANSFER ENGINE TELEMETRY\n{}\n",
+            serde_json::to_string_pretty(&transfer_summary).unwrap_or_default()
+        ));
+        report.push_str(&format!(
             "\nSAUDE DOS COLETORES / COLLECTOR HEALTH\n{}\n",
             serde_json::to_string_pretty(&health).unwrap_or_default()
         ));
@@ -639,6 +806,32 @@ impl Diagnostics {
             ("traces/replay-de-midia.jsonl".into(), jsonl(&media_replay)),
             ("capture/media-decisions.jsonl".into(), jsonl(&decisions)),
             (
+                "performance/transfer-engine.jsonl".into(),
+                jsonl(&transfer_engine),
+            ),
+            (
+                "performance/scheduler-samples.jsonl".into(),
+                jsonl(
+                    &scheduler_samples
+                        .iter()
+                        .map(|record| (*record).clone())
+                        .collect::<Vec<_>>(),
+                ),
+            ),
+            (
+                "performance/admission.jsonl".into(),
+                jsonl(
+                    &admission_events
+                        .iter()
+                        .map(|record| (*record).clone())
+                        .collect::<Vec<_>>(),
+                ),
+            ),
+            (
+                "performance/summary.json".into(),
+                serde_json::to_vec_pretty(&transfer_summary).unwrap_or_default(),
+            ),
+            (
                 "state/players-popup.json".into(),
                 serde_json::to_vec_pretty(&players).unwrap_or_default(),
             ),
@@ -648,6 +841,21 @@ impl Diagnostics {
             ),
         ]
     }
+    pub(super) fn ai_snapshot(&self, limit: usize) -> Vec<Value> {
+        let Ok(store) = self.inner.lock() else {
+            return Vec::new();
+        };
+        let (records, _) = self.records_locked(&store.config["sessionId"]);
+        records
+            .into_iter()
+            .rev()
+            .take(limit.clamp(1, 1000))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect()
+    }
+
     pub(super) fn report(&self) -> String {
         self.export()
             .into_iter()
@@ -768,6 +976,72 @@ mod tests {
         assert!(!value.to_string().contains("PRIVATE"));
         assert!(!value.to_string().contains("SECRET"));
     }
+    #[test]
+    fn transfer_engine_events_get_a_separate_performance_export() {
+        let (diag, path) = setup();
+        diag.control("start", None).unwrap();
+        let task = uuid::Uuid::new_v4().to_string();
+        diag.record(
+            "http.performance_sample",
+            "INFO",
+            None,
+            Some(&task),
+            json!({"bytesPerSecond":125000000u64,"activeConnections":16}),
+        );
+        diag.record(
+            "http.scheduler_sample",
+            "INFO",
+            None,
+            Some(&task),
+            json!({"bytesPerSecond":250000000u64,"admittedConnections":2,"workers":[]}),
+        );
+        diag.record(
+            "http.connection_admission",
+            "INFO",
+            None,
+            Some(&task),
+            json!({"decision":"reject_marginal_level","admittedConnections":2}),
+        );
+        diag.record(
+            "http.capacity_observed",
+            "INFO",
+            None,
+            Some(&task),
+            json!({"sustainedBytesPerSecond":130000000u64}),
+        );
+        diag.record(
+            "http.segment_completed",
+            "INFO",
+            None,
+            Some(&task),
+            json!({"bytesPerSecond":120000000u64,"attempts":2,"sourceCount":3,"transport":"HTTP/2","transitionGapMs":42}),
+        );
+        let exports = diag.export();
+        let summary = exports
+            .iter()
+            .find(|(name, _)| name == "performance/summary.json")
+            .map(|(_, bytes)| serde_json::from_slice::<Value>(bytes).unwrap())
+            .unwrap();
+        assert_eq!(summary["telemetryVersion"], 2);
+        assert_eq!(summary["peakBytesPerSecond"], 125000000u64);
+        assert_eq!(summary["schedulerSamples"], 1);
+        assert_eq!(summary["connectionAdmissionEvents"], 1);
+        assert_eq!(summary["capacityObservations"], 1);
+        assert_eq!(summary["maxTransitionGapMs"], 42);
+        assert_eq!(summary["mirrorFallbackSegments"], 1);
+        assert_eq!(summary["maxSourceCount"], 3);
+        assert!(exports
+            .iter()
+            .any(|(name, _)| name == "performance/transfer-engine.jsonl"));
+        assert!(exports
+            .iter()
+            .any(|(name, _)| name == "performance/scheduler-samples.jsonl"));
+        assert!(exports
+            .iter()
+            .any(|(name, _)| name == "performance/admission.jsonl"));
+        let _ = fs::remove_dir_all(path);
+    }
+
     #[test]
     fn clear_removes_detailed_session_and_preserves_other_files() {
         let (diag, path) = setup();

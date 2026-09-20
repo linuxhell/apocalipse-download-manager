@@ -1,16 +1,23 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod diagnostics_v3;
+mod gopeed;
 mod prepared_preview;
+mod thumbnail_cache;
 mod tiktok_preview;
 
 use apocalipse_core::{
-    classify_url, cleanup_chunk_artifacts, contextual_media_page, partial_path, plan_download,
-    BandwidthLimiter, Capabilities, DownloadEngine, DownloadEvent, DownloadId, DownloadKind,
-    DownloadRequest, DownloadState, DownloadTask,
+    chunk_directory, classify_url, cleanup_chunk_artifacts, contextual_media_page, parse_metalink,
+    partial_path, plan_download, BandwidthLimiter, Capabilities, DownloadEngine, DownloadEvent,
+    DownloadId, DownloadKind, DownloadRequest, DownloadState, DownloadTask,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use futures_util::StreamExt;
+use rustls::{
+    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime},
+    ClientConfig, ClientConnection, DigitallySignedStruct, ServerConfig, ServerConnection,
+    SignatureScheme, StreamOwned,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -18,7 +25,7 @@ use std::{
     fs,
     fs::OpenOptions,
     io::{Read, Write},
-    net::{TcpListener, TcpStream},
+    net::{IpAddr, TcpListener, TcpStream, UdpSocket},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{Arc, Mutex},
@@ -28,13 +35,174 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, State,
+    Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncReadExt,
     sync::{mpsc, oneshot},
 };
+use zeroize::Zeroize;
+
+#[cfg(windows)]
+use std::{
+    ffi::{c_void, OsStr},
+    os::windows::ffi::OsStrExt,
+};
+
+#[cfg(unix)]
+use std::{
+    ffi::c_void,
+    os::raw::{c_char, c_int},
+};
+
+#[cfg(windows)]
+#[link(name = "advapi32")]
+extern "system" {
+    fn LogonUserW(
+        username: *const u16,
+        domain: *const u16,
+        password: *const u16,
+        logon_type: u32,
+        logon_provider: u32,
+        token: *mut *mut c_void,
+    ) -> i32;
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn CloseHandle(object: *mut c_void) -> i32;
+}
+
+#[cfg(windows)]
+#[repr(C)]
+struct WindowsShareInfo2 {
+    netname: *mut u16,
+    share_type: u32,
+    remark: *mut u16,
+    permissions: u32,
+    max_uses: u32,
+    current_uses: u32,
+    path: *mut u16,
+    password: *mut u16,
+}
+
+#[cfg(windows)]
+#[link(name = "netapi32")]
+extern "system" {
+    fn NetShareEnum(
+        server_name: *const u16,
+        level: u32,
+        buffer: *mut *mut u8,
+        preferred_maximum_length: u32,
+        entries_read: *mut u32,
+        total_entries: *mut u32,
+        resume_handle: *mut u32,
+    ) -> u32;
+    fn NetApiBufferFree(buffer: *mut c_void) -> u32;
+}
+
+#[cfg(unix)]
+#[repr(C)]
+struct PamMessage {
+    msg_style: c_int,
+    msg: *const c_char,
+}
+
+#[cfg(unix)]
+#[repr(C)]
+struct PamResponse {
+    resp: *mut c_char,
+    resp_retcode: c_int,
+}
+
+#[cfg(unix)]
+#[repr(C)]
+struct PamConversation {
+    conv: Option<
+        unsafe extern "C" fn(
+            c_int,
+            *const *const PamMessage,
+            *mut *mut PamResponse,
+            *mut c_void,
+        ) -> c_int,
+    >,
+    appdata_ptr: *mut c_void,
+}
+
+#[cfg(unix)]
+struct PamConversationData {
+    username: Vec<u8>,
+    password: Vec<u8>,
+}
+
+#[cfg(unix)]
+#[link(name = "pam")]
+extern "C" {
+    fn pam_start(
+        service_name: *const c_char,
+        user: *const c_char,
+        pam_conversation: *const PamConversation,
+        pam_handle: *mut *mut c_void,
+    ) -> c_int;
+    fn pam_authenticate(pam_handle: *mut c_void, flags: c_int) -> c_int;
+    fn pam_acct_mgmt(pam_handle: *mut c_void, flags: c_int) -> c_int;
+    fn pam_end(pam_handle: *mut c_void, status: c_int) -> c_int;
+}
+
+#[cfg(unix)]
+extern "C" {
+    fn calloc(count: usize, size: usize) -> *mut c_void;
+    fn free(pointer: *mut c_void);
+    fn strdup(value: *const c_char) -> *mut c_char;
+}
+
+const VAULT_SERVICE: &str = "com.linuxhell.apocalipse";
+const VAULT_BRIDGE_TOKEN: &str = "extension-bridge-token";
+const VAULT_LINK_PASSWORD: &str = "apocalipse-link-password";
+const VAULT_PROXY_PASSWORD: &str = "proxy-password";
+
+fn vault_entry(account: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(VAULT_SERVICE, account).map_err(|error| error.to_string())
+}
+
+fn vault_load(account: &str) -> Result<Option<String>, String> {
+    match vault_entry(account)?.get_password() {
+        Ok(secret) => Ok(Some(secret)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn vault_store_verified(account: &str, secret: &str) -> Result<(), String> {
+    let entry = vault_entry(account)?;
+    entry
+        .set_password(secret)
+        .map_err(|error| error.to_string())?;
+    let mut recovered = entry.get_password().map_err(|error| error.to_string())?;
+    let matches = recovered == secret;
+    recovered.zeroize();
+    if !matches {
+        return Err("credential_vault_verification_failed".to_owned());
+    }
+    Ok(())
+}
+
+fn vault_delete(account: &str) -> Result<(), String> {
+    match vault_entry(account)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn website_vault_account(host: &str) -> String {
+    format!("website:{host}")
+}
+
+fn host_rule_vault_account(pattern: &str) -> String {
+    format!("host-rule:{pattern}")
+}
 
 struct AppState {
     queue: Mutex<Vec<DownloadTask>>,
@@ -49,6 +217,8 @@ struct AppState {
     blob_uploads: Mutex<HashMap<uuid::Uuid, BlobUpload>>,
     recording_stops: Mutex<HashSet<DownloadId>>,
     request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
+    gopeed_runtime: Mutex<Option<gopeed::Runtime>>,
+    gopeed_tasks: Mutex<HashMap<DownloadId, String>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
     diagnostics: diagnostics_v3::Diagnostics,
@@ -98,8 +268,12 @@ struct UserSettings {
     #[serde(default = "default_true")]
     adaptive_efficiency: bool,
     #[serde(default)]
+    http_global_capacity: HttpCapacityEstimate,
+    #[serde(default)]
+    http_host_capacities: HashMap<String, HttpCapacityEstimate>,
+    #[serde(default)]
     global_bandwidth_limit: u64,
-    #[serde(default = "default_bridge_token")]
+    #[serde(default = "default_bridge_token", skip_serializing)]
     bridge_token: String,
     #[serde(default)]
     recent_download_directories: Vec<PathBuf>,
@@ -112,7 +286,7 @@ struct UserSettings {
     #[serde(default)]
     n_m3u8dl_re_path: Option<PathBuf>,
     #[serde(default)]
-    aria2_path: Option<PathBuf>,
+    gopeed_path: Option<PathBuf>,
     #[serde(default)]
     media_player_path: Option<PathBuf>,
     #[serde(default)]
@@ -125,18 +299,24 @@ struct UserSettings {
     proxy_url: Option<String>,
     #[serde(default)]
     proxy_username: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     proxy_password: Option<String>,
+    #[serde(default, rename = "website_credentials", skip_serializing)]
+    legacy_website_credentials: Vec<WebsiteCredential>,
     #[serde(default)]
-    website_credentials: Vec<WebsiteCredential>,
+    host_rules: Vec<HostRule>,
     #[serde(default)]
     dns_enabled: bool,
     #[serde(default)]
     dns_servers: Vec<std::net::IpAddr>,
     #[serde(default)]
     associations: HashMap<String, bool>,
-    #[serde(default = "default_link_password")]
+    #[serde(default = "default_link_password", skip_serializing)]
     link_password: String,
+    #[serde(default)]
+    link_shares: Vec<LinkShare>,
+    #[serde(default)]
+    link_trusted_certificates: HashMap<String, String>,
     #[serde(default = "default_language")]
     language: String,
     #[serde(default = "default_theme")]
@@ -172,7 +352,7 @@ fn default_bridge_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 fn default_link_password() -> String {
-    uuid::Uuid::new_v4().simple().to_string()[..8].to_ascii_uppercase()
+    uuid::Uuid::new_v4().simple().to_string()
 }
 
 impl Default for UserSettings {
@@ -183,6 +363,8 @@ impl Default for UserSettings {
             max_active_downloads: default_max_active(),
             connections_per_download: default_connections(),
             adaptive_efficiency: true,
+            http_global_capacity: HttpCapacityEstimate::default(),
+            http_host_capacities: HashMap::new(),
             global_bandwidth_limit: 0,
             bridge_token: default_bridge_token(),
             recent_download_directories: Vec::new(),
@@ -190,7 +372,7 @@ impl Default for UserSettings {
             yt_dlp_path: None,
             qjs_path: None,
             n_m3u8dl_re_path: None,
-            aria2_path: None,
+            gopeed_path: None,
             media_player_path: None,
             user_agent: None,
             log_editor_path: None,
@@ -198,29 +380,62 @@ impl Default for UserSettings {
             proxy_url: None,
             proxy_username: None,
             proxy_password: None,
-            website_credentials: Vec::new(),
+            legacy_website_credentials: Vec::new(),
+            host_rules: Vec::new(),
             dns_enabled: false,
             dns_servers: Vec::new(),
             associations: HashMap::new(),
             link_password: default_link_password(),
+            link_shares: Vec::new(),
+            link_trusted_certificates: HashMap::new(),
             language: default_language(),
             theme: default_theme(),
         }
     }
 }
 
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HttpCapacityEstimate {
+    #[serde(default)]
+    bytes_per_second: u64,
+    #[serde(default)]
+    low_runs: u32,
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 struct WebsiteCredential {
     host: String,
     username: String,
+    #[serde(default, skip_serializing)]
     password: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct WebsiteCredentialSummary {
-    host: String,
+struct HostRule {
+    pattern: String,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default, skip_serializing)]
+    password: String,
+    #[serde(default)]
+    user_agent: Option<String>,
+    #[serde(default)]
+    connections: Option<usize>,
+    #[serde(default)]
+    bandwidth_limit: Option<u64>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HostRuleSummary {
+    pattern: String,
     username: String,
+    has_password: bool,
+    user_agent: String,
+    connections: Option<usize>,
+    bandwidth_limit: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -289,11 +504,43 @@ struct LinkFileEntry {
     directory: bool,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkShare {
+    id: String,
+    name: String,
+    path: PathBuf,
+    allow_write: bool,
+    #[serde(default)]
+    directory: bool,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LinkListRequest {
     password: String,
     path: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkAuthRequest {
+    username: String,
+    password: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkAuthResponse {
+    token: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteLinkAuthentication {
+    token: String,
+    fingerprint: String,
+    first_trust: bool,
 }
 
 #[derive(Deserialize)]
@@ -305,8 +552,19 @@ struct MobileAddRequest {
 #[serde(rename_all = "camelCase")]
 struct LinkIdentity {
     id: String,
-    password: String,
-    port: u16,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AboutMedia {
+    photo_data_url: Option<String>,
+    audio_data_url: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkCapabilities {
+    allow_write: bool,
 }
 
 fn safe_link_path(path: &str) -> Result<PathBuf, String> {
@@ -325,6 +583,25 @@ fn safe_link_path(path: &str) -> Result<PathBuf, String> {
         }
     }
     Ok(result)
+}
+
+const ABOUT_CREATOR_JPEG: &[u8] = include_bytes!("../assets/about-creator.jpg");
+const ABOUT_THEME_MP4: &[u8] = include_bytes!("../assets/about-theme.mp4");
+
+fn about_data_url(bytes: &[u8], mime: &str) -> String {
+    format!("data:{mime};base64,{}", BASE64.encode(bytes))
+}
+
+fn about_media_snapshot() -> AboutMedia {
+    AboutMedia {
+        photo_data_url: Some(about_data_url(ABOUT_CREATOR_JPEG, "image/jpeg")),
+        audio_data_url: Some(about_data_url(ABOUT_THEME_MP4, "audio/mp4")),
+    }
+}
+
+#[tauri::command]
+fn get_about_media() -> AboutMedia {
+    about_media_snapshot()
 }
 
 fn link_roots() -> Vec<LinkFileEntry> {
@@ -362,6 +639,10 @@ fn list_link_directory(path: &str) -> Result<Vec<LinkFileEntry>, String> {
         .map_err(|error| error.to_string())?
         .flatten()
         .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            if file_type.is_symlink() {
+                return None;
+            }
             let metadata = entry.metadata().ok()?;
             let name = entry.file_name().to_string_lossy().into_owned();
             let path = directory.join(&name).to_string_lossy().into_owned();
@@ -382,124 +663,1462 @@ fn list_link_directory(path: &str) -> Result<Vec<LinkFileEntry>, String> {
 }
 
 #[tauri::command]
-fn get_link_identity(state: State<'_, AppState>) -> Result<LinkIdentity, String> {
-    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+fn get_link_identity() -> LinkIdentity {
     let ip = local_link_ip();
-    Ok(LinkIdentity {
+    LinkIdentity {
         id: format!("{ip}:{LINK_PORT}"),
-        password: settings.link_password.clone(),
-        port: LINK_PORT,
-    })
+    }
 }
 
 #[tauri::command]
-fn regenerate_link_password(state: State<'_, AppState>) -> Result<String, String> {
-    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    settings.link_password = default_link_password();
-    save_settings(&state, &settings)?;
-    Ok(settings.link_password.clone())
+fn is_local_link_target(state: State<'_, AppState>, id: String) -> Result<bool, String> {
+    let (host, _, _) = link_remote_parts(&id)?;
+    if matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1")
+        || host
+            .parse::<IpAddr>()
+            .ok()
+            .is_some_and(|address| address.is_loopback())
+        || host.parse::<IpAddr>().ok() == Some(local_link_ip())
+    {
+        return Ok(true);
+    }
+
+    // A public address can hairpin through the router to this same machine.
+    // Compare the peer certificate with this installation's own certificate
+    // instead of trusting the address or skipping TLS authentication.
+    let (_, peer_fingerprint, _, _) = connect_link_tls(&state, &id)?;
+    let certificate_path = state
+        .settings_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("link-tls-cert.der");
+    let local_certificate =
+        CertificateDer::from(fs::read(certificate_path).map_err(|error| error.to_string())?);
+    Ok(peer_fingerprint == link_certificate_fingerprint(&local_certificate))
 }
 
 #[tauri::command]
-fn list_local_link_files(path: String) -> Result<Vec<LinkFileEntry>, String> {
-    list_link_directory(&path)
+async fn open_link_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("apocalipse-link") {
+        window.show().map_err(|error| error.to_string())?;
+        let _ = window.unminimize();
+        let _ = window.maximize();
+        window.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(&app, "apocalipse-link", WebviewUrl::App("link.html".into()))
+        .title("Apocalipse Link")
+        .inner_size(1400.0, 900.0)
+        .min_inner_size(960.0, 640.0)
+        .resizable(true)
+        .maximized(true)
+        .decorations(true)
+        .build()
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
-#[tauri::command]
-async fn list_remote_link_files(
-    id: String,
-    password: String,
-    path: String,
-) -> Result<Vec<LinkFileEntry>, String> {
-    let address = if id.starts_with("http://") {
-        id
+#[cfg(windows)]
+fn windows_wide(value: &str) -> Vec<u16> {
+    OsStr::new(value)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(windows)]
+fn windows_logon_candidates(value: &str) -> Result<Vec<(String, Option<String>)>, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err("system_username_required".to_owned());
+    }
+
+    let mut candidates = Vec::new();
+    if let Some((domain, user)) = value.split_once('\\') {
+        if domain.is_empty() || user.is_empty() {
+            return Err("invalid_system_username".to_owned());
+        }
+        if ["hotmail.com", "outlook.com", "live.com"]
+            .iter()
+            .any(|candidate| domain.eq_ignore_ascii_case(candidate))
+            && !user.contains('@')
+        {
+            let email = format!("{user}@{domain}");
+            candidates.push((email.clone(), Some("MicrosoftAccount".to_owned())));
+            candidates.push((email, None));
+        } else {
+            candidates.push((user.to_owned(), Some(domain.to_owned())));
+        }
+    } else if value.contains('@') {
+        // UPN is the documented form for a NULL domain. Windows 10/11 can also
+        // require explicit MicrosoftAccount or AzureAD providers, so retry both.
+        candidates.push((value.to_owned(), None));
+        candidates.push((value.to_owned(), Some("MicrosoftAccount".to_owned())));
+        candidates.push((value.to_owned(), Some("AzureAD".to_owned())));
     } else {
-        format!("http://{id}")
+        candidates.push((value.to_owned(), Some(".".to_owned())));
+        candidates.push((value.to_owned(), None));
+    }
+
+    candidates.dedup();
+    Ok(candidates)
+}
+
+#[cfg(windows)]
+fn verify_system_account(username: &str, password: &str) -> Result<(), String> {
+    let candidates = windows_logon_candidates(username)?;
+    let mut password_wide = windows_wide(password);
+    let mut last_error = 0;
+
+    for (account, domain) in candidates {
+        let account_wide = windows_wide(&account);
+        let domain_wide = domain.as_deref().map(windows_wide);
+        let domain_ptr = domain_wide
+            .as_ref()
+            .map_or(std::ptr::null(), |value| value.as_ptr());
+
+        // NETWORK avoids credential caching; INTERACTIVE is a compatibility
+        // fallback for local/Microsoft accounts that reject network logon.
+        for logon_type in [3_u32, 2_u32] {
+            let mut token: *mut c_void = std::ptr::null_mut();
+            let authenticated = unsafe {
+                LogonUserW(
+                    account_wide.as_ptr(),
+                    domain_ptr,
+                    password_wide.as_ptr(),
+                    logon_type,
+                    0,
+                    &mut token,
+                )
+            };
+            if authenticated != 0 {
+                if !token.is_null() {
+                    unsafe {
+                        CloseHandle(token);
+                    }
+                }
+                password_wide.zeroize();
+                return Ok(());
+            }
+            last_error = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        }
+    }
+
+    password_wide.zeroize();
+    Err(format!("system_auth_failed:{last_error}"))
+}
+
+#[cfg(unix)]
+unsafe fn free_pam_responses(responses: *mut PamResponse, count: usize) {
+    if responses.is_null() {
+        return;
+    }
+    for index in 0..count {
+        let response = responses.add(index);
+        if !(*response).resp.is_null() {
+            free((*response).resp.cast());
+        }
+    }
+    free(responses.cast());
+}
+
+#[cfg(unix)]
+unsafe extern "C" fn pam_link_conversation(
+    message_count: c_int,
+    messages: *const *const PamMessage,
+    responses: *mut *mut PamResponse,
+    appdata_ptr: *mut c_void,
+) -> c_int {
+    const PAM_SUCCESS: c_int = 0;
+    const PAM_PROMPT_ECHO_OFF: c_int = 1;
+    const PAM_PROMPT_ECHO_ON: c_int = 2;
+    const PAM_ERROR_MSG: c_int = 3;
+    const PAM_TEXT_INFO: c_int = 4;
+    const PAM_CONV_ERR: c_int = 19;
+
+    if message_count <= 0 || messages.is_null() || responses.is_null() || appdata_ptr.is_null() {
+        return PAM_CONV_ERR;
+    }
+    let data = &*(appdata_ptr as *const PamConversationData);
+    let count = message_count as usize;
+    let output = calloc(count, std::mem::size_of::<PamResponse>()) as *mut PamResponse;
+    if output.is_null() {
+        return PAM_CONV_ERR;
+    }
+    for index in 0..count {
+        let message = *messages.add(index);
+        if message.is_null() {
+            free_pam_responses(output, index);
+            return PAM_CONV_ERR;
+        }
+        let source = match (*message).msg_style {
+            PAM_PROMPT_ECHO_OFF => data.password.as_ptr(),
+            PAM_PROMPT_ECHO_ON => data.username.as_ptr(),
+            PAM_ERROR_MSG | PAM_TEXT_INFO => std::ptr::null(),
+            _ => {
+                free_pam_responses(output, index);
+                return PAM_CONV_ERR;
+            }
+        };
+        if !source.is_null() {
+            let copy = strdup(source.cast());
+            if copy.is_null() {
+                free_pam_responses(output, index);
+                return PAM_CONV_ERR;
+            }
+            (*output.add(index)).resp = copy;
+        }
+    }
+    *responses = output;
+    PAM_SUCCESS
+}
+
+#[cfg(unix)]
+fn pam_bytes(value: &str) -> Result<Vec<u8>, String> {
+    if value.as_bytes().contains(&0) {
+        return Err("invalid_system_credential".to_owned());
+    }
+    let mut bytes = value.as_bytes().to_vec();
+    bytes.push(0);
+    Ok(bytes)
+}
+
+#[cfg(unix)]
+fn verify_system_account(username: &str, password: &str) -> Result<(), String> {
+    const PAM_SUCCESS: c_int = 0;
+    if username.trim().is_empty() {
+        return Err("system_username_required".to_owned());
+    }
+    let mut data = PamConversationData {
+        username: pam_bytes(username.trim())?,
+        password: pam_bytes(password)?,
     };
-    reqwest::Client::new()
-        .post(format!("{address}/v1/link/list"))
-        .json(&LinkListRequest { password, path })
-        .send()
-        .await
+    let conversation = PamConversation {
+        conv: Some(pam_link_conversation),
+        appdata_ptr: (&mut data as *mut PamConversationData).cast(),
+    };
+    let mut handle = std::ptr::null_mut();
+    let service = b"login\0";
+    let started = unsafe {
+        pam_start(
+            service.as_ptr().cast(),
+            data.username.as_ptr().cast(),
+            &conversation,
+            &mut handle,
+        )
+    };
+    let (result, final_status) = if started != PAM_SUCCESS {
+        (Err(format!("system_auth_start_failed:{started}")), started)
+    } else {
+        let authenticated = unsafe { pam_authenticate(handle, 0) };
+        if authenticated != PAM_SUCCESS {
+            (
+                Err(format!("system_auth_failed:{authenticated}")),
+                authenticated,
+            )
+        } else {
+            let account = unsafe { pam_acct_mgmt(handle, 0) };
+            if account == PAM_SUCCESS {
+                (Ok(()), PAM_SUCCESS)
+            } else {
+                (Err(format!("system_account_denied:{account}")), account)
+            }
+        }
+    };
+    if started == PAM_SUCCESS && !handle.is_null() {
+        unsafe {
+            pam_end(handle, final_status);
+        }
+    }
+    data.password.zeroize();
+    result
+}
+
+#[tauri::command]
+fn authenticate_local_link_account(username: String, mut password: String) -> Result<(), String> {
+    let result = verify_system_account(&username, &password);
+    password.zeroize();
+    result
+}
+
+fn stable_link_share_id(prefix: &str, name: &str, path: &Path) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(prefix.as_bytes());
+    hasher.update([0]);
+    hasher.update(name.as_bytes());
+    hasher.update([0]);
+    hasher.update(path.to_string_lossy().as_bytes());
+    let digest = hasher.finalize();
+    let suffix = digest[..12]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("{prefix}-{suffix}")
+}
+
+#[cfg(windows)]
+fn windows_wide_pointer_to_string(pointer: *const u16) -> String {
+    if pointer.is_null() {
+        return String::new();
+    }
+    let mut length = 0_usize;
+    unsafe {
+        while length < 32_768 && *pointer.add(length) != 0 {
+            length += 1;
+        }
+        String::from_utf16_lossy(std::slice::from_raw_parts(pointer, length))
+    }
+}
+
+#[cfg(windows)]
+fn windows_shared_link_shares() -> Vec<LinkShare> {
+    const NERR_SUCCESS: u32 = 0;
+    const ERROR_MORE_DATA: u32 = 234;
+    const MAX_PREFERRED_LENGTH: u32 = u32::MAX;
+    const STYPE_DISKTREE: u32 = 0;
+    const STYPE_MASK: u32 = 0x0000_00ff;
+    const STYPE_SPECIAL: u32 = 0x8000_0000;
+
+    let mut shares = Vec::new();
+    let mut resume_handle = 0_u32;
+    loop {
+        let mut buffer = std::ptr::null_mut::<u8>();
+        let mut entries_read = 0_u32;
+        let mut total_entries = 0_u32;
+        let status = unsafe {
+            NetShareEnum(
+                std::ptr::null(),
+                2,
+                &mut buffer,
+                MAX_PREFERRED_LENGTH,
+                &mut entries_read,
+                &mut total_entries,
+                &mut resume_handle,
+            )
+        };
+        if status != NERR_SUCCESS && status != ERROR_MORE_DATA {
+            if !buffer.is_null() {
+                unsafe {
+                    NetApiBufferFree(buffer.cast());
+                }
+            }
+            break;
+        }
+        if !buffer.is_null() && entries_read > 0 {
+            let entries = unsafe {
+                std::slice::from_raw_parts(
+                    buffer.cast::<WindowsShareInfo2>(),
+                    entries_read as usize,
+                )
+            };
+            for entry in entries {
+                let is_disk = entry.share_type & STYPE_MASK == STYPE_DISKTREE;
+                let is_special = entry.share_type & STYPE_SPECIAL != 0;
+                if !is_disk || is_special {
+                    continue;
+                }
+                let name = windows_wide_pointer_to_string(entry.netname);
+                let path = PathBuf::from(windows_wide_pointer_to_string(entry.path));
+                if name.is_empty()
+                    || name.ends_with('$')
+                    || path.as_os_str().is_empty()
+                    || !path.is_absolute()
+                {
+                    continue;
+                }
+                shares.push(LinkShare {
+                    id: stable_link_share_id("windows", &name, &path),
+                    name,
+                    path,
+                    allow_write: false,
+                    directory: true,
+                });
+            }
+        }
+        if !buffer.is_null() {
+            unsafe {
+                NetApiBufferFree(buffer.cast());
+            }
+        }
+        if status != ERROR_MORE_DATA {
+            break;
+        }
+    }
+    shares
+}
+
+#[cfg(not(windows))]
+fn windows_shared_link_shares() -> Vec<LinkShare> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+fn linux_smb_config_entries(contents: &str) -> Vec<(String, PathBuf)> {
+    let mut result = Vec::new();
+    let mut section = String::new();
+    let mut section_path: Option<PathBuf> = None;
+
+    let mut flush = |name: &mut String, path: &mut Option<PathBuf>| {
+        let normalized = name.trim();
+        let reserved = normalized.eq_ignore_ascii_case("global")
+            || normalized.eq_ignore_ascii_case("homes")
+            || normalized.eq_ignore_ascii_case("printers")
+            || normalized.eq_ignore_ascii_case("print$");
+        if !normalized.is_empty() && !reserved && !normalized.ends_with('$') {
+            if let Some(candidate) = path.take() {
+                if candidate.is_absolute() {
+                    result.push((normalized.to_owned(), candidate));
+                }
+            }
+        } else {
+            *path = None;
+        }
+    };
+
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            flush(&mut section, &mut section_path);
+            section = line[1..line.len() - 1].trim().to_owned();
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim().eq_ignore_ascii_case("path") {
+            let value = value.trim().trim_matches('"');
+            if !value.is_empty() {
+                section_path = Some(PathBuf::from(value));
+            }
+        }
+    }
+    flush(&mut section, &mut section_path);
+    result
+}
+
+#[cfg(target_os = "linux")]
+fn linux_smb_usershare_entry(name: &str, contents: &str) -> Option<(String, PathBuf)> {
+    if name.trim().is_empty() || name.ends_with('$') {
+        return None;
+    }
+    let path = contents.lines().find_map(|raw_line| {
+        let line = raw_line.trim();
+        let (key, value) = line.split_once('=')?;
+        key.trim()
+            .eq_ignore_ascii_case("path")
+            .then(|| PathBuf::from(value.trim().trim_matches('"')))
+    })?;
+    path.is_absolute().then(|| (name.to_owned(), path))
+}
+
+#[cfg(target_os = "linux")]
+fn linux_shared_link_shares() -> Vec<LinkShare> {
+    let mut entries = Vec::<(String, PathBuf)>::new();
+
+    for config in ["/etc/samba/smb.conf", "/etc/samba/smb.conf.local"] {
+        if let Ok(contents) = fs::read_to_string(config) {
+            entries.extend(linux_smb_config_entries(&contents));
+        }
+    }
+
+    for directory in ["/var/lib/samba/usershares", "/var/lib/samba/usershare"] {
+        let Ok(items) = fs::read_dir(directory) else {
+            continue;
+        };
+        for item in items.flatten() {
+            if !item.path().is_file() {
+                continue;
+            }
+            let name = item.file_name().to_string_lossy().into_owned();
+            let Ok(contents) = fs::read_to_string(item.path()) else {
+                continue;
+            };
+            if let Some(entry) = linux_smb_usershare_entry(&name, &contents) {
+                entries.push(entry);
+            }
+        }
+    }
+
+    let mut shares = Vec::new();
+    for (name, path) in entries {
+        if shares.iter().any(|share: &LinkShare| share.path == path) {
+            continue;
+        }
+        shares.push(LinkShare {
+            id: stable_link_share_id("linux-smb", &name, &path),
+            name,
+            path,
+            // OS-discovered shares are intentionally read-only inside Link.
+            // The user can explicitly share the same folder in Apocalipse Link
+            // to grant Link's own read/write permission.
+            allow_write: false,
+            directory: true,
+        });
+    }
+    shares
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_shared_link_shares() -> Vec<LinkShare> {
+    Vec::new()
+}
+
+fn effective_link_shares(settings: &UserSettings) -> Vec<LinkShare> {
+    let mut shares = settings.link_shares.clone();
+    for share in windows_shared_link_shares()
+        .into_iter()
+        .chain(linux_shared_link_shares())
+    {
+        if shares
+            .iter()
+            .any(|existing| existing.path == share.path || existing.id == share.id)
+        {
+            continue;
+        }
+        shares.push(share);
+    }
+    shares
+}
+
+fn link_share_entries(settings: &UserSettings) -> Vec<LinkFileEntry> {
+    effective_link_shares(settings)
+        .into_iter()
+        .map(|share| {
+            let metadata = fs::metadata(&share.path).ok();
+            LinkFileEntry {
+                name: share.name.clone(),
+                path: format!("/shares/{}", share.id),
+                size: metadata
+                    .as_ref()
+                    .filter(|value| value.is_file())
+                    .map_or(0, |value| value.len()),
+                directory: metadata
+                    .as_ref()
+                    .map_or(share.directory, |value| value.is_dir()),
+            }
+        })
+        .collect()
+}
+
+fn resolve_link_share(
+    settings: &UserSettings,
+    virtual_path: &str,
+) -> Result<(PathBuf, bool), String> {
+    let mut parts = virtual_path.trim_matches('/').split('/');
+    if parts.next() != Some("shares") {
+        return Err("path_not_shared".to_owned());
+    }
+    let id = parts.next().ok_or_else(|| "path_not_shared".to_owned())?;
+    let share = effective_link_shares(settings)
+        .into_iter()
+        .find(|share| share.id == id)
+        .ok_or_else(|| "path_not_shared".to_owned())?;
+    let mut path = share.path;
+    for part in parts {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." || part.contains(['/', '\\']) {
+            return Err("invalid_remote_path".to_owned());
+        }
+        path.push(part);
+    }
+    Ok((path, share.allow_write))
+}
+
+fn list_shared_link_directory(
+    settings: &UserSettings,
+    path: &str,
+) -> Result<Vec<LinkFileEntry>, String> {
+    if path.trim().is_empty() {
+        return Ok(link_share_entries(settings));
+    }
+    let (directory, _) = resolve_link_share(settings, path)?;
+    let mut entries = list_link_directory(&directory.to_string_lossy())?;
+    for entry in &mut entries {
+        let name = entry.name.clone();
+        entry.path = remote_link_join(path, &name);
+    }
+    Ok(entries)
+}
+
+#[tauri::command]
+fn list_link_shares(state: State<'_, AppState>) -> Result<Vec<LinkShare>, String> {
+    Ok(state
+        .settings
+        .lock()
         .map_err(|error| error.to_string())?
-        .error_for_status()
-        .map_err(|error| error.to_string())?
-        .json()
-        .await
+        .link_shares
+        .clone())
+}
+
+#[tauri::command]
+fn add_link_share(state: State<'_, AppState>) -> Result<Vec<LinkShare>, String> {
+    let Some(path) = rfd::FileDialog::new().pick_folder() else {
+        return Err("cancelled".to_owned());
+    };
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Shared folder")
+        .to_owned();
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    if !settings.link_shares.iter().any(|share| share.path == path) {
+        settings.link_shares.push(LinkShare {
+            id: uuid::Uuid::new_v4().simple().to_string(),
+            name,
+            path,
+            allow_write: false,
+            directory: true,
+        });
+        save_settings(&state, &settings)?;
+    }
+    Ok(settings.link_shares.clone())
+}
+
+#[tauri::command]
+fn add_link_file_share(state: State<'_, AppState>) -> Result<Vec<LinkShare>, String> {
+    let Some(path) = rfd::FileDialog::new().pick_file() else {
+        return Err("cancelled".to_owned());
+    };
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Shared file")
+        .to_owned();
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    if !settings.link_shares.iter().any(|share| share.path == path) {
+        settings.link_shares.push(LinkShare {
+            id: uuid::Uuid::new_v4().simple().to_string(),
+            name,
+            path,
+            allow_write: false,
+            directory: false,
+        });
+        save_settings(&state, &settings)?;
+    }
+    Ok(settings.link_shares.clone())
+}
+
+#[tauri::command]
+fn update_link_share(
+    state: State<'_, AppState>,
+    id: String,
+    allow_write: bool,
+) -> Result<Vec<LinkShare>, String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    let share = settings
+        .link_shares
+        .iter_mut()
+        .find(|share| share.id == id)
+        .ok_or_else(|| "share_not_found".to_owned())?;
+    share.allow_write = allow_write;
+    save_settings(&state, &settings)?;
+    Ok(settings.link_shares.clone())
+}
+
+#[tauri::command]
+fn remove_link_share(state: State<'_, AppState>, id: String) -> Result<Vec<LinkShare>, String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.link_shares.retain(|share| share.id != id);
+    save_settings(&state, &settings)?;
+    Ok(settings.link_shares.clone())
+}
+
+fn remove_link_path(path: &str) -> Result<(), String> {
+    let path = safe_link_path(path)?;
+    if path.file_name().is_none() {
+        return Err("cannot_delete_link_root".to_owned());
+    }
+    let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+    if metadata.is_dir() {
+        fs::remove_dir_all(path).map_err(|error| error.to_string())
+    } else {
+        fs::remove_file(path).map_err(|error| error.to_string())
+    }
+}
+
+#[tauri::command]
+fn delete_local_link_item(path: String) -> Result<(), String> {
+    remove_link_path(&path)
+}
+
+#[derive(Debug)]
+struct LinkServerCertVerifier;
+
+impl ServerCertVerifier for LinkServerCertVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        // The exact certificate is pinned immediately after the handshake.
+        // Signature validation below proves possession of its private key.
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        let provider = rustls::crypto::ring::default_provider();
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &provider.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        let provider = rustls::crypto::ring::default_provider();
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &provider.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
+fn load_or_create_link_tls_config(directory: &Path) -> Result<Arc<ServerConfig>, String> {
+    let cert_path = directory.join("link-tls-cert.der");
+    let key_path = directory.join("link-tls-key.der");
+    if !cert_path.is_file() || !key_path.is_file() {
+        let rcgen::CertifiedKey { cert, key_pair } =
+            rcgen::generate_simple_self_signed(vec!["apocalipse-link.local".to_owned()])
+                .map_err(|error| error.to_string())?;
+        fs::write(&cert_path, cert.der().as_ref()).map_err(|error| error.to_string())?;
+        fs::write(&key_path, key_pair.serialize_der()).map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600));
+        }
+    }
+    let certificate =
+        CertificateDer::from(fs::read(&cert_path).map_err(|error| error.to_string())?);
+    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+        fs::read(&key_path).map_err(|error| error.to_string())?,
+    ));
+    ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![certificate], key)
+        .map(Arc::new)
         .map_err(|error| error.to_string())
 }
 
+fn link_remote_parts(id: &str) -> Result<(String, u16, String), String> {
+    let value = id.trim();
+    if value.is_empty() {
+        return Err("invalid_remote_id".to_owned());
+    }
+    let normalized = if let Some(rest) = value.strip_prefix("http://") {
+        format!("https://{rest}")
+    } else if value.starts_with("https://") {
+        value.to_owned()
+    } else {
+        format!("https://{value}")
+    };
+    let parsed = url::Url::parse(&normalized).map_err(|error| error.to_string())?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "invalid_remote_id".to_owned())?
+        .to_owned();
+    let port = parsed.port().unwrap_or(LINK_PORT);
+    let authority = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    Ok((host, port, authority))
+}
+
+fn link_certificate_fingerprint(certificate: &CertificateDer<'_>) -> String {
+    let digest = Sha256::digest(certificate.as_ref());
+    digest
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+type LinkTlsStream = StreamOwned<ClientConnection, TcpStream>;
+
+fn connect_link_tls(
+    state: &AppState,
+    id: &str,
+) -> Result<(LinkTlsStream, String, bool, String), String> {
+    let (host, port, authority) = link_remote_parts(id)?;
+    let mut socket =
+        TcpStream::connect((host.as_str(), port)).map_err(|error| error.to_string())?;
+    socket
+        .set_read_timeout(Some(Duration::from_secs(45)))
+        .map_err(|error| error.to_string())?;
+    socket
+        .set_write_timeout(Some(Duration::from_secs(45)))
+        .map_err(|error| error.to_string())?;
+    let config = ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(LinkServerCertVerifier))
+        .with_no_client_auth();
+    let server_name = ServerName::try_from("apocalipse-link.local".to_owned())
+        .map_err(|error| error.to_string())?;
+    let mut connection =
+        ClientConnection::new(Arc::new(config), server_name).map_err(|error| error.to_string())?;
+    while connection.is_handshaking() {
+        connection
+            .complete_io(&mut socket)
+            .map_err(|error| error.to_string())?;
+    }
+    let certificate = connection
+        .peer_certificates()
+        .and_then(|certificates| certificates.first())
+        .ok_or_else(|| "link_tls_certificate_missing".to_owned())?;
+    let fingerprint = link_certificate_fingerprint(certificate);
+    let host_key = authority.to_ascii_lowercase();
+    let first_trust = {
+        let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+        match settings.link_trusted_certificates.get(&host_key) {
+            Some(expected) if expected != &fingerprint => {
+                return Err("link_tls_certificate_changed".to_owned())
+            }
+            Some(_) => false,
+            None => {
+                settings
+                    .link_trusted_certificates
+                    .insert(host_key, fingerprint.clone());
+                save_settings(state, &settings)?;
+                true
+            }
+        }
+    };
+    Ok((
+        StreamOwned::new(connection, socket),
+        fingerprint,
+        first_trust,
+        authority,
+    ))
+}
+
+struct LinkHttpResponse {
+    status: u16,
+    body: Vec<u8>,
+}
+
+fn read_link_http_response<S: Read>(stream: &mut S) -> Result<LinkHttpResponse, String> {
+    let mut response = Vec::with_capacity(8_192);
+    let mut chunk = [0_u8; 8_192];
+    let header_end = loop {
+        let count = stream.read(&mut chunk).map_err(|error| error.to_string())?;
+        if count == 0 || response.len() + count > 65_536 {
+            return Err("invalid_link_http_response".to_owned());
+        }
+        response.extend_from_slice(&chunk[..count]);
+        if let Some(position) = response.windows(4).position(|window| window == b"\r\n\r\n") {
+            break position;
+        }
+    };
+    let body_start = header_end + 4;
+    let headers = String::from_utf8_lossy(&response[..body_start]);
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| "invalid_link_http_status".to_owned())?;
+    let content_length = bridge_content_length(&headers);
+    if content_length > 16 * 1024 * 1024 {
+        return Err("link_http_response_too_large".to_owned());
+    }
+    while response.len() < body_start + content_length {
+        let remaining = body_start + content_length - response.len();
+        let read_size = remaining.min(chunk.len());
+        let count = stream
+            .read(&mut chunk[..read_size])
+            .map_err(|error| error.to_string())?;
+        if count == 0 {
+            return Err("incomplete_link_http_response".to_owned());
+        }
+        response.extend_from_slice(&chunk[..count]);
+    }
+    Ok(LinkHttpResponse {
+        status,
+        body: response[body_start..body_start + content_length].to_vec(),
+    })
+}
+
+fn link_http_request(
+    state: &AppState,
+    id: &str,
+    method: &str,
+    target: &str,
+    bearer: Option<&str>,
+    body: &[u8],
+    content_type: Option<&str>,
+) -> Result<(LinkHttpResponse, String, bool), String> {
+    let (mut stream, fingerprint, first_trust, authority) = connect_link_tls(state, id)?;
+    let authorization = bearer
+        .map(|value| format!("Authorization: Bearer {value}\r\n"))
+        .unwrap_or_default();
+    let content_type = content_type
+        .map(|value| format!("Content-Type: {value}\r\n"))
+        .unwrap_or_default();
+    let headers = format!(
+        "{method} {target} HTTP/1.1\r\nHost: {authority}\r\n{authorization}{content_type}Content-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream
+        .write_all(headers.as_bytes())
+        .map_err(|error| error.to_string())?;
+    if !body.is_empty() {
+        stream.write_all(body).map_err(|error| error.to_string())?;
+    }
+    stream.flush().map_err(|error| error.to_string())?;
+    Ok((
+        read_link_http_response(&mut stream)?,
+        fingerprint,
+        first_trust,
+    ))
+}
+
+fn ensure_link_http_success(response: &LinkHttpResponse) -> Result<(), String> {
+    if (200..300).contains(&response.status) {
+        Ok(())
+    } else {
+        Err(format!("remote_http_status:{}", response.status))
+    }
+}
+
+fn read_link_download_head<S: Read>(stream: &mut S) -> Result<(u16, usize, Vec<u8>), String> {
+    let mut buffer = Vec::with_capacity(8192);
+    let mut chunk = [0_u8; 8192];
+    let header_end = loop {
+        let count = stream.read(&mut chunk).map_err(|error| error.to_string())?;
+        if count == 0 || buffer.len() + count > 65_536 {
+            return Err("invalid_link_http_response".to_owned());
+        }
+        buffer.extend_from_slice(&chunk[..count]);
+        if let Some(position) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+            break position;
+        }
+    };
+    let headers = String::from_utf8_lossy(&buffer[..header_end + 4]).into_owned();
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| "invalid_link_http_status".to_owned())?;
+    let length = bridge_content_length(&headers);
+    Ok((status, length, buffer[header_end + 4..].to_vec()))
+}
+
+fn download_link_file_to(
+    state: &AppState,
+    id: &str,
+    password: &str,
+    remote_path: &str,
+    destination: &Path,
+) -> Result<(), String> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
+    let (mut stream, _, _, authority) = connect_link_tls(state, id)?;
+    let request = format!(
+        "GET /v1/link/file?path={encoded} HTTP/1.1\r\nHost: {authority}\r\nAuthorization: Bearer {password}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| error.to_string())?;
+    stream.flush().map_err(|error| error.to_string())?;
+    let (status, length, initial) = read_link_download_head(&mut stream)?;
+    if status != 200 {
+        return Err(format!("remote_http_status:{status}"));
+    }
+    let mut file = fs::File::create(destination).map_err(|error| error.to_string())?;
+    let initial_len = initial.len().min(length);
+    file.write_all(&initial[..initial_len])
+        .map_err(|error| error.to_string())?;
+    let remaining = length.saturating_sub(initial_len);
+    std::io::copy(
+        &mut std::io::Read::by_ref(&mut stream).take(remaining as u64),
+        &mut file,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn send_link_directory(
+    state: &AppState,
+    id: &str,
+    password: &str,
+    remote_path: &str,
+) -> Result<(), String> {
+    let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
+    let (response, _, _) = link_http_request(
+        state,
+        id,
+        "PUT",
+        &format!("/v1/link/directory?path={encoded}"),
+        Some(password),
+        &[],
+        None,
+    )?;
+    ensure_link_http_success(&response)
+}
+
+fn send_link_file(
+    state: &AppState,
+    id: &str,
+    password: &str,
+    source: &Path,
+    remote_path: &str,
+) -> Result<(), String> {
+    let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
+    let (mut stream, _, _, authority) = connect_link_tls(state, id)?;
+    let mut file = fs::File::open(source).map_err(|error| error.to_string())?;
+    let size = file.metadata().map_err(|error| error.to_string())?.len();
+    let headers = format!(
+        "PUT /v1/link/file?path={encoded} HTTP/1.1\r\nHost: {authority}\r\nAuthorization: Bearer {password}\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n"
+    );
+    stream
+        .write_all(headers.as_bytes())
+        .map_err(|error| error.to_string())?;
+    std::io::copy(&mut file, &mut stream).map_err(|error| error.to_string())?;
+    stream.flush().map_err(|error| error.to_string())?;
+    let response = read_link_http_response(&mut stream)?;
+    ensure_link_http_success(&response)
+}
+
 #[tauri::command]
-async fn download_remote_link_file(
+async fn delete_remote_link_item(
+    app: tauri::AppHandle,
     id: String,
     password: String,
     path: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let encoded = url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>();
+        let (response, _, _) = link_http_request(
+            &state,
+            &id,
+            "DELETE",
+            &format!("/v1/link/item?path={encoded}"),
+            Some(&password),
+            &[],
+            None,
+        )?;
+        ensure_link_http_success(&response)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn get_remote_link_capabilities(
+    app: tauri::AppHandle,
+    id: String,
+    password: String,
+    path: String,
+) -> Result<LinkCapabilities, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let encoded = url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>();
+        let (response, _, _) = link_http_request(
+            &state,
+            &id,
+            "GET",
+            &format!("/v1/link/capabilities?path={encoded}"),
+            Some(&password),
+            &[],
+            None,
+        )?;
+        ensure_link_http_success(&response)?;
+        serde_json::from_slice(&response.body).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn list_local_link_files(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Vec<LinkFileEntry>, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    list_shared_link_directory(&settings, &path)
+}
+
+#[tauri::command]
+fn get_local_link_share_capabilities(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<LinkCapabilities, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    let allow_write = resolve_link_share(&settings, &path)
+        .map(|(_, write)| write)
+        .unwrap_or(false);
+    Ok(LinkCapabilities { allow_write })
+}
+
+#[tauri::command]
+fn delete_local_shared_link_item(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let target = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        let (target, allow_write) = resolve_link_share(&settings, &path)?;
+        if !allow_write {
+            return Err("link_write_not_allowed".to_owned());
+        }
+        target
+    };
+    remove_link_path(&target.to_string_lossy())
+}
+
+fn copy_local_link_directory(source: &Path, destination: &Path) -> Result<(), String> {
+    if destination.starts_with(source) {
+        return Err("destination_inside_source".to_owned());
+    }
+    fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+    let mut pending = vec![(source.to_path_buf(), destination.to_path_buf())];
+    while let Some((current_source, current_destination)) = pending.pop() {
+        fs::create_dir_all(&current_destination).map_err(|error| error.to_string())?;
+        for entry in fs::read_dir(&current_source).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let file_type = entry.file_type().map_err(|error| error.to_string())?;
+            if file_type.is_symlink() {
+                continue;
+            }
+            let target = current_destination.join(entry.file_name());
+            if file_type.is_dir() {
+                pending.push((entry.path(), target));
+            } else if file_type.is_file() {
+                fs::copy(entry.path(), target).map_err(|error| error.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn download_local_shared_link_item(
+    state: State<'_, AppState>,
+    path: String,
+    directory: bool,
+    file_name: Option<String>,
 ) -> Result<String, String> {
-    let file_name = Path::new(&path)
-        .file_name()
-        .and_then(|value| value.to_str())
+    let source = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        resolve_link_share(&settings, &path)?.0
+    };
+    let metadata = fs::symlink_metadata(&source).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() {
+        return Err("symlink_not_allowed".to_owned());
+    }
+    if directory || metadata.is_dir() {
+        let Some(parent) = rfd::FileDialog::new().pick_folder() else {
+            return Err("cancelled".to_owned());
+        };
+        let name = file_name
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .or_else(|| source.file_name().and_then(|value| value.to_str()))
+            .unwrap_or("download");
+        let destination = parent.join(name);
+        let source_for_copy = source.clone();
+        let destination_for_copy = destination.clone();
+        tokio::task::spawn_blocking(move || {
+            copy_local_link_directory(&source_for_copy, &destination_for_copy)
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+        return Ok(destination.to_string_lossy().into_owned());
+    }
+    let name = file_name
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .or_else(|| source.file_name().and_then(|value| value.to_str()))
         .unwrap_or("download");
-    let Some(destination) = rfd::FileDialog::new().set_file_name(file_name).save_file() else {
+    let Some(destination) = rfd::FileDialog::new().set_file_name(name).save_file() else {
         return Err("cancelled".to_owned());
     };
-    let address = if id.starts_with("http://") {
-        id
-    } else {
-        format!("http://{id}")
-    };
-    let encoded = url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>();
-    let response = reqwest::Client::new()
-        .get(format!("{address}/v1/link/file?path={encoded}"))
-        .bearer_auth(password)
-        .send()
-        .await
-        .map_err(|error| error.to_string())?
-        .error_for_status()
-        .map_err(|error| error.to_string())?;
-    let mut file = tokio::fs::File::create(&destination)
+    tokio::fs::copy(&source, &destination)
         .await
         .map_err(|error| error.to_string())?;
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        file.write_all(&chunk.map_err(|error| error.to_string())?)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
     Ok(destination.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
+async fn upload_local_shared_link_item(
+    state: State<'_, AppState>,
+    remote_directory: String,
+    local_path: String,
+) -> Result<String, String> {
+    let (source, destination_root) = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        let source = resolve_link_share(&settings, &local_path)?.0;
+        let (destination_root, allow_write) = resolve_link_share(&settings, &remote_directory)?;
+        if !allow_write {
+            return Err("link_write_not_allowed".to_owned());
+        }
+        (source, destination_root)
+    };
+    if !destination_root.is_dir() {
+        return Err("select_remote_directory".to_owned());
+    }
+    let name = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "invalid_file_name".to_owned())?
+        .to_owned();
+    let destination = destination_root.join(&name);
+    if source == destination {
+        return Err("source_and_destination_are_same".to_owned());
+    }
+    let metadata = fs::symlink_metadata(&source).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() {
+        return Err("symlink_not_allowed".to_owned());
+    }
+    if metadata.is_dir() {
+        let source_for_copy = source.clone();
+        let destination_for_copy = destination.clone();
+        tokio::task::spawn_blocking(move || {
+            copy_local_link_directory(&source_for_copy, &destination_for_copy)
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+    } else {
+        tokio::fs::copy(&source, &destination)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(remote_link_join(&remote_directory, &name))
+}
+
+#[tauri::command]
+async fn authenticate_remote_link_account(
+    app: tauri::AppHandle,
+    id: String,
+    username: String,
+    password: String,
+) -> Result<RemoteLinkAuthentication, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut request = LinkAuthRequest { username, password };
+        let body = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
+        request.password.zeroize();
+        let (response, fingerprint, first_trust) = link_http_request(
+            &state,
+            &id,
+            "POST",
+            "/v1/link/auth",
+            None,
+            &body,
+            Some("application/json"),
+        )?;
+        if response.status == 401 {
+            return Err("remote_system_auth_failed".to_owned());
+        }
+        ensure_link_http_success(&response)?;
+        let authenticated: LinkAuthResponse =
+            serde_json::from_slice(&response.body).map_err(|error| error.to_string())?;
+        Ok(RemoteLinkAuthentication {
+            token: authenticated.token,
+            fingerprint,
+            first_trust,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn list_remote_link_files(
+    app: tauri::AppHandle,
+    id: String,
+    password: String,
+    path: String,
+) -> Result<Vec<LinkFileEntry>, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let body = serde_json::to_vec(&LinkListRequest { password, path })
+            .map_err(|error| error.to_string())?;
+        let (response, _, _) = link_http_request(
+            &state,
+            &id,
+            "POST",
+            "/v1/link/list",
+            None,
+            &body,
+            Some("application/json"),
+        )?;
+        ensure_link_http_success(&response)?;
+        serde_json::from_slice(&response.body).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn download_remote_link_file(
+    app: tauri::AppHandle,
+    id: String,
+    password: String,
+    path: String,
+    directory: bool,
+    file_name: Option<String>,
+) -> Result<String, String> {
+    let fallback_name = Path::new(&path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download");
+    let file_name = file_name
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback_name)
+        .to_owned();
+    if directory {
+        let Some(destination_parent) = rfd::FileDialog::new().pick_folder() else {
+            return Err("cancelled".to_owned());
+        };
+        let destination = destination_parent.join(&file_name);
+        return tokio::task::spawn_blocking(move || {
+            let state = app.state::<AppState>();
+            fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
+            let mut pending = vec![(path, destination.clone())];
+            while let Some((remote_directory, local_directory)) = pending.pop() {
+                fs::create_dir_all(&local_directory).map_err(|error| error.to_string())?;
+                let body = serde_json::to_vec(&LinkListRequest {
+                    password: password.clone(),
+                    path: remote_directory,
+                })
+                .map_err(|error| error.to_string())?;
+                let (response, _, _) = link_http_request(
+                    &state,
+                    &id,
+                    "POST",
+                    "/v1/link/list",
+                    None,
+                    &body,
+                    Some("application/json"),
+                )?;
+                ensure_link_http_success(&response)?;
+                let entries: Vec<LinkFileEntry> =
+                    serde_json::from_slice(&response.body).map_err(|error| error.to_string())?;
+                for entry in entries {
+                    let local_path = local_directory.join(&entry.name);
+                    if entry.directory {
+                        pending.push((entry.path, local_path));
+                    } else {
+                        download_link_file_to(&state, &id, &password, &entry.path, &local_path)?;
+                    }
+                }
+            }
+            Ok(destination.to_string_lossy().into_owned())
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+    let Some(destination) = rfd::FileDialog::new().set_file_name(&file_name).save_file() else {
+        return Err("cancelled".to_owned());
+    };
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        download_link_file_to(&state, &id, &password, &path, &destination)?;
+        Ok(destination.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn remote_link_join(parent: &str, child: &str) -> String {
+    let separator = if parent.contains('\\') && !parent.contains('/') {
+        '\\'
+    } else {
+        '/'
+    };
+    format!(
+        "{}{}{}",
+        parent.trim_end_matches(['/', '\\']),
+        separator,
+        child
+    )
+}
+
+#[tauri::command]
 async fn upload_remote_link_file(
+    app: tauri::AppHandle,
     id: String,
     password: String,
     remote_directory: String,
     local_path: String,
 ) -> Result<String, String> {
-    let source = PathBuf::from(local_path);
-    if !source.is_file() {
-        return Err("selected_local_file_not_found".to_owned());
-    }
-    if remote_directory.trim().is_empty() {
-        return Err("select_remote_directory".to_owned());
-    }
     tokio::task::spawn_blocking(move || {
-        let name = source.file_name().and_then(|value| value.to_str()).ok_or_else(|| "invalid_file_name".to_owned())?;
-        let remote_path = format!("{}/{}", remote_directory.trim_end_matches(['/', '\\']), name);
-        let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
-        let parsed = url::Url::parse(&if id.starts_with("http://") { id } else { format!("http://{id}") }).map_err(|error| error.to_string())?;
-        let host = parsed.host_str().ok_or_else(|| "invalid_remote_id".to_owned())?;
-        let port = parsed.port().unwrap_or(LINK_PORT);
-        let mut stream = TcpStream::connect((host, port)).map_err(|error| error.to_string())?;
-        let mut file = fs::File::open(&source).map_err(|error| error.to_string())?;
-        let size = file.metadata().map_err(|error| error.to_string())?.len();
-        let header = format!("PUT /v1/link/file?path={encoded} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {password}\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n");
-        stream.write_all(header.as_bytes()).map_err(|error| error.to_string())?;
-        std::io::copy(&mut file, &mut stream).map_err(|error| error.to_string())?;
-        let mut response = String::new();
-        stream.read_to_string(&mut response).map_err(|error| error.to_string())?;
-        if !response.starts_with("HTTP/1.1 200") { return Err("remote_upload_failed".to_owned()); }
+        let state = app.state::<AppState>();
+        let source = {
+            let settings = state.settings.lock().map_err(|error| error.to_string())?;
+            resolve_link_share(&settings, &local_path)?.0
+        };
+        if !source.is_file() && !source.is_dir() {
+            return Err("selected_local_item_not_found".to_owned());
+        }
+        if remote_directory.trim().is_empty() {
+            return Err("select_remote_directory".to_owned());
+        }
+        let name = source
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| "invalid_file_name".to_owned())?;
+        let remote_path = remote_link_join(&remote_directory, name);
+        if source.is_file() {
+            send_link_file(&state, &id, &password, &source, &remote_path)?;
+            return Ok(remote_path);
+        }
+        send_link_directory(&state, &id, &password, &remote_path)?;
+        let mut pending = vec![(source, remote_path.clone())];
+        while let Some((local_directory, target_directory)) = pending.pop() {
+            for entry in fs::read_dir(local_directory).map_err(|error| error.to_string())? {
+                let entry = entry.map_err(|error| error.to_string())?;
+                let file_type = entry.file_type().map_err(|error| error.to_string())?;
+                if file_type.is_symlink() {
+                    continue;
+                }
+                let entry_name = entry.file_name().to_string_lossy().into_owned();
+                let target_path = remote_link_join(&target_directory, &entry_name);
+                if file_type.is_dir() {
+                    send_link_directory(&state, &id, &password, &target_path)?;
+                    pending.push((entry.path(), target_path));
+                } else if file_type.is_file() {
+                    send_link_file(&state, &id, &password, &entry.path(), &target_path)?;
+                }
+            }
+        }
         Ok(remote_path)
-    }).await.map_err(|error| error.to_string())?
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 enum BValue {
@@ -674,6 +2293,7 @@ struct AppUpdateStatus {
     current_version: String,
     latest_version: String,
     update_available: bool,
+    release_url: String,
 }
 
 fn version_numbers(value: &str) -> Vec<u64> {
@@ -688,6 +2308,103 @@ fn version_numbers(value: &str) -> Vec<u64> {
         })
         .map(|part| part.parse::<u64>().unwrap_or(0))
         .collect()
+}
+
+async fn resolve_thumbnail_internal(state: &AppState, url: &str) -> Result<Option<String>, String> {
+    let (proxy, dns) = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        let proxy = settings.proxy_enabled.then(|| {
+            (
+                settings.proxy_url.clone(),
+                settings.proxy_username.clone(),
+                settings.proxy_password.clone(),
+            )
+        });
+        let dns = if settings.dns_enabled {
+            settings.dns_servers.clone()
+        } else {
+            Vec::new()
+        };
+        (proxy, dns)
+    };
+
+    let (proxy_url, proxy_username, proxy_password) = proxy.unwrap_or_default();
+    let client = DownloadEngine::network_client_builder(
+        proxy_url.as_deref(),
+        proxy_username.as_deref(),
+        proxy_password.as_deref(),
+        &dns,
+    )
+    .map_err(|error| error.to_string())?
+    .redirect(reqwest::redirect::Policy::none())
+    .timeout(Duration::from_secs(12))
+    .build()
+    .map_err(|error| error.to_string())?;
+
+    let cache_root = state
+        .queue_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("cache");
+    match thumbnail_cache::resolve(&cache_root, &client, url).await {
+        Ok(Some(result)) => {
+            state.diagnostics.record(
+                if result.cache_hit {
+                    "thumbnail.cache_hit"
+                } else {
+                    "thumbnail.cached"
+                },
+                "INFO",
+                None,
+                None,
+                serde_json::json!({
+                    "bytes": result.bytes,
+                    "contentHashPrefix": result.content_hash.chars().take(12).collect::<String>(),
+                    "cacheVersion": 2
+                }),
+            );
+            Ok(Some(result.data_url))
+        }
+        Ok(None) => Ok(None),
+        Err(error) => {
+            state.diagnostics.record(
+                "thumbnail.cache_failed",
+                "WARN",
+                None,
+                None,
+                serde_json::json!({
+                    "error": error,
+                    "urlStored": false
+                }),
+            );
+            Ok(None)
+        }
+    }
+}
+
+#[tauri::command]
+async fn resolve_thumbnail(
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<Option<String>, String> {
+    resolve_thumbnail_internal(&state, &url).await
+}
+
+fn prefetch_thumbnail(app: tauri::AppHandle, url: String) {
+    if !matches!(
+        url.split(':')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "http" | "https"
+    ) {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let _ = resolve_thumbnail_internal(&state, &url).await;
+    });
 }
 
 #[tauri::command]
@@ -710,10 +2427,16 @@ async fn check_app_update() -> Result<AppUpdateStatus, String> {
         .ok_or_else(|| "release_without_tag".to_owned())?
         .trim_start_matches(['v', 'V'])
         .to_owned();
+    let release_url = payload["html_url"]
+        .as_str()
+        .and_then(valid_apocalipse_release_url)
+        .unwrap_or("https://github.com/linuxhell/apocalipse-download-manager/releases")
+        .to_owned();
     Ok(AppUpdateStatus {
         update_available: version_numbers(&latest) > version_numbers(&current),
         current_version: current,
         latest_version: latest,
+        release_url,
     })
 }
 
@@ -814,6 +2537,57 @@ fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
     path.clone()
         .filter(|value| !value.as_os_str().is_empty())
         .unwrap_or_else(|| PathBuf::from(fallback))
+}
+
+fn configured_gopeed(settings: &UserSettings) -> PathBuf {
+    configured_tool(
+        &settings.gopeed_path,
+        if cfg!(windows) {
+            "gopeed.exe"
+        } else {
+            "gopeed"
+        },
+    )
+}
+
+async fn gopeed_endpoint(state: &AppState) -> Result<gopeed::Endpoint, String> {
+    let executable = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        configured_gopeed(&settings)
+    };
+    let runtime_root = state
+        .queue_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("gopeed-runtime");
+    let endpoint = {
+        let mut runtime = state
+            .gopeed_runtime
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let reuse = runtime.as_mut().is_some_and(gopeed::Runtime::is_running);
+        if !reuse {
+            if let Some(current) = runtime.as_mut() {
+                current.terminate();
+            }
+            *runtime = Some(gopeed::Runtime::spawn(&executable, &runtime_root)?);
+        }
+        runtime
+            .as_ref()
+            .map(gopeed::Runtime::endpoint)
+            .ok_or_else(|| "gopeed_runtime_missing".to_owned())?
+    };
+    endpoint.wait_ready().await?;
+    Ok(endpoint)
+}
+
+fn stop_gopeed_runtime(state: &AppState) {
+    if let Ok(mut runtime) = state.gopeed_runtime.lock() {
+        if let Some(runtime) = runtime.as_mut() {
+            runtime.terminate();
+        }
+        *runtime = None;
+    }
 }
 
 fn http_origin(url: &str) -> Option<&str> {
@@ -1002,6 +2776,8 @@ struct DownloadContext {
     thumbnail: Option<String>,
     #[serde(default)]
     audio_url: Option<String>,
+    #[serde(default)]
+    expected_size: Option<u64>,
     cookie_header: Option<String>,
     user_agent: Option<String>,
     request_method: Option<String>,
@@ -1020,9 +2796,21 @@ struct RequestIdentity {
 
 fn social_cookie_domain(url: &str) -> Option<&'static str> {
     let host = url::Url::parse(url).ok()?.host_str()?.to_ascii_lowercase();
-    ["facebook.com", "instagram.com", "tiktok.com"]
-        .into_iter()
-        .find(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+    [
+        ("facebook.com", "facebook.com"),
+        ("instagram.com", "instagram.com"),
+        ("tiktok.com", "tiktok.com"),
+        ("twitch.tv", "twitch.tv"),
+        ("twitch.com", "twitch.tv"),
+        ("bilibili.com", "bilibili.com"),
+        ("b23.tv", "bilibili.com"),
+        ("bili.tv", "bilibili.com"),
+    ]
+    .into_iter()
+    .find_map(|(source_domain, cookie_domain)| {
+        (host == source_domain || host.ends_with(&format!(".{source_domain}")))
+            .then_some(cookie_domain)
+    })
 }
 
 fn write_social_cookie_jar(path: &Path, url: &str, header: &str) -> Result<(), String> {
@@ -1059,10 +2847,18 @@ const BRIDGE_PORT: u16 = 17654;
 const LINK_PORT: u16 = 17655;
 
 fn local_link_ip() -> std::net::IpAddr {
-    "127.0.0.1".parse().expect("valid loopback")
+    UdpSocket::bind("0.0.0.0:0")
+        .and_then(|socket| {
+            socket.connect("1.1.1.1:80")?;
+            socket.local_addr()
+        })
+        .ok()
+        .map(|address| address.ip())
+        .filter(|address| !address.is_unspecified() && !address.is_loopback())
+        .unwrap_or_else(|| "127.0.0.1".parse().expect("valid loopback"))
 }
 
-fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
+fn handle_link_connection<S: Read + Write>(app: &tauri::AppHandle, mut stream: S) {
     let mut buffer = Vec::with_capacity(8192);
     let mut chunk = [0_u8; 4096];
     let header_end = loop {
@@ -1108,7 +2904,9 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         bridge_response(&mut stream, "200 OK", None, &body);
         return;
     }
-    if headers.starts_with("PUT /v1/link/file?") {
+    if headers.starts_with("GET /v1/link/capabilities?")
+        || headers.starts_with("GET /v1/link/capabilities ")
+    {
         let state = app.state::<AppState>();
         let settings = match state.settings.lock() {
             Ok(value) => value,
@@ -1118,7 +2916,37 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             bridge_response(&mut stream, "401 Unauthorized", None, "");
             return;
         }
-        drop(settings);
+        let request_target = headers
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("");
+        let virtual_path = url::Url::parse(&format!("http://localhost{request_target}"))
+            .ok()
+            .and_then(|url| {
+                url.query_pairs()
+                    .find(|(key, _)| key == "path")
+                    .map(|(_, value)| value.into_owned())
+            })
+            .unwrap_or_default();
+        let allow_write = resolve_link_share(&settings, &virtual_path)
+            .map(|(_, write)| write)
+            .unwrap_or(false);
+        let body = serde_json::to_string(&LinkCapabilities { allow_write })
+            .unwrap_or_else(|_| "{\"allowWrite\":false}".to_owned());
+        bridge_response(&mut stream, "200 OK", None, &body);
+        return;
+    }
+    if headers.starts_with("DELETE /v1/link/item?") {
+        let state = app.state::<AppState>();
+        let settings = match state.settings.lock() {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        if !bridge_authorized(&headers, &settings.link_password) {
+            bridge_response(&mut stream, "401 Unauthorized", None, "");
+            return;
+        }
         let request_target = headers
             .lines()
             .next()
@@ -1131,10 +2959,96 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                     .find(|(key, _)| key == "path")
                     .map(|(_, value)| value.into_owned())
             });
-        let Some(path) = path.and_then(|value| safe_link_path(&value).ok()) else {
+        let resolved = path
+            .ok_or_else(|| "invalid_path".to_owned())
+            .and_then(|value| {
+                let is_root = value.trim_matches('/').split('/').count() <= 2;
+                let (path, allow_write) = resolve_link_share(&settings, &value)?;
+                if !allow_write || is_root {
+                    return Err("link_write_not_allowed".to_owned());
+                }
+                Ok(path)
+            });
+        drop(settings);
+        match resolved.and_then(|value| remove_link_path(&value.to_string_lossy())) {
+            Ok(()) => bridge_response(&mut stream, "200 OK", None, "{\"ok\":true}"),
+            Err(_) => bridge_response(
+                &mut stream,
+                "400 Bad Request",
+                None,
+                "{\"error\":\"delete_failed\"}",
+            ),
+        }
+        return;
+    }
+    if headers.starts_with("PUT /v1/link/directory?") {
+        let state = app.state::<AppState>();
+        let settings = match state.settings.lock() {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        if !bridge_authorized(&headers, &settings.link_password) {
+            bridge_response(&mut stream, "401 Unauthorized", None, "");
+            return;
+        }
+        let request_target = headers
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("");
+        let path = url::Url::parse(&format!("http://localhost{request_target}"))
+            .ok()
+            .and_then(|url| {
+                url.query_pairs()
+                    .find(|(key, _)| key == "path")
+                    .map(|(_, value)| value.into_owned())
+            });
+        let Some((path, true)) = path.and_then(|value| resolve_link_share(&settings, &value).ok())
+        else {
             bridge_response(&mut stream, "400 Bad Request", None, "");
             return;
         };
+        drop(settings);
+        match fs::create_dir_all(path) {
+            Ok(()) => bridge_response(&mut stream, "200 OK", None, "{\"ok\":true}"),
+            Err(_) => bridge_response(&mut stream, "403 Forbidden", None, ""),
+        }
+        return;
+    }
+    if headers.starts_with("PUT /v1/link/file?") {
+        let state = app.state::<AppState>();
+        let settings = match state.settings.lock() {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        if !bridge_authorized(&headers, &settings.link_password) {
+            bridge_response(&mut stream, "401 Unauthorized", None, "");
+            return;
+        }
+        let request_target = headers
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("");
+        let path = url::Url::parse(&format!("http://localhost{request_target}"))
+            .ok()
+            .and_then(|url| {
+                url.query_pairs()
+                    .find(|(key, _)| key == "path")
+                    .map(|(_, value)| value.into_owned())
+            });
+        let Some((path, true)) = path.and_then(|value| resolve_link_share(&settings, &value).ok())
+        else {
+            bridge_response(&mut stream, "400 Bad Request", None, "");
+            return;
+        };
+        drop(settings);
+        if let Some(parent) = path.parent() {
+            if fs::create_dir_all(parent).is_err() {
+                bridge_response(&mut stream, "403 Forbidden", None, "");
+                return;
+            }
+        }
         let length = bridge_content_length(&headers);
         let Ok(mut file) = fs::File::create(path) else {
             bridge_response(&mut stream, "403 Forbidden", None, "");
@@ -1172,6 +3086,42 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         return;
     };
     let headers = String::from_utf8_lossy(&buffer[..header_end + 4]);
+    if headers.starts_with("POST /v1/link/auth ") {
+        let request = serde_json::from_slice::<LinkAuthRequest>(&buffer[header_end + 4..]);
+        let Ok(mut request) = request else {
+            bridge_response(
+                &mut stream,
+                "400 Bad Request",
+                None,
+                "{\"error\":\"invalid_request\"}",
+            );
+            return;
+        };
+        let authentication = verify_system_account(&request.username, &request.password);
+        request.password.zeroize();
+        match authentication {
+            Ok(()) => {
+                let state = app.state::<AppState>();
+                let token = match state.settings.lock() {
+                    Ok(settings) => settings.link_password.clone(),
+                    Err(_) => return,
+                };
+                let body = serde_json::to_string(&LinkAuthResponse { token })
+                    .unwrap_or_else(|_| "{\"error\":\"serialization_failed\"}".to_owned());
+                bridge_response(&mut stream, "200 OK", None, &body);
+            }
+            Err(_) => {
+                std::thread::sleep(Duration::from_millis(750));
+                bridge_response(
+                    &mut stream,
+                    "401 Unauthorized",
+                    None,
+                    "{\"error\":\"authentication_failed\"}",
+                );
+            }
+        }
+        return;
+    }
     if headers.starts_with("POST /v1/mobile/add ") {
         let state = app.state::<AppState>();
         let settings = match state.settings.lock() {
@@ -1255,10 +3205,12 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                     .find(|(key, _)| key == "path")
                     .map(|(_, value)| value.into_owned())
             });
-        let Some(path) = path.and_then(|value| safe_link_path(&value).ok()) else {
+        let Some((path, _)) = path.and_then(|value| resolve_link_share(&settings, &value).ok())
+        else {
             bridge_response(&mut stream, "400 Bad Request", None, "");
             return;
         };
+        drop(settings);
         let Ok(mut file) = fs::File::open(&path) else {
             bridge_response(&mut stream, "404 Not Found", None, "");
             return;
@@ -1305,7 +3257,7 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         );
         return;
     }
-    match list_link_directory(&request.path)
+    match list_shared_link_directory(&settings, &request.path)
         .and_then(|entries| serde_json::to_string(&entries).map_err(|error| error.to_string()))
     {
         Ok(body) => bridge_response(&mut stream, "200 OK", None, &body),
@@ -1318,19 +3270,25 @@ fn handle_link_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     }
 }
 
-fn run_link_server(app: tauri::AppHandle, listener: TcpListener) {
+fn run_link_server(app: tauri::AppHandle, listener: TcpListener, tls_config: Arc<ServerConfig>) {
     for stream in listener.incoming().flatten() {
         let app = app.clone();
+        let tls_config = tls_config.clone();
         let _ = std::thread::Builder::new()
             .name("apocalipse-link-client".into())
-            .spawn(move || handle_link_connection(&app, stream));
+            .spawn(move || {
+                let Ok(connection) = ServerConnection::new(tls_config) else {
+                    return;
+                };
+                handle_link_connection(&app, StreamOwned::new(connection, stream));
+            });
     }
 }
 
 #[tauri::command]
 fn inspect_url(url: String) -> Result<PlanResponse, String> {
     let capabilities = Capabilities {
-        aria2: true,
+        gopeed: true,
         yt_dlp: true,
         n_m3u8dl_re: true,
         torrent: false,
@@ -1364,7 +3322,7 @@ async fn inspect_media_formats(
                 &settings.qjs_path,
                 if cfg!(windows) { "qjs.exe" } else { "qjs" },
             ),
-            website_credential_for_url(&settings, &url).cloned(),
+            effective_credential_for_download(&settings, &url, None),
         )
     };
     let mut command = tokio::process::Command::new(executable);
@@ -1377,6 +3335,19 @@ async fn inspect_media_formats(
         ])
         .arg("--js-runtimes")
         .arg(format!("quickjs:{}", quickjs.display()))
+        .args([
+            "--ignore-config",
+            "--retries",
+            "30",
+            "--extractor-retries",
+            "10",
+            "--retry-sleep",
+            "2",
+            "--retry-sleep",
+            "extractor:2",
+            "--socket-timeout",
+            "30",
+        ])
         .arg(&url);
     let cookie_jar = cookie_header
         .as_deref()
@@ -1599,20 +3570,172 @@ fn save_queue(state: &AppState, queue: &[DownloadTask]) -> Result<(), String> {
     result
 }
 
-fn load_settings(path: &Path) -> UserSettings {
-    let settings: UserSettings = fs::read(path)
+fn load_settings(path: &Path) -> Result<UserSettings, String> {
+    let mut settings: UserSettings = fs::read(path)
         .ok()
         .and_then(|data| serde_json::from_slice(&data).ok())
         .unwrap_or_default();
-    settings
+    for share in &mut settings.link_shares {
+        if let Ok(metadata) = fs::metadata(&share.path) {
+            share.directory = metadata.is_dir();
+        }
+    }
+    hydrate_and_migrate_secrets(&mut settings)?;
+    write_settings(path, &settings)?;
+    Ok(settings)
 }
 
-fn save_settings(state: &AppState, settings: &UserSettings) -> Result<(), String> {
-    if let Some(parent) = state.settings_path.parent() {
+fn migrate_secret(account: &str, in_memory: &mut String) -> Result<(), String> {
+    if let Some(secret) = vault_load(account)? {
+        in_memory.zeroize();
+        *in_memory = secret;
+        return Ok(());
+    }
+    vault_store_verified(account, in_memory)
+}
+
+fn hydrate_and_migrate_secrets(settings: &mut UserSettings) -> Result<(), String> {
+    migrate_secret(VAULT_BRIDGE_TOKEN, &mut settings.bridge_token)?;
+    migrate_secret(VAULT_LINK_PASSWORD, &mut settings.link_password)?;
+    if settings.link_password.len() < 24 {
+        settings.link_password.zeroize();
+        settings.link_password = default_link_password();
+        vault_store_verified(VAULT_LINK_PASSWORD, &settings.link_password)?;
+    }
+
+    if let Some(mut legacy) = settings.proxy_password.take() {
+        if vault_load(VAULT_PROXY_PASSWORD)?.is_none() {
+            vault_store_verified(VAULT_PROXY_PASSWORD, &legacy)?;
+        }
+        legacy.zeroize();
+    }
+    settings.proxy_password = vault_load(VAULT_PROXY_PASSWORD)?;
+
+    for credential in &mut settings.legacy_website_credentials {
+        let account = website_vault_account(&credential.host);
+        let secret = vault_load(&account)?.unwrap_or_else(|| credential.password.clone());
+        if !secret.is_empty()
+            && !settings
+                .host_rules
+                .iter()
+                .any(|rule| rule.pattern == credential.host)
+        {
+            vault_store_verified(&host_rule_vault_account(&credential.host), &secret)?;
+            settings.host_rules.push(HostRule {
+                pattern: credential.host.clone(),
+                username: Some(credential.username.clone()),
+                password: secret,
+                user_agent: None,
+                connections: None,
+                bandwidth_limit: None,
+            });
+        }
+        let _ = vault_delete(&account);
+        credential.password.zeroize();
+    }
+    settings.legacy_website_credentials.clear();
+    for rule in &mut settings.host_rules {
+        let account = host_rule_vault_account(&rule.pattern);
+        if !rule.password.is_empty() && vault_load(&account)?.is_none() {
+            vault_store_verified(&account, &rule.password)?;
+        }
+        rule.password.zeroize();
+        rule.password = vault_load(&account)?.unwrap_or_default();
+    }
+    Ok(())
+}
+
+fn write_settings(path: &Path, settings: &UserSettings) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let data = serde_json::to_vec_pretty(settings).map_err(|error| error.to_string())?;
-    fs::write(&state.settings_path, data).map_err(|error| error.to_string())
+    fs::write(path, data).map_err(|error| error.to_string())
+}
+
+fn save_settings(state: &AppState, settings: &UserSettings) -> Result<(), String> {
+    write_settings(&state.settings_path, settings)
+}
+
+fn update_capacity_estimate(
+    estimate: &mut HttpCapacityEstimate,
+    observed: u64,
+    decay_after_low_runs: u32,
+) {
+    if observed == 0 {
+        return;
+    }
+    if estimate.bytes_per_second == 0 || observed > estimate.bytes_per_second {
+        estimate.bytes_per_second = observed;
+        estimate.low_runs = 0;
+        return;
+    }
+    if observed >= estimate.bytes_per_second.saturating_mul(85) / 100 {
+        estimate.low_runs = 0;
+        return;
+    }
+    estimate.low_runs = estimate.low_runs.saturating_add(1);
+    if estimate.low_runs >= decay_after_low_runs.max(1) {
+        estimate.bytes_per_second =
+            (estimate.bytes_per_second.saturating_mul(95) / 100).max(observed);
+        estimate.low_runs = 0;
+    }
+}
+
+fn learn_http_capacity(state: &AppState, host: Option<&str>, observed: u64) {
+    if observed < 1024 * 1024 {
+        return;
+    }
+    let mut settings = match state.settings.lock() {
+        Ok(settings) => settings,
+        Err(_) => return,
+    };
+    let previous_global = settings.http_global_capacity.bytes_per_second;
+    let previous_host = host
+        .and_then(|host| settings.http_host_capacities.get(host))
+        .map(|estimate| estimate.bytes_per_second)
+        .unwrap_or(0);
+
+    if let Some(host) = host {
+        if settings.http_host_capacities.contains_key(host)
+            || settings.http_host_capacities.len() < 256
+        {
+            let estimate = settings
+                .http_host_capacities
+                .entry(host.to_owned())
+                .or_default();
+            update_capacity_estimate(estimate, observed, 4);
+        }
+    }
+
+    if observed > settings.http_global_capacity.bytes_per_second {
+        settings.http_global_capacity.bytes_per_second = observed;
+        settings.http_global_capacity.low_runs = 0;
+    } else if previous_global > 0 && previous_host >= previous_global.saturating_mul(85) / 100 {
+        // Only a host that historically came close to the user's global best
+        // is allowed to vote that the actual access link became slower.
+        update_capacity_estimate(&mut settings.http_global_capacity, observed, 8);
+    }
+
+    let global = settings.http_global_capacity.bytes_per_second;
+    let host_capacity = host
+        .and_then(|host| settings.http_host_capacities.get(host))
+        .map(|estimate| estimate.bytes_per_second)
+        .unwrap_or(0);
+    if save_settings(state, &settings).is_ok() {
+        state.diagnostics.record(
+            "http.capacity_learned",
+            "INFO",
+            None,
+            None,
+            serde_json::json!({
+                "observedSustainedBytesPerSecond": observed,
+                "globalCapacityBytesPerSecond": global,
+                "host": host,
+                "hostCapacityBytesPerSecond": host_capacity
+            }),
+        );
+    }
 }
 
 fn redact_url(url: &str) -> String {
@@ -1684,6 +3807,19 @@ fn sanitize_log_detail(detail: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn read_sanitized_log_tail(path: &Path, max_bytes: usize) -> Option<Vec<u8>> {
+    let bytes = fs::read(path).ok()?;
+    let start = bytes.len().saturating_sub(max_bytes);
+    let text = String::from_utf8_lossy(&bytes[start..]);
+    Some(
+        text.lines()
+            .map(sanitize_log_detail)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into_bytes(),
+    )
 }
 
 fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
@@ -1981,6 +4117,11 @@ async fn run_download(
             };
             (proxy, dns)
         });
+    let request_host = host_from_url(&request.url);
+    let mut previous_perf_rate: Option<u64> = None;
+    let mut display_rate_ewma = 0_f64;
+    let mut sustainable_peak = 0_u64;
+    let mut completed_ok = false;
     let engine_result = match network {
         Some((proxy, dns)) => {
             let (url, username, password) = proxy.unwrap_or_default();
@@ -2013,6 +4154,9 @@ async fn run_download(
     let (events, mut receiver) = mpsc::channel(64);
     let mut download = Box::pin(download_with_mirrors(engine, request, mirrors, events));
     let mut was_cancelled = false;
+    let mut active_connections = 1_usize;
+    let mut perf_last_at = Instant::now();
+    let mut perf_last_bytes = 0_u64;
     loop {
         tokio::select! {
             biased;
@@ -2023,6 +4167,7 @@ async fn run_download(
             result = &mut download => {
                 match result {
                     Ok(()) => {
+                        completed_ok = true;
                         diagnostic_log(&app.state::<AppState>(), "INFO", "http.completed", &format!("task={id}"));
                         update_task(&app, id, true, |task| {
                             task.state = DownloadState::Completed;
@@ -2038,7 +4183,23 @@ async fn run_download(
             }
             event = receiver.recv() => match event {
                 Some(DownloadEvent::Started { resumed_at, total, connections, resume_supported }) => {
+                    active_connections = connections;
+                    perf_last_at = Instant::now();
+                    perf_last_bytes = resumed_at;
                     diagnostic_log(&app.state::<AppState>(), "INFO", "http.mode", &format!("task={id} connections={connections} segmented={}", connections > 1));
+                    app.state::<AppState>().diagnostics.record(
+                        "http.transfer_started",
+                        "INFO",
+                        None,
+                        Some(&id.to_string()),
+                        serde_json::json!({
+                            "resumedBytes": resumed_at,
+                            "totalBytes": total,
+                            "activeConnections": connections,
+                            "resumeSupported": resume_supported,
+                            "mode": if connections > 1 { "segmented" } else { "single" }
+                        }),
+                    );
                     update_task(&app, id, true, |task| {
                         task.state = DownloadState::Downloading;
                         task.received = resumed_at;
@@ -2046,10 +4207,76 @@ async fn run_download(
                         task.resume_supported = Some(resume_supported);
                     });
                 },
-                Some(DownloadEvent::Progress { received, total }) => update_task(&app, id, false, |task| {
-                    task.received = received;
-                    task.total = total;
-                }),
+                Some(DownloadEvent::Progress { received, total }) => {
+                    update_task(&app, id, false, |task| {
+                        task.received = received;
+                        task.total = total;
+                    });
+                    let elapsed = perf_last_at.elapsed();
+                    if elapsed >= Duration::from_secs(2) {
+                        let elapsed_ms = elapsed.as_millis() as u64;
+                        let interval_bytes = received.saturating_sub(perf_last_bytes);
+                        let bytes_per_second = if elapsed_ms > 0 {
+                            interval_bytes.saturating_mul(1000) / elapsed_ms
+                        } else {
+                            0
+                        };
+                        if let Some(previous) = previous_perf_rate {
+                            sustainable_peak = sustainable_peak.max(previous.min(bytes_per_second));
+                        }
+                        previous_perf_rate = Some(bytes_per_second);
+                        let display_alpha = if bytes_per_second as f64 >= display_rate_ewma {
+                            0.80
+                        } else {
+                            0.35
+                        };
+                        display_rate_ewma = if display_rate_ewma > 0.0 {
+                            bytes_per_second as f64 * display_alpha
+                                + display_rate_ewma * (1.0 - display_alpha)
+                        } else {
+                            bytes_per_second as f64
+                        };
+                        let smoothed_bytes_per_second = display_rate_ewma as u64;
+                        update_task(&app, id, false, |task| {
+                            task.download_speed = Some(smoothed_bytes_per_second);
+                        });
+                        app.state::<AppState>().diagnostics.record(
+                            "http.performance_sample",
+                            "INFO",
+                            None,
+                            Some(&id.to_string()),
+                            serde_json::json!({
+                                "receivedBytes": received,
+                                "totalBytes": total,
+                                "intervalBytes": interval_bytes,
+                                "intervalMs": elapsed_ms,
+                                "bytesPerSecond": bytes_per_second,
+                                "smoothedBytesPerSecond": smoothed_bytes_per_second,
+                                "displayAlpha": display_alpha,
+                                "activeConnections": active_connections
+                            }),
+                        );
+                        perf_last_at = Instant::now();
+                        perf_last_bytes = received;
+                    }
+                },
+                Some(DownloadEvent::Diagnostic { event, detail }) => {
+                    if event == "http.connection_admission" {
+                        if let Some(connections) = detail
+                            .get("admittedConnections")
+                            .and_then(serde_json::Value::as_u64)
+                        {
+                            active_connections = connections.max(1) as usize;
+                        }
+                    }
+                    app.state::<AppState>().diagnostics.record(
+                        event,
+                        "INFO",
+                        None,
+                        Some(&id.to_string()),
+                        detail,
+                    );
+                },
                 Some(DownloadEvent::Completed { bytes }) => update_task(&app, id, true, |task| {
                     task.received = bytes;
                     task.total = Some(bytes);
@@ -2059,6 +4286,13 @@ async fn run_download(
                 None => break,
             }
         }
+    }
+    if completed_ok && sustainable_peak > 0 {
+        learn_http_capacity(
+            &app.state::<AppState>(),
+            request_host.as_deref(),
+            sustainable_peak,
+        );
     }
     if !was_cancelled {
         if let Ok(mut workers) = app.state::<AppState>().workers.lock() {
@@ -2075,16 +4309,7 @@ async fn download_with_mirrors(
     events: mpsc::Sender<DownloadEvent>,
 ) -> anyhow::Result<()> {
     let sources = engine.verified_sources(&request, &mirrors).await;
-    let mut last_error = None;
-    for source in sources {
-        let mut attempt = request.clone();
-        attempt.url = source;
-        match engine.download(attempt, events.clone()).await {
-            Ok(()) => return Ok(()),
-            Err(error) => last_error = Some(error),
-        }
-    }
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no_download_source")))
+    engine.download_from_sources(request, sources, events).await
 }
 
 fn finalize_media_page_download(
@@ -2221,6 +4446,385 @@ async fn log_network_route(state: &AppState, operation: &str, engine: &str) {
     }
 }
 
+fn gopeed_request_context(
+    state: &AppState,
+    task: &DownloadTask,
+) -> (gopeed::RequestContext, usize) {
+    let settings = state
+        .settings
+        .lock()
+        .ok()
+        .map(|value| value.clone())
+        .unwrap_or_default();
+    let identity = state
+        .request_identities
+        .lock()
+        .ok()
+        .and_then(|items| items.get(&task.id).cloned());
+    let host_rule = host_rule_for_url(&settings, &task.source).cloned();
+    let connections = task
+        .connections_override
+        .or_else(|| host_rule.as_ref().and_then(|rule| rule.connections))
+        .unwrap_or(settings.connections_per_download)
+        .clamp(1, 32);
+    let mut headers = HashMap::new();
+    if let Some(referer) = task.referer.as_deref() {
+        headers.insert("Referer".to_owned(), referer.to_owned());
+    }
+    if let Some(user_agent) = host_rule
+        .as_ref()
+        .and_then(|rule| rule.user_agent.as_ref())
+        .or(settings.user_agent.as_ref())
+        .or_else(|| {
+            identity
+                .as_ref()
+                .and_then(|value| value.user_agent.as_ref())
+        })
+    {
+        headers.insert("User-Agent".to_owned(), user_agent.clone());
+    }
+    if let Some(cookie) = identity
+        .as_ref()
+        .and_then(|value| value.cookie_header.as_ref())
+    {
+        headers.insert("Cookie".to_owned(), cookie.clone());
+    }
+    if let Some(content_type) = identity
+        .as_ref()
+        .and_then(|value| value.request_content_type.as_ref())
+    {
+        headers.insert("Content-Type".to_owned(), content_type.clone());
+    }
+    if let Some(credential) =
+        effective_credential_for_download(&settings, &task.source, task.referer.as_deref())
+    {
+        let basic = BASE64.encode(format!("{}:{}", credential.username, credential.password));
+        headers.insert("Authorization".to_owned(), format!("Basic {basic}"));
+    }
+    (
+        gopeed::RequestContext {
+            method: identity
+                .as_ref()
+                .map(|value| value.request_method.clone())
+                .unwrap_or_else(|| "GET".to_owned()),
+            headers,
+            body: identity
+                .and_then(|value| value.request_body)
+                .unwrap_or_default(),
+        },
+        connections,
+    )
+}
+
+async fn run_gopeed_download(
+    app: tauri::AppHandle,
+    id: DownloadId,
+    task: DownloadTask,
+    kind: DownloadKind,
+    mut cancellation: oneshot::Receiver<()>,
+) {
+    let state = app.state::<AppState>();
+    update_task(&app, id, true, |item| {
+        item.state = DownloadState::Downloading;
+        item.progress_percent = Some(0.0);
+        item.resume_supported = Some(true);
+    });
+    let route_app = app.clone();
+    let route_operation = id.to_string();
+    tauri::async_runtime::spawn(async move {
+        let state = route_app.state::<AppState>();
+        log_network_route(&state, &route_operation, "Gopeed").await;
+    });
+    let endpoint = match gopeed_endpoint(&state).await {
+        Ok(endpoint) => endpoint,
+        Err(message) => {
+            update_task(&app, id, true, |item| {
+                item.state = DownloadState::Failed {
+                    message: format!("gopeed_unavailable:{message}"),
+                }
+            });
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    };
+    let (context, connections) = gopeed_request_context(&state, &task);
+    let existing_task = task.gopeed_task_id.clone().or_else(|| {
+        state
+            .gopeed_tasks
+            .lock()
+            .ok()
+            .and_then(|items| items.get(&id).cloned())
+    });
+    let gopeed_id = match existing_task {
+        Some(gopeed_id) => {
+            if let Err(error) = endpoint.resume(&gopeed_id).await {
+                update_task(&app, id, true, |item| {
+                    item.state = DownloadState::Failed {
+                        message: format!("gopeed_resume_failed:{error}"),
+                    }
+                });
+                if let Ok(mut workers) = state.workers.lock() {
+                    workers.remove(&id);
+                }
+                start_next_queued(&app);
+                return;
+            }
+            gopeed_id
+        }
+        None => {
+            let selected_files = task
+                .torrent_selection
+                .iter()
+                .filter_map(|index| index.checked_sub(1))
+                .collect::<Vec<_>>();
+            let is_http = matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp);
+            let resolved_id = if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
+                // A BitTorrent fetcher binds its anacrolix storage during Resolve.
+                // Always resolve against the user's actual destination immediately
+                // before creating the task. Reusing a metadata-inspection resolve
+                // would keep writing to the inspection directory instead.
+                let directory = task
+                    .destination
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .to_string_lossy()
+                    .into_owned();
+                match endpoint.resolve(&task.source, &directory, &context).await {
+                    Ok(resolved) => Some(resolved.id),
+                    Err(error) => {
+                        update_task(&app, id, true, |item| {
+                            item.state = DownloadState::Failed {
+                                message: format!("gopeed_torrent_resolve_failed:{error}"),
+                            }
+                        });
+                        if let Ok(mut workers) = state.workers.lock() {
+                            workers.remove(&id);
+                        }
+                        start_next_queued(&app);
+                        return;
+                    }
+                }
+            } else {
+                None
+            };
+            match endpoint
+                .create_task(
+                    &task.source,
+                    &task.destination,
+                    connections,
+                    &selected_files,
+                    &context,
+                    resolved_id.as_deref(),
+                    is_http,
+                )
+                .await
+            {
+                Ok(gopeed_id) => {
+                    if let Ok(mut items) = state.gopeed_tasks.lock() {
+                        items.insert(id, gopeed_id.clone());
+                    }
+                    let persisted_id = gopeed_id.clone();
+                    update_task(&app, id, true, |item| {
+                        item.gopeed_task_id = Some(persisted_id.clone());
+                    });
+                    gopeed_id
+                }
+                Err(error) => {
+                    update_task(&app, id, true, |item| {
+                        item.state = DownloadState::Failed {
+                            message: format!("gopeed_create_failed:{error}"),
+                        }
+                    });
+                    if let Ok(mut workers) = state.workers.lock() {
+                        workers.remove(&id);
+                    }
+                    start_next_queued(&app);
+                    return;
+                }
+            }
+        }
+    };
+    diagnostic_log(
+        &state,
+        "INFO",
+        "gopeed.task_started",
+        &format!("task={id} gopeed_task={gopeed_id} engine={kind:?} connections={connections}"),
+    );
+    state.diagnostics.record(
+        "http.engine_selected",
+        "INFO",
+        None,
+        Some(&id.to_string()),
+        serde_json::json!({
+            "engine": "gopeed",
+            "connections": connections,
+            "kind": format!("{kind:?}")
+        }),
+    );
+
+    let mut last_at = Instant::now();
+    let mut last_downloaded = 0_u64;
+    let mut interval = tokio::time::interval(Duration::from_millis(350));
+    let mut terminal = false;
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut cancellation => {
+                let _ = endpoint.pause(&gopeed_id).await;
+                diagnostic_log(&state, "INFO", "gopeed.paused", &format!("task={id} gopeed_task={gopeed_id}"));
+                return;
+            }
+            _ = interval.tick() => {
+                let status = match endpoint.status(&gopeed_id).await {
+                    Ok(status) => status,
+                    Err(error) => {
+                        diagnostic_log(&state, "WARN", "gopeed.status_failed", &format!("task={id} error={error}"));
+                        continue;
+                    }
+                };
+                let stats = endpoint.stats(&gopeed_id).await.unwrap_or_default();
+                let now = Instant::now();
+                let elapsed = now.duration_since(last_at).as_secs_f64().max(0.001);
+                let raw_speed = if status.downloaded >= last_downloaded {
+                    ((status.downloaded - last_downloaded) as f64 / elapsed) as u64
+                } else {
+                    status.speed
+                };
+                last_at = now;
+                last_downloaded = status.downloaded;
+                let percent = if status.total > 0 {
+                    Some((status.downloaded as f64 * 100.0 / status.total as f64).clamp(0.0, 100.0))
+                } else {
+                    None
+                };
+                let eta = if status.speed > 0 && status.total > status.downloaded {
+                    Some(format!("{}s", (status.total - status.downloaded) / status.speed))
+                } else {
+                    None
+                };
+                update_task(&app, id, false, |item| {
+                    item.received = status.downloaded;
+                    item.total = (status.total > 0).then_some(status.total);
+                    item.progress_percent = percent;
+                    item.download_speed = Some(status.speed.max(raw_speed));
+                    item.upload_speed = Some(status.upload_speed);
+                    item.torrent_seeders = Some(stats.seeders);
+                    item.torrent_leechers = Some(stats.leechers);
+                    item.torrent_eta = eta.clone();
+                });
+                state.diagnostics.record(
+                    if is_http_kind(kind) { "http.performance_sample" } else { "gopeed.performance_sample" },
+                    "INFO",
+                    None,
+                    Some(&id.to_string()),
+                    serde_json::json!({
+                        "engine": "gopeed",
+                        "bytesPerSecond": raw_speed,
+                        "reportedBytesPerSecond": status.speed,
+                        "receivedBytes": status.downloaded,
+                        "totalBytes": status.total,
+                        "progressPercent": percent,
+                        "activeConnections": stats.active_connections,
+                        "activePeers": stats.active_peers,
+                        "totalPeers": stats.total_peers,
+                        "seeders": stats.seeders,
+                        "leechers": stats.leechers,
+                        "connectionDownloads": stats.connections.iter().map(|connection| connection.downloaded).collect::<Vec<_>>(),
+                        "connectionTotals": stats.connections.iter().map(|connection| connection.total).collect::<Vec<_>>(),
+                        "connectionCompleted": stats.connections.iter().map(|connection| connection.completed).collect::<Vec<_>>(),
+                        "connectionFailed": stats.connections.iter().map(|connection| connection.failed).collect::<Vec<_>>(),
+                        "connectionRetries": stats.connections.iter().map(|connection| connection.retry_times).collect::<Vec<_>>(),
+                        "sampleWindowMs": 350
+                    }),
+                );
+                match status.status.as_str() {
+                    "done" => {
+                        let torrent_output_ready = if matches!(
+                            kind,
+                            DownloadKind::Torrent | DownloadKind::Magnet
+                        ) {
+                            let mut ready = task.destination.exists();
+                            for _ in 0..20 {
+                                if ready {
+                                    break;
+                                }
+                                tokio::time::sleep(Duration::from_millis(100)).await;
+                                ready = task.destination.exists();
+                            }
+                            ready
+                        } else {
+                            true
+                        };
+                        if !torrent_output_ready {
+                            diagnostic_log(
+                                &state,
+                                "ERROR",
+                                "gopeed.output_missing",
+                                &format!(
+                                    "task={id} destination={}",
+                                    task.destination.display()
+                                ),
+                            );
+                            update_task(&app, id, true, |item| {
+                                item.download_speed = Some(0);
+                                item.upload_speed = Some(0);
+                                item.state = DownloadState::Failed {
+                                    message: "gopeed_output_missing".to_owned(),
+                                };
+                            });
+                            terminal = true;
+                            break;
+                        }
+                        update_task(&app, id, true, |item| {
+                            item.received = status.total.max(status.downloaded);
+                            item.total = Some(status.total.max(status.downloaded));
+                            item.progress_percent = Some(100.0);
+                            item.download_speed = Some(0);
+                            item.upload_speed = Some(0);
+                            item.state = DownloadState::Completed;
+                            item.completed_at = Some(epoch_seconds());
+                        });
+                        terminal = true;
+                        break;
+                    }
+                    "error" => {
+                        update_task(&app, id, true, |item| {
+                            item.state = DownloadState::Failed {
+                                message: "gopeed_task_failed".to_owned(),
+                            };
+                        });
+                        terminal = true;
+                        break;
+                    }
+                    "pause" => {
+                        update_task(&app, id, true, |item| {
+                            item.state = DownloadState::Paused;
+                            item.download_speed = Some(0);
+                            item.upload_speed = Some(0);
+                        });
+                        terminal = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    if terminal {
+        if let Ok(mut workers) = state.workers.lock() {
+            workers.remove(&id);
+        }
+        start_next_queued(&app);
+    }
+}
+
+fn is_http_kind(kind: DownloadKind) -> bool {
+    matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp)
+}
+
 async fn run_external_download(
     app: tauri::AppHandle,
     id: DownloadId,
@@ -2296,14 +4900,7 @@ async fn run_external_download(
                         "N_m3u8DL-RE"
                     },
                 ),
-                configured_tool(
-                    &settings.aria2_path,
-                    if cfg!(windows) {
-                        "aria2c.exe"
-                    } else {
-                        "aria2c"
-                    },
-                ),
+                configured_gopeed(&settings),
                 settings.connections_per_download.clamp(1, 32),
                 settings
                     .proxy_enabled
@@ -2323,7 +4920,11 @@ async fn run_external_download(
                 "ffmpeg".into(),
                 "yt-dlp".into(),
                 "N_m3u8DL-RE".into(),
-                "aria2c".into(),
+                if cfg!(windows) {
+                    "gopeed.exe".into()
+                } else {
+                    "gopeed".into()
+                },
                 8,
                 None,
                 None,
@@ -2331,7 +4932,17 @@ async fn run_external_download(
                 Vec::new(),
             )
         });
-    let task_connections = task.connections_override.unwrap_or(tools.4).clamp(1, 32);
+    let host_rule = app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .ok()
+        .and_then(|settings| host_rule_for_url(&settings, &task.source).cloned());
+    let task_connections = task
+        .connections_override
+        .or_else(|| host_rule.as_ref().and_then(|rule| rule.connections))
+        .unwrap_or(tools.4)
+        .clamp(1, 32);
     diagnostic_log(
         &app.state::<AppState>(),
         "INFO",
@@ -2351,12 +4962,16 @@ async fn run_external_download(
         .lock()
         .ok()
         .and_then(|identities| identities.get(&task.id).cloned());
-    let configured_user_agent = app
-        .state::<AppState>()
-        .settings
-        .lock()
-        .ok()
-        .and_then(|settings| settings.user_agent.clone());
+    let configured_user_agent = host_rule
+        .as_ref()
+        .and_then(|rule| rule.user_agent.clone())
+        .or_else(|| {
+            app.state::<AppState>()
+                .settings
+                .lock()
+                .ok()
+                .and_then(|settings| settings.user_agent.clone())
+        });
     let global_bandwidth_limit = app
         .state::<AppState>()
         .settings
@@ -2365,7 +4980,9 @@ async fn run_external_download(
         .unwrap_or_default();
     let bandwidth_limit = match (
         global_bandwidth_limit,
-        task.bandwidth_limit.unwrap_or_default(),
+        task.bandwidth_limit
+            .or_else(|| host_rule.as_ref().and_then(|rule| rule.bandwidth_limit))
+            .unwrap_or_default(),
     ) {
         (0, task_limit) => task_limit,
         (global_limit, 0) => global_limit,
@@ -2377,8 +4994,7 @@ async fn run_external_download(
         .lock()
         .ok()
         .and_then(|settings| {
-            website_credential_for_download(&settings, &task.source, task.referer.as_deref())
-                .cloned()
+            effective_credential_for_download(&settings, &task.source, task.referer.as_deref())
         });
     let user_agent = configured_user_agent.as_deref()
         .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_deref()))
@@ -2392,7 +5008,6 @@ async fn run_external_download(
             let mut command = tokio::process::Command::new(&tools.1);
             let media_source =
                 canonical_facebook_video_url(&task.source).unwrap_or_else(|| task.source.clone());
-            let facebook_media = media_source.contains("facebook.com/");
             if let Some(proxy_url) = proxy_url.as_deref() {
                 command.arg("--proxy").arg(proxy_url);
             }
@@ -2422,15 +5037,6 @@ async fn run_external_download(
             if task.is_live {
                 command.args(["--live-from-start", "--hls-use-mpegts"]);
             }
-            if facebook_media {
-                command
-                    .arg("--downloader")
-                    .arg(&tools.3)
-                    .arg("--downloader-args")
-                    .arg(format!(
-                        "aria2c:-x{media_connections} -s{media_connections} -k1M --file-allocation=none"
-                    ));
-            }
             let quickjs_name = if cfg!(windows) { "qjs.exe" } else { "qjs" };
             let configured_quickjs = app
                 .state::<AppState>()
@@ -2456,7 +5062,12 @@ async fn run_external_download(
             }
             let browser_session_site = task.source.contains("instagram.com/")
                 || task.source.contains("tiktok.com/")
-                || task.source.contains("facebook.com/");
+                || task.source.contains("facebook.com/")
+                || task.source.contains("twitch.tv/")
+                || task.source.contains("twitch.com/")
+                || task.source.contains("bilibili.com/")
+                || task.source.contains("b23.tv/")
+                || task.source.contains("bili.tv/");
             if let Some(cookie) = identity
                 .as_ref()
                 .and_then(|value| value.cookie_header.as_deref())
@@ -2473,22 +5084,29 @@ async fn run_external_download(
                 } else {
                     command.arg("--add-headers").arg(format!("Cookie:{cookie}"));
                 }
-            } else if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
+            } else if browser_session_site
+                || task.source.contains("youtube.com/")
+                || task.source.contains("youtu.be/")
+            {
                 command.args(["--cookies-from-browser", "chrome"]);
             }
-            if task.source.contains("youtube.com/")
-                || task.source.contains("youtu.be/")
-                || browser_session_site
-            {
-                command.args([
-                    "--retries",
-                    "10",
-                    "--fragment-retries",
-                    "10",
-                    "--retry-sleep",
-                    "fragment:exp=1:8",
-                ]);
-            }
+            command.args([
+                "--ignore-config",
+                "--retries",
+                "30",
+                "--fragment-retries",
+                "30",
+                "--extractor-retries",
+                "10",
+                "--retry-sleep",
+                "2",
+                "--retry-sleep",
+                "extractor:2",
+                "--retry-sleep",
+                "fragment:exp=1:8",
+                "--socket-timeout",
+                "30",
+            ]);
             command.args(["--user-agent", user_agent]);
             if let Some(credential) = website_credential.as_ref() {
                 command
@@ -2524,10 +5142,29 @@ async fn run_external_download(
                     command.arg("-http_proxy").arg(proxy_url);
                 }
                 command.arg("-y");
+                command.arg("-user_agent").arg(&user_agent);
+                if let Some(referer) = task.referer.as_deref() {
+                    command.arg("-referer").arg(referer);
+                }
+                let mut request_headers = String::new();
                 if let Some(credential) = website_credential.as_ref() {
                     let basic =
                         BASE64.encode(format!("{}:{}", credential.username, credential.password));
-                    command.args(["-headers", &format!("Authorization: Basic {basic}\r\n")]);
+                    request_headers.push_str(&format!("Authorization: Basic {basic}\r\n"));
+                }
+                if let Some(cookie) = identity
+                    .as_ref()
+                    .and_then(|value| value.cookie_header.as_deref())
+                {
+                    request_headers.push_str(&format!("Cookie: {cookie}\r\n"));
+                }
+                if let Some(referer) = task.referer.as_deref() {
+                    if let Some(origin) = http_origin(referer) {
+                        request_headers.push_str(&format!("Origin: {origin}\r\n"));
+                    }
+                }
+                if !request_headers.is_empty() {
+                    command.arg("-headers").arg(request_headers);
                 }
                 command.arg("-i").arg(&task.source).arg("-vn");
                 match audio_format {
@@ -2633,88 +5270,6 @@ async fn run_external_download(
                 ]);
                 command
             }
-        }
-        DownloadKind::Torrent
-        | DownloadKind::Magnet
-        | DownloadKind::Ftp
-        | DownloadKind::AcceleratedHttp => {
-            let mut command = tokio::process::Command::new(&tools.3);
-            if !tools.8.is_empty() {
-                command.arg(format!(
-                    "--async-dns-server={}",
-                    tools
-                        .8
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(",")
-                ));
-            }
-            if let Some(proxy_url) = tools.5.as_deref() {
-                command.arg(format!("--all-proxy={proxy_url}"));
-                if let Some(username) = tools.6.as_deref() {
-                    command.arg(format!("--all-proxy-user={username}"));
-                }
-                if let Some(password) = tools.7.as_deref() {
-                    command.arg(format!("--all-proxy-passwd={password}"));
-                }
-            }
-            if kind == DownloadKind::Ftp {
-                if let Some(credential) = website_credential.as_ref() {
-                    command
-                        .arg(format!("--ftp-user={}", credential.username))
-                        .arg(format!("--ftp-passwd={}", credential.password));
-                }
-            }
-            if kind == DownloadKind::AcceleratedHttp {
-                command.args([
-                    "--split=16",
-                    "--max-connection-per-server=16",
-                    "--min-split-size=1M",
-                    "--optimize-concurrent-downloads=true",
-                    "--stream-piece-selector=geom",
-                ]);
-                command.arg(format!("--out={file_name}"));
-                command.arg(format!("--user-agent={user_agent}"));
-                if let Some(referer) = task.referer.as_deref() {
-                    command.arg(format!("--referer={referer}"));
-                }
-                if let Some(cookie) = identity
-                    .as_ref()
-                    .and_then(|value| value.cookie_header.as_deref())
-                {
-                    command.arg(format!("--header=Cookie: {cookie}"));
-                }
-            }
-            command.arg(format!("--dir={}", directory.display())).args([
-                "--summary-interval=1",
-                "--console-log-level=notice",
-                "--show-console-readout=true",
-                "--download-result=hide",
-                "--continue=true",
-                "--enable-dht=true",
-                "--enable-peer-exchange=true",
-                "--bt-enable-lpd=true",
-                "--bt-max-peers=100",
-                "--bt-prioritize-piece=head=64M,tail=64M",
-                "--file-allocation=trunc",
-                "--seed-time=0",
-            ]);
-            if bandwidth_limit > 0 {
-                command.arg(format!("--max-download-limit={bandwidth_limit}"));
-            }
-            if !task.torrent_selection.is_empty() {
-                command.arg(format!(
-                    "--select-file={}",
-                    task.torrent_selection
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(",")
-                ));
-            }
-            command.arg(&task.source);
-            command
         }
         _ => return,
     };
@@ -3032,7 +5587,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "ytDlp": settings.yt_dlp_path.as_ref().is_some_and(|path| path.is_file()),
             "qjs": settings.qjs_path.as_ref().is_some_and(|path| path.is_file()),
             "nM3u8DlRe": settings.n_m3u8dl_re_path.as_ref().is_some_and(|path| path.is_file()),
-            "aria2": settings.aria2_path.as_ref().is_some_and(|path| path.is_file()),
+            "gopeed": settings.gopeed_path.as_ref().is_some_and(|path| path.is_file()),
             "mediaPlayer": settings.media_player_path.as_ref().is_some_and(|path| path.is_file()),
         },
         "pairingTokenPresent": !settings.bridge_token.is_empty(),
@@ -3154,6 +5709,26 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
     ));
     let guide = b"Apocalipse diagnostic bundle v3\nStart with RELATORIO_PARA_IA.txt, traces/replay-de-midia.jsonl and health/collectors.json. Legacy v2 files are preserved. A missing event is not proof of no activity. Review legacy logs before sharing.\n";
     entries.push(("README.txt".to_owned(), guide.to_vec()));
+
+    let gopeed_log_dir = state
+        .queue_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("gopeed-runtime")
+        .join("storage")
+        .join("logs");
+    for (source, name) in [
+        (gopeed_log_dir.join("core.log"), "logs/gopeed/core.log"),
+        (
+            gopeed_log_dir.join("extension.log"),
+            "logs/gopeed/extension.log",
+        ),
+    ] {
+        if let Some(contents) = read_sanitized_log_tail(&source, 4 * 1024 * 1024) {
+            entries.push((name.to_owned(), contents));
+        }
+    }
+
     entries.extend(state.diagnostics.export());
     write_diagnostic_zip(&path, entries)?;
     diagnostic_log(
@@ -3163,6 +5738,11 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         &format!("file={}", path.display()),
     );
     Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+fn read_ai_diagnostics(state: State<'_, AppState>) -> Vec<serde_json::Value> {
+    state.diagnostics.ai_snapshot(750)
 }
 
 #[tauri::command]
@@ -3363,36 +5943,7 @@ async fn read_process_tail(
                 }
                 progress_buffer.push_str(&text);
                 if let Some((app, id, kind)) = progress.as_ref() {
-                    if matches!(
-                        *kind,
-                        DownloadKind::Torrent
-                            | DownloadKind::Magnet
-                            | DownloadKind::Ftp
-                            | DownloadKind::AcceleratedHttp
-                    ) {
-                        if let Some((
-                            received,
-                            total,
-                            percent,
-                            download_speed,
-                            upload_speed,
-                            seeders,
-                            leechers,
-                            eta,
-                        )) = parse_aria2_progress(&progress_buffer)
-                        {
-                            update_task(app, *id, false, |task| {
-                                task.received = received;
-                                task.total = Some(total);
-                                task.progress_percent = Some(percent);
-                                task.download_speed = Some(download_speed);
-                                task.upload_speed = Some(upload_speed);
-                                task.torrent_seeders = Some(seeders);
-                                task.torrent_leechers = Some(leechers);
-                                task.torrent_eta = eta;
-                            });
-                        }
-                    } else if *kind == DownloadKind::MediaPage {
+                    if *kind == DownloadKind::MediaPage {
                         if let Some((received, total, percent, speed)) =
                             parse_yt_dlp_progress(&progress_buffer)
                         {
@@ -3406,17 +5957,6 @@ async fn read_process_tail(
                                     );
                                 }
                             });
-                        } else if let Some((received, total, percent, speed, _, _, _, _)) =
-                            parse_aria2_progress(&progress_buffer)
-                        {
-                            update_task(app, *id, false, |task| {
-                                task.received = received;
-                                task.total = Some(total);
-                                task.download_speed = Some(speed);
-                                task.progress_percent = Some(
-                                    task.progress_percent.unwrap_or(0.0).max(percent.min(90.0)),
-                                );
-                            });
                         } else if let Some(percent) = parse_external_progress(&progress_buffer) {
                             update_task(app, *id, false, |task| {
                                 task.progress_percent = Some(
@@ -3426,11 +5966,6 @@ async fn read_process_tail(
                         }
                     } else if let Some(percent) = parse_external_progress(&progress_buffer) {
                         update_task(app, *id, false, |task| {
-                            let percent = if *kind == DownloadKind::MediaPage {
-                                percent.min(90.0)
-                            } else {
-                                percent
-                            };
                             task.progress_percent =
                                 Some(task.progress_percent.unwrap_or(0.0).max(percent));
                         });
@@ -3444,79 +5979,6 @@ async fn read_process_tail(
         }
     }
     tail
-}
-
-fn parse_aria2_size(value: &str) -> Option<u64> {
-    let value =
-        value.trim_start_matches(|character: char| !character.is_ascii_digit() && character != '.');
-    let split = value
-        .find(|character: char| !character.is_ascii_digit() && character != '.')
-        .unwrap_or(value.len());
-    let number = value[..split].parse::<f64>().ok()?;
-    let unit = value[split..].to_ascii_lowercase();
-    let multiplier = match unit.as_str() {
-        "" | "b" => 1.0,
-        "k" | "kb" | "kib" => 1024.0,
-        "m" | "mb" | "mib" => 1024.0 * 1024.0,
-        "g" | "gb" | "gib" => 1024.0 * 1024.0 * 1024.0,
-        "t" | "tb" | "tib" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
-        _ => return None,
-    };
-    Some((number * multiplier) as u64)
-}
-
-#[allow(clippy::type_complexity)]
-fn parse_aria2_progress(text: &str) -> Option<(u64, u64, f64, u64, u64, u64, u64, Option<String>)> {
-    text.lines().rev().find_map(|line| {
-        let ratio = line.split_whitespace().find_map(|token| {
-            let slash = token.find('/')?;
-            let open = token[slash + 1..]
-                .find('(')
-                .map(|index| slash + 1 + index)?;
-            let close = token[open + 1..].find('%').map(|index| open + 1 + index)?;
-            let received = parse_aria2_size(&token[..slash])?;
-            let total = parse_aria2_size(&token[slash + 1..open])?;
-            let percent = token[open + 1..close].parse::<f64>().ok()?;
-            if total > 0 && received <= total && (0.0..=100.0).contains(&percent) {
-                Some((received, total, percent))
-            } else {
-                None
-            }
-        })?;
-        let field = |prefix: &str| {
-            line.split_whitespace()
-                .find_map(|token| token.strip_prefix(prefix).and_then(parse_aria2_size))
-                .unwrap_or(0)
-        };
-        let count = |prefix: &str| {
-            line.split_whitespace()
-                .find_map(|token| {
-                    token
-                        .strip_prefix(prefix)?
-                        .trim_end_matches(']')
-                        .parse::<u64>()
-                        .ok()
-                })
-                .unwrap_or(0)
-        };
-        let connections = count("CN:");
-        let seeders = count("SD:");
-        let eta = line.split_whitespace().find_map(|token| {
-            token
-                .strip_prefix("ETA:")
-                .map(|value| value.trim_end_matches(']').to_owned())
-        });
-        Some((
-            ratio.0,
-            ratio.1,
-            ratio.2,
-            field("DL:"),
-            field("UL:"),
-            seeders,
-            connections.saturating_sub(seeders),
-            eta,
-        ))
-    })
 }
 
 fn parse_external_progress(text: &str) -> Option<f64> {
@@ -3864,12 +6326,17 @@ fn reserve_queued_task(
     reject_active_duplicate: bool,
 ) -> Result<(), String> {
     if reject_active_duplicate {
+        let gopeed_torrent = matches!(
+            classify_url(&task.source),
+            Some(DownloadKind::Torrent | DownloadKind::Magnet)
+        );
         if let Some(existing) = queue.iter().find(|existing| {
             existing.source == task.source
-                && !matches!(
-                    existing.state,
-                    DownloadState::Completed | DownloadState::Failed { .. }
-                )
+                && (gopeed_torrent
+                    || !matches!(
+                        existing.state,
+                        DownloadState::Completed | DownloadState::Failed { .. }
+                    ))
         }) {
             return Err(format!("duplicate_active_download:{}", existing.id));
         }
@@ -4064,22 +6531,27 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
             ["--version"].as_slice(),
         ),
         (
-            "aria2",
-            configured_tool(
-                &settings.aria2_path,
-                if cfg!(windows) {
-                    "aria2c.exe"
-                } else {
-                    "aria2c"
-                },
-            ),
+            "gopeed",
+            configured_gopeed(&settings),
             ["--version"].as_slice(),
         ),
     ];
     Ok(definitions
         .into_iter()
         .map(|(id, executable, args)| {
-            let version = version_line(&executable, args);
+            let version = if id == "gopeed" {
+                let marker = executable
+                    .parent()
+                    .map(|parent| parent.join(".gopeed-version"))
+                    .and_then(|path| fs::read_to_string(path).ok())
+                    .map(|value| value.trim().to_owned())
+                    .filter(|value| !value.is_empty());
+                executable
+                    .is_file()
+                    .then(|| marker.unwrap_or_else(|| "Gopeed stable".to_owned()))
+            } else {
+                version_line(&executable, args)
+            };
             ToolStatus {
                 id: id.to_owned(),
                 path: executable.to_string_lossy().into_owned(),
@@ -4113,14 +6585,14 @@ fn set_tool_paths(
     yt_dlp: String,
     qjs: String,
     n_m3u8dl_re: String,
-    aria2: String,
+    gopeed: String,
 ) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.ffmpeg_path = optional_path(ffmpeg);
     settings.yt_dlp_path = optional_path(yt_dlp);
     settings.qjs_path = optional_path(qjs);
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
-    settings.aria2_path = optional_path(aria2);
+    settings.gopeed_path = optional_path(gopeed);
     save_settings(&state, &settings)
 }
 
@@ -4143,6 +6615,23 @@ fn set_media_player(state: State<'_, AppState>, path: String) -> Result<(), Stri
     save_settings(&state, &settings)
 }
 
+fn is_previewable_video_path(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let lower = name.to_ascii_lowercase();
+    let payload_name = lower.strip_suffix(".part").unwrap_or(&lower);
+    Path::new(payload_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension,
+                "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts"
+            )
+        })
+}
+
 fn find_video_file(root: &Path, depth: usize) -> Option<PathBuf> {
     if depth > 6 {
         return None;
@@ -4159,16 +6648,7 @@ fn find_video_file(root: &Path, depth: usize) -> Option<PathBuf> {
                     }
                 }
             }
-        } else if path
-            .extension()
-            .and_then(|value| value.to_str())
-            .is_some_and(|extension| {
-                matches!(
-                    extension.to_ascii_lowercase().as_str(),
-                    "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts"
-                )
-            })
-        {
+        } else if is_previewable_video_path(&path) {
             if let Ok(metadata) = path.metadata() {
                 let size = metadata.len();
                 if best.as_ref().is_none_or(|(current, _)| size > *current) {
@@ -4201,22 +6681,126 @@ fn find_named_file(root: &Path, expected_name: &str, depth: usize) -> Option<Pat
     None
 }
 
+fn extract_zip_archive(bytes: &[u8], destination: &Path) -> Result<(), String> {
+    let cursor = std::io::Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|error| error.to_string())?;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        let Some(relative) = entry.enclosed_name() else {
+            return Err("release_archive_contains_unsafe_path".to_owned());
+        };
+        let target = destination.join(relative);
+        if entry.is_dir() {
+            fs::create_dir_all(&target).map_err(|error| error.to_string())?;
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let mut output = fs::File::create(&target).map_err(|error| error.to_string())?;
+        std::io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn extract_tar_archive(bytes: &[u8], asset_name: &str, destination: &Path) -> Result<(), String> {
+    let archive_path = destination.join(asset_name);
+    fs::write(&archive_path, bytes).map_err(|error| error.to_string())?;
+    let listing = Command::new("tar")
+        .arg("-tf")
+        .arg(&archive_path)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !listing.status.success() {
+        return Err(String::from_utf8_lossy(&listing.stderr).trim().to_owned());
+    }
+    for entry in String::from_utf8_lossy(&listing.stdout).lines() {
+        let path = Path::new(entry);
+        if path.is_absolute()
+            || path.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir | std::path::Component::Prefix(_)
+                )
+            })
+        {
+            return Err("release_archive_contains_unsafe_path".to_owned());
+        }
+    }
+    let status = Command::new("tar")
+        .arg("-xf")
+        .arg(&archive_path)
+        .arg("-C")
+        .arg(destination)
+        .status()
+        .map_err(|error| error.to_string())?;
+    let _ = fs::remove_file(&archive_path);
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "release_extraction_failed".to_owned())
+}
+
+fn extract_release_archive(
+    bytes: &[u8],
+    asset_name: &str,
+    destination: &Path,
+) -> Result<(), String> {
+    let lower = asset_name.to_ascii_lowercase();
+    if lower.ends_with(".zip") {
+        return extract_zip_archive(bytes, destination);
+    }
+    #[cfg(unix)]
+    if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") || lower.ends_with(".tar.xz") {
+        return extract_tar_archive(bytes, asset_name, destination);
+    }
+    Err(format!("unsupported_release_archive:{asset_name}"))
+}
+
+fn release_platform_architecture() -> Result<(&'static str, &'static str), String> {
+    let platform = if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        return Err("tool_update_platform_unsupported".to_owned());
+    };
+    let architecture = if cfg!(target_arch = "x86_64") {
+        "x86_64"
+    } else {
+        return Err("tool_update_architecture_unsupported".to_owned());
+    };
+    Ok((platform, architecture))
+}
+
+fn gopeed_platform_asset_markers() -> Result<[&'static str; 3], String> {
+    let platform = if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        return Err("gopeed_update_platform_unsupported".to_owned());
+    };
+    let architecture = if cfg!(target_arch = "x86_64") {
+        "amd64"
+    } else {
+        return Err("gopeed_update_architecture_unsupported".to_owned());
+    };
+    Ok([platform, architecture, ".zip"])
+}
+
 fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
     let mut best: Option<(u64, PathBuf)> = None;
     for entry in fs::read_dir(directory).ok()?.flatten() {
         let path = entry.path();
         let candidate = if path.is_dir() {
             find_video_file(&path, 0)
-        } else if path
-            .extension()
-            .and_then(|value| value.to_str())
-            .is_some_and(|extension| {
-                matches!(
-                    extension.to_ascii_lowercase().as_str(),
-                    "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts"
-                )
-            })
-        {
+        } else if is_previewable_video_path(&path) {
             Some(path)
         } else {
             None
@@ -4228,11 +6812,8 @@ fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
             continue;
         };
         let size = metadata.len();
-        let control = PathBuf::from(format!("{}.aria2", candidate.display()));
-        let priority = if control.exists() { u64::MAX / 2 } else { 0 };
-        let score = priority.saturating_add(size);
-        if best.as_ref().is_none_or(|(current, _)| score > *current) {
-            best = Some((score, candidate));
+        if best.as_ref().is_none_or(|(current, _)| size > *current) {
+            best = Some((size, candidate));
         }
     }
     best.map(|(_, path)| path)
@@ -4321,14 +6902,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &settings.qjs_path,
                 if cfg!(windows) { "qjs.exe" } else { "qjs" },
             ),
-            "aria2" => configured_tool(
-                &settings.aria2_path,
-                if cfg!(windows) {
-                    "aria2c.exe"
-                } else {
-                    "aria2c"
-                },
-            ),
+            "gopeed" => configured_gopeed(&settings),
             "n-m3u8dl-re" => configured_tool(
                 &settings.n_m3u8dl_re_path,
                 if cfg!(windows) {
@@ -4379,11 +6953,9 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         });
     }
 
-    #[cfg(not(target_os = "windows"))]
-    return Err("automatic_binary_update_not_available_for_this_platform".to_owned());
-
-    #[cfg(target_os = "windows")]
     {
+        let (platform, architecture) = release_platform_architecture()?;
+        let gopeed_markers = gopeed_platform_asset_markers()?;
         let (repository, executable_name, asset_markers, version_args): (
             &str,
             &str,
@@ -4392,39 +6964,76 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         ) = match id.as_str() {
             "qjs" => (
                 "quickjs-ng/quickjs",
-                "qjs.exe",
-                &["qjs-windows-x86_64.exe"],
+                if cfg!(windows) { "qjs.exe" } else { "qjs" },
+                &[],
                 &["--version"],
             ),
-            "aria2" => (
-                "aria2/aria2",
-                "aria2c.exe",
-                &["win", "64bit", ".zip"],
+            "gopeed" => (
+                "GopeedLab/gopeed",
+                if cfg!(windows) {
+                    "gopeed.exe"
+                } else {
+                    "gopeed"
+                },
+                gopeed_markers.as_slice(),
                 &["--version"],
             ),
             "n-m3u8dl-re" => (
                 "nilaoda/N_m3u8DL-RE",
-                "N_m3u8DL-RE.exe",
-                &["win-x64", ".zip"],
+                if cfg!(windows) {
+                    "N_m3u8DL-RE.exe"
+                } else {
+                    "N_m3u8DL-RE"
+                },
+                &[],
                 &["--version"],
             ),
             "ffmpeg" => (
-                "BtbN/FFmpeg-Builds",
-                "ffmpeg.exe",
-                &["win64", "gpl", ".zip"],
+                if cfg!(target_os = "macos") {
+                    "eugeneware/ffmpeg-static"
+                } else {
+                    "BtbN/FFmpeg-Builds"
+                },
+                if cfg!(windows) {
+                    "ffmpeg.exe"
+                } else {
+                    "ffmpeg"
+                },
+                &[],
                 &["-version"],
             ),
             _ => return Err("unknown_tool".to_owned()),
         };
-        let before =
-            version_line(&executable, version_args).unwrap_or_else(|| "unknown".to_owned());
-        let api = format!("https://api.github.com/repos/{repository}/releases/latest");
+        let version_marker = executable
+            .parent()
+            .map(|parent| parent.join(".gopeed-version"));
+        let before = if id == "gopeed" {
+            version_marker
+                .as_ref()
+                .and_then(|path| fs::read_to_string(path).ok())
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| {
+                    if executable.is_file() {
+                        "installed"
+                    } else {
+                        "not installed"
+                    }
+                    .to_owned()
+                })
+        } else {
+            version_line(&executable, version_args).unwrap_or_else(|| "unknown".to_owned())
+        };
         let client = reqwest::Client::builder()
             .user_agent("Apocalipse-Download-Manager")
             .build()
             .map_err(|error| error.to_string())?;
+        // GitHub's /latest endpoint excludes drafts and prereleases, so
+        // Gopeed updates can never silently move users onto a beta build.
         let release: serde_json::Value = client
-            .get(api)
+            .get(format!(
+                "https://api.github.com/repos/{repository}/releases/latest"
+            ))
             .send()
             .await
             .map_err(|error| error.to_string())?
@@ -4450,8 +7059,43 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                     .unwrap_or("")
                     .to_ascii_lowercase();
                 match id.as_str() {
-                    "qjs" => name == "qjs-windows-x86_64.exe",
-                    "ffmpeg" => name.ends_with("win64-gpl.zip") && !name.contains("shared"),
+                    "qjs" => match (platform, architecture) {
+                        ("windows", "x86_64") => name == "qjs-windows-x86_64.exe",
+                        ("linux", "x86_64") => name == "qjs-linux-x86_64",
+                        ("macos", "x86_64") => name == "qjs-darwin-x86_64",
+                        _ => false,
+                    },
+                    "n-m3u8dl-re" => {
+                        let platform_marker = match platform {
+                            "windows" => "win-",
+                            "linux" => "linux-",
+                            "macos" => "osx-",
+                            _ => return false,
+                        };
+                        let arch_marker = "x64";
+                        name.contains(platform_marker)
+                            && name.contains(arch_marker)
+                            && (name.ends_with(".zip") || name.ends_with(".tar.gz"))
+                    }
+                    "ffmpeg" => match platform {
+                        "windows" => name.ends_with("win64-gpl.zip") && !name.contains("shared"),
+                        "linux" => {
+                            let marker = "linux64";
+                            name.ends_with(&format!("{marker}-gpl.tar.xz"))
+                                && !name.contains("shared")
+                        }
+                        "macos" => {
+                            let marker = "x64";
+                            name == format!("ffmpeg-darwin-{marker}")
+                        }
+                        _ => false,
+                    },
+                    "gopeed" => {
+                        name.starts_with("gopeed-web-")
+                            && asset_markers
+                                .iter()
+                                .all(|marker| name.contains(&marker.to_ascii_lowercase()))
+                    }
                     _ => asset_markers
                         .iter()
                         .all(|marker| name.contains(&marker.to_ascii_lowercase())),
@@ -4479,46 +7123,72 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         let sha256 = format!("{:x}", Sha256::digest(&bytes));
         let temporary =
             std::env::temp_dir().join(format!("apocalipse-tool-update-{}", uuid::Uuid::new_v4()));
-        let (replacement, ffprobe_replacement) = if id == "qjs" {
-            (bytes.to_vec(), Vec::new())
-        } else {
-            let archive_path = temporary.join("release.zip");
-            let extracted = temporary.join("extracted");
-            fs::create_dir_all(&extracted).map_err(|error| error.to_string())?;
-            fs::write(&archive_path, &bytes).map_err(|error| error.to_string())?;
-            let mut extractor = Command::new("tar.exe");
-            extractor
-                .arg("-xf")
-                .arg(&archive_path)
-                .arg("-C")
-                .arg(&extracted);
-            use std::os::windows::process::CommandExt;
-            extractor.creation_flags(0x08000000);
-            let extraction = extractor.output().map_err(|error| error.to_string())?;
-            if !extraction.status.success() {
-                let _ = fs::remove_dir_all(&temporary);
-                return Err(format!(
-                    "release_extraction_failed:{}",
-                    String::from_utf8_lossy(&extraction.stderr).trim()
-                ));
-            }
-            let replacement_path = find_named_file(&extracted, executable_name, 0)
-                .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
-            let replacement = fs::read(replacement_path).map_err(|error| error.to_string())?;
-            let ffprobe_replacement = if id == "ffmpeg" {
-                fs::read(
-                    find_named_file(&extracted, "ffprobe.exe", 0)
-                        .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?,
-                )
-                .map_err(|error| error.to_string())?
+        let (replacement, ffprobe_replacement) =
+            if id == "qjs" || (id == "ffmpeg" && platform == "macos") {
+                let ffprobe_replacement = if id == "ffmpeg" {
+                    let marker = "x64";
+                    let expected = format!("ffprobe-darwin-{marker}");
+                    let probe_asset = assets
+                        .iter()
+                        .find(|asset| {
+                            asset.get("name").and_then(|value| value.as_str())
+                                == Some(expected.as_str())
+                        })
+                        .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?;
+                    let probe_url = probe_asset
+                        .get("browser_download_url")
+                        .and_then(|value| value.as_str())
+                        .ok_or_else(|| "release_asset_url_missing".to_owned())?;
+                    client
+                        .get(probe_url)
+                        .send()
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .error_for_status()
+                        .map_err(|error| error.to_string())?
+                        .bytes()
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .to_vec()
+                } else {
+                    Vec::new()
+                };
+                (bytes.to_vec(), ffprobe_replacement)
             } else {
-                Vec::new()
+                let extracted = temporary.join("extracted");
+                fs::create_dir_all(&extracted).map_err(|error| error.to_string())?;
+                if let Err(error) = extract_release_archive(&bytes, asset_name, &extracted) {
+                    let _ = fs::remove_dir_all(&temporary);
+                    return Err(format!("release_extraction_failed:{error}"));
+                }
+                let replacement_path = find_named_file(&extracted, executable_name, 0)
+                    .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
+                let replacement = fs::read(replacement_path).map_err(|error| error.to_string())?;
+                let ffprobe_replacement = if id == "ffmpeg" {
+                    fs::read(
+                        find_named_file(
+                            &extracted,
+                            if cfg!(windows) {
+                                "ffprobe.exe"
+                            } else {
+                                "ffprobe"
+                            },
+                            0,
+                        )
+                        .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?,
+                    )
+                    .map_err(|error| error.to_string())?
+                } else {
+                    Vec::new()
+                };
+                (replacement, ffprobe_replacement)
             };
-            (replacement, ffprobe_replacement)
-        };
         let _ = fs::remove_dir_all(&temporary);
         if replacement.len() < 32_768 || (id == "ffmpeg" && ffprobe_replacement.len() < 32_768) {
             return Err(format!("replacement_executable_invalid:{asset_name}"));
+        }
+        if id == "gopeed" {
+            stop_gopeed_runtime(&state);
         }
         let parent = executable
             .parent()
@@ -4526,19 +7196,49 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         let staged = parent.join(format!(".apocalipse-new-{executable_name}"));
         let backup = parent.join(format!(".{executable_name}.apocalipse-backup"));
-        let ffprobe = parent.join("ffprobe.exe");
-        let ffprobe_staged = parent.join(".apocalipse-new-ffprobe.exe");
-        let ffprobe_backup = parent.join(".ffprobe.exe.apocalipse-backup");
+        let ffprobe_name = if cfg!(windows) {
+            "ffprobe.exe"
+        } else {
+            "ffprobe"
+        };
+        let ffprobe = parent.join(ffprobe_name);
+        let ffprobe_staged = parent.join(format!(".apocalipse-new-{ffprobe_name}"));
+        let ffprobe_backup = parent.join(format!(".{ffprobe_name}.apocalipse-backup"));
         fs::write(&staged, &replacement).map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))
+                .map_err(|error| error.to_string())?;
+        }
         if id == "ffmpeg" {
             fs::write(&ffprobe_staged, &ffprobe_replacement).map_err(|error| error.to_string())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&ffprobe_staged, fs::Permissions::from_mode(0o755))
+                    .map_err(|error| error.to_string())?;
+            }
         }
-        let candidate_version = match version_line(&staged, version_args) {
-            Some(version) => version,
-            None => {
+        let candidate_version = if id == "gopeed" {
+            if staged
+                .metadata()
+                .map(|metadata| metadata.len())
+                .unwrap_or(0)
+                < 32_768
+            {
                 let _ = fs::remove_file(&staged);
-                let _ = fs::remove_file(&ffprobe_staged);
                 return Err("downloaded_tool_validation_failed".to_owned());
+            }
+            tag.to_owned()
+        } else {
+            match version_line(&staged, version_args) {
+                Some(version) => version,
+                None => {
+                    let _ = fs::remove_file(&staged);
+                    let _ = fs::remove_file(&ffprobe_staged);
+                    return Err("downloaded_tool_validation_failed".to_owned());
+                }
             }
         };
         if id == "ffmpeg" && version_line(&ffprobe_staged, &["-version"]).is_none() {
@@ -4546,9 +7246,19 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             let _ = fs::remove_file(&ffprobe_staged);
             return Err("downloaded_ffprobe_validation_failed".to_owned());
         }
-        if candidate_version == before {
+        if id != "gopeed" && candidate_version == before {
             let _ = fs::remove_file(&staged);
             let _ = fs::remove_file(&ffprobe_staged);
+            diagnostic_log(
+                &state,
+                "INFO",
+                "tool.already_current",
+                &format!("tool={id} version={before} asset={asset_name}"),
+            );
+            return Ok(format!("{id} already current ({before})"));
+        }
+        if id == "gopeed" && candidate_version == before {
+            let _ = fs::remove_file(&staged);
             diagnostic_log(
                 &state,
                 "INFO",
@@ -4590,7 +7300,11 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 return Err(error.to_string());
             }
         }
-        let after = version_line(&executable, version_args);
+        let after = if id == "gopeed" {
+            executable.is_file().then(|| tag.to_owned())
+        } else {
+            version_line(&executable, version_args)
+        };
         let ffprobe_valid = id != "ffmpeg" || version_line(&ffprobe, &["-version"]).is_some();
         if after.is_none() || !ffprobe_valid {
             let _ = fs::remove_file(&executable);
@@ -4612,6 +7326,11 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             fs::remove_file(&ffprobe_backup).map_err(|error| error.to_string())?;
         }
         let after = after.unwrap_or_else(|| tag.to_owned());
+        if id == "gopeed" {
+            if let Some(marker) = &version_marker {
+                fs::write(marker, format!("{after}\n")).map_err(|error| error.to_string())?;
+            }
+        }
         diagnostic_log(&state, "INFO", "tool.updated", &format!("tool={id} repository={repository} tag={tag} asset={asset_name} sha256={sha256} before={before} after={after} target={}", executable.display()));
         Ok(format!("{id} updated: {before} → {after}"))
     }
@@ -4622,71 +7341,76 @@ async fn inspect_torrent_metadata(
     state: State<'_, AppState>,
     source: String,
 ) -> Result<TorrentInspection, String> {
-    match classify_url(&source) {
-        Some(DownloadKind::Torrent) => inspect_torrent_file(Path::new(&source)),
-        Some(DownloadKind::Magnet) => {
-            let (aria2, root) = {
-                let settings = state.settings.lock().map_err(|error| error.to_string())?;
-                let root = state
-                    .queue_path
-                    .parent()
-                    .unwrap_or(Path::new("."))
-                    .join("torrent-metadata")
-                    .join(uuid::Uuid::new_v4().to_string());
-                (
-                    configured_tool(
-                        &settings.aria2_path,
-                        if cfg!(windows) {
-                            "aria2c.exe"
-                        } else {
-                            "aria2c"
-                        },
-                    ),
-                    root,
-                )
-            };
-            fs::create_dir_all(&root).map_err(|error| error.to_string())?;
-            let mut command = tokio::process::Command::new(aria2);
-            command
-                .args([
-                    "--bt-metadata-only=true",
-                    "--bt-save-metadata=true",
-                    "--seed-time=0",
-                    "--summary-interval=0",
-                ])
-                .arg(format!("--dir={}", root.display()))
-                .arg(&source);
-            #[cfg(target_os = "windows")]
-            {
-                use std::os::windows::process::CommandExt;
-                command.as_std_mut().creation_flags(0x08000000);
-            }
-            let output = tokio::time::timeout(Duration::from_secs(120), command.output())
-                .await
-                .map_err(|_| "torrent_metadata_timeout".to_owned())?
-                .map_err(|error| error.to_string())?;
-            if !output.status.success() {
-                let _ = fs::remove_dir_all(&root);
-                return Err(external_error_detail(
-                    &String::from_utf8_lossy(&output.stderr),
-                    output.status.code(),
-                ));
-            }
-            let torrent = fs::read_dir(&root)
-                .map_err(|error| error.to_string())?
-                .flatten()
-                .map(|entry| entry.path())
-                .find(|path| {
-                    path.extension()
-                        .is_some_and(|extension| extension.eq_ignore_ascii_case("torrent"))
-                })
-                .ok_or_else(|| "torrent_metadata_missing".to_owned())?;
-            let result = inspect_torrent_file(&torrent);
-            let _ = fs::remove_dir_all(&root);
-            result
-        }
-        _ => Err("not_a_torrent".to_owned()),
+    if !matches!(
+        classify_url(&source),
+        Some(DownloadKind::Torrent | DownloadKind::Magnet)
+    ) {
+        return Err("not_a_torrent".to_owned());
     }
+    // Metadata inspection must not share the live Gopeed/anacrolix client.
+    // Resolve binds BitTorrent storage immediately, before the user chooses the
+    // final save directory. Use a short-lived backend so its storage can never
+    // leak into the real download task.
+    let executable = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        configured_gopeed(&settings)
+    };
+    let app_data = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
+    let inspection_root = app_data
+        .join("gopeed-metadata-inspection")
+        .join(uuid::Uuid::new_v4().simple().to_string());
+    let payload_root = inspection_root.join("payload");
+    fs::create_dir_all(&payload_root).map_err(|error| error.to_string())?;
+    let mut runtime = gopeed::Runtime::spawn(&executable, &inspection_root)?;
+    let endpoint = runtime.endpoint();
+    let resolved_result = async {
+        endpoint.wait_ready().await?;
+        endpoint
+            .resolve(
+                &source,
+                &payload_root.to_string_lossy(),
+                &gopeed::RequestContext::default(),
+            )
+            .await
+    }
+    .await;
+    runtime.terminate();
+    let _ = fs::remove_dir_all(&inspection_root);
+    let resolved = resolved_result?;
+    let files = resolved
+        .res
+        .files
+        .iter()
+        .enumerate()
+        .map(|(offset, file)| {
+            let path = if file.path.trim().is_empty() {
+                file.name.clone()
+            } else {
+                format!("{}/{}", file.path.trim_matches('/'), file.name)
+            };
+            TorrentFileInfo {
+                index: offset + 1,
+                path,
+                size: file.size,
+            }
+        })
+        .collect::<Vec<_>>();
+    if files.is_empty() {
+        return Err("torrent_has_no_files".to_owned());
+    }
+    let total_size = files.iter().map(|file| file.size).sum();
+    Ok(TorrentInspection {
+        name: if resolved.res.name.trim().is_empty() {
+            files
+                .first()
+                .map(|file| file.path.clone())
+                .unwrap_or_else(|| "torrent".to_owned())
+        } else {
+            resolved.res.name
+        },
+        files,
+        total_size,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4702,6 +7426,8 @@ fn enqueue_download_impl(
     priority: Option<i8>,
     bandwidth_limit: Option<u64>,
     connections_override: Option<usize>,
+    expected_size: Option<u64>,
+    expected_sha256: Option<String>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
     let diagnostic_trace = context.as_ref().and_then(|c| c.trace_id.clone());
@@ -4732,15 +7458,22 @@ fn enqueue_download_impl(
         .unwrap_or_default()
         .into_iter()
         .filter(|mirror| mirror.starts_with("https://") || mirror.starts_with("http://"))
-        .take(10)
+        .take(32)
         .collect();
+    task.sha256 = expected_sha256
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()));
     task.priority = priority.unwrap_or_default().clamp(-10, 10);
     task.bandwidth_limit = bandwidth_limit.filter(|limit| *limit > 0);
     let pixeldrain_single_connection = host_from_url(&url)
         .as_deref()
         .is_some_and(|value| value == "pixeldrain.com" || value.ends_with(".pixeldrain.com"));
     task.connections_override = site_connection_override(&url, connections_override);
+    task.expected_size = expected_size.filter(|value| *value > 0);
     if let Some(context) = context {
+        if task.expected_size.is_none() {
+            task.expected_size = context.expected_size.filter(|value| *value > 0);
+        }
         task.referer = context
             .referer
             .filter(|url| url.starts_with("https://") || url.starts_with("http://"));
@@ -4835,6 +7568,9 @@ fn enqueue_download_impl(
             &format!("task={} host=pixeldrain.com connections=1", task.id),
         );
     }
+    if let Some(thumbnail) = task.thumbnail.clone() {
+        prefetch_thumbnail(app.clone(), thumbnail);
+    }
     start_download(&app, state, task.clone(), kind)?;
     Ok(task)
 }
@@ -4867,6 +7603,8 @@ fn enqueue_download(
         priority,
         bandwidth_limit,
         connections_override,
+        None,
+        None,
         context,
     )
 }
@@ -4876,6 +7614,265 @@ fn queued_task_for_start(queue: &[DownloadTask], id: DownloadId) -> Option<Downl
         .iter()
         .find(|item| item.id == id && item.state == DownloadState::Queued)
         .cloned()
+}
+
+async fn run_metalink_manifest(
+    app: tauri::AppHandle,
+    id: DownloadId,
+    task: DownloadTask,
+    mut cancellation: oneshot::Receiver<()>,
+) {
+    let state = app.state::<AppState>();
+    diagnostic_log(
+        &state,
+        "INFO",
+        "metalink.inspect_started",
+        &format!("task={id} url={}", redact_url(&task.source)),
+    );
+    update_task(&app, id, true, |item| {
+        item.state = DownloadState::Inspecting
+    });
+
+    let (proxy, dns, identity, credential) = {
+        let settings = match state.settings.lock() {
+            Ok(settings) => settings.clone(),
+            Err(error) => {
+                update_task(&app, id, true, |item| {
+                    item.state = DownloadState::Failed {
+                        message: error.to_string(),
+                    }
+                });
+                return;
+            }
+        };
+        let proxy = settings.proxy_enabled.then(|| {
+            (
+                settings.proxy_url.clone(),
+                settings.proxy_username.clone(),
+                settings.proxy_password.clone(),
+            )
+        });
+        let dns = if settings.dns_enabled {
+            settings.dns_servers.clone()
+        } else {
+            Vec::new()
+        };
+        let identity = state
+            .request_identities
+            .lock()
+            .ok()
+            .and_then(|items| items.get(&id).cloned());
+        let credential =
+            effective_credential_for_download(&settings, &task.source, task.referer.as_deref());
+        (proxy, dns, identity, credential)
+    };
+
+    let builder = match proxy {
+        Some((url, username, password)) => DownloadEngine::network_client_builder(
+            url.as_deref(),
+            username.as_deref(),
+            password.as_deref(),
+            &dns,
+        ),
+        None => DownloadEngine::network_client_builder(None, None, None, &dns),
+    };
+    let client = match builder.and_then(|builder| builder.build().map_err(Into::into)) {
+        Ok(client) => client,
+        Err(error) => {
+            update_task(&app, id, true, |item| {
+                item.state = DownloadState::Failed {
+                    message: error.to_string(),
+                }
+            });
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    };
+
+    let mut request = client.get(&task.source);
+    if let Some(referer) = task.referer.as_deref() {
+        request = request.header("Referer", referer);
+    }
+    if let Some(user_agent) = identity
+        .as_ref()
+        .and_then(|item| item.user_agent.as_deref())
+    {
+        request = request.header("User-Agent", user_agent);
+    }
+    if let Some(cookie) = identity
+        .as_ref()
+        .and_then(|item| item.cookie_header.as_deref())
+    {
+        request = request.header("Cookie", cookie);
+    }
+    if let Some(credential) = credential {
+        request = request.basic_auth(credential.username, Some(credential.password));
+    }
+
+    let response = tokio::select! {
+        _ = &mut cancellation => {
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+        response = request.send() => response
+    };
+    let response = match response.and_then(|response| response.error_for_status()) {
+        Ok(response) => response,
+        Err(error) => {
+            diagnostic_log(
+                &state,
+                "ERROR",
+                "metalink.inspect_failed",
+                &error.to_string(),
+            );
+            update_task(&app, id, true, |item| {
+                item.state = DownloadState::Failed {
+                    message: format!("metalink_fetch_failed: {error}"),
+                }
+            });
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    };
+
+    let bytes = match response.bytes().await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            update_task(&app, id, true, |item| {
+                item.state = DownloadState::Failed {
+                    message: format!("metalink_read_failed: {error}"),
+                }
+            });
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    };
+    let files = match parse_metalink(&bytes, Some(&task.source)) {
+        Ok(files) => files,
+        Err(error) => {
+            diagnostic_log(&state, "ERROR", "metalink.invalid", &error.to_string());
+            update_task(&app, id, true, |item| {
+                item.state = DownloadState::Failed {
+                    message: format!("metalink_invalid: {error}"),
+                }
+            });
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    };
+
+    let destination_directory = task
+        .destination
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_string_lossy()
+        .into_owned();
+    let mut prepared = Vec::new();
+    for file in files.into_iter().take(256) {
+        let Some(primary) = file.urls.first().cloned() else {
+            continue;
+        };
+        let fallback_name = suggested_name(&primary);
+        let name = file
+            .name
+            .filter(|name| validate_file_name(name).is_ok())
+            .unwrap_or(fallback_name);
+        prepared.push((
+            primary,
+            name,
+            file.urls.into_iter().skip(1).take(31).collect::<Vec<_>>(),
+            file.size,
+            file.sha256,
+        ));
+    }
+    if prepared.is_empty() {
+        update_task(&app, id, true, |item| {
+            item.state = DownloadState::Failed {
+                message: "metalink_contains_no_downloads".to_owned(),
+            }
+        });
+        if let Ok(mut workers) = state.workers.lock() {
+            workers.remove(&id);
+        }
+        start_next_queued(&app);
+        return;
+    }
+
+    {
+        let mut queue = match state.queue.lock() {
+            Ok(queue) => queue,
+            Err(error) => {
+                update_task(&app, id, true, |item| {
+                    item.state = DownloadState::Failed {
+                        message: error.to_string(),
+                    }
+                });
+                return;
+            }
+        };
+        queue.retain(|item| item.id != id);
+        if let Err(error) = save_queue(&state, &queue) {
+            diagnostic_log(&state, "ERROR", "metalink.queue_replace_failed", &error);
+            return;
+        }
+    }
+    if let Ok(mut identities) = state.request_identities.lock() {
+        identities.remove(&id);
+    }
+    if let Ok(mut workers) = state.workers.lock() {
+        workers.remove(&id);
+    }
+
+    let total_children = prepared.len();
+    let mut accepted = 0_usize;
+    for (primary, name, mirrors, expected_size, sha256) in prepared {
+        match enqueue_download_impl(
+            app.clone(),
+            &state,
+            primary,
+            Some(destination_directory.clone()),
+            Some(name),
+            None,
+            None,
+            Some(mirrors),
+            Some(task.priority),
+            task.bandwidth_limit,
+            task.connections_override,
+            expected_size,
+            sha256,
+            None,
+        ) {
+            Ok(_) => accepted += 1,
+            Err(error) => diagnostic_log(
+                &state,
+                "ERROR",
+                "metalink.child_rejected",
+                &format!("error={error}"),
+            ),
+        }
+    }
+    diagnostic_log(
+        &state,
+        "INFO",
+        "metalink.expanded",
+        &format!("task={id} children={accepted}/{total_children}"),
+    );
+    start_next_queued(&app);
 }
 
 fn start_download(
@@ -4911,6 +7908,10 @@ fn start_download(
         "task.dispatched",
         &format!("task={} engine={kind:?}", task.id),
     );
+    if kind == DownloadKind::Metalink {
+        tauri::async_runtime::spawn(run_metalink_manifest(app.clone(), task.id, task, cancelled));
+        return Ok(());
+    }
     if kind == DownloadKind::Http && task.companion_audio_url.is_some() {
         tauri::async_runtime::spawn(run_adaptive_social_download(
             app.clone(),
@@ -4920,21 +7921,25 @@ fn start_download(
         ));
         return Ok(());
     }
-    if kind == DownloadKind::Http
-        && task.source.starts_with("https://")
-        && task.source.contains(".freefilehub.com:")
-    {
+    if matches!(
+        kind,
+        DownloadKind::Http
+            | DownloadKind::AcceleratedHttp
+            | DownloadKind::Torrent
+            | DownloadKind::Magnet
+            | DownloadKind::Ftp
+    ) {
         diagnostic_log(
             state,
             "INFO",
-            "http.accelerated",
-            &format!("task={} engine=aria2", task.id),
+            "gopeed.dispatched",
+            &format!("task={} engine={kind:?}", task.id),
         );
-        tauri::async_runtime::spawn(run_external_download(
+        tauri::async_runtime::spawn(run_gopeed_download(
             app.clone(),
             task.id,
             task,
-            DownloadKind::AcceleratedHttp,
+            kind,
             cancelled,
         ));
         return Ok(());
@@ -4952,14 +7957,22 @@ fn start_download(
             } else {
                 limits.connections_per_download
             };
+        let host_rule = host_rule_for_url(&limits, &task.source).cloned();
         let connections = task
             .connections_override
-            .unwrap_or_else(|| configured_connections.clamp(1, 32));
+            .or_else(|| host_rule.as_ref().and_then(|rule| rule.connections))
+            .unwrap_or_else(|| configured_connections.clamp(1, 32))
+            .clamp(1, 32);
         let mut headers = Vec::new();
         if let Some(referer) = task.referer.as_ref() {
             headers.push(("Referer".to_owned(), referer.clone()));
         }
-        if let Some(user_agent) = identity.as_ref().and_then(|item| item.user_agent.as_ref()) {
+        if let Some(user_agent) = host_rule
+            .as_ref()
+            .and_then(|rule| rule.user_agent.as_ref())
+            .or(limits.user_agent.as_ref())
+            .or_else(|| identity.as_ref().and_then(|item| item.user_agent.as_ref()))
+        {
             headers.push(("User-Agent".to_owned(), user_agent.clone()));
         }
         if let Some(cookie) = identity
@@ -4975,23 +7988,36 @@ fn start_download(
             headers.push(("Content-Type".to_owned(), content_type.clone()));
         }
         if let Some(credential) =
-            website_credential_for_download(&limits, &task.source, task.referer.as_deref())
+            effective_credential_for_download(&limits, &task.source, task.referer.as_deref())
         {
             let basic = BASE64.encode(format!("{}:{}", credential.username, credential.password));
             headers.push(("Authorization".to_owned(), format!("Basic {basic}")));
         }
         let mirrors = task.mirrors.clone();
+        let capacity_host = host_from_url(&task.source);
+        let host_capacity_hint_bps = capacity_host
+            .as_ref()
+            .and_then(|host| limits.http_host_capacities.get(host))
+            .map(|estimate| estimate.bytes_per_second)
+            .filter(|value| *value > 0);
+        let network_capacity_hint_bps = (limits.http_global_capacity.bytes_per_second > 0)
+            .then_some(limits.http_global_capacity.bytes_per_second);
         let request = DownloadRequest {
             url: task.source,
             destination: task.destination,
             overwrite: false,
             connections,
+            adaptive_connections: true,
+            network_capacity_hint_bps,
+            host_capacity_hint_bps,
             method: identity
                 .as_ref()
                 .map(|item| item.request_method.clone())
                 .unwrap_or_else(|| "GET".to_owned()),
             body: identity.and_then(|item| item.request_body.map(String::into_bytes)),
             headers,
+            expected_size: task.expected_size,
+            expected_sha256: task.sha256.clone(),
             limiters: {
                 let mut limiters = vec![state.global_bandwidth_limiter.clone()];
                 let task_limiter =
@@ -5000,7 +8026,12 @@ fn start_download(
                         .lock()
                         .ok()
                         .and_then(|mut items| {
-                            let limit = task.bandwidth_limit.unwrap_or_default();
+                            let limit = task
+                                .bandwidth_limit
+                                .or_else(|| {
+                                    host_rule.as_ref().and_then(|rule| rule.bandwidth_limit)
+                                })
+                                .unwrap_or_default();
                             if limit == 0 {
                                 items.remove(&task.id);
                                 None
@@ -5356,6 +8387,84 @@ fn get_proxy_setting(state: State<'_, AppState>) -> Result<ProxySetting, String>
     })
 }
 
+fn normalize_host_rule_pattern(value: &str) -> Result<String, String> {
+    let value = value.trim().to_ascii_lowercase();
+    if let Some(suffix) = value.strip_prefix("*.") {
+        if suffix.contains('*') {
+            return Err("invalid_host_rule_pattern".to_owned());
+        }
+        let host = normalize_credential_host(suffix)
+            .map_err(|_| "invalid_host_rule_pattern".to_owned())?;
+        return Ok(format!("*.{host}"));
+    }
+    if value.contains('*') {
+        return Err("invalid_host_rule_pattern".to_owned());
+    }
+    normalize_credential_host(&value).map_err(|_| "invalid_host_rule_pattern".to_owned())
+}
+
+fn host_rule_matches(pattern: &str, host: &str) -> bool {
+    if let Some(suffix) = pattern.strip_prefix("*.") {
+        host != suffix && host.ends_with(&format!(".{suffix}"))
+    } else {
+        host == pattern
+    }
+}
+
+fn host_rule_for_url<'a>(settings: &'a UserSettings, source: &str) -> Option<&'a HostRule> {
+    let host = url::Url::parse(source)
+        .ok()?
+        .host_str()?
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    settings
+        .host_rules
+        .iter()
+        .filter(|rule| host_rule_matches(&rule.pattern, &host))
+        .max_by_key(|rule| {
+            (
+                usize::from(!rule.pattern.starts_with("*.")),
+                rule.pattern.trim_start_matches("*.").len(),
+            )
+        })
+}
+
+fn effective_credential_for_download(
+    settings: &UserSettings,
+    source: &str,
+    referer: Option<&str>,
+) -> Option<WebsiteCredential> {
+    let credential_from_rule = |rule: &HostRule| {
+        if let Some(username) = rule.username.as_deref().filter(|value| !value.is_empty()) {
+            if !rule.password.is_empty() {
+                return Some(WebsiteCredential {
+                    host: rule.pattern.clone(),
+                    username: username.to_owned(),
+                    password: rule.password.clone(),
+                });
+            }
+        }
+        None
+    };
+    host_rule_for_url(settings, source)
+        .and_then(credential_from_rule)
+        .or_else(|| {
+            let source_host = url::Url::parse(source)
+                .ok()?
+                .host_str()?
+                .to_ascii_lowercase();
+            let referer = referer?;
+            let referer_host = url::Url::parse(referer)
+                .ok()?
+                .host_str()?
+                .to_ascii_lowercase();
+            ((source_host == "fixti.net" || source_host.ends_with(".fixti.net"))
+                && (referer_host == "rsload.net" || referer_host.ends_with(".rsload.net")))
+            .then(|| host_rule_for_url(settings, referer).and_then(credential_from_rule))
+            .flatten()
+        })
+}
+
 fn normalize_credential_host(value: &str) -> Result<String, String> {
     let candidate = value.trim().trim_end_matches('/');
     let parsed = if candidate.contains("://") {
@@ -5378,128 +8487,168 @@ fn normalize_credential_host(value: &str) -> Result<String, String> {
         .ok_or_else(|| "invalid_credential_host".to_owned())
 }
 
-fn website_credential_for_url<'a>(
-    settings: &'a UserSettings,
-    source: &str,
-) -> Option<&'a WebsiteCredential> {
-    let host = url::Url::parse(source)
-        .ok()?
-        .host_str()?
-        .to_ascii_lowercase();
-    settings.website_credentials.iter().find(|credential| {
-        host == credential.host || host.ends_with(&format!(".{}", credential.host))
-    })
-}
-
-fn website_credential_for_download<'a>(
-    settings: &'a UserSettings,
-    source: &str,
-    referer: Option<&str>,
-) -> Option<&'a WebsiteCredential> {
-    website_credential_for_url(settings, source).or_else(|| {
-        let source_host = url::Url::parse(source)
-            .ok()?
-            .host_str()?
-            .to_ascii_lowercase();
-        let referer = referer?;
-        let referer_host = url::Url::parse(referer)
-            .ok()?
-            .host_str()?
-            .to_ascii_lowercase();
-        let is_rsload_download = (source_host == "fixti.net"
-            || source_host.ends_with(".fixti.net"))
-            && (referer_host == "rsload.net" || referer_host.ends_with(".rsload.net"));
-        is_rsload_download
-            .then(|| website_credential_for_url(settings, referer))
-            .flatten()
-    })
-}
-
-#[tauri::command]
-fn list_website_credentials(
-    state: State<'_, AppState>,
-) -> Result<Vec<WebsiteCredentialSummary>, String> {
-    let settings = state.settings.lock().map_err(|error| error.to_string())?;
-    Ok(settings
-        .website_credentials
+fn host_rule_summaries(settings: &UserSettings) -> Vec<HostRuleSummary> {
+    settings
+        .host_rules
         .iter()
-        .map(|credential| WebsiteCredentialSummary {
-            host: credential.host.clone(),
-            username: credential.username.clone(),
+        .map(|rule| HostRuleSummary {
+            pattern: rule.pattern.clone(),
+            username: rule.username.clone().unwrap_or_default(),
+            has_password: !rule.password.is_empty(),
+            user_agent: rule.user_agent.clone().unwrap_or_default(),
+            connections: rule.connections,
+            bandwidth_limit: rule.bandwidth_limit,
         })
-        .collect())
+        .collect()
 }
 
 #[tauri::command]
-fn save_website_credential(
+fn list_host_rules(state: State<'_, AppState>) -> Result<Vec<HostRuleSummary>, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    Ok(host_rule_summaries(&settings))
+}
+
+#[tauri::command]
+fn save_host_rule(
     state: State<'_, AppState>,
-    host: String,
+    pattern: String,
     username: String,
     password: String,
-) -> Result<Vec<WebsiteCredentialSummary>, String> {
-    let host = normalize_credential_host(&host)?;
+    user_agent: String,
+    connections: Option<usize>,
+    bandwidth_limit: Option<u64>,
+    clear_password: bool,
+) -> Result<Vec<HostRuleSummary>, String> {
+    let pattern = normalize_host_rule_pattern(&pattern)?;
     let username = username.trim();
-    if username.is_empty()
-        || password.is_empty()
-        || username.len() > 512
+    let user_agent = user_agent.trim();
+    if username.len() > 512
         || password.len() > 2048
-        || username
-            .chars()
-            .any(|character| matches!(character, '\r' | '\n'))
-        || password
-            .chars()
-            .any(|character| matches!(character, '\r' | '\n'))
+        || user_agent.len() > 1024
+        || [username, password.as_str(), user_agent]
+            .iter()
+            .any(|value| {
+                value
+                    .chars()
+                    .any(|character| matches!(character, '\r' | '\n'))
+            })
+        || connections.is_some_and(|value| !(1..=32).contains(&value))
     {
-        return Err("invalid_website_credential".to_owned());
+        return Err("invalid_host_rule".to_owned());
     }
+
+    let account = host_rule_vault_account(&pattern);
+    let mut secret = vault_load(&account)?.unwrap_or_default();
+    if clear_password {
+        vault_delete(&account)?;
+        secret.zeroize();
+    }
+    if !password.is_empty() {
+        vault_store_verified(&account, &password)?;
+        secret.zeroize();
+        secret = password;
+    }
+
+    let existing_username = state.settings.lock().ok().and_then(|settings| {
+        settings
+            .host_rules
+            .iter()
+            .find(|rule| rule.pattern == pattern)
+            .and_then(|rule| rule.username.clone())
+    });
+    let username = if username.is_empty() && !clear_password {
+        existing_username
+    } else {
+        (!username.is_empty()).then(|| username.to_owned())
+    };
+    if username.is_some() != !secret.is_empty() {
+        secret.zeroize();
+        return Err("host_rule_credentials_must_have_username_and_password".to_owned());
+    }
+    let user_agent = (!user_agent.is_empty()).then(|| user_agent.to_owned());
+    let bandwidth_limit = bandwidth_limit.filter(|value| *value > 0);
+    if username.is_none()
+        && user_agent.is_none()
+        && connections.is_none()
+        && bandwidth_limit.is_none()
+    {
+        secret.zeroize();
+        return Err("empty_host_rule".to_owned());
+    }
+
+    let pattern_key = pattern.clone();
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     if let Some(existing) = settings
-        .website_credentials
+        .host_rules
         .iter_mut()
-        .find(|credential| credential.host == host)
+        .find(|rule| rule.pattern == pattern_key)
     {
-        existing.username = username.to_owned();
-        existing.password = password;
+        existing.password.zeroize();
+        existing.username = username;
+        existing.password = secret;
+        existing.user_agent = user_agent;
+        existing.connections = connections;
+        existing.bandwidth_limit = bandwidth_limit;
     } else {
-        settings.website_credentials.push(WebsiteCredential {
-            host,
-            username: username.to_owned(),
-            password,
+        settings.host_rules.push(HostRule {
+            pattern,
+            username,
+            password: secret,
+            user_agent,
+            connections,
+            bandwidth_limit,
         });
     }
-    settings
-        .website_credentials
-        .sort_by(|left, right| left.host.cmp(&right.host));
+    settings.host_rules.sort_by(|left, right| {
+        let left_exact = !left.pattern.starts_with("*.");
+        let right_exact = !right.pattern.starts_with("*.");
+        right_exact
+            .cmp(&left_exact)
+            .then_with(|| right.pattern.len().cmp(&left.pattern.len()))
+            .then_with(|| left.pattern.cmp(&right.pattern))
+    });
     save_settings(&state, &settings)?;
-    Ok(settings
-        .website_credentials
-        .iter()
-        .map(|credential| WebsiteCredentialSummary {
-            host: credential.host.clone(),
-            username: credential.username.clone(),
-        })
-        .collect())
+    diagnostic_log(
+        &state,
+        "INFO",
+        "host_rule.updated",
+        &format!(
+            "pattern={} password_stored={}",
+            pattern_key,
+            settings
+                .host_rules
+                .iter()
+                .find(|rule| rule.pattern == pattern_key)
+                .is_some_and(|rule| !rule.password.is_empty())
+        ),
+    );
+    Ok(host_rule_summaries(&settings))
 }
 
 #[tauri::command]
-fn remove_website_credential(
+fn remove_host_rule(
     state: State<'_, AppState>,
-    host: String,
-) -> Result<Vec<WebsiteCredentialSummary>, String> {
-    let host = normalize_credential_host(&host)?;
+    pattern: String,
+) -> Result<Vec<HostRuleSummary>, String> {
+    let pattern = normalize_host_rule_pattern(&pattern)?;
+    vault_delete(&host_rule_vault_account(&pattern))?;
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    settings
-        .website_credentials
-        .retain(|credential| credential.host != host);
+    for rule in settings
+        .host_rules
+        .iter_mut()
+        .filter(|rule| rule.pattern == pattern)
+    {
+        rule.password.zeroize();
+    }
+    settings.host_rules.retain(|rule| rule.pattern != pattern);
     save_settings(&state, &settings)?;
-    Ok(settings
-        .website_credentials
-        .iter()
-        .map(|credential| WebsiteCredentialSummary {
-            host: credential.host.clone(),
-            username: credential.username.clone(),
-        })
-        .collect())
+    diagnostic_log(
+        &state,
+        "INFO",
+        "host_rule.removed",
+        &format!("pattern={pattern}"),
+    );
+    Ok(host_rule_summaries(&settings))
 }
 
 #[tauri::command]
@@ -5539,8 +8688,16 @@ fn set_proxy_setting(
     settings.proxy_url = (!url.is_empty()).then(|| url.to_owned());
     settings.proxy_username = (!username.is_empty()).then(|| username.to_owned());
     if clear_password {
+        vault_delete(VAULT_PROXY_PASSWORD)?;
+        if let Some(secret) = settings.proxy_password.as_mut() {
+            secret.zeroize();
+        }
         settings.proxy_password = None;
     } else if !password.is_empty() {
+        vault_store_verified(VAULT_PROXY_PASSWORD, &password)?;
+        if let Some(secret) = settings.proxy_password.as_mut() {
+            secret.zeroize();
+        }
         settings.proxy_password = Some(password);
     }
     save_settings(&state, &settings)?;
@@ -5697,7 +8854,10 @@ fn get_bridge_pairing(state: State<'_, AppState>) -> Result<BridgePairing, Strin
 fn regenerate_bridge_token(state: State<'_, AppState>) -> Result<BridgePairing, String> {
     let token = {
         let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-        settings.bridge_token = default_bridge_token();
+        let token = default_bridge_token();
+        vault_store_verified(VAULT_BRIDGE_TOKEN, &token)?;
+        settings.bridge_token.zeroize();
+        settings.bridge_token = token;
         save_settings(&state, &settings)?;
         settings.bridge_token.clone()
     };
@@ -5786,7 +8946,7 @@ fn read_bridge_request(stream: &mut TcpStream) -> Option<Vec<u8>> {
     (!request.is_empty()).then_some(request)
 }
 
-fn bridge_response(stream: &mut TcpStream, status: &str, origin: Option<&str>, body: &str) {
+fn bridge_response<S: Write>(stream: &mut S, status: &str, origin: Option<&str>, body: &str) {
     let cors = origin
         .map(|value| format!("Access-Control-Allow-Origin: {value}\r\nVary: Origin\r\n"))
         .unwrap_or_else(|| "Access-Control-Allow-Origin: *\r\n".to_owned());
@@ -5814,6 +8974,38 @@ fn show_main_window(app: &tauri::AppHandle) {
 #[tauri::command]
 fn activate_main_window(app: tauri::AppHandle) {
     show_main_window(&app);
+}
+
+fn valid_apocalipse_release_url(value: &str) -> Option<&str> {
+    let parsed = url::Url::parse(value).ok()?;
+    let host = parsed
+        .host_str()?
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    let path = parsed.path();
+    (parsed.scheme() == "https"
+        && host == "github.com"
+        && (path == "/linuxhell/apocalipse-download-manager/releases"
+            || path.starts_with("/linuxhell/apocalipse-download-manager/releases/")))
+    .then_some(value)
+}
+
+#[tauri::command]
+fn open_apocalipse_releases(url: Option<String>) -> Result<(), String> {
+    const RELEASES: &str = "https://github.com/linuxhell/apocalipse-download-manager/releases";
+    let target = url
+        .as_deref()
+        .and_then(valid_apocalipse_release_url)
+        .unwrap_or(RELEASES);
+    #[cfg(target_os = "windows")]
+    let result = Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", target])
+        .spawn();
+    #[cfg(target_os = "macos")]
+    let result = Command::new("open").arg(target).spawn();
+    #[cfg(target_os = "linux")]
+    let result = Command::new("xdg-open").arg(target).spawn();
+    result.map(|_| ()).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -6018,6 +9210,7 @@ fn queue_from_bridge(
             title: request.title,
             thumbnail: request.thumbnail,
             audio_url: request.audio_url,
+            expected_size: request.expected_size,
             cookie_header: request.cookie_header,
             user_agent: request.user_agent,
             request_method: request.request_method,
@@ -6034,6 +9227,8 @@ fn queue_from_bridge(
             None,
             None,
             Some(10),
+            None,
+            None,
             None,
             None,
             Some(context),
@@ -7313,6 +10508,71 @@ async fn remove_downloads(
         .filter(|task| ids.contains(&task.id))
         .cloned()
         .collect::<Vec<_>>();
+
+    let gopeed_targets = removed
+        .iter()
+        .filter_map(|task| {
+            task.gopeed_task_id
+                .clone()
+                .map(|gopeed_id| (task.clone(), gopeed_id))
+        })
+        .collect::<Vec<_>>();
+    let mut torrent_payload_cleanup = false;
+    if !gopeed_targets.is_empty() {
+        let endpoint = gopeed_endpoint(&state).await?;
+        for (task, gopeed_id) in &gopeed_targets {
+            let gopeed_torrent = matches!(
+                classify_url(&task.source),
+                Some(DownloadKind::Torrent | DownloadKind::Magnet)
+            );
+            // Backend force deletion is unsafe for BT on Windows: it can
+            // attempt to unlink .part files while anacrolix still owns them,
+            // and a subsequent Close may dereference the already-closed global
+            // BT client. Close/remove the backend task without force and let
+            // ADM delete the payload after the handles are released.
+            let backend_delete_files = delete_files && !gopeed_torrent;
+            endpoint.delete(gopeed_id, backend_delete_files).await?;
+            torrent_payload_cleanup |= delete_files && gopeed_torrent;
+            if let Ok(mut items) = state.gopeed_tasks.lock() {
+                items.remove(&task.id);
+            }
+            state.diagnostics.record(
+                "gopeed.task_removed",
+                "INFO",
+                Some(&removal_trace),
+                Some(&task.id.to_string()),
+                serde_json::json!({
+                    "gopeedTask": gopeed_id,
+                    "deleteFiles": delete_files,
+                    "backendDeleteFiles": backend_delete_files,
+                    "torrentPayloadCleanupByAdm": delete_files && gopeed_torrent
+                }),
+            );
+        }
+    }
+    if torrent_payload_cleanup {
+        let other_gopeed_tasks_remain = state
+            .queue
+            .lock()
+            .map_err(|error| error.to_string())?
+            .iter()
+            .any(|task| !ids.contains(&task.id) && task.gopeed_task_id.is_some());
+        if !other_gopeed_tasks_remain {
+            // Gopeed is a shared local backend. If the removed torrent was the
+            // last Gopeed task, terminate it before deleting the payload so
+            // Windows can release every anacrolix file handle. It will be
+            // started lazily again on the next Gopeed download.
+            stop_gopeed_runtime(&state);
+            state.diagnostics.record(
+                "gopeed.runtime_stopped_for_cleanup",
+                "INFO",
+                Some(&removal_trace),
+                None,
+                serde_json::json!({"reason":"last_gopeed_torrent_removed"}),
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+    }
     if delete_files {
         for task in &removed {
             cleanup_chunk_artifacts(&task.destination)
@@ -7333,12 +10593,37 @@ async fn remove_downloads(
                     remove_path_with_retry(&workspace, true).await?;
                 }
             }
+            cleanup_chunk_artifacts(&task.destination)
+                .await
+                .map_err(|error| error.to_string())?;
+            let partial_remaining = partial_path(&task.destination).exists();
+            let chunk_artifacts_remaining = chunk_directory(&task.destination).exists();
+            state.diagnostics.record(
+                "task.removal_disk_cleanup",
+                if partial_remaining || chunk_artifacts_remaining {
+                    "ERROR"
+                } else {
+                    "INFO"
+                },
+                Some(&removal_trace),
+                Some(&task.id.to_string()),
+                serde_json::json!({
+                    "partialRemaining": partial_remaining,
+                    "chunkArtifactsRemaining": chunk_artifacts_remaining
+                }),
+            );
+            if partial_remaining || chunk_artifacts_remaining {
+                return Err("download_cleanup_incomplete".to_owned());
+            }
         }
     }
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     queue.retain(|task| !ids.contains(&task.id));
     if let Ok(mut identities) = state.request_identities.lock() {
         identities.retain(|id, _| !ids.contains(id));
+    }
+    if let Ok(mut mappings) = state.gopeed_tasks.lock() {
+        mappings.retain(|id, _| !ids.contains(id));
     }
     save_queue(&state, &queue)?;
     diagnostic_log(
@@ -7362,6 +10647,15 @@ async fn remove_downloads(
 fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
     let partial = partial_path(&task.destination);
     let mut paths = vec![task.destination.clone(), partial];
+    if matches!(
+        classify_url(&task.source),
+        Some(DownloadKind::Torrent | DownloadKind::Magnet)
+    ) {
+        let gopeed_part = PathBuf::from(format!("{}.part", task.destination.display()));
+        if !paths.contains(&gopeed_part) {
+            paths.push(gopeed_part);
+        }
+    }
     let recording_source = PathBuf::from(&task.source);
     if task.source.ends_with(".recording.webm") && recording_source.is_absolute() {
         paths.push(recording_source);
@@ -7428,14 +10722,28 @@ async fn remove_path_with_retry(path: &Path, allow_directory: bool) -> Result<()
 }
 
 fn main() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let app_data = portable_data_directory(app)?;
+            let link_tls_config =
+                load_or_create_link_tls_config(&app_data).map_err(std::io::Error::other)?;
             let queue_path = app_data.join("queue.json");
             let settings_path = app_data.join("settings.json");
             let log_path = app_data.join("logs").join("apocalipse.log");
-            let initial_settings = load_settings(&settings_path);
+            let mut initial_settings =
+                load_settings(&settings_path).map_err(std::io::Error::other)?;
+            if initial_settings.gopeed_path.is_none() {
+                let gopeed_dir = app_data.join("tools").join("gopeed");
+                fs::create_dir_all(&gopeed_dir)?;
+                initial_settings.gopeed_path = Some(gopeed_dir.join(if cfg!(windows) {
+                    "gopeed.exe"
+                } else {
+                    "gopeed"
+                }));
+                write_settings(&settings_path, &initial_settings).map_err(std::io::Error::other)?;
+            }
             let (show_label, quit_label) = tray_labels(&initial_settings.language);
             let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
@@ -7474,6 +10782,8 @@ fn main() {
                 blob_uploads: Mutex::new(HashMap::new()),
                 recording_stops: Mutex::new(HashSet::new()),
                 request_identities: Mutex::new(HashMap::new()),
+                gopeed_runtime: Mutex::new(None),
+                gopeed_tasks: Mutex::new(HashMap::new()),
                 log_path,
                 log_write_lock: Mutex::new(()),
                 diagnostics: diagnostics_v3::Diagnostics::new(&app_data.join("logs")),
@@ -7494,13 +10804,14 @@ fn main() {
                     .name("apocalipse-extension-bridge".into())
                     .spawn(move || run_extension_bridge(bridge_app, listener))?;
             }
-            // File/control access stays local by default. Exposing it to the LAN requires a
-            // separately designed authenticated transport instead of an implicit wildcard bind.
-            if let Ok(listener) = TcpListener::bind(("127.0.0.1", LINK_PORT)) {
+            // Apocalipse Link uses TLS on loopback, LAN and Internet-facing binds.
+            // Only authenticated sessions can enumerate the explicitly allowed shares.
+            if let Ok(listener) = TcpListener::bind(("0.0.0.0", LINK_PORT)) {
                 let link_app = app.handle().clone();
+                let link_tls_config = link_tls_config.clone();
                 std::thread::Builder::new()
                     .name("apocalipse-link-server".into())
-                    .spawn(move || run_link_server(link_app, listener))?;
+                    .spawn(move || run_link_server(link_app, listener, link_tls_config))?;
             }
             if let Some(source) = associated_source {
                 queue_associated_source(app.handle(), source).map_err(std::io::Error::other)?;
@@ -7522,7 +10833,7 @@ fn main() {
                 .on_tray_icon_event(|tray, event| {
                     if matches!(
                         event,
-                        TrayIconEvent::DoubleClick {
+                        TrayIconEvent::Click {
                             button: MouseButton::Left,
                             ..
                         }
@@ -7539,9 +10850,11 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -7549,11 +10862,27 @@ fn main() {
             inspect_media_formats,
             inspect_torrent_metadata,
             get_link_identity,
-            regenerate_link_password,
+            is_local_link_target,
+            get_about_media,
+            open_link_window,
+            authenticate_local_link_account,
+            authenticate_remote_link_account,
+            list_link_shares,
+            add_link_share,
+            add_link_file_share,
+            update_link_share,
+            remove_link_share,
             list_local_link_files,
+            get_local_link_share_capabilities,
+            download_local_shared_link_item,
+            upload_local_shared_link_item,
+            delete_local_shared_link_item,
             list_remote_link_files,
+            get_remote_link_capabilities,
             download_remote_link_file,
             upload_remote_link_file,
+            delete_local_link_item,
+            delete_remote_link_item,
             list_downloads,
             enqueue_download,
             default_download_directory,
@@ -7562,18 +10891,21 @@ fn main() {
             pick_executable,
             pick_url_list,
             activate_main_window,
+            open_apocalipse_releases,
             open_paypal_donation,
             get_tool_statuses,
             set_tool_paths,
             get_media_player,
             get_app_version,
             check_app_update,
+            resolve_thumbnail,
             set_media_player,
             preview_torrent,
             update_tool,
             suggest_download_name,
             remove_downloads,
             read_general_log,
+            read_ai_diagnostics,
             clear_general_log,
             export_diagnostic_bundle,
             diagnostics_status,
@@ -7607,9 +10939,9 @@ fn main() {
             set_user_agent,
             get_proxy_setting,
             set_proxy_setting,
-            list_website_credentials,
-            save_website_credential,
-            remove_website_credential,
+            list_host_rules,
+            save_host_rule,
+            remove_host_rule,
             get_dns_setting,
             set_dns_setting,
             get_bridge_pairing,
@@ -7638,6 +10970,30 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn release_links_are_restricted_to_the_official_apocalipse_repository() {
+        assert!(valid_apocalipse_release_url(
+            "https://github.com/linuxhell/apocalipse-download-manager/releases"
+        )
+        .is_some());
+        assert!(valid_apocalipse_release_url(
+            "https://github.com/linuxhell/apocalipse-download-manager/releases/tag/v1.2.3"
+        )
+        .is_some());
+        assert!(valid_apocalipse_release_url(
+            "https://github.com/linuxhell/apocalipse-download-manager.evil.test/releases"
+        )
+        .is_none());
+        assert!(valid_apocalipse_release_url(
+            "https://evil.test/linuxhell/apocalipse-download-manager/releases"
+        )
+        .is_none());
+        assert!(valid_apocalipse_release_url(
+            "http://github.com/linuxhell/apocalipse-download-manager/releases"
+        )
+        .is_none());
+    }
+
     #[test]
     fn pixeldrain_always_uses_one_connection_without_matching_spoofed_hosts() {
         assert_eq!(
@@ -7941,46 +11297,142 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_site_credential_domains_and_matches_subdomains() {
+    fn http_capacity_learning_rises_fast_and_falls_slowly() {
+        let mut estimate = HttpCapacityEstimate::default();
+        update_capacity_estimate(&mut estimate, 100_000_000, 4);
+        assert_eq!(estimate.bytes_per_second, 100_000_000);
+
+        update_capacity_estimate(&mut estimate, 117_000_000, 4);
+        assert_eq!(estimate.bytes_per_second, 117_000_000);
+        for _ in 0..3 {
+            update_capacity_estimate(&mut estimate, 60_000_000, 4);
+        }
+        assert_eq!(estimate.bytes_per_second, 117_000_000);
+        update_capacity_estimate(&mut estimate, 60_000_000, 4);
+        assert_eq!(estimate.bytes_per_second, 111_150_000);
+    }
+
+    #[test]
+    fn host_rules_prefer_exact_then_most_specific_wildcard_without_spoofing() {
+        let mut settings = UserSettings::default();
+        settings.host_rules = vec![
+            HostRule {
+                pattern: "*.example.com".into(),
+                username: None,
+                password: String::new(),
+                user_agent: Some("wild".into()),
+                connections: Some(6),
+                bandwidth_limit: None,
+            },
+            HostRule {
+                pattern: "*.cdn.example.com".into(),
+                username: None,
+                password: String::new(),
+                user_agent: Some("specific".into()),
+                connections: Some(10),
+                bandwidth_limit: None,
+            },
+            HostRule {
+                pattern: "media.cdn.example.com".into(),
+                username: None,
+                password: String::new(),
+                user_agent: Some("exact".into()),
+                connections: Some(12),
+                bandwidth_limit: None,
+            },
+        ];
+
+        assert_eq!(
+            host_rule_for_url(&settings, "https://media.cdn.example.com/file")
+                .and_then(|rule| rule.connections),
+            Some(12)
+        );
+        assert_eq!(
+            host_rule_for_url(&settings, "https://other.cdn.example.com/file")
+                .and_then(|rule| rule.connections),
+            Some(10)
+        );
+        assert_eq!(
+            host_rule_for_url(&settings, "https://www.example.com/file")
+                .and_then(|rule| rule.connections),
+            Some(6)
+        );
+        assert!(host_rule_for_url(&settings, "https://example.com.evil.test/file").is_none());
+        assert!(normalize_host_rule_pattern("foo.*.example.com").is_err());
+        assert_eq!(
+            normalize_host_rule_pattern("*.Example.COM").as_deref(),
+            Ok("*.example.com")
+        );
+    }
+
+    #[test]
+    fn normalizes_site_domains_for_transfer_rules() {
         assert_eq!(
             normalize_credential_host("https://Example.COM/").as_deref(),
             Ok("example.com")
         );
         assert!(normalize_credential_host("https://example.com/login").is_err());
-        let mut settings = UserSettings::default();
-        settings.website_credentials.push(WebsiteCredential {
-            host: "example.com".into(),
-            username: "user".into(),
-            password: "secret".into(),
-        });
-        assert_eq!(
-            website_credential_for_url(&settings, "https://cdn.example.com/file")
-                .map(|credential| credential.username.as_str()),
-            Some("user")
-        );
-        assert!(website_credential_for_url(&settings, "https://notexample.com/file").is_none());
     }
 
     #[test]
     fn applies_rsload_credentials_only_to_its_known_download_host() {
         let mut settings = UserSettings::default();
-        settings.website_credentials.push(WebsiteCredential {
-            host: "rsload.net".into(),
-            username: "rsload".into(),
+        settings.host_rules.push(HostRule {
+            pattern: "rsload.net".into(),
+            username: Some("rsload".into()),
             password: "rsload".into(),
+            user_agent: None,
+            connections: None,
+            bandwidth_limit: None,
         });
-        assert!(website_credential_for_download(
+        assert!(effective_credential_for_download(
             &settings,
             "https://s4.fixti.net/files/freeware/file.zip",
             Some("https://rsload.net/software/page.html")
         )
         .is_some());
-        assert!(website_credential_for_download(
+        assert!(effective_credential_for_download(
             &settings,
             "https://unrelated.example/file.zip",
             Some("https://rsload.net/software/page.html")
         )
         .is_none());
+    }
+
+    #[test]
+    fn social_cookie_domains_cover_authenticated_media_sites_without_spoofing() {
+        assert_eq!(
+            social_cookie_domain("https://www.facebook.com/reel/123"),
+            Some("facebook.com")
+        );
+        assert_eq!(
+            social_cookie_domain("https://www.instagram.com/reel/example/"),
+            Some("instagram.com")
+        );
+        assert_eq!(
+            social_cookie_domain("https://www.tiktok.com/@creator/video/123"),
+            Some("tiktok.com")
+        );
+        assert_eq!(
+            social_cookie_domain("https://www.twitch.tv/videos/123"),
+            Some("twitch.tv")
+        );
+        assert_eq!(
+            social_cookie_domain("https://www.bilibili.com/video/BV1xx"),
+            Some("bilibili.com")
+        );
+        assert_eq!(
+            social_cookie_domain("https://b23.tv/example"),
+            Some("bilibili.com")
+        );
+        assert_eq!(
+            social_cookie_domain("https://facebook.com.evil.test/video"),
+            None
+        );
+        assert_eq!(
+            social_cookie_domain("https://bilibili.com.evil.test/video"),
+            None
+        );
     }
 
     #[test]
@@ -8066,24 +11518,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_real_aria2_transfer_progress() {
-        assert_eq!(
-            parse_aria2_progress("[#abc 5.0MiB/20MiB(25%) CN:4 SD:2 DL:1MiB ETA:15s]"),
-            Some((
-                5 * 1024 * 1024,
-                20 * 1024 * 1024,
-                25.0,
-                1024 * 1024,
-                0,
-                2,
-                2,
-                Some("15s".to_owned())
-            ))
-        );
-        assert_eq!(parse_aria2_progress("[#abc 0B/0B CN:1 DL:0B]"), None);
-    }
-
-    #[test]
     fn parses_bridge_content_length_case_insensitively() {
         assert_eq!(
             bridge_content_length("POST / HTTP/1.1\r\nContent-Length: 123"),
@@ -8092,6 +11526,15 @@ mod tests {
         assert_eq!(
             bridge_content_length("GET / HTTP/1.1\r\ncontent-length: 0"),
             0
+        );
+    }
+
+    #[test]
+    fn joins_remote_link_paths_using_the_remote_separator() {
+        assert_eq!(remote_link_join(r"C:\Users", "Folder"), r"C:\Users\Folder");
+        assert_eq!(
+            remote_link_join("/home/user/", "Folder"),
+            "/home/user/Folder"
         );
     }
 

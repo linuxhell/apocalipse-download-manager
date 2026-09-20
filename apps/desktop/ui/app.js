@@ -26,8 +26,9 @@ const catalogs = {
     aiStatusProposed: "Awaiting approval", aiStatusTesting: "Testing", aiStatusSaved: "Saved", aiStatusConfirmed: "Confirmed", aiStatusRejected: "Did not work",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
-    toolbox: "TOOLBOX", update: "Update", mediaPlayer: "VLC / mpv / media player",
+    toolbox: "TOOLBOX", update: "Update", gopeedBackend: "Gopeed (backend engine)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "VLC / mpv / media player",
     donatePaypal: "Donate via PayPal",
+    about: "About", aboutDescription: "About the creator of Apocalipse Download Manager.", aboutCreator: "Creator: Juliano - Brazil - Sátia Mortadela", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume",
     overview: "OVERVIEW",
     engineReady: "Engine ready",
     addDownload: "Add download",
@@ -72,12 +73,12 @@ const catalogs = {
     stopRecording: "Stop and save",
     recordingActive: "Recording",
     linkThisComputer: "This computer",
-    linkRemoteControl: "Control remote computer",
-    linkRemoteId: "Remote ID",
-    linkNewPassword: "New password",
-    linkAccessNotice: "Authorized access shows all drives and folders on this computer.",
-    linkConnect: "Connect",
-    linkSelfTest: "Test on this PC",
+    linkRemoteControl: "Remote connection",
+    linkRemoteId: "Remote IP / host",
+    linkRemoteAddressExamples: "Use the same connection flow for this PC (127.0.0.1), a local-network IP or a public Internet IP/host.",
+    linkAccessNotice: "Only explicitly shared files, folders and drives are exposed. Each share keeps its read-only or read/write permission.",
+    linkConnect: "Connect", linkDisconnect: "Disconnect", linkDisconnected: "Disconnected.",
+    convertWithFfmpeg: "Convert using FFmpeg after download to:",
     linkSend: "Send →",
     linkRemoteComputer: "Remote computer",
     linkDownload: "← Download",
@@ -89,6 +90,23 @@ const catalogs = {
     linkCompleted: "Completed",
     linkTransferFailed: "Transfer failed",
     linkUploadFailed: "Upload failed",
+    linkShareNotice: "Share a file, folder or mapped drive here. Windows and Linux SMB shared folders are also discovered automatically.",
+    linkRemoteShareNotice: "Only files, folders and drives shared by the other user appear below.",
+    linkNoShares: "No shared files, folders or drives yet. Share an item above to make it appear here.",
+    linkRemoteUsername: "Operating-system username",
+    linkRemoteSystemPassword: "System account password",
+    linkCredentialsRequired: "Enter the remote IP/host, operating-system username and account password.",
+    linkAuthenticating: "Authenticating system account…",
+    linkAuthenticationFailed: "System account authentication failed",
+    linkLocalSessionReady: "Connected to this Apocalipse. Shared items are available below.",
+    linkRemoteSessionReady: "Encrypted TLS connection established. Remote shares are available below.", linkRemoteFirstTrust: "First connection: this Apocalipse TLS certificate was trusted for this address.",
+    linkRemoteAuthPlan: "Remote access uses one login: IP/host + operating-system username + account password.",
+    linkRemoteAccountFormats: "Windows: use the local/domain/Microsoft account name (for example juliano or MicrosoftAccount\\name@hotmail.com). Linux and macOS: use the local system username (for example juliano). Windows Hello PIN is not a remote password. The system password is never saved.",
+    linkRemoteSecurityNotice: "The system password is never saved and is sent only inside the encrypted TLS channel. Only explicitly shared items remain visible, with their read-only or read/write permission.",
+    linkShareFile: "Share file", linkShareFolder: "Share folder or drive", linkReadOnly: "Read only", linkReadWrite: "Read and write", linkStopSharing: "Stop sharing",
+    linkDelete: "Delete",
+    linkDeleteConfirm: "Permanently delete {name}?",
+    linkWriteDenied: "The remote computer has not enabled Accept writing.",
     linkSendTitle: "Send a file directly",
     linkSendHint: "Create a private, one-use link valid for 10 minutes on your local network.",
     linkChooseFile: "Choose file and create link",
@@ -126,13 +144,26 @@ const catalogs = {
     websiteCredentialRemove: "Remove",
     websiteCredentialSaved: "Credential saved",
     websiteCredentialsEmpty: "No site credentials saved.",
-    websiteCredentialsLocalWarning: "Passwords are stored locally in the portable data/settings.json file. Protect access to this folder.",
+    websiteCredentialsLocalWarning: "Passwords are stored in the operating system credential vault and are not written to settings.json.",
+    hostRules: "Per-site transfer rules",
+    hostRulesHint: "Apply exact hosts or wildcard subdomains and optionally save credentials, connections, speed and User-Agent in one rule. Existing site credentials remain compatible.",
+    hostRulePattern: "Host pattern",
+    hostRulePatternHint: "*.example.com",
+    hostRulePasswordHint: "Leave blank to keep the saved password",
+    hostRuleBandwidth: "Speed limit (MB/s)",
+    hostRuleUnlimitedHint: "0 or empty = unlimited",
+    hostRuleClearPassword: "Remove the saved password for this rule",
+    hostRuleAdd: "Add or update rule",
+    hostRuleRemove: "Remove",
+    hostRuleRemoveConfirm: "Remove the rule for {pattern}?",
+    hostRulesEmpty: "No per-site rules saved.",
+    hostRulesVaultWarning: "Passwords are kept in the operating system credential vault, not in settings.json.",
     customDns: "Custom DNS",
     customDnsHint: "Resolve native downloads without changing the operating system DNS",
     dnsProvider: "Provider",
     dnsCustom: "Custom",
     dnsServers: "DNS servers",
-    dnsScopeHint: "Applied to the native HTTP engine and aria2. SOCKS5H continues resolving through the proxy.",
+    dnsScopeHint: "Applied to the native HTTP engine. Gopeed uses its own network stack; SOCKS5H continues resolving through the proxy.",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
     automatic: "Automatic",
@@ -204,8 +235,9 @@ const catalogs = {
     aiStatusProposed: "Aguardando aprovação", aiStatusTesting: "Em teste", aiStatusSaved: "Guardada", aiStatusConfirmed: "Confirmada", aiStatusRejected: "Não funcionou",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
-    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", mediaPlayer: "VLC / mpv / reprodutor de mídia",
+    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", gopeedBackend: "Gopeed (motor em segundo plano)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "VLC / mpv / reprodutor de mídia",
     donatePaypal: "Faça uma doação pelo PayPal",
+    about: "Sobre", aboutDescription: "Sobre o criador do Apocalipse Download Manager.", aboutCreator: "Criador: Juliano - Brasil - Sátia Mortadela", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume",
     overview: "VISÃO GERAL",
     engineReady: "Motor pronto",
     addDownload: "Adicionar download",
@@ -250,12 +282,12 @@ const catalogs = {
     stopRecording: "Parar e salvar",
     recordingActive: "Gravando",
     linkThisComputer: "Este computador",
-    linkRemoteControl: "Controlar computador remoto",
-    linkRemoteId: "ID remoto",
-    linkNewPassword: "Nova senha",
-    linkAccessNotice: "O acesso autorizado mostra todas as unidades e pastas deste computador.",
-    linkConnect: "Conectar",
-    linkSelfTest: "Testar neste PC",
+    linkRemoteControl: "Conexão remota",
+    linkRemoteId: "IP / host remoto",
+    linkRemoteAddressExamples: "Use o mesmo fluxo para este PC (127.0.0.1), um IP da rede local ou um IP/host público da Internet.",
+    linkAccessNotice: "Somente arquivos, pastas e unidades compartilhados explicitamente ficam expostos. Cada compartilhamento mantém sua permissão de Somente leitura ou Leitura e gravação.",
+    linkConnect: "Conectar", linkDisconnect: "Desconectar", linkDisconnected: "Desconectado.",
+    convertWithFfmpeg: "Converter usando FFmpeg ao final do download para:",
     linkSend: "Enviar →",
     linkRemoteComputer: "Computador remoto",
     linkDownload: "← Baixar",
@@ -267,6 +299,23 @@ const catalogs = {
     linkCompleted: "Concluído",
     linkTransferFailed: "Falha na transferência",
     linkUploadFailed: "Falha no envio",
+    linkShareNotice: "Compartilhe um arquivo, pasta ou unidade por aqui. Pastas compartilhadas pelo Windows ou Linux via SMB também aparecem automaticamente.",
+    linkRemoteShareNotice: "Abaixo aparecem somente arquivos, pastas e unidades compartilhados pelo outro usuário.",
+    linkNoShares: "Nenhum arquivo, pasta ou unidade foi compartilhado. Compartilhe um item acima para ele aparecer aqui.",
+    linkRemoteUsername: "Usuário do sistema operacional",
+    linkRemoteSystemPassword: "Senha da conta do sistema",
+    linkCredentialsRequired: "Informe o IP/host remoto, o usuário do sistema operacional e a senha da conta.",
+    linkAuthenticating: "Autenticando conta do sistema…",
+    linkAuthenticationFailed: "Falha na autenticação da conta do sistema",
+    linkLocalSessionReady: "Conectado a este Apocalipse. Os compartilhamentos estão disponíveis abaixo.",
+    linkRemoteSessionReady: "Conexão TLS criptografada estabelecida. Os compartilhamentos remotos estão disponíveis abaixo.", linkRemoteFirstTrust: "Primeira conexão: o certificado TLS deste Apocalipse foi confiado para este endereço.",
+    linkRemoteAuthPlan: "O acesso remoto usa um único login: IP/host + usuário do sistema operacional + senha da conta.",
+    linkRemoteAccountFormats: "Windows: use o usuário da conta local, domínio ou Microsoft (por exemplo juliano ou MicrosoftAccount\\nome@hotmail.com). Linux e macOS: use o usuário local do sistema (por exemplo juliano). O PIN do Windows Hello não é uma senha remota. A senha do sistema nunca é salva.",
+    linkRemoteSecurityNotice: "A senha do sistema nunca é salva e só é enviada dentro do canal TLS criptografado. Continuam visíveis apenas os itens compartilhados explicitamente, respeitando Somente leitura ou Leitura e gravação.",
+    linkShareFile: "Compartilhar arquivo", linkShareFolder: "Compartilhar pasta ou unidade", linkReadOnly: "Somente leitura", linkReadWrite: "Leitura e gravação", linkStopSharing: "Parar de compartilhar",
+    linkDelete: "Apagar",
+    linkDeleteConfirm: "Apagar permanentemente {name}?",
+    linkWriteDenied: "O computador remoto não ativou Aceitar gravação.",
     linkSendTitle: "Enviar um arquivo diretamente",
     linkSendHint: "Crie um link privado de uso único, válido por 10 minutos na sua rede local.",
     linkChooseFile: "Escolher arquivo e criar link",
@@ -304,13 +353,26 @@ const catalogs = {
     websiteCredentialRemove: "Remover",
     websiteCredentialSaved: "Credencial salva",
     websiteCredentialsEmpty: "Nenhuma credencial de site salva.",
-    websiteCredentialsLocalWarning: "As senhas ficam armazenadas localmente no arquivo portátil data/settings.json. Proteja o acesso a essa pasta.",
+    websiteCredentialsLocalWarning: "As senhas ficam no cofre de credenciais do sistema operacional e não são gravadas no settings.json.",
+    hostRules: "Regras de transferência por site",
+    hostRulesHint: "Aplique hosts exatos ou subdomínios com curinga e, se quiser, salve credenciais, conexões, velocidade e User-Agent na mesma regra. Credenciais antigas continuam compatíveis.",
+    hostRulePattern: "Padrão de host",
+    hostRulePatternHint: "*.exemplo.com",
+    hostRulePasswordHint: "Deixe vazio para manter a senha salva",
+    hostRuleBandwidth: "Limite de velocidade (MB/s)",
+    hostRuleUnlimitedHint: "0 ou vazio = ilimitado",
+    hostRuleClearPassword: "Remover a senha salva desta regra",
+    hostRuleAdd: "Adicionar ou atualizar regra",
+    hostRuleRemove: "Remover",
+    hostRuleRemoveConfirm: "Remover a regra de {pattern}?",
+    hostRulesEmpty: "Nenhuma regra por site salva.",
+    hostRulesVaultWarning: "As senhas ficam no cofre de credenciais do sistema operacional, não no settings.json.",
     customDns: "DNS personalizado",
     customDnsHint: "Resolver downloads nativos sem alterar o DNS do sistema operacional",
     dnsProvider: "Provedor",
     dnsCustom: "Personalizado",
     dnsServers: "Servidores DNS",
-    dnsScopeHint: "Aplicado ao motor HTTP nativo e ao aria2. O SOCKS5H continua resolvendo pelo proxy.",
+    dnsScopeHint: "Aplicado ao motor HTTP nativo. O Gopeed usa sua própria pilha de rede; o SOCKS5H continua resolvendo pelo proxy.",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
     automatic: "Automático",
@@ -382,8 +444,9 @@ const catalogs = {
     aiStatusProposed: "等待批准", aiStatusTesting: "测试中", aiStatusSaved: "已保存", aiStatusConfirmed: "已确认", aiStatusRejected: "未解决",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
-    toolbox: "工具箱", update: "更新", mediaPlayer: "VLC / mpv / 媒体播放器",
+    toolbox: "工具箱", update: "更新", gopeedBackend: "Gopeed（后台引擎）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "VLC / mpv / 媒体播放器",
     donatePaypal: "通过 PayPal 捐赠",
+    about: "关于", aboutDescription: "关于 Apocalipse Download Manager 的创作者。", aboutCreator: "创作者：Juliano - 巴西 - Sátia Mortadela", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量",
     overview: "概览",
     engineReady: "引擎已就绪",
     addDownload: "添加下载",
@@ -427,12 +490,12 @@ const catalogs = {
     stopRecording: "停止并保存",
     recordingActive: "正在录制",
     linkThisComputer: "此电脑",
-    linkRemoteControl: "控制远程电脑",
-    linkRemoteId: "远程 ID",
-    linkNewPassword: "新密码",
-    linkAccessNotice: "授权访问会显示此电脑上的所有驱动器和文件夹。",
-    linkConnect: "连接",
-    linkSelfTest: "在此电脑上测试",
+    linkRemoteControl: "远程连接",
+    linkRemoteId: "远程 IP / 主机",
+    linkRemoteAddressExamples: "本机 (127.0.0.1)、局域网 IP 或公网 IP/主机都使用同一个连接流程。",
+    linkAccessNotice: "只会公开明确共享的文件、文件夹和驱动器。每个共享项都保留只读或读写权限。",
+    linkConnect: "连接", linkDisconnect: "断开连接", linkDisconnected: "已断开连接。",
+    convertWithFfmpeg: "下载完成后使用 FFmpeg 转换为：",
     linkSend: "发送 →",
     linkRemoteComputer: "远程电脑",
     linkDownload: "← 下载",
@@ -444,6 +507,23 @@ const catalogs = {
     linkCompleted: "已完成",
     linkTransferFailed: "传输失败",
     linkUploadFailed: "发送失败",
+    linkShareNotice: "可在此共享文件、文件夹或映射驱动器；Windows 和 Linux 的 SMB 共享文件夹也会自动显示。",
+    linkRemoteShareNotice: "下方仅显示对方用户共享的文件、文件夹和驱动器。",
+    linkNoShares: "尚未共享文件、文件夹或驱动器。请先在上方共享项目。",
+    linkRemoteUsername: "操作系统用户名",
+    linkRemoteSystemPassword: "系统账户密码",
+    linkCredentialsRequired: "请输入远程 IP/主机、操作系统用户名和账户密码。",
+    linkAuthenticating: "正在验证系统账户…",
+    linkAuthenticationFailed: "系统账户身份验证失败",
+    linkLocalSessionReady: "已连接到本机 Apocalipse。共享项目已显示在下方。",
+    linkRemoteSessionReady: "TLS 加密连接已建立。远程共享项目已显示在下方。", linkRemoteFirstTrust: "首次连接：已信任此地址的 Apocalipse TLS 证书。",
+    linkRemoteAuthPlan: "远程访问使用一次登录：IP/主机 + 操作系统用户名 + 账户密码。",
+    linkRemoteAccountFormats: "Windows：使用本地、域或 Microsoft 账户用户名（例如 juliano 或 MicrosoftAccount\\name@hotmail.com）。Linux 和 macOS：使用本地系统用户名（例如 juliano）。Windows Hello PIN 不是远程密码。系统密码绝不会保存。",
+    linkRemoteSecurityNotice: "系统密码永不保存，并且只会通过 TLS 加密通道发送。仍只显示明确共享的项目，并遵守只读或读写权限。",
+    linkShareFile: "共享文件", linkShareFolder: "共享文件夹或驱动器", linkReadOnly: "只读", linkReadWrite: "读写", linkStopSharing: "停止共享",
+    linkDelete: "删除",
+    linkDeleteConfirm: "永久删除 {name}？",
+    linkWriteDenied: "远程电脑尚未启用接受写入。",
     linkSendTitle: "直接发送文件",
     linkSendHint: "创建一个在本地网络中有效十分钟的私密一次性链接。",
     linkChooseFile: "选择文件并创建链接",
@@ -481,13 +561,26 @@ const catalogs = {
     websiteCredentialRemove: "删除",
     websiteCredentialSaved: "凭据已保存",
     websiteCredentialsEmpty: "尚未保存网站凭据。",
-    websiteCredentialsLocalWarning: "密码保存在便携式 data/settings.json 文件中。请保护此文件夹的访问权限。",
+    websiteCredentialsLocalWarning: "密码保存在操作系统凭据保险库中，不会写入 settings.json。",
+    hostRules: "按网站传输规则",
+    hostRulesHint: "为精确主机或通配子域创建规则，并可在同一规则中保存凭据、连接数、速度和 User-Agent。现有网站凭据仍然兼容。",
+    hostRulePattern: "主机模式",
+    hostRulePatternHint: "*.example.com",
+    hostRulePasswordHint: "留空以保留已保存的密码",
+    hostRuleBandwidth: "速度限制（MB/秒）",
+    hostRuleUnlimitedHint: "0 或留空 = 不限速",
+    hostRuleClearPassword: "删除此规则保存的密码",
+    hostRuleAdd: "添加或更新规则",
+    hostRuleRemove: "删除",
+    hostRuleRemoveConfirm: "删除 {pattern} 的规则吗？",
+    hostRulesEmpty: "尚未保存按网站规则。",
+    hostRulesVaultWarning: "密码保存在操作系统凭据保险库中，而不是 settings.json。",
     customDns: "自定义 DNS",
     customDnsHint: "解析原生下载而不更改操作系统 DNS",
     dnsProvider: "提供商",
     dnsCustom: "自定义",
     dnsServers: "DNS 服务器",
-    dnsScopeHint: "应用于原生 HTTP 引擎和 aria2。SOCKS5H 仍通过代理解析。",
+    dnsScopeHint: "应用于原生 HTTP 引擎。Gopeed 使用自己的网络栈；SOCKS5H 仍通过代理解析。",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
     automatic: "自动",
@@ -582,12 +675,13 @@ let clipboardMonitorPrimed = false;
 const busyIds = new Set();
 const selectedIds = new Set();
 const speedSamples = new Map();
+const SPEED_EWMA_SECONDS = 2.0;
 const schedulerPaused = new Set();
 let selectionPointerActive = false;
 let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
-const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", ai: "aiDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
+const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", ai: "aiDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", about: "aboutDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
 const invoke = (command, args = {}) => {
   const bridge = window.__TAURI__?.core?.invoke;
   if (!bridge) throw new Error("Desktop bridge unavailable in preview");
@@ -639,10 +733,9 @@ function updateSpeeds(tasks) {
     const active = stateKey(task.state) === "downloading";
     const changed = !previous || task.received !== previous.bytes;
     const changedAt = changed ? now : previous.changedAt;
-    // aria2's received byte counter is formatted in coarse units and can remain
-    // unchanged across several polls while DL still reports live throughput.
-    // Trust the engine's explicit speed while the task is active; aria2 reports
-    // zero itself when the transfer really stalls.
+    // External engines can report byte counters at a different cadence from
+    // their live throughput. Prefer the explicit engine speed while active and
+    // use byte deltas as a second signal for a responsive ADM display.
     const externalSpeed = active ? Number(task.download_speed) || 0 : 0;
     let speed = active ? previous?.speed || 0 : 0;
     if (previous && active) {
@@ -650,7 +743,10 @@ function updateSpeeds(tasks) {
       const delta = Math.max(0, task.received - previous.bytes);
       if (delta > 0) {
         const instantaneous = delta / elapsed;
-        speed = previous.speed ? instantaneous * 0.65 + previous.speed * 0.35 : instantaneous;
+        const alpha = 1 - Math.exp(-elapsed / SPEED_EWMA_SECONDS);
+        speed = previous.speed
+          ? instantaneous * alpha + previous.speed * (1 - alpha)
+          : instantaneous;
       } else if (now - changedAt >= 1500) {
         speed = 0;
       }
@@ -683,7 +779,56 @@ function visibleDownloads() {
   return visible;
 }
 
-const failedThumbnailUrls = new Set();
+const thumbnailDataCache = new Map();
+const thumbnailPending = new Map();
+const thumbnailRetryAfter = new Map();
+
+async function resolveCachedThumbnail(url) {
+  if (!url) return null;
+  if (/^data:image\//i.test(url)) return url;
+  if (thumbnailDataCache.has(url)) return thumbnailDataCache.get(url);
+  if ((thumbnailRetryAfter.get(url) || 0) > Date.now()) return null;
+  if (thumbnailPending.has(url)) return thumbnailPending.get(url);
+
+  const pending = invoke("resolve_thumbnail", { url })
+    .then((resolved) => {
+      if (resolved) {
+        thumbnailDataCache.set(url, resolved);
+        thumbnailRetryAfter.delete(url);
+        return resolved;
+      }
+      thumbnailRetryAfter.set(url, Date.now() + 60_000);
+      return null;
+    })
+    .catch((error) => {
+      console.warn("thumbnail-cache", error);
+      thumbnailRetryAfter.set(url, Date.now() + 60_000);
+      return null;
+    })
+    .finally(() => thumbnailPending.delete(url));
+  thumbnailPending.set(url, pending);
+  return pending;
+}
+
+function loadPreviewThumbnail(image, url) {
+  image.dataset.thumbnailSource = url || "";
+  image.hidden = true;
+  image.removeAttribute("src");
+  if (!url) return;
+  resolveCachedThumbnail(url).then((resolved) => {
+    if (!resolved || image.dataset.thumbnailSource !== url) return;
+    image.src = resolved;
+    image.hidden = false;
+    image.onerror = () => {
+      if (image.dataset.thumbnailSource !== url) return;
+      image.hidden = true;
+      image.removeAttribute("src");
+      thumbnailDataCache.delete(url);
+      thumbnailRetryAfter.set(url, Date.now() + 60_000);
+    };
+  });
+}
+
 let lastDownloadRenderSignature = "";
 
 function renderDownloads(force = false) {
@@ -721,19 +866,23 @@ function renderDownloads(force = false) {
       className: "download-icon",
       textContent: "⇩",
     });
-    if (task.thumbnail && !failedThumbnailUrls.has(task.thumbnail)) {
-      const thumbnail = document.createElement("img");
-      thumbnail.className = "download-thumbnail";
-      thumbnail.alt = "";
-      thumbnail.referrerPolicy = "no-referrer";
-      thumbnail.src = task.thumbnail;
-      thumbnail.onerror = () => {
-        failedThumbnailUrls.add(task.thumbnail);
-        icon.replaceChildren(document.createTextNode("⇩"));
-        icon.classList.remove("has-thumbnail");
-      };
-      icon.replaceChildren(thumbnail);
-      icon.classList.add("has-thumbnail");
+    if (task.thumbnail) {
+      const requestedThumbnail = task.thumbnail;
+      resolveCachedThumbnail(requestedThumbnail).then((resolved) => {
+        if (!resolved || !row.isConnected) return;
+        const thumbnail = document.createElement("img");
+        thumbnail.className = "download-thumbnail";
+        thumbnail.alt = "";
+        thumbnail.src = resolved;
+        thumbnail.onerror = () => {
+          thumbnailDataCache.delete(requestedThumbnail);
+          thumbnailRetryAfter.set(requestedThumbnail, Date.now() + 60_000);
+          icon.replaceChildren(document.createTextNode("⇩"));
+          icon.classList.remove("has-thumbnail");
+        };
+        icon.replaceChildren(thumbnail);
+        icon.classList.add("has-thumbnail");
+      });
     }
     const info = Object.assign(document.createElement("div"), {
       className: "download-info",
@@ -985,9 +1134,47 @@ document.querySelector("#import-list").onclick = async (event) => {
   } catch (error) { console.error(error); }
   finally { button.disabled = false; }
 };
+async function applyAboutMedia(media) {
+  const photo = document.querySelector("#about-creator-photo");
+  const audio = document.querySelector("#about-audio");
+  if (media?.photoDataUrl) photo.src = media.photoDataUrl;
+  if (media?.audioDataUrl && audio.src !== media.audioDataUrl) {
+    audio.src = media.audioDataUrl;
+    audio.load();
+  }
+}
+
+async function loadAboutMedia() {
+  await applyAboutMedia(await invoke("get_about_media"));
+}
+
+const aboutAudio = document.querySelector("#about-audio");
+const aboutPlayPause = document.querySelector("#about-play-pause");
+aboutAudio.volume = Number(document.querySelector("#about-volume").value);
+aboutPlayPause.onclick = () => {
+  if (aboutAudio.paused) aboutAudio.play().catch(() => {});
+  else aboutAudio.pause();
+};
+document.querySelector("#about-stop").onclick = () => {
+  aboutAudio.pause();
+  aboutAudio.currentTime = 0;
+};
+document.querySelector("#about-volume").oninput = (event) => {
+  aboutAudio.volume = Number(event.target.value);
+};
+aboutAudio.onplay = () => { aboutPlayPause.textContent = t("aboutPause"); };
+aboutAudio.onpause = () => { aboutPlayPause.textContent = t("aboutPlay"); };
+
+loadAboutMedia().catch(console.error);
+
 document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data-page="tools"])').forEach((button) => {
   button.onclick = () => {
     const openedAt = performance.now();
+    if (button.dataset.page === "link") {
+      invoke("open_link_window").catch((error) => window.alert(String(error)));
+      invoke("record_ui_diagnostic", { level: "INFO", event: "link_window_requested", detail: "source=main_navigation" }).catch(() => {});
+      return;
+    }
     activePage = button.dataset.page;
     document.querySelectorAll("nav [data-page]").forEach((item) => item.classList.toggle("active", item === button));
     const heading = button.querySelector("b")?.textContent || t("downloads");
@@ -998,8 +1185,17 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector("#logs-panel").hidden = activePage !== "logs";
     document.querySelector("#themes-panel").hidden = activePage !== "themes";
     document.querySelector("#language-panel").hidden = activePage !== "language";
-    document.querySelector(".metrics").hidden = ["link", "ai", "logs", "themes", "language"].includes(activePage);
-    document.querySelector(".panel").hidden = ["link", "ai", "logs", "themes", "language"].includes(activePage);
+    document.querySelector("#about-panel").hidden = activePage !== "about";
+    document.querySelector("#add").hidden = activePage === "about";
+    if (activePage === "about" && aboutAudio.src) {
+      aboutAudio.currentTime = 0;
+      aboutAudio.play().catch(() => {});
+    } else {
+      aboutAudio.pause();
+      aboutAudio.currentTime = 0;
+    }
+    document.querySelector(".metrics").hidden = ["link", "ai", "logs", "themes", "language", "about"].includes(activePage);
+    document.querySelector(".panel").hidden = ["link", "ai", "logs", "themes", "language", "about"].includes(activePage);
     renderDownloads();
     invoke("record_ui_diagnostic", { level: "INFO", event: "page_opened", detail: `page=${activePage} panel_present=${activePage === "link" ? Boolean(document.querySelector("#apocalipse-link-panel")) : activePage === "logs" ? Boolean(document.querySelector("#logs-panel")) : true} duration_ms=${Math.round(performance.now() - openedAt)}` }).catch(() => {});
     if (activePage === "logs") refreshLogEvents().catch(console.error);
@@ -1052,17 +1248,54 @@ document.querySelector("#clear-logs").onclick = async () => { await invoke("clea
 let linkLocalPath = "";
 let linkRemotePath = "";
 let linkRemoteId = "";
-let linkRemotePassword = "";
-let linkSelectedLocal = "";
-let linkSelectedRemote = "";
-const linkParent = (path) => /^[A-Za-z]:[\\/]?$/.test(path) ? "" : path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
+let linkRemoteTransportToken = "";
+let linkLocalIdentity = "";
+let linkLocalAccountSession = false;
+let linkSelectedLocal = null;
+let linkSelectedRemote = null;
+let linkRemoteAllowWrite = false;
+const linkParent = (path) => /^[A-Za-z]:[\\/]?$/.test(path) || /^\/shares\/[^/]+\/?$/.test(path) ? "" : path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
+function linkHost(value) {
+  const authority = String(value || "").trim().replace(/^https?:\/\//i, "").split(/[/?#]/)[0];
+  if (!authority) return "";
+  if (authority.startsWith("[")) {
+    const end = authority.indexOf("]");
+    return (end > 0 ? authority.slice(1, end) : authority).toLowerCase();
+  }
+  if (authority === "::1" || (authority.match(/:/g) || []).length > 1) return authority.toLowerCase();
+  return authority.split(":")[0].toLowerCase();
+}
+async function isLocalLinkTarget(value) {
+  const host = linkHost(value);
+  const ownHost = linkHost(linkLocalIdentity);
+  if (host === "127.0.0.1" || host === "localhost" || host === "::1" || Boolean(ownHost && host === ownHost)) return true;
+  return invoke("is_local_link_target", { id: value });
+}
 function updateLinkTransferButtons() {
-  document.querySelector("#link-upload-local").disabled = !linkSelectedLocal || !linkRemoteId || !linkRemotePath;
+  document.querySelector("#link-upload-local").disabled = !linkSelectedLocal || !linkRemoteId || !linkRemotePath || !linkRemoteAllowWrite;
   document.querySelector("#link-download-remote").disabled = !linkSelectedRemote;
+  document.querySelector("#link-delete-remote").disabled = !linkSelectedRemote || !linkRemoteAllowWrite;
+  document.querySelector("#link-disconnect").disabled = !linkRemoteId;
+}
+function disconnectLink() {
+  linkRemoteId = ""; linkRemoteTransportToken = ""; linkLocalAccountSession = false;
+  linkRemotePath = ""; linkSelectedRemote = null; linkRemoteAllowWrite = false;
+  document.querySelector("#link-remote-password").value = "";
+  document.querySelector("#link-remote-path").textContent = "/";
+  document.querySelector("#link-remote-files").replaceChildren();
+  document.querySelector("#link-status").textContent = t("linkDisconnected");
+  updateLinkTransferButtons();
 }
 function renderLinkFiles(target, entries, open, select) {
   const root = document.querySelector(target);
   root.replaceChildren();
+  if (!entries.length) {
+    const empty = document.createElement("small");
+    empty.className = "link-empty";
+    empty.textContent = t("linkNoShares");
+    root.append(empty);
+    return;
+  }
   for (const entry of entries) {
     const row = document.createElement("button");
     row.type = "button";
@@ -1083,56 +1316,145 @@ function renderLinkFiles(target, entries, open, select) {
 }
 async function openLocalLink(path = "") {
   linkLocalPath = path;
-  linkSelectedLocal = "";
+  linkSelectedLocal = null;
   updateLinkTransferButtons();
   document.querySelector("#link-local-path").textContent = path || t("linkDrives");
   renderLinkFiles("#link-local-files", await invoke("list_local_link_files", { path }), openLocalLink, (entry) => {
-    linkSelectedLocal = entry.directory ? "" : entry.path;
+    linkSelectedLocal = entry;
     updateLinkTransferButtons();
   });
 }
 async function openRemoteLink(path = "") {
   linkRemotePath = path;
-  linkSelectedRemote = "";
+  linkSelectedRemote = null;
   updateLinkTransferButtons();
   document.querySelector("#link-remote-path").textContent = path || t("linkDrives");
-  const entries = await invoke("list_remote_link_files", { id: linkRemoteId, password: linkRemotePassword, path });
+  const capabilities = linkLocalAccountSession
+    ? await invoke("get_local_link_share_capabilities", { path })
+    : await invoke("get_remote_link_capabilities", { id: linkRemoteId, password: linkRemoteTransportToken, path });
+  linkRemoteAllowWrite = Boolean(capabilities.allowWrite);
+  updateLinkTransferButtons();
+  const entries = linkLocalAccountSession
+    ? await invoke("list_local_link_files", { path })
+    : await invoke("list_remote_link_files", { id: linkRemoteId, password: linkRemoteTransportToken, path });
   renderLinkFiles("#link-remote-files", entries, openRemoteLink, (entry) => {
-    linkSelectedRemote = entry.directory ? "" : entry.path;
+    linkSelectedRemote = entry;
     updateLinkTransferButtons();
   });
 }
 async function loadLinkIdentity() {
   const identity = await invoke("get_link_identity");
+  linkLocalIdentity = identity.id;
   document.querySelector("#link-own-id").value = identity.id;
-  document.querySelector("#link-own-password").value = identity.password;
+  renderLinkShares(await invoke("list_link_shares"));
   await openLocalLink();
-  return identity;
 }
-document.querySelector('[data-page="link"]').addEventListener("click", () => loadLinkIdentity().catch(console.error));
-document.querySelector("#link-new-password").onclick = async () => {
-  document.querySelector("#link-own-password").value = await invoke("regenerate_link_password");
-};
+// Link now opens in its own maximized window. The embedded panel stays available
+// as a fallback for tests and future recovery paths, but main navigation does not load it.
+async function refreshVisibleLinkPanels({ resetToRoot = false } = {}) {
+  const localPath = resetToRoot ? "" : linkLocalPath;
+  const remotePath = resetToRoot ? "" : linkRemotePath;
+  await openLocalLink(localPath).catch(() => openLocalLink(""));
+  if (linkRemoteId) await openRemoteLink(remotePath).catch(() => openRemoteLink(""));
+}
+function renderLinkShares(shares) {
+  const root = document.querySelector("#link-share-list"); root.replaceChildren();
+  for (const share of shares) {
+    const row = document.createElement("div");
+    const name = Object.assign(document.createElement("b"), { textContent: share.name });
+    const permission = document.createElement("select");
+    permission.append(new Option(t("linkReadOnly"), "false"), new Option(t("linkReadWrite"), "true"));
+    permission.value = String(Boolean(share.allowWrite));
+    permission.onchange = async () => { renderLinkShares(await invoke("update_link_share", { id: share.id, allowWrite: permission.value === "true" })); await refreshVisibleLinkPanels({ resetToRoot: true }); };
+    const remove = Object.assign(document.createElement("button"), { type: "button", textContent: t("linkStopSharing") });
+    remove.onclick = async () => { renderLinkShares(await invoke("remove_link_share", { id: share.id })); await refreshVisibleLinkPanels({ resetToRoot: true }); };
+    row.append(name, permission, remove); root.append(row);
+  }
+}
+document.querySelector("#link-share-file").onclick = async () => { try { renderLinkShares(await invoke("add_link_file_share")); await refreshVisibleLinkPanels({ resetToRoot: true }); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
+document.querySelector("#link-share-folder").onclick = async () => { try { renderLinkShares(await invoke("add_link_share")); await refreshVisibleLinkPanels({ resetToRoot: true }); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
 document.querySelector("#link-connect").onclick = async () => {
-  linkRemoteId = document.querySelector("#link-remote-id").value.trim();
-  linkRemotePassword = document.querySelector("#link-remote-password").value.trim();
-  try { await openRemoteLink(); document.querySelector("#link-status").textContent = t("linkConnected"); }
-  catch (error) { document.querySelector("#link-status").textContent = `${t("linkConnectionFailed")}: ${error}`; }
-};
-document.querySelector("#link-self-test").onclick = async () => {
-  const identity = await loadLinkIdentity();
-  document.querySelector("#link-remote-id").value = `127.0.0.1:${identity.port}`;
-  document.querySelector("#link-remote-password").value = identity.password;
-  document.querySelector("#link-connect").click();
+  const id = document.querySelector("#link-remote-id").value.trim();
+  const username = document.querySelector("#link-remote-username").value.trim();
+  const passwordField = document.querySelector("#link-remote-password");
+  const status = document.querySelector("#link-status");
+  if (!id) {
+    status.textContent = t("linkCredentialsRequired");
+    return;
+  }
+  linkRemoteId = "";
+  linkRemoteTransportToken = "";
+  linkLocalAccountSession = false;
+  try {
+    if (await isLocalLinkTarget(id)) {
+      linkRemoteId = id;
+      linkLocalAccountSession = true;
+      await openRemoteLink("");
+      status.textContent = t("linkLocalSessionReady");
+      return;
+    }
+    if (!username || !passwordField.value) {
+      status.textContent = t("linkCredentialsRequired");
+      return;
+    }
+    status.textContent = t("linkAuthenticating");
+    const session = await invoke("authenticate_remote_link_account", {
+      id,
+      username,
+      password: passwordField.value,
+    });
+    linkRemoteId = id;
+    linkRemoteTransportToken = session.token;
+    linkLocalAccountSession = false;
+    await openRemoteLink("");
+    status.textContent = session.firstTrust
+      ? `${t("linkRemoteSessionReady")} ${t("linkRemoteFirstTrust")} ${session.fingerprint}`
+      : t("linkRemoteSessionReady");
+  } catch (error) {
+    linkRemoteId = "";
+    linkRemoteTransportToken = "";
+    linkLocalAccountSession = false;
+    const value = String(error);
+    status.textContent = value.includes("remote_system_auth_failed")
+      ? t("linkAuthenticationInvalidCredentials")
+      : value.includes("link_tls_certificate_changed")
+        ? `${t("linkConnectionFailed")}: TLS certificate changed`
+        : `${t("linkConnectionFailed")}: ${value}`;
+  } finally {
+    passwordField.value = "";
+    updateLinkTransferButtons();
+  }
 };
 document.querySelector("#link-local-up").onclick = () => openLocalLink(linkParent(linkLocalPath)).catch(console.error);
+document.querySelector("#link-disconnect").onclick = disconnectLink;
 document.querySelector("#link-remote-up").onclick = () => openRemoteLink(linkParent(linkRemotePath)).catch(console.error);
+document.querySelector("#link-delete-remote").onclick = async () => {
+  if (!linkSelectedRemote || !window.confirm(t("linkDeleteConfirm").replace("{name}", linkSelectedRemote.name))) return;
+  if (linkLocalAccountSession) {
+    await invoke("delete_local_shared_link_item", { path: linkSelectedRemote.path });
+  } else {
+    await invoke("delete_remote_link_item", { id: linkRemoteId, password: linkRemoteTransportToken, path: linkSelectedRemote.path });
+  }
+  await openRemoteLink(linkRemotePath);
+};
 document.querySelector("#link-download-remote").onclick = async () => {
   if (!linkSelectedRemote) return;
   const status = document.querySelector("#link-status");
   status.textContent = t("linkTransferring");
   try {
-    const destination = await invoke("download_remote_link_file", { id: linkRemoteId, password: linkRemotePassword, path: linkSelectedRemote });
+    const destination = linkLocalAccountSession
+      ? await invoke("download_local_shared_link_item", {
+          path: linkSelectedRemote.path,
+          directory: linkSelectedRemote.directory,
+          fileName: linkSelectedRemote.name,
+        })
+      : await invoke("download_remote_link_file", {
+          id: linkRemoteId,
+          password: linkRemoteTransportToken,
+          path: linkSelectedRemote.path,
+          directory: linkSelectedRemote.directory,
+          fileName: linkSelectedRemote.name,
+        });
     status.textContent = `${t("linkCompleted")}: ${destination}`;
   } catch (error) { if (`${error}` !== "cancelled") status.textContent = `${t("linkTransferFailed")}: ${error}`; }
 };
@@ -1143,7 +1465,17 @@ document.querySelector("#link-upload-local").onclick = async () => {
   status.textContent = t("linkSending");
   button.disabled = true;
   try {
-    const remotePath = await invoke("upload_remote_link_file", { id: linkRemoteId, password: linkRemotePassword, remoteDirectory: linkRemotePath, localPath: linkSelectedLocal });
+    const remotePath = linkLocalAccountSession
+      ? await invoke("upload_local_shared_link_item", {
+          remoteDirectory: linkRemotePath,
+          localPath: linkSelectedLocal.path,
+        })
+      : await invoke("upload_remote_link_file", {
+          id: linkRemoteId,
+          password: linkRemoteTransportToken,
+          remoteDirectory: linkRemotePath,
+          localPath: linkSelectedLocal.path,
+        });
     status.textContent = `${t("linkCompleted")}: ${remotePath}`;
     await openRemoteLink(linkRemotePath);
   } catch (error) {
@@ -1243,10 +1575,14 @@ function resetMediaInspection() {
   const thumbnail = document.querySelector("#media-thumbnail");
   panel.hidden = true;
   thumbnail.hidden = true;
+  thumbnail.dataset.thumbnailSource = "";
   thumbnail.removeAttribute("src");
   document.querySelector("#media-title").textContent = "";
   document.querySelector("#media-duration").textContent = "";
   document.querySelector("#media-format").replaceChildren();
+  document.querySelector("#media-format").hidden = false;
+  document.querySelector("#hls-audio-conversion").hidden = true;
+  document.querySelector("#hls-convert-audio").checked = false;
   document.querySelector("#media-format-control").hidden = false;
   document.querySelector("#torrent-inspection").hidden = true;
   document.querySelector("#torrent-files").replaceChildren();
@@ -1262,11 +1598,7 @@ function showCapturedPreview({ title, thumbnail, kind, duration, size, showForma
     Number.isFinite(duration) && duration > 0 ? `${t("duration")}: ${secondsLabel(duration)}` : "",
   ].filter(Boolean).join(" · ");
   document.querySelector("#media-format-control").hidden = !showFormats;
-  image.hidden = !thumbnail;
-  if (thumbnail) {
-    image.src = thumbnail;
-    image.onerror = () => { image.hidden = true; image.removeAttribute("src"); };
-  } else image.removeAttribute("src");
+  loadPreviewThumbnail(image, thumbnail);
   panel.hidden = false;
 }
 
@@ -1372,36 +1704,35 @@ document.querySelector("#clear-destinations").onclick = async () => {
 document
   .querySelectorAll("[data-clear-cancel]")
   .forEach((button) => (button.onclick = () => clearDialog.close()));
-document.querySelectorAll("[data-clear-mode]").forEach((button) => {
-  button.onclick = async () => {
-    button.disabled = true;
-    const ids = [...selectedIds];
-    downloadListState.beginRemoval(ids);
-    let removed = false;
-    try {
-      await invoke("remove_downloads", {
-        ids,
-        deleteFiles: button.dataset.clearMode === "files",
-      });
-      removed = true;
-      downloadListState.finishRemoval(ids, true);
-      downloads = downloadListState.visible(downloads);
-      for (const id of ids) selectedIds.delete(id);
-      renderDownloads(true);
-      clearDialog.close();
+async function removeSelectedDownloads(button, deleteFiles) {
+  button.disabled = true;
+  const ids = [...selectedIds];
+  downloadListState.beginRemoval(ids);
+  let removed = false;
+  try {
+    await invoke("remove_downloads", { ids, deleteFiles });
+    removed = true;
+    downloadListState.finishRemoval(ids, true);
+    downloads = downloadListState.visible(downloads);
+    for (const id of ids) selectedIds.delete(id);
+    renderDownloads(true);
+    clearDialog.close();
+    await refreshDownloads();
+  } catch (error) {
+    console.error(error);
+    window.alert(`${t("removeFailed")}: ${error}`);
+  } finally {
+    if (!removed) {
+      downloadListState.finishRemoval(ids, false);
       await refreshDownloads();
-    } catch (error) {
-      console.error(error);
-      window.alert(`${t("removeFailed")}: ${error}`);
-    } finally {
-      if (!removed) {
-        downloadListState.finishRemoval(ids, false);
-        await refreshDownloads();
-      }
-      button.disabled = false;
     }
-  };
-});
+    button.disabled = false;
+  }
+}
+document.querySelector("#clear-list-only").onclick = (event) =>
+  removeSelectedDownloads(event.currentTarget, false);
+document.querySelector("#clear-list-and-files").onclick = (event) =>
+  removeSelectedDownloads(event.currentTarget, true);
 function updateProxyControls() {
   const enabled = document.querySelector("#proxy-enabled").checked;
   for (const id of ["#proxy-url", "#proxy-username", "#proxy-password", "#proxy-clear-password"]) {
@@ -1420,30 +1751,48 @@ document.querySelector("#dns-preset").onchange = (event) => {
     document.querySelector("#dns-servers").value = event.target.value;
   }
 };
-function renderWebsiteCredentials(credentials) {
-  const list = document.querySelector("#website-credential-list");
+function renderHostRules(rules) {
+  const list = document.querySelector("#host-rule-list");
   list.replaceChildren();
-  if (!credentials.length) {
+  if (!rules.length) {
     const empty = document.createElement("small");
-    empty.textContent = t("websiteCredentialsEmpty");
+    empty.textContent = t("hostRulesEmpty");
     list.append(empty);
     return;
   }
-  for (const credential of credentials) {
+  for (const rule of rules) {
     const row = document.createElement("div");
     const identity = document.createElement("span");
-    const host = document.createElement("b");
-    const username = document.createElement("small");
+    const pattern = document.createElement("b");
+    const details = document.createElement("small");
     const remove = document.createElement("button");
-    host.textContent = credential.host;
-    username.textContent = credential.username;
-    identity.append(host, username);
+    pattern.textContent = rule.pattern;
+    const parts = [];
+    if (rule.username) parts.push(rule.username);
+    if (rule.userAgent) parts.push("UA: " + rule.userAgent);
+    if (rule.connections) parts.push(t("connections") + ": " + rule.connections);
+    if (rule.bandwidthLimit) parts.push(t("hostRuleBandwidth") + ": " + (rule.bandwidthLimit / 1024 / 1024).toFixed(1));
+    if (rule.hasPassword) parts.push("🔐");
+    details.textContent = parts.join(" · ");
+    identity.append(pattern, details);
+    identity.onclick = () => {
+      document.querySelector("#host-rule-pattern").value = rule.pattern;
+      document.querySelector("#host-rule-username").value = rule.username || "";
+      document.querySelector("#host-rule-password").value = "";
+      document.querySelector("#host-rule-user-agent").value = rule.userAgent || "";
+      document.querySelector("#host-rule-connections").value = rule.connections || "";
+      document.querySelector("#host-rule-bandwidth").value = rule.bandwidthLimit ? (rule.bandwidthLimit / 1024 / 1024).toFixed(1) : "";
+      document.querySelector("#host-rule-clear-password").checked = false;
+      document.querySelector("#host-rule-pattern").focus();
+    };
     remove.type = "button";
-    remove.textContent = t("websiteCredentialRemove");
+    remove.className = "danger-action";
+    remove.textContent = t("hostRuleRemove");
     remove.onclick = async () => {
+      if (!window.confirm(t("hostRuleRemoveConfirm").replace("{pattern}", rule.pattern))) return;
       remove.disabled = true;
       try {
-        renderWebsiteCredentials(await invoke("remove_website_credential", { host: credential.host }));
+        renderHostRules(await invoke("remove_host_rule", { pattern: rule.pattern }));
       } catch (error) {
         console.error(error);
         remove.disabled = false;
@@ -1453,22 +1802,36 @@ function renderWebsiteCredentials(credentials) {
     list.append(row);
   }
 }
-document.querySelector("#save-website-credential").onclick = async (event) => {
+
+document.querySelector("#save-host-rule").onclick = async (event) => {
   const button = event.currentTarget;
-  const host = document.querySelector("#website-credential-host");
-  const username = document.querySelector("#website-credential-username");
-  const password = document.querySelector("#website-credential-password");
-  if (![host, username, password].every((input) => input.reportValidity()) || !host.value.trim() || !username.value.trim() || !password.value) return;
+  const pattern = document.querySelector("#host-rule-pattern");
+  const username = document.querySelector("#host-rule-username");
+  const password = document.querySelector("#host-rule-password");
+  const userAgent = document.querySelector("#host-rule-user-agent");
+  const connections = document.querySelector("#host-rule-connections");
+  const bandwidth = document.querySelector("#host-rule-bandwidth");
+  if (![pattern, username, password, userAgent, connections, bandwidth].every((input) => input.reportValidity()) || !pattern.value.trim()) return;
   button.disabled = true;
   try {
-    renderWebsiteCredentials(await invoke("save_website_credential", {
-      host: host.value,
+    const connectionValue = connections.value ? Number(connections.value) : null;
+    const bandwidthValue = Number(bandwidth.value) || 0;
+    renderHostRules(await invoke("save_host_rule", {
+      pattern: pattern.value,
       username: username.value,
       password: password.value,
+      userAgent: userAgent.value,
+      connections: connectionValue,
+      bandwidthLimit: bandwidthValue > 0 ? Math.round(bandwidthValue * 1024 * 1024) : null,
+      clearPassword: document.querySelector("#host-rule-clear-password").checked,
     }));
-    host.value = "";
+    pattern.value = "";
     username.value = "";
     password.value = "";
+    userAgent.value = "";
+    connections.value = "";
+    bandwidth.value = "";
+    document.querySelector("#host-rule-clear-password").checked = false;
   } catch (error) {
     console.error(error);
     window.alert(String(error));
@@ -1476,9 +1839,10 @@ document.querySelector("#save-website-credential").onclick = async (event) => {
     button.disabled = false;
   }
 };
+
 const openSettings = async (target = "general") => {
   try {
-    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations, websiteCredentials] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations, hostRules] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
@@ -1489,7 +1853,7 @@ const openSettings = async (target = "general") => {
       invoke("get_proxy_setting"),
       invoke("get_dns_setting"),
       invoke("get_associations"),
-      invoke("list_website_credentials"),
+      invoke("list_host_rules"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
     document.querySelector("#theme").value = document.documentElement.dataset.theme;
@@ -1529,7 +1893,7 @@ const openSettings = async (target = "general") => {
       ? dnsValue
       : "custom";
     updateDnsControls();
-    renderWebsiteCredentials(websiteCredentials);
+    renderHostRules(hostRules);
     updateLogEditorControls();
     settingsDialog.showModal();
     const targetElement = {
@@ -1683,7 +2047,7 @@ document.querySelector("#save-tools").onclick = async (event) => {
       ytDlp: document.querySelector("#tool-yt-dlp").value,
       qjs: document.querySelector("#tool-qjs").value,
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
-      aria2: document.querySelector("#tool-aria2").value,
+      gopeed: document.querySelector("#tool-gopeed").value,
     });
     await invoke("set_media_player", { path: document.querySelector("#media-player").value });
     toolsDialog.close();
@@ -1694,11 +2058,15 @@ document.querySelectorAll("[data-tool-update]").forEach((button) => {
   button.onclick = async () => {
     button.disabled = true;
     try {
-      const message = await invoke("update_tool", { id: button.dataset.toolUpdate });
+      const message = String(await invoke("update_tool", { id: button.dataset.toolUpdate }));
       await refreshToolStatuses();
-      alert(message);
+      const updated = message.match(/^(.+) updated: (.+) → (.+)$/);
+      const current = message.match(/^(.+) already current \((.+)\)$/);
+      if (updated) alert(`${updated[1]} · ${t("toolUpdated")}: ${updated[2]} → ${updated[3]}`);
+      else if (current) alert(`${current[1]} · ${t("toolCurrent")} (${current[2]})`);
+      else alert(message);
     } catch (error) {
-      alert(String(error).replace("manual_update_required:", "Atualização manual necessária:"));
+      alert(String(error).replace("manual_update_required:", `${t("manualUpdateRequired")}:`));
     } finally {
       button.disabled = false;
     }
@@ -1832,6 +2200,8 @@ async function showMediaInspection(url) {
   const panel = document.querySelector("#media-inspection");
   const select = document.querySelector("#media-format");
   select.replaceChildren();
+  select.hidden = false;
+  document.querySelector("#hls-audio-conversion").hidden = true;
   option(select, "bestvideo+bestaudio/best", t("bestQuality"));
   document.querySelector("#media-format-control").hidden = false;
   for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
@@ -1871,13 +2241,24 @@ async function showMediaInspection(url) {
     });
   }
 }
-document.querySelector("#media-format").onchange = (event) => {
-  const audio = event.target.value.match(/^audio:(.+)$/);
+function applyAudioFormatSelection(value) {
+  const audio = value.match(/^audio:(.+)$/);
   if (!audio) return;
   const input = document.querySelector("#file-name");
   const base = input.value.replace(/\.[^.]+$/, "");
   input.value = `${base}.${audio[1]}`;
-};
+}
+document.querySelector("#media-format").onchange = (event) => applyAudioFormatSelection(event.target.value);
+function updateHlsAudioConversion() {
+  const enabled = document.querySelector("#hls-convert-audio").checked;
+  const format = document.querySelector("#hls-audio-format").value;
+  const selection = enabled ? `audio:${format}` : "original";
+  document.querySelector("#media-format").value = selection;
+  document.querySelector("#hls-audio-format").disabled = !enabled;
+  if (enabled) applyAudioFormatSelection(selection);
+}
+document.querySelector("#hls-convert-audio").onchange = updateHlsAudioConversion;
+document.querySelector("#hls-audio-format").onchange = updateHlsAudioConversion;
 document.querySelector("#task-connections").oninput = (event) => {
   taskConnectionsManuallyChanged = true;
   document.querySelector("#task-connections-value").value = event.target.value;
@@ -1906,7 +2287,7 @@ document.querySelector("#analyze").onclick = async () => {
     }
     box.textContent = `${plan.primary} · ${plan.reason}`;
     if (plan.primary === "YtDlp") await showMediaInspection(url.value);
-    else if (plan.primary === "Aria2Rpc" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) {
+    else if (plan.primary === "Gopeed" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) {
       const startedAt = Date.now();
       const updateMetadataStatus = () => {
         const seconds = Math.floor((Date.now() - startedAt) / 1000);
@@ -1919,12 +2300,17 @@ document.querySelector("#analyze").onclick = async () => {
       metadataTimer = null;
       box.textContent = `${plan.primary} · ${plan.reason}`;
     }
-    else if (plan.primary === "NM3u8DlRe") {
+    else if (plan.reason === "hls_manifest") {
       const select = document.querySelector("#media-format");
       select.replaceChildren();
-      option(select, "", t("bestQuality"));
+      option(select, "original", pendingMediaKind === "audio" ? "Original (MP4/M4A)" : t("bestQuality"));
       for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
         option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
+      const audioHls = pendingMediaKind === "audio";
+      select.hidden = audioHls;
+      document.querySelector("#hls-audio-conversion").hidden = !audioHls;
+      document.querySelector("#hls-convert-audio").checked = false;
+      updateHlsAudioConversion();
       showCapturedPreview({ title: pendingTitle || "HLS", thumbnail: pendingThumbnail, kind: "M3U8 / HLS", duration: pendingDuration, size: pendingExpectedSize, showFormats: true });
     } else if (pendingMediaKind === "image" || /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)(?:$|[?#])/i.test(url.value)) {
       showCapturedPreview({ title: pendingTitle || fileName.value, thumbnail: pendingThumbnail || url.value, kind: pendingMediaKind || "image", duration: null, size: pendingExpectedSize });
@@ -1967,6 +2353,7 @@ document.querySelector("#enqueue").onclick = async () => {
           title: pendingTitle,
           thumbnail: pendingThumbnail,
           audioUrl: pendingAudioUrl,
+          expectedSize: pendingExpectedSize,
           cookieHeader: pendingCookieHeader,
           userAgent: pendingUserAgent,
           requestMethod: pendingRequestMethod,

@@ -7,5 +7,6 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 apocalipse-core = { path = "../apocalipse-core" }
+serde_json.workspace = true
 tokio.workspace = true
 

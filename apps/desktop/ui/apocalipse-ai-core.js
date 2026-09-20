@@ -41,6 +41,19 @@
       clarifyAction: "Did this happen when you clicked Download, Preview or Record?",
       taskSummary: "There are {total} task(s): {active} active, {paused} paused, {failed} failed and {completed} completed.",
       downloadSlow: "A slow download may be caused by the website, the number of allowed connections, a configured speed limit, proxy/VPN routing or lack of torrent peers. Tell me the website or task so I can check its records.",
+      performanceObserved: "The transfer-engine telemetry shows {speed} now, with a recorded peak of {peak}, using {connections} connection(s), {sources} verified source(s) and {protocol}. {finding}",
+      performanceNeedDiagnostics: "I do not have structured transfer telemetry for this download yet. Enable Advanced diagnostics while reproducing the slow transfer so I can measure connections, mirrors, resume decisions and throughput.",
+      performanceNoSamples: "I found transfer-engine decisions, but there are not enough throughput samples yet to measure the slowdown. Keep Advanced diagnostics active during the transfer and ask me again.",
+      performanceSingleConnection: "Only one connection was observed. If this server limits each connection, additional safe ranges could improve throughput; the current evidence does not confirm that yet.",
+      performanceManyConnections: "The engine is already using {connections} connections. Without evidence of unused bandwidth, increasing the count further is not the first change to test.",
+      performanceDrop: "Observed throughput fell to about {ratio}% of the recorded peak. This confirms a slowdown occurred, but does not by itself prove server throttling.",
+      performanceStable: "The latest sample is close to the recorded peak, so the current telemetry does not show a large throughput collapse.",
+      performanceMirrors: "{count} segment(s) needed another verified source, so mirror fallback actively recovered failed or slower attempts.",
+      performanceResumeRestarted: "A previous partial transfer was not resumed because the remote identity or byte range no longer matched the saved checkpoint. Apocalipse restarted safely instead of mixing incompatible bytes.",
+      performanceResumeAccepted: "The saved checkpoint matched the remote validator and byte range, so safe resume was accepted.",
+      performanceProtocolUnknown: "protocol not recorded yet",
+      performanceRangeSteal: "Adaptive range stealing reassigned {count} slow-tail range(s), moving {bytes} to idle/faster workers instead of waiting for the original connection.",
+      performanceRemoteChecksum: "The server advertised a SHA-256 digest and Apocalipse is using it to detect transfer corruption. Because the digest came from the same origin, it is transport-integrity evidence, not independent publisher authentication.",
       previewHelp: "Preview opens the selected media in the external player configured in Tools. It must never create a download or open the save-location window.",
       recordingHelp: "Record captures media while it plays and later exports the result. Use it when the page does not provide a complete direct download address.",
       extensionHelp: "The browser extension detects media and sends approved actions to the desktop application. Its connection status appears at the bottom of Apocalipse.",
@@ -63,7 +76,9 @@
       helpPrompt: "Of course. Tell me what happened, the website name and whether it involved Download, Preview or Record.",
       currentTime: "The current system time is {time}.",
       updateChecking: "I’ll check the official Apocalipse release now.",
-      updateAvailable: "An update is available: Apocalipse {latest}. This computer is running {current}.",
+      updateAvailable: "An update is available: Apocalipse {latest}. This computer is running {current}. Open the official Releases page to download it.",
+      updateReleaseLink: "Open official Releases",
+      updateNavTitle: "New Apocalipse version {latest} available",
       upToDate: "Apocalipse is up to date. This computer is running {current}.",
       updateUnavailable: "I couldn’t reach the official update service right now. The installed version is {current}.",
       siteLogFound: "I found {count} diagnostic event(s) for {site}. The latest record is: {detail}",
@@ -102,6 +117,19 @@
       clarifyAction: "Isso aconteceu quando você clicou em Baixar, Visualizar ou Gravar?",
       taskSummary: "Existem {total} tarefa(s): {active} ativa(s), {paused} pausada(s), {failed} com falha e {completed} concluída(s).",
       downloadSlow: "Um download lento pode ser causado pelo site, quantidade de conexões permitidas, limite de velocidade, rota de proxy/VPN ou falta de pares no torrent. Informe o site ou a tarefa para eu conferir os registros.",
+      performanceObserved: "A telemetria do motor mostra {speed} agora, com pico registrado de {peak}, usando {connections} conexão(ões), {sources} fonte(s) verificada(s) e {protocol}. {finding}",
+      performanceNeedDiagnostics: "Ainda não tenho telemetria estruturada do motor para esse download. Ative o Diagnóstico avançado enquanto reproduz a lentidão para eu medir conexões, mirrors, decisões de retomada e velocidade.",
+      performanceNoSamples: "Encontrei decisões do motor, mas ainda não há amostras de velocidade suficientes para medir a lentidão. Mantenha o Diagnóstico avançado ativo durante a transferência e me pergunte novamente.",
+      performanceSingleConnection: "Foi observada apenas uma conexão. Se o servidor limitar a velocidade por conexão, faixas adicionais seguras podem aumentar o desempenho; os registros atuais ainda não confirmam isso.",
+      performanceManyConnections: "O motor já está usando {connections} conexões. Sem evidência de banda ociosa, aumentar ainda mais esse número não é a primeira mudança a testar.",
+      performanceDrop: "A velocidade observada caiu para cerca de {ratio}% do pico registrado. Isso confirma que houve lentidão, mas sozinho não prova que o servidor aplicou throttling.",
+      performanceStable: "A amostra mais recente está próxima do pico registrado, portanto a telemetria atual não mostra uma grande queda de velocidade.",
+      performanceMirrors: "{count} segmento(s) precisaram de outra fonte verificada; o fallback de mirrors recuperou ativamente tentativas com falha ou mais lentas.",
+      performanceResumeRestarted: "Uma transferência parcial anterior não foi retomada porque a identidade remota ou a faixa de bytes deixou de corresponder ao checkpoint salvo. O Apocalipse reiniciou com segurança em vez de misturar bytes incompatíveis.",
+      performanceResumeAccepted: "O checkpoint salvo correspondeu ao validador remoto e à faixa de bytes, então a retomada segura foi aceita.",
+      performanceProtocolUnknown: "protocolo ainda não registrado",
+      performanceRangeSteal: "O range stealing adaptativo redistribuiu {count} cauda(s) lenta(s), movendo {bytes} para workers ociosos/mais rápidos em vez de esperar a conexão original.",
+      performanceRemoteChecksum: "O servidor anunciou um SHA-256 e o Apocalipse está usando esse hash para detectar corrupção na transferência. Como o hash veio da própria origem, ele comprova integridade de transporte, não autenticação independente do publicador.",
       previewHelp: "Visualizar abre a mídia escolhida no player externo configurado em Ferramentas. Essa ação nunca deve criar um download nem abrir a janela de escolha do local de salvamento.",
       recordingHelp: "Gravar captura a mídia enquanto ela é reproduzida e permite exportar o resultado depois. Use quando a página não fornecer um endereço direto completo para download.",
       extensionHelp: "A extensão detecta mídias no navegador e envia as ações autorizadas ao aplicativo. O estado da conexão aparece no rodapé do Apocalipse.",
@@ -124,7 +152,9 @@
       helpPrompt: "Claro. Conte o que aconteceu, o nome do site e se foi em Baixar, Visualizar ou Gravar.",
       currentTime: "Agora são {time}, conforme o relógio deste computador.",
       updateChecking: "Vou consultar agora a versão oficial do Apocalipse.",
-      updateAvailable: "Há uma atualização disponível: Apocalipse {latest}. Este computador está usando a versão {current}.",
+      updateAvailable: "Há uma atualização disponível: Apocalipse {latest}. Este computador está usando a versão {current}. Abra a página oficial de Releases para baixar.",
+      updateReleaseLink: "Abrir Releases oficial",
+      updateNavTitle: "Nova versão do Apocalipse {latest} disponível",
       upToDate: "O Apocalipse está atualizado. Este computador está usando a versão {current}.",
       updateUnavailable: "Não consegui acessar o serviço oficial de atualização agora. A versão instalada é {current}.",
       siteLogFound: "Encontrei {count} registro(s) de diagnóstico sobre {site}. O registro mais recente é: {detail}",
@@ -163,6 +193,19 @@
       clarifyAction: "这是在你点击下载、预览还是录制时发生的？",
       taskSummary: "共有 {total} 个任务：{active} 个活动、{paused} 个暂停、{failed} 个失败、{completed} 个完成。",
       downloadSlow: "下载缓慢可能由网站、允许的连接数、速度限制、代理或 VPN 路由，或种子缺少节点造成。请告诉我网站或任务，以便检查日志。",
+      performanceObserved: "传输引擎遥测显示当前速度为 {speed}，本次记录峰值为 {peak}，正在使用 {connections} 个连接、{sources} 个已验证来源以及 {protocol}。{finding}",
+      performanceNeedDiagnostics: "目前还没有这个下载的结构化传输遥测。请在重现下载缓慢时开启“高级诊断”，这样我才能测量连接数、镜像、续传决策和吞吐量。",
+      performanceNoSamples: "我找到了传输引擎的决策记录，但还没有足够的速度样本来衡量降速。请在传输期间保持“高级诊断”开启，然后再让我分析。",
+      performanceSingleConnection: "目前只观察到一个连接。如果服务器按单连接限速，增加安全的分段连接可能提高速度；现有证据还不能确认这一点。",
+      performanceManyConnections: "引擎已经在使用 {connections} 个连接。在没有发现带宽未被利用的证据前，不应首先继续增加连接数。",
+      performanceDrop: "观察到的速度已降至本次记录峰值的大约 {ratio}%。这能确认发生了降速，但仅凭这一点不能证明服务器进行了限速。",
+      performanceStable: "最新速度样本接近本次记录峰值，因此当前遥测没有显示明显的吞吐量崩塌。",
+      performanceMirrors: "有 {count} 个分段需要切换到另一个已验证来源，说明镜像回退正在主动恢复失败或较慢的尝试。",
+      performanceResumeRestarted: "之前的部分下载没有继续，因为远程文件身份或字节范围已不再匹配保存的检查点。Apocalipse 为避免混合不兼容的数据而进行了安全重启。",
+      performanceResumeAccepted: "保存的检查点与远程验证器和字节范围一致，因此已接受安全续传。",
+      performanceProtocolUnknown: "尚未记录协议",
+      performanceRangeSteal: "自适应范围窃取重新分配了 {count} 个慢速尾部范围，将 {bytes} 交给空闲或更快的工作线程，而不是等待原连接完成。",
+      performanceRemoteChecksum: "服务器公布了 SHA-256，Apocalipse 正用它检测传输损坏。由于该摘要来自同一来源，它只能作为传输完整性证据，不能独立证明发布者身份。",
       previewHelp: "预览会在“工具”中设置的外部播放器里打开所选媒体。它绝不能创建下载或打开保存位置窗口。",
       recordingHelp: "录制会在媒体播放时捕获内容，之后可以导出结果。当页面没有提供完整的直接下载地址时可使用此功能。",
       extensionHelp: "浏览器扩展负责检测媒体，并把获准的操作发送到桌面应用。连接状态显示在 Apocalipse 底部。",
@@ -185,7 +228,9 @@
       helpPrompt: "当然可以。请告诉我发生了什么、网站名称，以及问题涉及下载、预览还是录制。",
       currentTime: "根据这台电脑的时钟，现在是 {time}。",
       updateChecking: "我现在会检查 Apocalipse 官方版本。",
-      updateAvailable: "有可用更新：Apocalipse {latest}。这台电脑当前使用 {current}。",
+      updateAvailable: "有可用更新：Apocalipse {latest}。这台电脑当前使用 {current}。请打开官方 Releases 页面下载。",
+      updateReleaseLink: "打开官方 Releases",
+      updateNavTitle: "Apocalipse 新版本 {latest} 可用",
       upToDate: "Apocalipse 已是最新版本。这台电脑当前使用 {current}。",
       updateUnavailable: "目前无法连接官方更新服务。已安装版本为 {current}。",
       siteLogFound: "我找到了 {count} 条关于 {site} 的诊断记录。最新记录是：{detail}",
@@ -277,6 +322,77 @@
     return subject ? `${q} ${subject}` : q;
   }
 
+  function formatRate(bytesPerSecond) {
+    const value = Number(bytesPerSecond || 0);
+    if (!Number.isFinite(value) || value <= 0) return "0 MB/s";
+    const mib = value / (1024 * 1024);
+    return `${mib >= 100 ? mib.toFixed(0) : mib.toFixed(1)} MB/s`;
+  }
+
+  function performanceDiagnosis(context, locale) {
+    const events = parseEvents(context.engineEvents || [])
+      .filter(event => /^http\.(?:engine_|performance_|segment_|resume_|transfer_|transport_|range_|remote_|integrity_)/.test(String(event?.event || "")));
+    if (!events.length) return say(locale, "performanceNeedDiagnostics");
+
+    const samples = events.filter(event => event.event === "http.performance_sample"
+      && Number(event?.detail?.bytesPerSecond) >= 0);
+    if (!samples.length) return say(locale, "performanceNoSamples");
+
+    const latest = samples.at(-1);
+    const current = Number(latest.detail.bytesPerSecond || 0);
+    const peak = Math.max(...samples.map(event => Number(event.detail.bytesPerSecond || 0)));
+    const plan = [...events].reverse().find(event => event.event === "http.engine_plan"
+      || event.event === "http.transfer_started");
+    const segments = events.filter(event => event.event === "http.segment_completed");
+    const latestSegment = segments.at(-1);
+    const connections = Number(latest?.detail?.activeConnections
+      || plan?.detail?.activeConnections || 1);
+    const sources = Number(plan?.detail?.sourceCount
+      || latestSegment?.detail?.sourceCount || 1);
+    const protocol = String(latestSegment?.detail?.transport || say(locale, "performanceProtocolUnknown"));
+    const ratio = peak > 0 ? Math.round((current / peak) * 100) : 100;
+
+    const findings = [];
+    findings.push(ratio < 70
+      ? say(locale, "performanceDrop", { ratio })
+      : say(locale, "performanceStable"));
+    if (connections <= 1) findings.push(say(locale, "performanceSingleConnection"));
+    else if (connections >= 16) findings.push(say(locale, "performanceManyConnections", { connections }));
+
+    const mirrorFallbacks = segments.filter(event => Number(event?.detail?.attempts || 1) > 1).length;
+    if (mirrorFallbacks) findings.push(say(locale, "performanceMirrors", { count: mirrorFallbacks }));
+
+    const steals = events.filter(event => event.event === "http.range_stolen");
+    if (steals.length) {
+      const stolenBytes = steals.reduce((sum, event) => sum + Number(event?.detail?.stolenBytes || 0), 0);
+      findings.push(say(locale, "performanceRangeSteal", {
+        count: steals.length,
+        bytes: formatRate(stolenBytes).replace("/s", ""),
+      }));
+    }
+    if (events.some(event => event.event === "http.remote_checksum")) {
+      findings.push(say(locale, "performanceRemoteChecksum"));
+    }
+
+    const resume = [...events].reverse().find(event => event.event === "http.resume_decision");
+    if (resume?.detail?.accepted === true
+      && Number(resume?.detail?.resumedBytes || resume?.detail?.candidateBytes || 0) > 0) {
+      findings.push(say(locale, "performanceResumeAccepted"));
+    } else if (resume?.detail?.accepted === false
+      && Number(resume?.detail?.candidateBytes || 0) > 0) {
+      findings.push(say(locale, "performanceResumeRestarted"));
+    }
+
+    return say(locale, "performanceObserved", {
+      speed: formatRate(current),
+      peak: formatRate(peak),
+      connections,
+      sources,
+      protocol,
+      finding: findings.join(" "),
+    });
+  }
+
   function diagnose(question, context, locale) {
     const q = contextualQuestion(question, context.messages);
     const site = siteFrom(q);
@@ -318,7 +434,12 @@
     if (/sponsored|patrocinado|赞助/.test(text) && /(botao|button|captur|list|按钮)/.test(q)) return say(locale, "sponsored");
     if (/canDownload=false|recording.only|visual.only|recording_only/i.test(scoped.map(event => `${event?.detail || ""} ${event?.event || ""}`).join("\n"))) return say(locale, "recordOnly");
     if (/(botao|button|按钮)/.test(q) && /(download|baix|下载)/.test(q)) return say(locale, scoped.length ? "missingButton" : "noEvidence");
-    if (/(lent|devagar|slow|speed|veloc|慢|速度)/.test(q) && /(download|baix|torrent|下载)/.test(q)) return say(locale, "downloadSlow");
+    if (/(lent|devagar|slow|speed|veloc|performance|desempenho|mirror|espelho|retom|resume|慢|速度|性能|镜像|续传)/.test(q)
+        && /(download|baix|transfer|motor|engine|torrent|下载|传输|引擎)/.test(q)) {
+      return Array.isArray(context.engineEvents)
+        ? performanceDiagnosis(context, locale)
+        : say(locale, "downloadSlow");
+    }
     if (/(visualizar|preview|player|播放器|预览)/.test(q)) return say(locale, "previewHelp");
     if (/(gravar|gravacao|record|capture|录制)/.test(q)) return say(locale, "recordingHelp");
     if (/(extensao|extension|扩展)/.test(q)) return say(locale, "extensionHelp");
@@ -410,5 +531,5 @@
       : { text: say(locale, "offTopic"), intent: "unknown" };
   }
 
-  return { contextualQuestion, copy, diagnose, fold, localeOf, normalizeQuestion, parseCredentialCommand, parseEvents, previousSubject, redactCredentialCommand, respond, say, siteFrom };
+  return { contextualQuestion, copy, diagnose, fold, formatRate, localeOf, normalizeQuestion, parseCredentialCommand, parseEvents, performanceDiagnosis, previousSubject, redactCredentialCommand, respond, say, siteFrom };
 });

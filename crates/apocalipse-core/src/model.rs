@@ -71,9 +71,15 @@ pub struct DownloadTask {
     #[serde(default)]
     pub connections_override: Option<usize>,
     #[serde(default)]
+    pub expected_size: Option<u64>,
+    #[serde(default)]
     pub sha256: Option<String>,
     #[serde(default)]
     pub integrity_verified: bool,
+    /// Backend task identifier used by the experimental Gopeed engine. It is
+    /// persisted so pause/resume/removal still work after an ADM restart.
+    #[serde(default)]
+    pub gopeed_task_id: Option<String>,
     #[serde(default)]
     pub created_at: u64,
     #[serde(default)]
@@ -108,8 +114,10 @@ impl DownloadTask {
             priority: 0,
             bandwidth_limit: None,
             connections_override: None,
+            expected_size: None,
             sha256: None,
             integrity_verified: false,
+            gopeed_task_id: None,
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |value| value.as_secs()),

@@ -36,6 +36,9 @@
         <button id="donate-paypal" type="button">
           <span>♥</span><b data-i18n="donatePaypal">Donate via PayPal</b>
         </button>
+        <button data-page="about">
+          <span>ⓘ</span><b data-i18n="about">About</b>
+        </button>
       </nav>
       <div class="engine">
         <i></i
@@ -85,10 +88,10 @@
         </article>
       </section>
       <section id="apocalipse-link-panel" class="link-panel" hidden>
-        <div class="link-identity"><b data-i18n="linkThisComputer">This computer</b><label>ID<input id="link-own-id" readonly /></label><label><span data-i18n="proxyPassword">Password</span><input id="link-own-password" readonly /></label><button id="link-new-password" type="button" data-i18n="linkNewPassword">New password</button><small data-i18n="linkAccessNotice">Authorized access shows all drives and folders on this computer.</small></div>
-        <div class="link-connect"><b data-i18n="linkRemoteControl">Control remote computer</b><label><span data-i18n="linkRemoteId">Remote ID</span><input id="link-remote-id" placeholder="192.168.1.10:17655" /></label><label><span data-i18n="proxyPassword">Password</span><input id="link-remote-password" /></label><div class="path-picker"><button id="link-connect" class="primary" type="button" data-i18n="linkConnect">Connect</button><button id="link-self-test" type="button" data-i18n="linkSelfTest">Test on this PC</button></div><small id="link-status"></small></div>
-        <div class="link-files"><header><b data-i18n="linkThisComputer">This computer</b><span><button id="link-upload-local" type="button" data-i18n="linkSend" disabled>Send →</button> <button id="link-local-up" type="button">↑</button></span></header><small id="link-local-path">/</small><div id="link-local-files"></div></div>
-        <div class="link-files"><header><b data-i18n="linkRemoteComputer">Remote computer</b><span><button id="link-download-remote" type="button" data-i18n="linkDownload" disabled>← Download</button> <button id="link-remote-up" type="button">↑</button></span></header><small id="link-remote-path">/</small><div id="link-remote-files"></div></div>
+        <div class="link-identity"><b data-i18n="linkThisComputer">This computer</b><label>ID<input id="link-own-id" readonly /></label><small data-i18n="linkShareNotice">Share a file, folder or mapped drive and choose its permission for it to appear in Apocalipse Link.</small><small data-i18n="linkAccessNotice">Only explicitly shared files, folders and drives are exposed.</small><div class="link-share-actions"><button id="link-share-file" type="button" data-i18n="linkShareFile">Share file</button><button id="link-share-folder" type="button" data-i18n="linkShareFolder">Share folder or drive</button></div><div id="link-share-list"></div></div>
+        <div class="link-connect"><b data-i18n="linkRemoteControl">Remote connection</b><label><span data-i18n="linkRemoteId">Remote IP / host</span><input id="link-remote-id" placeholder="127.0.0.1:17655" /></label><small data-i18n="linkRemoteAddressExamples">Use the same connection flow for this PC (127.0.0.1), a local-network IP or a public Internet IP/host.</small><label><span data-i18n="linkRemoteUsername">Operating-system username</span><input id="link-remote-username" autocomplete="username" placeholder="juliano" /></label><label><span data-i18n="linkRemoteSystemPassword">System account password</span><input id="link-remote-password" type="password" autocomplete="current-password" /></label><div class="link-connection-actions"><button id="link-connect" class="primary" type="button" data-i18n="linkConnect">Connect</button><button id="link-disconnect" type="button" data-i18n="linkDisconnect" disabled>Disconnect</button></div><small data-i18n="linkRemoteShareNotice">Only files, folders and drives shared by the other user appear below.</small><small data-i18n="linkRemoteAuthPlan">Remote access uses one login: IP/host + operating-system username + account password.</small><small data-i18n="linkRemoteAccountFormats">Windows account formats include MicrosoftAccount, hotmail.com, AzureAD and PC-NAME prefixes.</small><small data-i18n="linkRemoteSecurityNotice">The system password is never saved and is only used with encrypted native authentication.</small><small id="link-status"></small></div>
+        <div class="link-files"><header><b data-i18n="linkThisComputer">This computer</b><span><button id="link-upload-local" type="button" data-i18n="linkSend" disabled>Send →</button><button id="link-local-up" type="button">↑</button></span></header><small id="link-local-path">/</small><div id="link-local-files"></div></div>
+        <div class="link-files"><header><b data-i18n="linkRemoteComputer">Remote computer</b><span><button id="link-delete-remote" type="button" data-i18n="linkDelete" disabled>Delete</button><button id="link-download-remote" type="button" data-i18n="linkDownload" disabled>← Download</button><button id="link-remote-up" type="button">↑</button></span></header><small id="link-remote-path">/</small><div id="link-remote-files"></div></div>
       </section>
       <section id="logs-panel" class="logs-panel" hidden>
         <header><div><b data-i18n="logs">Logs</b><small data-i18n="logsDescription">End-to-end diagnostics for extension, shortcuts, bridge and downloads.</small></div><span class="log-actions"><button id="export-logs" class="primary" type="button" data-i18n="exportLog">Export log</button><button id="clear-logs" type="button" data-i18n="clearLog">Clear log</button></span></header>
@@ -136,6 +139,19 @@
           <label class="appearance-range"><span><b data-i18n="cornerRadius">Corner radius</b><output id="corner-radius-value">10 px</output></span><input id="corner-radius" type="range" min="0" max="28" value="10" /></label>
           <label class="appearance-select"><span><b data-i18n="interfaceSize">Interface size</b><small data-i18n="interfaceSizeHint">Adjust text and element sizes</small></span><select id="interface-size"><option value="compact" data-i18n="compact">Compact</option><option value="normal" data-i18n="normal">Normal</option><option value="large" data-i18n="large">Large</option></select></label>
         </section>
+      </section>
+      <section id="about-panel" class="about-page" hidden>
+        <article class="about-card">
+          <img id="about-creator-photo" class="about-creator-photo" alt="Juliano" />
+          <p class="about-creator-line" data-i18n="aboutCreator">Creator: Juliano - Brazil - Sátia Mortadela</p>
+          <audio id="about-audio" preload="auto"></audio>
+          <div class="about-audio-controls">
+            <button id="about-play-pause" type="button" data-i18n="aboutPause">Pause</button>
+            <button id="about-stop" type="button" data-i18n="aboutStop">Stop</button>
+            <label for="about-volume" data-i18n="aboutVolume">Volume</label>
+            <input id="about-volume" type="range" min="0" max="1" step="0.05" value="0.7" />
+          </div>
+        </article>
       </section>
       <section id="language-panel" class="appearance-page language-page" hidden>
         <section class="appearance-card">
@@ -227,6 +243,10 @@
             <div id="media-format-control">
               <label for="media-format" data-i18n="qualityFormat">Quality and format</label>
               <select id="media-format"></select>
+              <div id="hls-audio-conversion" class="hls-audio-conversion" hidden>
+                <label><input id="hls-convert-audio" type="checkbox" /><span data-i18n="convertWithFfmpeg">Convert using FFmpeg after download to:</span></label>
+                <select id="hls-audio-format" aria-label="FFmpeg audio format"><option value="mp3">MP3</option><option value="m4a">M4A</option><option value="opus">OPUS</option><option value="flac">FLAC</option><option value="wav">WAV</option></select>
+              </div>
             </div>
           </div>
         </section>
@@ -313,13 +333,13 @@
           What do you want to remove?
         </p>
         <div class="remove-options">
-          <button type="button" data-clear-mode="list">
+          <button id="clear-list-only" type="button" data-clear-mode="list">
             <b data-i18n="listOnly">Clear from list</b>
             <small data-i18n="keepFiles"
               >Keep downloaded and partial files on disk</small
             >
           </button>
-          <button type="button" class="danger" data-clear-mode="files">
+          <button id="clear-list-and-files" type="button" class="danger" data-clear-mode="files">
             <b data-i18n="listAndFiles">Clear list and files</b>
             <small data-i18n="deleteFiles"
               >Permanently delete downloaded and partial files</small
@@ -411,17 +431,24 @@
           </label>
           <small data-i18n="proxyPortableWarning">The proxy configuration is saved in the portable data/settings.json file.</small>
         </section>
-        <section class="pairing-settings website-credentials-settings">
-          <b data-i18n="websiteCredentials">Site credentials</b>
-          <small data-i18n="websiteCredentialsHint">Automatically authenticate compatible HTTP, FTP and media downloads.</small>
+        <section class="pairing-settings host-rules-settings">
+          <b data-i18n="hostRules">Per-site transfer rules</b>
+          <small data-i18n="hostRulesHint">Apply exact hosts or wildcard subdomains and optionally save credentials, connections, speed and User-Agent in one rule.</small>
           <div class="website-credential-form">
-            <label><span data-i18n="websiteHost">Site domain</span><input id="website-credential-host" type="text" maxlength="253" autocomplete="off" data-i18n-placeholder="websiteHostHint" placeholder="example.com" /></label>
-            <label><span data-i18n="proxyUsername">Username</span><input id="website-credential-username" type="text" maxlength="512" autocomplete="off" /></label>
-            <label><span data-i18n="proxyPassword">Password</span><input id="website-credential-password" type="password" maxlength="2048" autocomplete="new-password" /></label>
-            <button id="save-website-credential" type="button" data-i18n="websiteCredentialAdd">Add or update</button>
+            <label><span data-i18n="hostRulePattern">Host pattern</span><input id="host-rule-pattern" type="text" maxlength="255" autocomplete="off" data-i18n-placeholder="hostRulePatternHint" placeholder="*.example.com" /></label>
+            <label><span data-i18n="proxyUsername">Username</span><input id="host-rule-username" type="text" maxlength="512" autocomplete="off" /></label>
+            <label><span data-i18n="proxyPassword">Password</span><input id="host-rule-password" type="password" maxlength="2048" autocomplete="new-password" data-i18n-placeholder="hostRulePasswordHint" placeholder="Leave blank to keep saved password" /></label>
+            <label><span data-i18n="userAgent">User-Agent</span><input id="host-rule-user-agent" type="text" maxlength="1024" autocomplete="off" /></label>
+            <label><span data-i18n="connections">Connections per download</span><input id="host-rule-connections" type="number" min="1" max="32" step="1" /></label>
+            <label><span data-i18n="hostRuleBandwidth">Speed limit (MB/s)</span><input id="host-rule-bandwidth" type="number" min="0" step="0.1" data-i18n-placeholder="hostRuleUnlimitedHint" placeholder="0 or empty = unlimited" /></label>
+            <label class="setting-toggle compact-toggle">
+              <input id="host-rule-clear-password" type="checkbox" />
+              <span><small data-i18n="hostRuleClearPassword">Remove the saved password for this rule</small></span>
+            </label>
+            <button id="save-host-rule" type="button" data-i18n="hostRuleAdd">Add or update rule</button>
           </div>
-          <div id="website-credential-list" class="website-credential-list"></div>
-          <small data-i18n="websiteCredentialsLocalWarning">Passwords are stored locally in the portable data/settings.json file. Protect access to this folder.</small>
+          <div id="host-rule-list" class="website-credential-list"></div>
+          <small data-i18n="hostRulesVaultWarning">Passwords are kept in the operating system credential vault, not in settings.json.</small>
         </section>
         <section class="pairing-settings">
           <label class="setting-toggle compact-toggle">
@@ -437,7 +464,7 @@
           </select>
           <label for="dns-servers" data-i18n="dnsServers">DNS servers</label>
           <input id="dns-servers" type="text" maxlength="400" placeholder="1.1.1.1, 1.0.0.1" />
-          <small data-i18n="dnsScopeHint">Applied to the native HTTP engine and aria2. SOCKS5H continues resolving through the proxy.</small>
+          <small data-i18n="dnsScopeHint">Applied to the native HTTP engine. Gopeed uses its own network stack; SOCKS5H continues resolving through the proxy.</small>
         </section>
         <div class="transfer-settings">
           <label>
@@ -512,7 +539,7 @@
             <label data-tool="yt-dlp"><span>yt-dlp <small></small></span><div><input id="tool-yt-dlp" type="text" /><button type="button" data-tool-pick="yt-dlp" data-i18n="browse">Browse…</button><button type="button" data-tool-update="yt-dlp" data-i18n="update">Update</button></div></label>
             <label data-tool="qjs"><span>QuickJS (qjs) <small></small></span><div><input id="tool-qjs" type="text" /><button type="button" data-tool-pick="qjs" data-i18n="browse">Browse…</button><button type="button" data-tool-update="qjs" data-i18n="update">Update</button></div></label>
             <label data-tool="n-m3u8dl-re"><span>N_m3u8DL-RE <small></small></span><div><input id="tool-n-m3u8dl-re" type="text" /><button type="button" data-tool-pick="n-m3u8dl-re" data-i18n="browse">Browse…</button><button type="button" data-tool-update="n-m3u8dl-re" data-i18n="update">Update</button></div></label>
-            <label data-tool="aria2"><span>aria2c <small></small></span><div><input id="tool-aria2" type="text" /><button type="button" data-tool-pick="aria2" data-i18n="browse">Browse…</button><button type="button" data-tool-update="aria2" data-i18n="update">Update</button></div></label>
+            <label data-tool="gopeed"><span><span data-i18n="gopeedBackend">Gopeed (backend engine)</span> <small></small></span><div><input id="tool-gopeed" type="text" /><button type="button" data-tool-pick="gopeed" data-i18n="browse">Browse…</button><button type="button" data-tool-update="gopeed" data-i18n="update">Update</button></div></label>
           </div>
           <label for="media-player" data-i18n="mediaPlayer">VLC / mpv / player</label>
           <div class="path-picker"><input id="media-player" type="text" /><button id="pick-media-player" type="button" data-i18n="browse">Browse…</button></div>
