@@ -224,15 +224,22 @@
       '[aria-label*="Sponsored" i]', '[aria-label*="Patrocinado" i]',
       '[aria-label*="Publicidad" i]', '[aria-label*="Gesponsert" i]',
       '[data-ad-preview]', '[data-testid*="sponsored" i]',
-      'a[href*="ad_id="]', 'a[href*="/ads/"]', 'a[href*="ads/about"]',
     ].join(',');
     const label = /(?:^|[\s·•|])(?:Sponsored|Patrocinado|Patrocinada|Publicidad|Gesponsert|Sponsorisé|Sponsorizzato|赞助内容|贊助內容)(?:$|[\s·•|])/iu;
+    const visibleMarker = marker => {
+      const rect = marker?.getBoundingClientRect?.();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+      if (marker?.getAttribute?.("aria-hidden") === "true" || marker?.hidden) return false;
+      const style = globalThis.getComputedStyle?.(marker);
+      return !style || (style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) > 0);
+    };
     const closeToPlayer = marker => {
+      if (!visibleMarker(marker)) return false;
       const playerRect = element?.getBoundingClientRect?.(), markerRect = marker?.getBoundingClientRect?.();
       if (!playerRect || !markerRect) return false;
       const markerY = markerRect.top + markerRect.height / 2;
       return markerRect.right >= playerRect.left - 80 && markerRect.left <= playerRect.right + 80
-        && markerY >= playerRect.top - 320 && markerY <= playerRect.top + 120;
+        && markerY >= playerRect.top - 220 && markerY <= playerRect.top + 80;
     };
     let exactPost = element.closest?.('[role="article"],article');
     if (!exactPost) {
@@ -1096,8 +1103,13 @@
       // A direct HTTP media URL belongs in the download path. Cross-origin
       // players commonly reject captureStream(), so displaying Record there
       // offers an action that cannot succeed (and duplicates Download).
-      const canRecord = !isYouTubeVideo && !hasDirectHttpMedia && element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
-        && Boolean(element.captureStream || element.webkitCaptureStream);
+      // Facebook Home frequently exposes a direct HTTP video track even when
+      // audio is separate or the durable post identity is still unresolved.
+      // Keep Record available there and let Download fall back to recording
+      // when no complete Facebook resource can be proven.
+      const canRecord = !isYouTubeVideo && element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
+        && Boolean(element.captureStream || element.webkitCaptureStream)
+        && (!hasDirectHttpMedia || isFacebookVideo);
       if (!canDownload && !canRecord) return;
       element.dataset.apocalipseButton = "1";
       const button = document.createElement("button");
@@ -1224,13 +1236,15 @@
             && !/\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp)(?:[?#]|$)/i.test(currentUrl))
         );
         if (!currentUrl || (isFacebookVideo && !facebookPlayableUrl)) {
-          // Sponsored Facebook players can expose only a MediaStream through
-          // srcObject while their network traffic consists of short, separate
-          // fragments. Capture the exact combined stream instead of guessing a
-          // fragment or a neighbouring post.
-          if (isFacebookVideo && element.srcObject && canRecord && recordButton) {
-            trace("overlay_download_stream_capture", "download", { reason: "facebook_srcobject_without_complete_resource",
-              duration: Number.isFinite(element.duration) ? element.duration : null });
+          // Facebook Home players may expose only a MediaStream/blob or an
+          // incomplete DASH track. Preserve the historical behavior: clicking
+          // Download automatically starts recording when no complete resource
+          // can be proven for this exact player.
+          if (isFacebookVideo && canRecord && recordButton) {
+            trace("overlay_download_stream_capture", "download", {
+              reason: element.srcObject ? "facebook_srcobject_without_complete_resource" : "facebook_unresolved_recording_fallback",
+              duration: Number.isFinite(element.duration) ? element.duration : null,
+            });
             button.textContent = "●";
             button.title = recordingLabels().record;
             recordButton.click();
