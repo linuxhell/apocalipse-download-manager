@@ -197,7 +197,12 @@ impl Drop for Runtime {
 }
 
 impl Endpoint {
-    async fn request(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value, String> {
+    async fn request(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> Result<Value, String> {
         let mut request = self
             .client
             .request(method, format!("{}{}", self.base_url, path))
@@ -252,7 +257,9 @@ impl Endpoint {
                 "selectFiles": []
             }
         });
-        let value = self.request(Method::POST, "/api/v1/resolve", Some(body)).await?;
+        let value = self
+            .request(Method::POST, "/api/v1/resolve", Some(body))
+            .await?;
         serde_json::from_value(value).map_err(|error| error.to_string())
     }
 
@@ -302,7 +309,9 @@ impl Endpoint {
                 "opts": opts
             })
         };
-        let value = self.request(Method::POST, "/api/v1/tasks", Some(body)).await?;
+        let value = self
+            .request(Method::POST, "/api/v1/tasks", Some(body))
+            .await?;
         value
             .as_str()
             .map(str::to_owned)
@@ -322,11 +331,7 @@ impl Endpoint {
 
     pub async fn stats(&self, task_id: &str) -> Result<StatsSummary, String> {
         let value = self
-            .request(
-                Method::GET,
-                &format!("/api/v1/tasks/{task_id}/stats"),
-                None,
-            )
+            .request(Method::GET, &format!("/api/v1/tasks/{task_id}/stats"), None)
             .await?;
         let snapshot = value.get("snapshot").unwrap_or(&Value::Null);
         let runtime = value.get("runtime").unwrap_or(&Value::Null);
