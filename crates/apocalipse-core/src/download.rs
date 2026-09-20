@@ -2040,13 +2040,8 @@ fn known_capacity_settle_threshold(host_hint: f64, network_hint: f64) -> Option<
     (target >= KNOWN_CAPACITY_SETTLE_MIN_BPS).then_some(target)
 }
 
-fn should_wait_for_known_capacity_confirmation(
-    confirming_samples: u8,
-    grace_used: bool,
-) -> bool {
-    confirming_samples > 0
-        && confirming_samples < KNOWN_CAPACITY_SETTLE_SAMPLES
-        && !grace_used
+fn should_wait_for_known_capacity_confirmation(confirming_samples: u8, grace_used: bool) -> bool {
+    confirming_samples > 0 && confirming_samples < KNOWN_CAPACITY_SETTLE_SAMPLES && !grace_used
 }
 
 fn proportional_admission_gain(
