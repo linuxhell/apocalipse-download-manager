@@ -474,3 +474,18 @@ test('structured object details remain searchable by Apocalipse AI', () => {
   assert.match(result.text, /rsload\.net/);
   assert.doesNotMatch(result.text, /\[object Object\]/);
 });
+
+
+test('Apocalipse AI always answers diagnostic evidence in the selected UI language', () => {
+  const events = [
+    { event: 'social.overlay_missing', level: 'WARN', detail: { platform: 'facebook', playerId: '11111111-1111-4111-8111-111111111111', reason: 'no_supported_action' } },
+  ];
+  const pt = AI.respond('why is this failing?', { locale: 'pt-BR', engineEvents: events });
+  const en = AI.respond('por que isso falhou?', { locale: 'en', engineEvents: events });
+  const zh = AI.respond('por que isso falhou?', { locale: 'zh-CN', engineEvents: events });
+  assert.match(pt.text, /debugger social estruturado|telemetria/i);
+  assert.match(en.text, /structured social debugger|telemetry/i);
+  assert.match(zh.text, /结构化社交媒体调试器|遥测/);
+  assert.doesNotMatch(pt.text, /^The structured social debugger/);
+  assert.doesNotMatch(en.text, /^O debugger social estruturado/);
+});
