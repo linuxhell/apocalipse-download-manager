@@ -79,11 +79,11 @@ test("removing a media task terminates yt-dlp and every child process", () => {
   assert.match(desktop, /child\.wait\(\)\.await/);
 });
 
-test("Facebook composite links are canonicalized without an aria2 dependency", () => {
+test("Facebook composite links stay canonicalized before transfer-engine dispatch", () => {
   assert.match(desktop, /fn canonical_facebook_video_url/);
   assert.match(desktop, /Some\(format!\("https:\/\/www\.facebook\.com\/watch\/\?v=\{video_id\}"\)\)/);
-  assert.doesNotMatch(desktop, /aria2c|parse_aria2_progress|Aria2Rpc/);
   assert.match(desktop, /run_aria2_download/);
+  assert.match(desktop, /requires_native_http_compatibility/);
 });
 
 test("streamed browser recordings publish a global core speed", () => {
