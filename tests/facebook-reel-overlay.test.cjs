@@ -277,9 +277,11 @@ test('Facebook sponsored videos show Record only and hide Download', () => {
   assert.match(script, /sponsoredRecordOnly:/);
 });
 
-test('non-sponsored Facebook streams can still redirect Download to Record when no permalink exists', () => {
-  assert.match(script, /overlay_download_recording_redirect/);
-  assert.match(script, /element\.srcObject && !immediateFacebookUrl/);
-  assert.match(script, /!facebookSponsoredEvidence\(element\)/);
-  assert.match(script, /recordButton\.click\(\)/);
+test('normal Facebook srcObject Reels resolve Download before any recording fallback', () => {
+  assert.doesNotMatch(script, /facebook_stream_without_permalink/);
+  const immediate = script.indexOf('const immediateFacebookUrl = isFacebookVideo ? facebookUrlFor(element) : null;');
+  const reveal = script.indexOf('await revealFacebookUrl(element)');
+  const fallback = script.indexOf('facebook_unresolved_recording_fallback');
+  assert.ok(immediate >= 0 && reveal > immediate, 'normal Facebook stream must attempt permalink discovery');
+  assert.ok(fallback > reveal, 'recording fallback must happen only after permalink resolution fails');
 });
