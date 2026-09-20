@@ -7441,8 +7441,7 @@ fn start_download(
     }
     if kind == DownloadKind::Http
         && (FORCE_ARIA2_DIRECT_HTTP_BENCHMARK
-            || (task.source.starts_with("https://")
-                && task.source.contains(".freefilehub.com:")))
+            || (task.source.starts_with("https://") && task.source.contains(".freefilehub.com:")))
     {
         diagnostic_log(
             state,
