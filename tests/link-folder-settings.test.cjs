@@ -61,7 +61,8 @@ test("Linux Samba shares are discovered from smb.conf and usershares", () => {
 });
 
 test("Link lists remain readable and settings use the available window", () => {
-  assert.match(css, /#settings-dialog \\{ width: min\\(1480px, calc\\(100vw - 16px\\)\\)/);
+  assert.match(css, /#settings-dialog \{ width: min\(1480px, calc\(100vw - 16px\)\)/);
+  assert.match(css, /height: min\(960px, calc\(100vh - 16px\)\)/);
   assert.match(css, /height:clamp\(300px,42vh,460px\)/);
   assert.match(css, /text-overflow:ellipsis/);
 });
