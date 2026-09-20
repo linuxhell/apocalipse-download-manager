@@ -4138,6 +4138,17 @@ fn html_attribute_urls(html: &str, attribute: &str) -> Vec<String> {
     urls
 }
 
+fn file_host_candidate_trusted(adapter: &str, host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    match adapter {
+        "gofile" => host == "gofile.io" || host.ends_with(".gofile.io"),
+        "mediafire" => host == "mediafire.com" || host.ends_with(".mediafire.com"),
+        "datanodes" => host == "datanodes.to" || host.ends_with(".datanodes.to"),
+        "archive" => host == "archive.org" || host.ends_with(".archive.org"),
+        _ => false,
+    }
+}
+
 fn file_host_candidate_score(adapter: &str, value: &url::Url) -> i32 {
     let path = value.path().to_ascii_lowercase();
     let host = value.host_str().unwrap_or_default().to_ascii_lowercase();
@@ -4188,7 +4199,7 @@ async fn resolve_file_host_url_internal(url: &str) -> Result<FileHostResolution,
         let Ok(candidate) = final_url.join(value.trim()) else { continue };
         if !matches!(candidate.scheme(), "http" | "https") { continue; }
         let candidate_host = candidate.host_str().unwrap_or_default();
-        if candidate_host.eq_ignore_ascii_case("localhost") { continue; }
+        if !file_host_candidate_trusted(adapter, candidate_host) { continue; }
         let score = file_host_candidate_score(adapter, &candidate);
         if score >= 50 && best.as_ref().is_none_or(|(current, _)| score > *current) {
             best = Some((score, candidate.to_string()));
@@ -12179,6 +12190,10 @@ mod tests {
         assert_eq!(supported_file_host("archive.org"), Some("archive"));
         assert_eq!(supported_file_host("mediafire.com.evil.test"), None);
         assert_eq!(supported_file_host("fakearchive.org"), None);
+        assert!(file_host_candidate_trusted("mediafire", "download123.mediafire.com"));
+        assert!(file_host_candidate_trusted("archive", "ia801.example.archive.org"));
+        assert!(!file_host_candidate_trusted("mediafire", "evil.example"));
+        assert!(!file_host_candidate_trusted("gofile", "gofile.io.evil.test"));
     }
 
     #[test]
