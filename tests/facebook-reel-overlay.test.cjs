@@ -6,9 +6,11 @@ const { test } = require('node:test');
 const vm = require('node:vm');
 const script = readFileSync(process.env.ADM_CONTENT_SCRIPT || join(__dirname, '../browser-extension/content.js'), 'utf8');
 
-test('Facebook srcObject download falls back to the exact combined player stream', () => {
+test('Facebook unresolved download falls back to the exact player recording path', () => {
   assert.match(script, /overlay_download_stream_capture/);
-  assert.match(script, /isFacebookVideo && element\.srcObject && canRecord && recordButton/);
+  assert.match(script, /if \(isFacebookVideo && canRecord && recordButton\)/);
+  assert.match(script, /facebook_srcobject_without_complete_resource/);
+  assert.match(script, /facebook_unresolved_recording_fallback/);
   assert.match(script, /recordButton\.click\(\)/);
 });
 
@@ -220,9 +222,9 @@ test('Facebook srcObject alone never classifies an ordinary Reel as recording-on
   assert.doesNotMatch(script, /recordingOnly:\s*Boolean\(element\.srcObject && \/\(\^\|\\\.\)facebook/);
 });
 
-test('direct HTTP players expose Download without an unusable cross-origin Record action', () => {
+test('ordinary direct HTTP players avoid Record while Facebook keeps its recording fallback', () => {
   assert.match(script, /const hasDirectHttpMedia = \/\^https\?:\/i\.test\(liveMediaUrl\)/);
-  assert.match(script, /const canRecord = !isYouTubeVideo && !hasDirectHttpMedia/);
+  assert.match(script, /\(!hasDirectHttpMedia \|\| isFacebookVideo\)/);
 });
 
 test('Facebook sponsored-player detection is scoped to the exact post and explicit ad markers', () => {
@@ -234,7 +236,10 @@ test('Facebook sponsored-player detection is scoped to the exact post and explic
   assert.match(script, /const closeToPlayer = marker =>/);
   assert.match(script, /let exactPost = element\.closest/);
   assert.match(script, /if \(!exactPost\) return false/);
-  assert.match(script, /markerY >= playerRect\.top - 320/);
+  assert.match(script, /markerY >= playerRect\.top - 220/);
+  assert.match(script, /const visibleMarker = marker =>/);
+  assert.doesNotMatch(script, /a\[href\*="\/ads\/"\]/);
+  assert.doesNotMatch(script, /a\[href\*="ads\/about"\]/);
   assert.match(script, /if \(isSponsoredFacebookPlayer\(element\)\) return;/);
   assert.match(script, /if \(isSponsoredFacebookPlayer\(anchor\)\) return;/);
 });
