@@ -452,7 +452,7 @@
     const scoped = relatedEvents(context.events, site);
     const text = scoped.map(eventText).join("\n");
     const failures = scoped.filter(event => String(event.level || "").toUpperCase() === "ERROR" || /failed|error=/.test(eventText(event)));
-    const social = socialDiagnosis(context.events, site, locale, q);
+    const social = socialDiagnosis([...parseEvents(context.events), ...parseEvents(context.engineEvents || [])], site, locale, q);
     if (social) return social;
 
     if (site && /(?:log|registro|diagnost|record|日志|诊断)/.test(q)) {
