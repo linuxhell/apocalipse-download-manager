@@ -3034,6 +3034,188 @@ fn extraction_args(kind: ExtractorKind, archive: &Path, destination: &Path) -> V
     }
 }
 
+fn archive_member_is_safe(name: &str) -> bool {
+    let normalized = name.replace('\\', "/");
+    if normalized.trim().is_empty() || normalized.starts_with('/') {
+        return false;
+    }
+    let path = Path::new(&normalized);
+    path.components().all(|component| matches!(component, std::path::Component::Normal(_) | std::path::Component::CurDir))
+}
+
+fn collect_lsar_names(value: &serde_json::Value, output: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(name) = map.get("XADFileName").and_then(|value| value.as_str()) {
+                output.push(name.to_owned());
+            }
+            for value in map.values() {
+                collect_lsar_names(value, output);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for value in items {
+                collect_lsar_names(value, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn list_archive_members(executable: &Path, kind: ExtractorKind, archive: &Path) -> Result<Vec<String>, String> {
+    let mut command = match kind {
+        ExtractorKind::Unar => {
+            let sibling = executable.parent().unwrap_or_else(|| Path::new(".")).join(if cfg!(windows) { "lsar.exe" } else { "lsar" });
+            if !sibling.is_file() {
+                return Err("archive_listing_tool_missing:lsar".to_owned());
+            }
+            let mut command = Command::new(sibling);
+            command.arg("-j").arg(archive);
+            command
+        }
+        _ => {
+            let mut command = Command::new(executable);
+            match kind {
+                ExtractorKind::SevenZip => { command.args(["l", "-slt"]).arg(archive); }
+                ExtractorKind::Rar | ExtractorKind::Unrar => { command.args(["lb"]).arg(archive); }
+                ExtractorKind::Bsdtar | ExtractorKind::Tar => { command.args(["-tf"]).arg(archive); }
+                ExtractorKind::Unar => unreachable!(),
+            }
+            command
+        }
+    };
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err("archive_listing_failed".to_owned());
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut names = match kind {
+        ExtractorKind::SevenZip => {
+            let archive_display = archive.to_string_lossy();
+            text.lines()
+                .filter_map(|line| line.strip_prefix("Path = ").map(str::trim))
+                .filter(|name| !name.is_empty() && *name != archive_display)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        }
+        ExtractorKind::Unar => {
+            let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
+            let mut names = Vec::new();
+            collect_lsar_names(&value, &mut names);
+            names
+        }
+        _ => text.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned).collect(),
+    };
+    names.sort();
+    names.dedup();
+    if names.is_empty() {
+        return Err("archive_has_no_members".to_owned());
+    }
+    if names.iter().any(|name| !archive_member_is_safe(name)) {
+        return Err("archive_contains_unsafe_path".to_owned());
+    }
+    Ok(names)
+}
+
+fn move_tree(source: &Path, destination: &Path) -> Result<(), String> {
+    if source.is_dir() {
+        fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+        for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            move_tree(&entry.path(), &destination.join(entry.file_name()))?;
+        }
+        fs::remove_dir(source).map_err(|error| error.to_string())?;
+    } else {
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        if destination.exists() {
+            if destination.is_dir() {
+                return Err("archive_destination_conflict".to_owned());
+            }
+            fs::remove_file(destination).map_err(|error| error.to_string())?;
+        }
+        fs::rename(source, destination).or_else(|_| {
+            fs::copy(source, destination)
+                .map(|_| ())
+                .and_then(|_| fs::remove_file(source))
+        }).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn extract_archive_safely(settings: &UserSettings, archive: &Path) -> Result<PathBuf, String> {
+    if !archive.is_file() || !archive.file_name().and_then(|value| value.to_str()).is_some_and(is_archive_file_name) {
+        return Err("not_archive_file".to_owned());
+    }
+    let executable = settings.extractor_path.clone().ok_or_else(|| "archive_extractor_not_configured".to_owned())?;
+    let kind = extractor_kind(&executable).ok_or_else(|| "unsupported_archive_extractor".to_owned())?;
+    if !executable.is_file() {
+        return Err("archive_extractor_not_found".to_owned());
+    }
+    let _members = list_archive_members(&executable, kind, archive)?;
+    let parent = archive.parent().unwrap_or_else(|| Path::new("."));
+    let staging = parent.join(format!(".apocalipse-extract-{}", uuid::Uuid::new_v4().simple()));
+    fs::create_dir_all(&staging).map_err(|error| error.to_string())?;
+    let mut command = Command::new(&executable);
+    command.args(extraction_args(kind, archive, &staging));
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let _ = fs::remove_dir_all(&staging);
+        let detail = String::from_utf8_lossy(if output.stderr.is_empty() { &output.stdout } else { &output.stderr }).trim().to_owned();
+        return Err(if detail.is_empty() { "archive_extraction_failed".to_owned() } else { format!("archive_extraction_failed:{detail}") });
+    }
+    let entries = fs::read_dir(&staging).map_err(|error| error.to_string())?
+        .filter_map(Result::ok).map(|entry| entry.path()).collect::<Vec<_>>();
+    if entries.is_empty() {
+        let _ = fs::remove_dir_all(&staging);
+        return Err("archive_extraction_empty".to_owned());
+    }
+    let destination = if entries.len() == 1 && entries[0].is_dir() {
+        parent.join(entries[0].file_name().unwrap_or_default())
+    } else {
+        parent.join(archive_name_without_extensions(archive))
+    };
+    if entries.len() == 1 && entries[0].is_dir() {
+        move_tree(&entries[0], &destination)?;
+    } else {
+        fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
+        for entry in entries {
+            let target = destination.join(entry.file_name().unwrap_or_default());
+            move_tree(&entry, &target)?;
+        }
+    }
+    let _ = fs::remove_dir_all(&staging);
+    Ok(destination)
+}
+
+fn maybe_auto_extract_completed(app: &tauri::AppHandle, id: DownloadId) {
+    let state = app.state::<AppState>();
+    let task = state.queue.lock().ok().and_then(|queue| queue.iter().find(|task| task.id == id).cloned());
+    let Some(task) = task.filter(|task| task.auto_extract && task.state == DownloadState::Completed) else { return; };
+    let settings = match state.settings.lock() { Ok(settings) => settings.clone(), Err(_) => return };
+    let destination = task.destination.clone();
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = extract_archive_safely(&settings, &destination);
+        let state = app.state::<AppState>();
+        match &result {
+            Ok(path) => diagnostic_log(&state, "INFO", "archive.auto_extract_completed", &format!("task={id} output={}", path.display())),
+            Err(error) => diagnostic_log(&state, "ERROR", "archive.auto_extract_failed", &format!("task={id} error={error}")),
+        }
+    });
+}
+
 async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::Endpoint, String> {
     let settings = state
         .settings
