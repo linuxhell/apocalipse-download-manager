@@ -30,3 +30,22 @@ test('stale dataset marker cannot block overlay reinstall after DOM recycling', 
   assert.match(content, /element\.dataset\.apocalipseButton && !activeOverlays\.has\(element\)/);
   assert.match(content, /delete element\.dataset\.apocalipseButton/);
 });
+
+
+test('Facebook sponsored filtering requires a visible explicit marker and avoids generic ads links', () => {
+  assert.match(content, /const visibleMarker = marker =>/);
+  assert.match(content, /style\.display !== "none"/);
+  assert.match(content, /style\.visibility !== "hidden"/);
+  assert.doesNotMatch(content, /a\[href\*="\/ads\/"\]/);
+  assert.doesNotMatch(content, /a\[href\*="ads\/about"\]/);
+});
+
+test('Facebook direct HTTP players keep recording available', () => {
+  assert.match(content, /\(!hasDirectHttpMedia \|\| isFacebookVideo\)/);
+});
+
+test('Facebook unresolved Download falls back to recording even without srcObject', () => {
+  assert.match(content, /facebook_unresolved_recording_fallback/);
+  assert.match(content, /if \(isFacebookVideo && canRecord && recordButton\)/);
+  assert.doesNotMatch(content, /if \(isFacebookVideo && element\.srcObject && canRecord && recordButton\)/);
+});
