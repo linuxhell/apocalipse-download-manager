@@ -138,6 +138,10 @@ impl Runtime {
         fs::create_dir_all(&temporary).map_err(|error| error.to_string())?;
         let port = reserve_loopback_port()?;
         let token = uuid::Uuid::new_v4().simple().to_string();
+        // Gopeed 2.0 web requires non-empty web credentials when API-token
+        // authentication is enabled. ADM only talks to the loopback API, but
+        // beta.3 exits before opening that API unless these are also present.
+        let web_password = uuid::Uuid::new_v4().simple().to_string();
         let config = runtime_root.join("apocalipse-gopeed.json");
         let mut command = Command::new(executable);
         command
@@ -145,6 +149,10 @@ impl Runtime {
             .arg("127.0.0.1")
             .arg("--port")
             .arg(port.to_string())
+            .arg("--username")
+            .arg("apocalipse")
+            .arg("--password")
+            .arg(&web_password)
             .arg("--api-token")
             .arg(&token)
             .arg("--storage-dir")
