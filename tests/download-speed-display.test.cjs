@@ -100,10 +100,8 @@ test("streamed browser recordings publish a global core speed", () => {
 });
 
 test("quiet clipboard polling does not flood diagnostics", () => {
-  assert.match(
-    ui,
-    /if \(!quiet\.has\(command\) && command !== "record_ui_diagnostic"\)/,
-  );
+  assert.match(ui, /const quiet = new Set\(\["list_downloads", "read_general_log", "get_bridge_pairing", "read_clipboard_link"/);
+  assert.match(ui, /if \(!quiet\.has\(command\) && command !== "record_ui_diagnostic" && command !== "record_diagnostics_ui"\)/);
   assert.match(
     desktop,
     /let Ok\(value\) = app\.clipboard\(\)\.read_text\(\) else \{\s*return Ok\(None\);/,
