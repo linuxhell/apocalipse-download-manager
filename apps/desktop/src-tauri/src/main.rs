@@ -6617,7 +6617,10 @@ fn is_previewable_video_path(path: &Path) -> bool {
         .extension()
         .and_then(|value| value.to_str())
         .is_some_and(|extension| {
-            matches!(extension, "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts")
+            matches!(
+                extension,
+                "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts"
+            )
         })
 }
 
