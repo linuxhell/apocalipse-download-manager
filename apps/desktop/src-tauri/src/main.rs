@@ -3040,9 +3040,8 @@ fn archive_name_without_extensions(path: &Path) -> String {
         .unwrap_or("archive")
         .to_owned();
     for suffix in [
-        ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tgz", ".tbz2", ".txz", ".zip",
-        ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".zst", ".cab", ".arj", ".lha",
-        ".lzh",
+        ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tgz", ".tbz2", ".txz", ".zip", ".7z",
+        ".rar", ".tar", ".gz", ".bz2", ".xz", ".zst", ".cab", ".arj", ".lha", ".lzh",
     ] {
         if name.to_ascii_lowercase().ends_with(suffix) {
             name.truncate(name.len() - suffix.len());
@@ -3059,8 +3058,8 @@ fn archive_name_without_extensions(path: &Path) -> String {
 fn is_archive_file_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     [
-        ".zip", ".7z", ".rar", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz",
-        ".txz", ".tar.zst", ".gz", ".bz2", ".xz", ".zst", ".cab", ".arj", ".lha", ".lzh",
+        ".zip", ".7z", ".rar", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz",
+        ".tar.zst", ".gz", ".bz2", ".xz", ".zst", ".cab", ".arj", ".lha", ".lzh",
     ]
     .iter()
     .any(|suffix| lower.ends_with(suffix))
@@ -3324,12 +3323,11 @@ fn extract_archive_safely(settings: &UserSettings, archive: &Path) -> Result<Pat
 
 fn maybe_auto_extract_completed(app: &tauri::AppHandle, id: DownloadId) {
     let state = app.state::<AppState>();
-    let task = state.queue.lock().ok().and_then(|queue| {
-        queue
-            .iter()
-            .find(|task| task.id == id)
-            .cloned()
-    });
+    let task = state
+        .queue
+        .lock()
+        .ok()
+        .and_then(|queue| queue.iter().find(|task| task.id == id).cloned());
     let Some(task) =
         task.filter(|task| task.auto_extract && task.state == DownloadState::Completed)
     else {
@@ -4222,7 +4220,6 @@ fn run_link_server(app: tauri::AppHandle, listener: TcpListener, tls_config: Arc
     }
 }
 
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FileHostResolution {
@@ -4256,9 +4253,7 @@ fn html_attribute_urls(html: &str, attribute: &str) -> Vec<String> {
             let Some(end) = value.find(quote) else {
                 break;
             };
-            let candidate = value[..end]
-                .replace("&amp;", "&")
-                .replace("&#38;", "&");
+            let candidate = value[..end].replace("&amp;", "&").replace("&#38;", "&");
             if !candidate.trim().is_empty() {
                 urls.push(candidate);
             }
