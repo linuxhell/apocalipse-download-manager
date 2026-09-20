@@ -31,7 +31,7 @@ use tokio::{
 use crate::validation::{validate_payload, PayloadExpectation};
 
 const MIN_SEGMENT_CHUNK_SIZE: u64 = 4 * 1024 * 1024;
-const MAX_SEGMENT_CHUNK_SIZE: u64 = 256 * 1024 * 1024;
+const MAX_SEGMENT_CHUNK_SIZE: u64 = 512 * 1024 * 1024;
 const TARGET_CHUNKS_PER_WORKER: u64 = 4;
 const WORKER_START_INTERVAL_MS: u64 = 35;
 const JOURNAL_VERSION: u8 = 1;
@@ -2720,9 +2720,10 @@ mod tests {
         assert_eq!(segmented_target_chunks(16, true), 16);
         assert_eq!(segmented_target_chunks(16, false), 64);
         assert_eq!(legacy_max_worker_plan, 128 * 1024 * 1024);
+        assert_eq!(adaptive_plan, 512 * 1024 * 1024);
         assert_eq!(adaptive_plan, MAX_SEGMENT_CHUNK_SIZE);
         assert!(adaptive_plan > legacy_max_worker_plan);
-        assert!(total.div_ceil(adaptive_plan) >= 16);
+        assert_eq!(total.div_ceil(adaptive_plan), 16);
         assert_eq!(
             segmented_chunk_size(total, 16, false),
             legacy_max_worker_plan
