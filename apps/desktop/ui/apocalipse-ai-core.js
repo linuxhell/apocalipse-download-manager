@@ -273,7 +273,7 @@
     .replace(/\b(?:obg|brigado|brigada)\b/g, "obrigado")
     .replace(/\b(?:vlw|valeu demais)\b/g, "valeu")
     .replace(/\s+/g, " ").trim();
-  const safeDetail = value => String(value || "").replace(/([?&](?:token|sig|key|auth|password|cookie)=[^\s&]+)/gi, " [protected]").slice(0, 360);
+  const safeDetail = value => detailText(value).replace(/([?&](?:token|sig|key|auth|password|cookie)=[^\s&]+)/gi, " [protected]").slice(0, 360);
   const detailText = value => typeof value === "string" ? value : value && typeof value === "object" ? JSON.stringify(value) : String(value || "");
   const eventText = event => fold(`${event?.event || ""} ${detailText(event?.detail)} ${event?.raw || ""} ${event?.source || ""}`);
 
