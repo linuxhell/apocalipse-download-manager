@@ -7801,21 +7801,25 @@ fn start_download(
         ));
         return Ok(());
     }
-    if kind == DownloadKind::Http
-        && task.source.starts_with("https://")
-        && task.source.contains(".freefilehub.com:")
-    {
+    if matches!(
+        kind,
+        DownloadKind::Http
+            | DownloadKind::AcceleratedHttp
+            | DownloadKind::Torrent
+            | DownloadKind::Magnet
+            | DownloadKind::Ftp
+    ) {
         diagnostic_log(
             state,
             "INFO",
-            "http.accelerated",
-            &format!("task={} engine=aria2", task.id),
+            "gopeed.dispatched",
+            &format!("task={} engine={kind:?}", task.id),
         );
-        tauri::async_runtime::spawn(run_external_download(
+        tauri::async_runtime::spawn(run_gopeed_download(
             app.clone(),
             task.id,
             task,
-            DownloadKind::AcceleratedHttp,
+            kind,
             cancelled,
         ));
         return Ok(());
