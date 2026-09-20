@@ -7424,7 +7424,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                     },
                     "aria2" => asset_markers
                         .iter()
-                        .all(|marker| name.contains(&marker.to_ascii_lowercase()))
+                        .all(|marker| name.contains(&marker.to_ascii_lowercase())),
                     _ => asset_markers
                         .iter()
                         .all(|marker| name.contains(&marker.to_ascii_lowercase())),
