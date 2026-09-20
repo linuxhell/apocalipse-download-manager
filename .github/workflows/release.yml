@@ -62,6 +62,7 @@ jobs:
         shell: bash
         run: |
           cargo fmt --all -- --check
+          cargo update -p zip --precise 2.4.2
           cargo test --workspace --locked
 
       - name: Verify prepared media with FFmpeg and FFprobe

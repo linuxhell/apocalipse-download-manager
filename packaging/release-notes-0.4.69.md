@@ -5,3 +5,4 @@
 - Substituição transacional somente dos binários conhecidos, preservando outros arquivos da pasta.
 - Firefox 0.3.158 assinado incluído nos artefatos.
 - Linha Aria mantida separadamente, sem releases oficiais.
+- Dependências do empacotamento fixadas para builds reproduzíveis nas três plataformas.
