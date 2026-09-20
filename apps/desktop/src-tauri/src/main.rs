@@ -11,7 +11,6 @@ use apocalipse_core::{
     DownloadKind, DownloadRequest, DownloadState, DownloadTask,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use futures_util::StreamExt;
 use rustls::{
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime},
@@ -39,7 +38,7 @@ use tauri::{
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncReadExt,
     sync::{mpsc, oneshot},
 };
 use zeroize::Zeroize;
@@ -6372,6 +6371,7 @@ fn find_video_file(root: &Path, depth: usize) -> Option<PathBuf> {
     best.map(|(_, path)| path)
 }
 
+#[cfg(target_os = "windows")]
 fn find_named_file(root: &Path, expected_name: &str, depth: usize) -> Option<PathBuf> {
     if depth > 8 {
         return None;

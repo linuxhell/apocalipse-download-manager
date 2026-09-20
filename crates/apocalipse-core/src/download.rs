@@ -221,7 +221,6 @@ struct SingleResumeJournal {
 struct SourceProbe {
     total: Option<u64>,
     etag: Option<String>,
-    last_modified: Option<String>,
     digest: Option<String>,
     elapsed: Duration,
 }
@@ -693,10 +692,6 @@ impl DownloadEngine {
             total,
             etag: headers
                 .get(header::ETAG)
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_owned),
-            last_modified: headers
-                .get(header::LAST_MODIFIED)
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_owned),
             digest: advertised_repr_sha256(headers).map(|(digest, _)| digest),
@@ -1735,6 +1730,7 @@ fn segmented_chunk_size(total: u64, connections: usize, adaptive_connections: bo
     )
 }
 
+#[cfg(test)]
 fn adaptive_chunk_size(total: u64, connections: usize) -> u64 {
     chunk_size_for_target_chunks(
         total,
@@ -2113,10 +2109,12 @@ pub fn chunk_directory(destination: &Path) -> PathBuf {
         .join(identifier)
 }
 
+#[cfg(test)]
 fn chunk_path(destination: &Path, index: usize) -> PathBuf {
     chunk_directory(destination).join(format!("{index:06}.part"))
 }
 
+#[cfg(test)]
 fn legacy_chunk_path(destination: &Path, index: usize) -> PathBuf {
     PathBuf::from(format!("{}.part.chunk.{index:06}", destination.display()))
 }
@@ -2219,14 +2217,12 @@ mod tests {
         let primary = SourceProbe {
             total: Some(10_000),
             etag: None,
-            last_modified: Some("Mon, 01 Jan 2024 00:00:00 GMT".into()),
             digest: None,
             elapsed: Duration::from_millis(20),
         };
         let same_size = SourceProbe {
             total: Some(10_000),
             etag: None,
-            last_modified: Some("Mon, 01 Jan 2024 00:00:00 GMT".into()),
             digest: None,
             elapsed: Duration::from_millis(10),
         };
@@ -2248,21 +2244,18 @@ mod tests {
         let primary = SourceProbe {
             total: Some(10_000),
             etag: Some("\"file-a\"".into()),
-            last_modified: Some("Mon, 01 Jan 2024 00:00:00 GMT".into()),
             digest: None,
             elapsed: Duration::from_millis(20),
         };
         let different_size = SourceProbe {
             total: Some(9_999),
             etag: Some("\"file-a\"".into()),
-            last_modified: Some("Mon, 01 Jan 2024 00:00:00 GMT".into()),
             digest: None,
             elapsed: Duration::from_millis(10),
         };
         let different_etag = SourceProbe {
             total: Some(10_000),
             etag: Some("\"file-b\"".into()),
-            last_modified: Some("Mon, 01 Jan 2024 00:00:00 GMT".into()),
             digest: None,
             elapsed: Duration::from_millis(10),
         };
@@ -2275,14 +2268,12 @@ mod tests {
         let primary = SourceProbe {
             total: Some(10_000),
             etag: None,
-            last_modified: None,
             digest: None,
             elapsed: Duration::from_millis(20),
         };
         let duplicate = SourceProbe {
             total: Some(10_000),
             etag: None,
-            last_modified: None,
             digest: None,
             elapsed: Duration::from_millis(10),
         };

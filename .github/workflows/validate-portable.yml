@@ -21,8 +21,8 @@ jobs:
     name: Extension regression tests and packages
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
       - name: Test extension handoffs
@@ -56,7 +56,7 @@ jobs:
                           archive.writestr(relative, json.dumps(firefox, ensure_ascii=False, indent=2) + '\n')
                       else:
                           archive.write(path, relative)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: browser-extension-candidates
           path: dist/*
@@ -78,7 +78,7 @@ jobs:
             image: archlinux:latest
     container: ${{ matrix.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Debian dependencies
         if: matrix.name == 'Debian 12'
         shell: bash
@@ -99,11 +99,13 @@ jobs:
       - name: Install Rust
         shell: bash
         run: |
+          export HOME=/root
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Check desktop on distro
         shell: bash
         run: |
+          export HOME=/root
           . "$HOME/.cargo/env"
           cargo check -p apocalipse-desktop
 
@@ -128,7 +130,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libpam0g-dev patchelf ffmpeg
@@ -149,7 +151,7 @@ jobs:
         run: cargo test -p apocalipse-desktop paired_preview_uses_real_mux_and_probe -- --ignored
       - name: Build desktop candidate
         run: cargo build --release -p apocalipse-desktop
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: runner.os == 'Linux'
         with:
           node-version: '22'
@@ -196,7 +198,7 @@ jobs:
         run: |
           git rev-parse HEAD > dist/build-commit.txt
           printf '%s\n' '${{ github.event.pull_request.head.sha || github.sha }}' >> dist/build-commit.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: |
