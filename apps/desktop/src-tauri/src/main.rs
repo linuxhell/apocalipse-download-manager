@@ -4158,8 +4158,14 @@ async fn run_download(
                             sustainable_peak = sustainable_peak.max(previous.min(bytes_per_second));
                         }
                         previous_perf_rate = Some(bytes_per_second);
+                        let display_alpha = if bytes_per_second as f64 >= display_rate_ewma {
+                            0.80
+                        } else {
+                            0.35
+                        };
                         display_rate_ewma = if display_rate_ewma > 0.0 {
-                            bytes_per_second as f64 * 0.35 + display_rate_ewma * 0.65
+                            bytes_per_second as f64 * display_alpha
+                                + display_rate_ewma * (1.0 - display_alpha)
                         } else {
                             bytes_per_second as f64
                         };
@@ -4179,6 +4185,7 @@ async fn run_download(
                                 "intervalMs": elapsed_ms,
                                 "bytesPerSecond": bytes_per_second,
                                 "smoothedBytesPerSecond": smoothed_bytes_per_second,
+                                "displayAlpha": display_alpha,
                                 "activeConnections": active_connections
                             }),
                         );

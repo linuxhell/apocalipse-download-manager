@@ -47,6 +47,10 @@ const ADMISSION_RECOVERY_EWMA_ALPHA: f64 = 0.25;
 const ADMISSION_RECOVERY_MIN_BELOW_MS: u64 = 3_200;
 const ADMISSION_REPROBE_COOLDOWN_MS: u64 = 4_000;
 const ADMISSION_REJECT_BACKOFF_MS: u64 = 20_000;
+const KNOWN_CAPACITY_SETTLE_HOST_FRACTION: f64 = 0.95;
+const KNOWN_CAPACITY_SETTLE_NETWORK_FRACTION: f64 = 0.85;
+const KNOWN_CAPACITY_SETTLE_SAMPLES: u8 = 2;
+const KNOWN_CAPACITY_SETTLE_MIN_BPS: f64 = 32.0 * 1024.0 * 1024.0;
 const DOWNSCALE_DRAIN_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy)]
@@ -1070,6 +1074,7 @@ impl DownloadEngine {
                 let mut admission_skip_sample = adaptive_admission && !admission_settled;
                 let mut recovery_ewma_rate: Option<f64> = None;
                 let mut recovery_below_target_ms = 0_u64;
+                let mut known_capacity_hits = 0_u8;
                 let mut last_rejected_level: Option<(usize, u64)> = None;
                 let mut last_reprobe_ms = 0_u64;
                 let mut last_scheduler_diagnostic_ms = 0_u64;
@@ -1185,6 +1190,41 @@ impl DownloadEngine {
                         previous_interval_rate = Some(interval_rate);
 
                         let current_limit = active_limit.load(Ordering::Acquire).max(1);
+                        if !admission_settled {
+                            if let Some(target) = known_capacity_settle_threshold(
+                                host_capacity_hint,
+                                network_capacity_hint,
+                            ) {
+                                if interval_rate >= target {
+                                    known_capacity_hits = known_capacity_hits.saturating_add(1);
+                                } else {
+                                    known_capacity_hits = 0;
+                                }
+                                if known_capacity_hits >= KNOWN_CAPACITY_SETTLE_SAMPLES {
+                                    admission_settled = true;
+                                    admission_baseline = None;
+                                    admission_held_rate = None;
+                                    admission_skip_sample = false;
+                                    recovery_ewma_rate = Some(interval_rate);
+                                    recovery_below_target_ms = 0;
+                                    last_reprobe_ms = now_ms;
+                                    let _ = sender.try_send(DownloadEvent::Diagnostic {
+                                        event: "http.connection_admission",
+                                        detail: serde_json::json!({
+                                            "decision": "known_capacity_reached",
+                                            "admittedConnections": current_limit,
+                                            "measuredBytesPerSecond": interval_rate as u64,
+                                            "settleThresholdBytesPerSecond": target as u64,
+                                            "hostHintBytesPerSecond": host_capacity_hint as u64,
+                                            "networkHintBytesPerSecond": network_capacity_hint as u64,
+                                            "confirmingSamples": known_capacity_hits,
+                                            "settled": true
+                                        }),
+                                    });
+                                }
+                            }
+                        }
+
                         if admission_settled {
                             let recovery_target = stable_capacity.max(host_capacity_hint);
                             let recovery_rate = recovery_ewma_rate
@@ -1961,6 +2001,20 @@ fn confirmed_capacity_candidate(previous: Option<f64>, current: f64) -> Option<f
     previous.map(|value| value.min(current))
 }
 
+fn known_capacity_settle_threshold(host_hint: f64, network_hint: f64) -> Option<f64> {
+    let host_target = (host_hint > 0.0)
+        .then_some(host_hint * KNOWN_CAPACITY_SETTLE_HOST_FRACTION);
+    let network_target = (network_hint > 0.0)
+        .then_some(network_hint * KNOWN_CAPACITY_SETTLE_NETWORK_FRACTION);
+    let target = match (host_target, network_target) {
+        (Some(host), Some(network)) => host.max(network),
+        (Some(host), None) => host,
+        (None, Some(network)) => network,
+        (None, None) => return None,
+    };
+    (target >= KNOWN_CAPACITY_SETTLE_MIN_BPS).then_some(target)
+}
+
 fn proportional_admission_gain(
     previous_connections: usize,
     previous_rate: f64,
@@ -2645,6 +2699,17 @@ mod tests {
         assert!(!destination.exists());
         assert!(partial.exists());
         let _ = fs::remove_dir_all(root).await;
+    }
+
+    #[test]
+    fn known_capacity_fast_settle_uses_specific_host_and_network_floor() {
+        let mib = 1024.0 * 1024.0;
+        let threshold =
+            known_capacity_settle_threshold(116.0 * mib, 116.0 * mib).unwrap();
+        assert!((threshold / mib - 110.2).abs() < 0.01);
+        assert!(known_capacity_settle_threshold(0.0, 20.0 * mib).is_none());
+        let network_only = known_capacity_settle_threshold(0.0, 100.0 * mib).unwrap();
+        assert!((network_only / mib - 85.0).abs() < 0.01);
     }
 
     #[test]

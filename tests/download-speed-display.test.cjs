@@ -20,6 +20,9 @@ test("native HTTP speed uses a multi-second EWMA instead of noisy quarter-second
   assert.match(ui, /const SPEED_EWMA_SECONDS = 2\.0/);
   assert.match(ui, /1 - Math\.exp\(-elapsed \/ SPEED_EWMA_SECONDS\)/);
   assert.match(desktop, /smoothedBytesPerSecond/);
+  assert.match(desktop, /bytes_per_second as f64 >= display_rate_ewma/);
+  assert.match(desktop, /0\.80/);
+  assert.match(desktop, /0\.35/);
   assert.match(desktop, /task\.download_speed = Some\(smoothed_bytes_per_second\)/);
 });
 
