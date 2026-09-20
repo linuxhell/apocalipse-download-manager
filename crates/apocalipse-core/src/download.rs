@@ -1709,9 +1709,7 @@ fn adaptive_connection_count(total: u64, requested: usize) -> usize {
 fn segmented_target_chunks(connections: usize, adaptive_connections: bool) -> u64 {
     let max_workers = connections.max(1) as u64;
     if !adaptive_connections {
-        return max_workers
-            .saturating_mul(TARGET_CHUNKS_PER_WORKER)
-            .max(1);
+        return max_workers.saturating_mul(TARGET_CHUNKS_PER_WORKER).max(1);
     }
 
     let initial_workers = connections.min(ADMISSION_INITIAL_WORKERS).max(1) as u64;
