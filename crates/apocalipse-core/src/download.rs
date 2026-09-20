@@ -1022,6 +1022,7 @@ impl DownloadEngine {
                     }
 
                     let now_ms = transfer_started.elapsed().as_millis() as u64;
+                    let admitted_workers = active_limit.load(Ordering::Acquire).min(states.len());
                     let mut aggregate_window_bytes = 0_u64;
                     for (index, state) in states.iter().take(admitted_workers).enumerate() {
                         let bytes = state.window_bytes.swap(0, Ordering::AcqRel);
@@ -1145,7 +1146,6 @@ impl DownloadEngine {
                     if !queue.lock().await.is_empty() {
                         continue;
                     }
-                    let admitted_workers = active_limit.load(Ordering::Acquire).min(states.len());
                     let idle_workers = states
                         .iter()
                         .take(admitted_workers)
@@ -1170,7 +1170,7 @@ impl DownloadEngine {
                         sorted[sorted.len() / 2]
                     };
 
-                    for (index, state) in states.iter().enumerate() {
+                    for (index, state) in states.iter().take(admitted_workers).enumerate() {
                         if !state.active.load(Ordering::Acquire) {
                             continue;
                         }
