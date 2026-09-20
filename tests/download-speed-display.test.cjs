@@ -9,6 +9,10 @@ const desktop = fs.readFileSync(
   path.join(root, "apps/desktop/src-tauri/src/main.rs"),
   "utf8",
 );
+const aria2 = fs.readFileSync(
+  path.join(root, "apps/desktop/src-tauri/src/aria2.rs"),
+  "utf8",
+);
 const cargo = fs.readFileSync(path.join(root, "Cargo.toml"), "utf8");
 const tauri = JSON.parse(
   fs.readFileSync(path.join(root, "apps/desktop/src-tauri/tauri.conf.json"), "utf8"),
@@ -269,4 +273,20 @@ test("automatic mirrors are server-advertised, identity-checked and latency-rank
   assert.match(core, /same_download_identity/);
   assert.match(core, /verified\.sort_by_key\(\|\(_, elapsed\)\| \*elapsed\)/);
   assert.match(desktop, /engine\.verified_sources\(&request, &mirrors\)\.await/);
+});
+
+
+test("magnet metadata completion follows the real torrent content GID", () => {
+  assert.match(aria2, /"followedBy"/);
+  assert.match(aria2, /pub followed_by: Vec<String>/);
+  assert.match(desktop, /aria2\.torrent_followed_by/);
+  assert.match(desktop, /std::mem::replace\(&mut gid, next_gid\.clone\(\)\)/);
+  assert.match(desktop, /items\.insert\(id, next_gid\)/);
+  assert.match(desktop, /item\.progress_percent = Some\(0\.0\)/);
+});
+
+test("torrent preview prioritizes the beginning and end of selected files", () => {
+  assert.match(aria2, /"bt-prioritize-piece"/);
+  assert.match(aria2, /"head=32M,tail=32M"/);
+  assert.match(desktop, /torrentPreviewPriority/);
 });
