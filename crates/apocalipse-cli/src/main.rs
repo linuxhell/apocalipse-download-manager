@@ -42,6 +42,8 @@ async fn main() -> Result<()> {
         overwrite: false,
         connections,
         adaptive_connections: benchmark,
+        network_capacity_hint_bps: None,
+        host_capacity_hint_bps: None,
         method: "GET".to_owned(),
         body: None,
         headers: Vec::new(),
