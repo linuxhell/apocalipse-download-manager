@@ -4742,6 +4742,42 @@ async fn run_gopeed_download(
                 );
                 match status.status.as_str() {
                     "done" => {
+                        let torrent_output_ready = if matches!(
+                            kind,
+                            DownloadKind::Torrent | DownloadKind::Magnet
+                        ) {
+                            let mut ready = task.destination.exists();
+                            for _ in 0..20 {
+                                if ready {
+                                    break;
+                                }
+                                tokio::time::sleep(Duration::from_millis(100)).await;
+                                ready = task.destination.exists();
+                            }
+                            ready
+                        } else {
+                            true
+                        };
+                        if !torrent_output_ready {
+                            diagnostic_log(
+                                &state,
+                                "ERROR",
+                                "gopeed.output_missing",
+                                &format!(
+                                    "task={id} destination={}",
+                                    task.destination.display()
+                                ),
+                            );
+                            update_task(&app, id, true, |item| {
+                                item.download_speed = Some(0);
+                                item.upload_speed = Some(0);
+                                item.state = DownloadState::Failed {
+                                    message: "gopeed_output_missing".to_owned(),
+                                };
+                            });
+                            terminal = true;
+                            break;
+                        }
                         update_task(&app, id, true, |item| {
                             item.received = status.total.max(status.downloaded);
                             item.total = Some(status.total.max(status.downloaded));
