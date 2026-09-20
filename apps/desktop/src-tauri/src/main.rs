@@ -4894,7 +4894,7 @@ async fn run_external_download(
                         "N_m3u8DL-RE"
                     },
                 ),
-                configured_gopeed(&settings),
+                configured_aria2(&settings),
                 settings.connections_per_download.clamp(1, 32),
                 settings
                     .proxy_enabled
@@ -4915,11 +4915,11 @@ async fn run_external_download(
                 "yt-dlp".into(),
                 "N_m3u8DL-RE".into(),
                 if cfg!(windows) {
-                    "gopeed.exe".into()
+                    "aria2c.exe".into()
                 } else {
-                    "gopeed".into()
+                    "aria2c".into()
                 },
-                8,
+                16,
                 None,
                 None,
                 None,
@@ -5581,7 +5581,9 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "ytDlp": settings.yt_dlp_path.as_ref().is_some_and(|path| path.is_file()),
             "qjs": settings.qjs_path.as_ref().is_some_and(|path| path.is_file()),
             "nM3u8DlRe": settings.n_m3u8dl_re_path.as_ref().is_some_and(|path| path.is_file()),
-            "gopeed": settings.gopeed_path.as_ref().is_some_and(|path| path.is_file()),
+            "aria2": settings.aria2_path.as_ref().is_some_and(|path| path.is_file()),
+            "aria2RpcEnabled": settings.aria2_rpc_enabled,
+            "aria2RpcAutoStart": settings.aria2_rpc_auto_start,
             "mediaPlayer": settings.media_player_path.as_ref().is_some_and(|path| path.is_file()),
         },
         "pairingTokenPresent": !settings.bridge_token.is_empty(),
@@ -5703,25 +5705,6 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
     ));
     let guide = b"Apocalipse diagnostic bundle v3\nStart with RELATORIO_PARA_IA.txt, traces/replay-de-midia.jsonl and health/collectors.json. Legacy v2 files are preserved. A missing event is not proof of no activity. Review legacy logs before sharing.\n";
     entries.push(("README.txt".to_owned(), guide.to_vec()));
-
-    let gopeed_log_dir = state
-        .queue_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("gopeed-runtime")
-        .join("storage")
-        .join("logs");
-    for (source, name) in [
-        (gopeed_log_dir.join("core.log"), "logs/gopeed/core.log"),
-        (
-            gopeed_log_dir.join("extension.log"),
-            "logs/gopeed/extension.log",
-        ),
-    ] {
-        if let Some(contents) = read_sanitized_log_tail(&source, 4 * 1024 * 1024) {
-            entries.push((name.to_owned(), contents));
-        }
-    }
 
     entries.extend(state.diagnostics.export());
     write_diagnostic_zip(&path, entries)?;
@@ -6320,13 +6303,13 @@ fn reserve_queued_task(
     reject_active_duplicate: bool,
 ) -> Result<(), String> {
     if reject_active_duplicate {
-        let gopeed_torrent = matches!(
+        let torrent_task = matches!(
             classify_url(&task.source),
             Some(DownloadKind::Torrent | DownloadKind::Magnet)
         );
         if let Some(existing) = queue.iter().find(|existing| {
             existing.source == task.source
-                && (gopeed_torrent
+                && (torrent_task
                     || !matches!(
                         existing.state,
                         DownloadState::Completed | DownloadState::Failed { .. }
@@ -6526,7 +6509,7 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
         ),
         (
             "gopeed",
-            configured_gopeed(&settings),
+            configured_aria2(&settings),
             ["--version"].as_slice(),
         ),
     ];
@@ -6896,7 +6879,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &settings.qjs_path,
                 if cfg!(windows) { "qjs.exe" } else { "qjs" },
             ),
-            "gopeed" => configured_gopeed(&settings),
+            "gopeed" => configured_aria2(&settings),
             "n-m3u8dl-re" => configured_tool(
                 &settings.n_m3u8dl_re_path,
                 if cfg!(windows) {
@@ -7347,7 +7330,7 @@ async fn inspect_torrent_metadata(
     // leak into the real download task.
     let executable = {
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
-        configured_gopeed(&settings)
+        configured_aria2(&settings)
     };
     let app_data = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
     let inspection_root = app_data
@@ -10538,7 +10521,7 @@ async fn remove_downloads(
     if !gopeed_targets.is_empty() {
         let endpoint = gopeed_endpoint(&state).await?;
         for (task, gopeed_id) in &gopeed_targets {
-            let gopeed_torrent = matches!(
+            let torrent_task = matches!(
                 classify_url(&task.source),
                 Some(DownloadKind::Torrent | DownloadKind::Magnet)
             );
