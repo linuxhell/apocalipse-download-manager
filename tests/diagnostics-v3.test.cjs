@@ -83,3 +83,22 @@ test('diagnostic scripts are packaged in the same isolated contexts, not in MAIN
  assert.ok(!manifest.content_scripts.filter(e=>e.world==='MAIN').some(e=>e.js.includes('diagnostics.js')));
  const html=load('popup.html');assert.ok(html.indexOf('diagnostics.js')<html.indexOf('popup.js'));
 });
+
+
+test('forensic diagnostics keep a larger bounded durable window', () => {
+  const core = coreHarness();
+  assert.equal(core.MAX_EVENTS, 5000);
+  assert.equal(core.MAX_BATCH, 80);
+  const worker = load('diagnostics-worker.js');
+  assert.match(worker, /MAX_OUTBOX_BYTES = 8 \* 1024 \* 1024/);
+});
+
+test('forensic content diagnostics observe media lifecycle and DOM recycling without page text', () => {
+  const source = load('diagnostics.js');
+  assert.match(source, /dom\.media_mutation_batch/);
+  assert.match(source, /attributeFilter:\['src','poster','class','style'\]/);
+  assert.match(source, /'playing','pause','waiting','stalled'/);
+  assert.match(source, /sourceChildren/);
+  assert.match(source, /currentTime/);
+  assert.doesNotMatch(source, /innerText|textContent|document\.body\.innerHTML/);
+});
