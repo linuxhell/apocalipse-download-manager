@@ -445,3 +445,32 @@ test('update details use official GitHub release notes instead of guessing', () 
   assert.match(desktop, /release_notes: String/);
   assert.match(desktop, /published_at: String/);
 });
+
+
+test('Apocalipse AI explains a missing social overlay from structured evidence instead of guessing', () => {
+  const engineEvents = [
+    { event: 'social.scan_summary', detail: { platform: 'facebook', visible: 8, eligible: 7, overlays: 3, missing: 4, sponsored: 1, inactive: 0, noAction: 2 } },
+    { event: 'social.overlay_missing', level: 'WARN', detail: { platform: 'facebook', playerId: '11111111-1111-4111-8111-111111111111', reason: 'no_supported_action' } },
+  ];
+  const result = AI.respond('por que vários vídeos do facebook estão sem botão?', { locale: 'pt-BR', engineEvents });
+  assert.equal(result.intent, 'diagnosis');
+  assert.match(result.text, /no_supported_action/);
+  assert.match(result.text, /não de uma suposição/i);
+});
+
+test('Apocalipse AI summarizes universal social debugger telemetry', () => {
+  const engineEvents = [
+    { event: 'social.scan_summary', detail: { platform: 'tiktok', visible: 6, eligible: 5, overlays: 4, missing: 1, sponsored: 0, inactive: 1, noAction: 0 } },
+  ];
+  const result = AI.respond('qual o resumo do diagnóstico do tiktok?', { locale: 'pt-BR', engineEvents });
+  assert.match(result.text, /6 player/);
+  assert.match(result.text, /1 faltando/);
+  assert.match(result.text, /TikTok|tiktok/i);
+});
+
+test('structured object details remain searchable by Apocalipse AI', () => {
+  const events = [{ level: 'INFO', event: 'credential.matched', detail: { host: 'rsload.net', result: 'available' } }];
+  const result = AI.respond('há algo do site rsload.net nos registros?', { locale: 'pt-BR', events });
+  assert.match(result.text, /rsload\.net/);
+  assert.doesNotMatch(result.text, /\[object Object\]/);
+});
