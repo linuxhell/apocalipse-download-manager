@@ -4930,7 +4930,7 @@ async fn run_aria2_download(
         .lock()
         .ok()
         .and_then(|items| items.get(&id).cloned());
-    let gid = match existing_task {
+    let mut gid = match existing_task {
         Some(gid) => {
             if let Err(error) = endpoint.resume(&gid).await {
                 update_task(&app, id, true, |item| {
@@ -4948,6 +4948,7 @@ async fn run_aria2_download(
         }
         None => {
             let is_http = matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp);
+            let is_torrent = matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet);
             match endpoint
                 .add_download(
                     &task.source,
@@ -4956,6 +4957,7 @@ async fn run_aria2_download(
                     &task.torrent_selection,
                     &context,
                     is_http,
+                    is_torrent,
                 )
                 .await
             {
@@ -4996,7 +4998,12 @@ async fn run_aria2_download(
             "connections": connections,
             "kind": format!("{kind:?}"),
             "minSplitSize": "1M",
-            "fileAllocation": "none"
+            "fileAllocation": "none",
+            "torrentPreviewPriority": if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
+                Some("head=32M,tail=32M")
+            } else {
+                None
+            }
         }),
     );
 
@@ -5020,6 +5027,45 @@ async fn run_aria2_download(
                         continue;
                     }
                 };
+                if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet)
+                    && !status.followed_by.is_empty()
+                {
+                    let next_gid = status.followed_by[0].clone();
+                    diagnostic_log(
+                        &state,
+                        "INFO",
+                        "aria2.torrent_followed_by",
+                        &format!("task={id} metadata_gid={gid} content_gid={next_gid}"),
+                    );
+                    state.diagnostics.record(
+                        "aria2.torrent_followed_by",
+                        "INFO",
+                        None,
+                        Some(&id.to_string()),
+                        serde_json::json!({
+                            "metadataGid": gid,
+                            "contentGid": next_gid,
+                            "metadataBytes": status.downloaded,
+                            "metadataTotal": status.total
+                        }),
+                    );
+                    let previous_gid = std::mem::replace(&mut gid, next_gid.clone());
+                    if let Ok(mut items) = state.aria2_tasks.lock() {
+                        items.insert(id, next_gid);
+                    }
+                    let _ = endpoint.remove_result(&previous_gid).await;
+                    last_at = Instant::now();
+                    last_downloaded = 0;
+                    update_task(&app, id, true, |item| {
+                        item.received = 0;
+                        item.total = None;
+                        item.progress_percent = Some(0.0);
+                        item.download_speed = Some(0);
+                        item.upload_speed = Some(0);
+                        item.state = DownloadState::Downloading;
+                    });
+                    continue;
+                }
                 let peers = if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
                     endpoint.peers(&gid).await.unwrap_or_default()
                 } else {
