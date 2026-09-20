@@ -10377,7 +10377,19 @@ fn main() {
             let queue_path = app_data.join("queue.json");
             let settings_path = app_data.join("settings.json");
             let log_path = app_data.join("logs").join("apocalipse.log");
-            let initial_settings = load_settings(&settings_path).map_err(std::io::Error::other)?;
+            let mut initial_settings =
+                load_settings(&settings_path).map_err(std::io::Error::other)?;
+            if initial_settings.gopeed_path.is_none() {
+                let gopeed_dir = app_data.join("tools").join("gopeed");
+                fs::create_dir_all(&gopeed_dir)?;
+                initial_settings.gopeed_path = Some(gopeed_dir.join(if cfg!(windows) {
+                    "gopeed.exe"
+                } else {
+                    "gopeed"
+                }));
+                save_settings_path(&settings_path, &initial_settings)
+                    .map_err(std::io::Error::other)?;
+            }
             let (show_label, quit_label) = tray_labels(&initial_settings.language);
             let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
