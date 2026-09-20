@@ -227,15 +227,14 @@ test('ordinary direct HTTP players avoid Record while Facebook keeps its recordi
   assert.match(script, /\(!hasDirectHttpMedia \|\| isFacebookVideo\)/);
 });
 
-test('Facebook sponsored-player detection is scoped to the exact post and explicit ad markers', () => {
+test('Facebook sponsored-player detection is limited to an explicit marker in the same tight single-video card', () => {
   assert.match(script, /const isSponsoredFacebookPlayer = \(element\) =>/);
-  assert.match(script, /depth < 24/);
+  assert.match(script, /depth < 14/);
   assert.match(script, /videos\.some\(video => video !== element\)/);
-  assert.match(script, /data-ad-preview/);
-  assert.match(script, /Patrocinado/);
-  assert.match(script, /const closeToPlayer = marker =>/);
-  assert.match(script, /let exactPost = element\.closest/);
-  assert.match(script, /if \(!exactPost\) return false/);
+  assert.match(script, /const tightCard =/);
+  assert.match(script, /rect\.top >= playerRect\.top - 260/);
+  assert.match(script, /const explicitSponsoredMarker = marker =>/);
+  assert.match(script, /sponsoredLabel\.test\(aria\) \|\| sponsoredLabel\.test\(text\)/);
   assert.match(script, /markerY >= playerRect\.top - 220/);
   assert.match(script, /const visibleMarker = marker =>/);
   assert.doesNotMatch(script, /a\[href\*="\/ads\/"\]/);
