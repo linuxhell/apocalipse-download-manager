@@ -1167,8 +1167,9 @@ impl DownloadEngine {
                         last_admission_ms = now_ms;
                         last_admission_bytes = current_bytes;
 
-                        if let Some(previous) = previous_interval_rate {
-                            let confirmed = previous.min(interval_rate);
+                        if let Some(confirmed) =
+                            confirmed_capacity_candidate(previous_interval_rate, interval_rate)
+                        {
                             if confirmed > stable_capacity {
                                 stable_capacity = confirmed;
                                 let _ = sender.try_send(DownloadEvent::Diagnostic {
@@ -1289,7 +1290,6 @@ impl DownloadEngine {
                                 if gain_frac >= ADMISSION_MIN_PROPORTIONAL_GAIN {
                                     last_rejected_level = None;
                                     admission_baseline = Some((current_limit, interval_rate));
-                                    stable_capacity = stable_capacity.max(interval_rate);
                                     if current_limit < states.len() {
                                         let next =
                                             next_admission_level(current_limit, states.len());
@@ -1414,7 +1414,6 @@ impl DownloadEngine {
                             }
                         } else {
                             admission_baseline = Some((current_limit, interval_rate));
-                            stable_capacity = stable_capacity.max(interval_rate);
                             if current_limit < states.len() {
                                 let next = next_admission_level(current_limit, states.len());
                                 let newly_enabled = enable_workers_to(&states, next);
@@ -1956,6 +1955,10 @@ fn transport_name(version: reqwest::Version) -> &'static str {
 
 fn next_admission_level(current: usize, maximum: usize) -> usize {
     current.saturating_mul(2).min(maximum).max(1)
+}
+
+fn confirmed_capacity_candidate(previous: Option<f64>, current: f64) -> Option<f64> {
+    previous.map(|value| value.min(current))
 }
 
 fn proportional_admission_gain(
@@ -2642,6 +2645,19 @@ mod tests {
         assert!(!destination.exists());
         assert!(partial.exists());
         let _ = fs::remove_dir_all(root).await;
+    }
+
+    #[test]
+    fn capacity_learning_requires_two_confirming_windows() {
+        assert_eq!(confirmed_capacity_candidate(None, 150.0), None);
+        assert_eq!(
+            confirmed_capacity_candidate(Some(100.0), 150.0),
+            Some(100.0)
+        );
+        assert_eq!(
+            confirmed_capacity_candidate(Some(150.0), 100.0),
+            Some(100.0)
+        );
     }
 
     #[test]
