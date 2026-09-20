@@ -4524,11 +4524,13 @@ async fn run_gopeed_download(
         }
     };
     let (context, connections) = gopeed_request_context(&state, &task);
-    let existing_task = state
-        .gopeed_tasks
-        .lock()
-        .ok()
-        .and_then(|items| items.get(&id).cloned());
+    let existing_task = task.gopeed_task_id.clone().or_else(|| {
+        state
+            .gopeed_tasks
+            .lock()
+            .ok()
+            .and_then(|items| items.get(&id).cloned())
+    });
     let gopeed_id = match existing_task {
         Some(gopeed_id) => {
             if let Err(error) = endpoint.resume(&gopeed_id).await {
@@ -4608,6 +4610,10 @@ async fn run_gopeed_download(
                     if let Ok(mut items) = state.gopeed_tasks.lock() {
                         items.insert(id, gopeed_id.clone());
                     }
+                    let persisted_id = gopeed_id.clone();
+                    update_task(&app, id, true, |item| {
+                        item.gopeed_task_id = Some(persisted_id.clone());
+                    });
                     gopeed_id
                 }
                 Err(error) => {
