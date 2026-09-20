@@ -1075,6 +1075,8 @@ impl DownloadEngine {
                 let mut recovery_ewma_rate: Option<f64> = None;
                 let mut recovery_below_target_ms = 0_u64;
                 let mut known_capacity_hits = 0_u8;
+                let mut known_capacity_hit_level = initial_active_workers;
+                let mut known_capacity_probe_grace_used = false;
                 let mut last_rejected_level: Option<(usize, u64)> = None;
                 let mut last_reprobe_ms = 0_u64;
                 let mut last_scheduler_diagnostic_ms = 0_u64;
@@ -1137,6 +1139,47 @@ impl DownloadEngine {
                     }
                     let aggregate_rate = aggregate_window_bytes.saturating_mul(1000)
                         / RANGE_STEAL_INTERVAL_MS.max(1);
+                    let current_limit = active_limit.load(Ordering::Acquire).max(1);
+                    let known_capacity_target = if !admission_settled {
+                        known_capacity_settle_threshold(host_capacity_hint, network_capacity_hint)
+                    } else {
+                        None
+                    };
+                    if let Some(target) = known_capacity_target {
+                        if current_limit != known_capacity_hit_level {
+                            known_capacity_hit_level = current_limit;
+                            known_capacity_hits = 0;
+                            known_capacity_probe_grace_used = false;
+                        }
+                        if aggregate_rate as f64 >= target {
+                            known_capacity_hits = known_capacity_hits.saturating_add(1);
+                        } else {
+                            known_capacity_hits = 0;
+                        }
+                        if known_capacity_hits >= KNOWN_CAPACITY_SETTLE_SAMPLES {
+                            admission_settled = true;
+                            admission_baseline = None;
+                            admission_held_rate = None;
+                            admission_skip_sample = false;
+                            recovery_ewma_rate = Some(aggregate_rate as f64);
+                            recovery_below_target_ms = 0;
+                            last_reprobe_ms = now_ms;
+                            let _ = sender.try_send(DownloadEvent::Diagnostic {
+                                event: "http.connection_admission",
+                                detail: serde_json::json!({
+                                    "decision": "known_capacity_reached",
+                                    "admittedConnections": current_limit,
+                                    "measuredBytesPerSecond": aggregate_rate,
+                                    "sampleWindowMs": RANGE_STEAL_INTERVAL_MS,
+                                    "settleThresholdBytesPerSecond": target as u64,
+                                    "hostHintBytesPerSecond": host_capacity_hint as u64,
+                                    "networkHintBytesPerSecond": network_capacity_hint as u64,
+                                    "confirmingSamples": known_capacity_hits,
+                                    "settled": true
+                                }),
+                            });
+                        }
+                    }
                     if now_ms.saturating_sub(last_scheduler_diagnostic_ms)
                         >= ADMISSION_SAMPLE_INTERVAL_MS
                     {
@@ -1188,42 +1231,6 @@ impl DownloadEngine {
                             }
                         }
                         previous_interval_rate = Some(interval_rate);
-
-                        let current_limit = active_limit.load(Ordering::Acquire).max(1);
-                        if !admission_settled {
-                            if let Some(target) = known_capacity_settle_threshold(
-                                host_capacity_hint,
-                                network_capacity_hint,
-                            ) {
-                                if interval_rate >= target {
-                                    known_capacity_hits = known_capacity_hits.saturating_add(1);
-                                } else {
-                                    known_capacity_hits = 0;
-                                }
-                                if known_capacity_hits >= KNOWN_CAPACITY_SETTLE_SAMPLES {
-                                    admission_settled = true;
-                                    admission_baseline = None;
-                                    admission_held_rate = None;
-                                    admission_skip_sample = false;
-                                    recovery_ewma_rate = Some(interval_rate);
-                                    recovery_below_target_ms = 0;
-                                    last_reprobe_ms = now_ms;
-                                    let _ = sender.try_send(DownloadEvent::Diagnostic {
-                                        event: "http.connection_admission",
-                                        detail: serde_json::json!({
-                                            "decision": "known_capacity_reached",
-                                            "admittedConnections": current_limit,
-                                            "measuredBytesPerSecond": interval_rate as u64,
-                                            "settleThresholdBytesPerSecond": target as u64,
-                                            "hostHintBytesPerSecond": host_capacity_hint as u64,
-                                            "networkHintBytesPerSecond": network_capacity_hint as u64,
-                                            "confirmingSamples": known_capacity_hits,
-                                            "settled": true
-                                        }),
-                                    });
-                                }
-                            }
-                        }
 
                         if admission_settled {
                             let recovery_target = stable_capacity.max(host_capacity_hint);
@@ -1310,6 +1317,25 @@ impl DownloadEngine {
                                     });
                                 }
                             }
+                        } else if should_wait_for_known_capacity_confirmation(
+                            known_capacity_hits,
+                            known_capacity_probe_grace_used,
+                        ) {
+                            known_capacity_probe_grace_used = true;
+                            let _ = sender.try_send(DownloadEvent::Diagnostic {
+                                event: "http.connection_admission",
+                                detail: serde_json::json!({
+                                    "decision": "known_capacity_confirmation_pending",
+                                    "admittedConnections": current_limit,
+                                    "measuredBytesPerSecond": aggregate_rate,
+                                    "sampleWindowMs": RANGE_STEAL_INTERVAL_MS,
+                                    "settleThresholdBytesPerSecond": known_capacity_target
+                                        .unwrap_or_default() as u64,
+                                    "confirmingSamples": known_capacity_hits,
+                                    "requiredSamples": KNOWN_CAPACITY_SETTLE_SAMPLES,
+                                    "settled": false
+                                }),
+                            });
                         } else if admission_skip_sample {
                             // Hydra-style warm-up: do not judge a newly admitted
                             // connection while it is still handshaking/slow-starting.
@@ -2014,6 +2040,15 @@ fn known_capacity_settle_threshold(host_hint: f64, network_hint: f64) -> Option<
     (target >= KNOWN_CAPACITY_SETTLE_MIN_BPS).then_some(target)
 }
 
+fn should_wait_for_known_capacity_confirmation(
+    confirming_samples: u8,
+    grace_used: bool,
+) -> bool {
+    confirming_samples > 0
+        && confirming_samples < KNOWN_CAPACITY_SETTLE_SAMPLES
+        && !grace_used
+}
+
 fn proportional_admission_gain(
     previous_connections: usize,
     previous_rate: f64,
@@ -2708,6 +2743,17 @@ mod tests {
         assert!(known_capacity_settle_threshold(0.0, 20.0 * mib).is_none());
         let network_only = known_capacity_settle_threshold(0.0, 100.0 * mib).unwrap();
         assert!((network_only / mib - 85.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn known_capacity_probe_waits_once_for_a_second_short_window() {
+        assert!(!should_wait_for_known_capacity_confirmation(0, false));
+        assert!(should_wait_for_known_capacity_confirmation(1, false));
+        assert!(!should_wait_for_known_capacity_confirmation(1, true));
+        assert!(!should_wait_for_known_capacity_confirmation(
+            KNOWN_CAPACITY_SETTLE_SAMPLES,
+            false,
+        ));
     }
 
     #[test]
