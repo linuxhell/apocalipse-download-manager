@@ -76,11 +76,16 @@ jobs:
         env:
           ARIA2_ASSET: ${{ matrix.aria2_asset }}
           ARIA2_BINARY: ${{ matrix.aria2_binary }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           release_json="$RUNNER_TEMP/aria2-release.json"
-          curl --fail --location --retry 3             "https://api.github.com/repos/Kenshin9977/aria2/releases/latest"             --output "$release_json"
-          asset_url=$(python3 - "$release_json" "$ARIA2_ASSET" <<'PY'
+          curl --fail --location --retry 3 \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/Kenshin9977/aria2/releases/latest" \
+            --output "$release_json"
+          asset_id=$(python3 - "$release_json" "$ARIA2_ASSET" <<'PY'
           import json
           import sys
 
@@ -89,14 +94,19 @@ jobs:
           expected = sys.argv[2]
           for asset in release.get("assets", []):
               if asset.get("name") == expected:
-                  print(asset["browser_download_url"])
+                  print(asset["id"])
                   break
           else:
               raise SystemExit(f"aria2 asset not found: {expected}")
           PY
           )
           mkdir -p dist/aria2-backend
-          curl --fail --location --retry 3 "$asset_url" --output "dist/aria2-backend/$ARIA2_BINARY"
+          curl --fail --location --retry 3 \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/Kenshin9977/aria2/releases/assets/$asset_id" \
+            --output "dist/aria2-backend/$ARIA2_BINARY"
           chmod 755 "dist/aria2-backend/$ARIA2_BINARY"
 
       - name: Stage Windows portable
