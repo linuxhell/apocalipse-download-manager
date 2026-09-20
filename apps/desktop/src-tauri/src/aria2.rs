@@ -100,6 +100,7 @@ impl Runtime {
         if !session.exists() {
             fs::write(&session, b"").map_err(|error| error.to_string())?;
         }
+        let log = runtime_root.join("aria2.log");
         let mut command = Command::new(executable);
         command
             .arg("--enable-rpc=true")
@@ -114,6 +115,8 @@ impl Runtime {
             .arg("--max-concurrent-downloads=20")
             .arg("--summary-interval=0")
             .arg("--console-log-level=warn")
+            .arg("--log-level=notice")
+            .arg(format!("--log={}", log.display()))
             .arg("--download-result=hide")
             .arg(format!("--input-file={}", session.display()))
             .arg(format!("--save-session={}", session.display()))
