@@ -270,11 +270,16 @@ test('recording seals each segment and resumes only after real media progress', 
 });
 
 
-test('Facebook stream Download redirects to the proven Record path before permalink discovery', () => {
+test('Facebook sponsored videos show Record only and hide Download', () => {
+  assert.match(script, /button\.hidden = !canDownload \|\| Boolean\(isFacebookVideo && facebookSponsoredEvidence\(element\)\)/);
+  assert.match(script, /const sponsoredHomeVideo = Boolean\(isFacebookVideo && facebookSponsoredEvidence\(element\)\)/);
+  assert.match(script, /button\.hidden = sponsoredHomeVideo \|\| !liveCanDownload/);
+  assert.match(script, /sponsoredRecordOnly:/);
+});
+
+test('non-sponsored Facebook streams can still redirect Download to Record when no permalink exists', () => {
   assert.match(script, /overlay_download_recording_redirect/);
   assert.match(script, /element\.srcObject && !immediateFacebookUrl/);
+  assert.match(script, /!facebookSponsoredEvidence\(element\)/);
   assert.match(script, /recordButton\.click\(\)/);
-  const redirect = script.indexOf('overlay_download_recording_redirect');
-  const reveal = script.indexOf('await revealFacebookUrl(element)');
-  assert.ok(redirect >= 0 && reveal >= 0 && redirect < reveal, 'recording redirect must happen before menu/permalink discovery');
 });
