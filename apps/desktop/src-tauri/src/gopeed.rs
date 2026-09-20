@@ -17,6 +17,12 @@ pub struct Endpoint {
     client: Client,
 }
 
+const MAX_HTTP_CONNECTIONS: usize = 8;
+
+pub fn applied_http_connections(requested: usize) -> usize {
+    requested.clamp(1, MAX_HTTP_CONNECTIONS)
+}
+
 pub struct Runtime {
     child: Child,
     endpoint: Endpoint,
@@ -304,7 +310,7 @@ impl Endpoint {
             ""
         };
         let extra = if http_download {
-            json!({ "connections": connections.clamp(1, 32) })
+            json!({ "connections": applied_http_connections(connections) })
         } else {
             Value::Null
         };
@@ -446,4 +452,18 @@ fn http_request_extra(context: &RequestContext) -> Value {
         "header": context.headers,
         "body": context.body,
     })
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gopeed_http_connections_are_capped_at_eight() {
+        assert_eq!(applied_http_connections(1), 1);
+        assert_eq!(applied_http_connections(8), 8);
+        assert_eq!(applied_http_connections(16), 8);
+        assert_eq!(applied_http_connections(32), 8);
+    }
 }
