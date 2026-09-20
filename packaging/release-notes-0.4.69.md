@@ -6,3 +6,4 @@
 - Firefox 0.3.158 assinado incluído nos artefatos.
 - Linha Aria mantida separadamente, sem releases oficiais.
 - Dependências do empacotamento fixadas para builds reproduzíveis nas três plataformas.
+- Empacotamento Linux validado com suporte PAM requerido pelo aplicativo.
