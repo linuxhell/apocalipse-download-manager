@@ -554,6 +554,7 @@ struct LinkTransferProgress {
 struct LinkTransferControl {
     paused: AtomicBool,
     cancelled: AtomicBool,
+    progress: Mutex<Option<LinkTransferProgress>>,
 }
 
 struct LinkTransferReporter {
@@ -564,12 +565,20 @@ struct LinkTransferReporter {
     transferred: u64,
     started: Instant,
     last_emit: Instant,
+    last_speed_at: Instant,
+    last_speed_bytes: u64,
+    smoothed_speed: u64,
+    last_diagnostic_at: Instant,
     control: Arc<LinkTransferControl>,
 }
 
 impl LinkTransferReporter {
     fn new(app: tauri::AppHandle, transfer_id: String, direction: &str, total: u64) -> Self {
-        let control = Arc::new(LinkTransferControl::default());
+        let control = Arc::new(LinkTransferControl {
+            paused: AtomicBool::new(false),
+            cancelled: AtomicBool::new(false),
+            progress: Mutex::new(None),
+        });
         if let Ok(mut transfers) = app.state::<AppState>().link_transfers.lock() {
             transfers.insert(transfer_id.clone(), control.clone());
         }
@@ -582,6 +591,10 @@ impl LinkTransferReporter {
             transferred: 0,
             started: now,
             last_emit: now.checked_sub(Duration::from_secs(1)).unwrap_or(now),
+            last_speed_at: now,
+            last_speed_bytes: 0,
+            smoothed_speed: 0,
+            last_diagnostic_at: now.checked_sub(Duration::from_secs(2)).unwrap_or(now),
             control,
         };
         reporter.emit(true);
@@ -624,9 +637,21 @@ impl LinkTransferReporter {
         if !force && self.last_emit.elapsed() < Duration::from_millis(125) {
             return;
         }
-        self.last_emit = Instant::now();
-        let elapsed_ms = self.started.elapsed().as_millis().max(1) as u64;
-        let bytes_per_second = self.transferred.saturating_mul(1000) / elapsed_ms;
+        let now = Instant::now();
+        self.last_emit = now;
+        let sample_elapsed = now.duration_since(self.last_speed_at);
+        if sample_elapsed >= Duration::from_millis(250) || force {
+            let sample_ms = sample_elapsed.as_millis().max(1) as u64;
+            let sample_bytes = self.transferred.saturating_sub(self.last_speed_bytes);
+            let instantaneous = sample_bytes.saturating_mul(1000) / sample_ms;
+            self.smoothed_speed = if self.smoothed_speed == 0 {
+                instantaneous
+            } else {
+                (instantaneous as f64 * 0.65 + self.smoothed_speed as f64 * 0.35) as u64
+            };
+            self.last_speed_at = now;
+            self.last_speed_bytes = self.transferred;
+        }
         let percent = if self.total > 0 {
             (self.transferred as f64 * 100.0 / self.total as f64).clamp(0.0, 100.0)
         } else if force && self.transferred > 0 {
@@ -634,17 +659,36 @@ impl LinkTransferReporter {
         } else {
             0.0
         };
-        let _ = self.app.emit(
-            "link-transfer-progress",
-            LinkTransferProgress {
-                transfer_id: self.transfer_id.clone(),
-                direction: self.direction.clone(),
-                transferred: self.transferred,
-                total: self.total,
-                percent,
-                bytes_per_second,
-            },
-        );
+        let payload = LinkTransferProgress {
+            transfer_id: self.transfer_id.clone(),
+            direction: self.direction.clone(),
+            transferred: self.transferred,
+            total: self.total,
+            percent,
+            bytes_per_second: self.smoothed_speed,
+        };
+        if let Ok(mut progress) = self.control.progress.lock() {
+            *progress = Some(payload.clone());
+        }
+        let _ = self.app.emit("link-transfer-progress", payload.clone());
+        if force || self.last_diagnostic_at.elapsed() >= Duration::from_secs(1) {
+            self.last_diagnostic_at = now;
+            let state = self.app.state::<AppState>();
+            diagnostic_log(
+                &state,
+                "INFO",
+                "link.transfer_progress",
+                &format!(
+                    "transfer={} direction={} bytes={} total={} percent={:.2} speed_bps={}",
+                    payload.transfer_id,
+                    payload.direction,
+                    payload.transferred,
+                    payload.total,
+                    payload.percent,
+                    payload.bytes_per_second
+                ),
+            );
+        }
     }
 }
 
@@ -685,6 +729,26 @@ fn cancel_link_transfer(state: State<'_, AppState>, transfer_id: String) -> Resu
     control.cancelled.store(true, Ordering::Release);
     control.paused.store(false, Ordering::Release);
     Ok(())
+}
+
+#[tauri::command]
+fn get_link_transfer_progress(
+    state: State<'_, AppState>,
+    transfer_id: String,
+) -> Result<Option<LinkTransferProgress>, String> {
+    let transfers = state
+        .link_transfers
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let Some(control) = transfers.get(&transfer_id) else {
+        return Ok(None);
+    };
+    let progress = control
+        .progress
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    Ok(progress)
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -11256,6 +11320,7 @@ fn main() {
             get_link_identity,
             pause_link_transfer,
             cancel_link_transfer,
+            get_link_transfer_progress,
             is_local_link_target,
             get_about_media,
             open_link_window,
