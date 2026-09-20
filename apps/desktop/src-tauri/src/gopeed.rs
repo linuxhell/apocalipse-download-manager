@@ -271,10 +271,14 @@ impl Endpoint {
             .unwrap_or_else(|| Path::new("."))
             .to_string_lossy()
             .into_owned();
-        let name = destination
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("download");
+        let name = if http_download {
+            destination
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("download")
+        } else {
+            ""
+        };
         let extra = if http_download {
             json!({ "connections": connections.clamp(1, 32) })
         } else {
