@@ -393,3 +393,55 @@ test('natural questions about a named site search its diagnostic records', () =>
   const empty = AI.respond('há algo do site ausente.test nos registros?', { locale: 'pt-BR', events: [] });
   assert.match(empty.text, /Não encontrei registros/);
 });
+
+
+test('Apocalipse AI can learn a new local correction candidate in all supported languages', () => {
+  const pt = AI.respond('aprenda correção para example.com: usar uma conexão', { locale: 'pt-BR' });
+  assert.equal(pt.intent, 'correction_learned');
+  assert.equal(pt.learnCorrection.site, 'example.com');
+  assert.equal(pt.learnCorrection.status, 'saved');
+
+  const en = AI.respond('learn fix for example.org: force one connection', { locale: 'en' });
+  assert.equal(en.intent, 'correction_learned');
+  assert.equal(en.learnCorrection.site, 'example.org');
+
+  const zh = AI.respond('保存修正 example.net：只使用一个连接', { locale: 'zh-CN' });
+  assert.equal(zh.intent, 'correction_learned');
+  assert.equal(zh.learnCorrection.site, 'example.net');
+});
+
+test('confirmed corrections become reusable local knowledge with version metadata', () => {
+  const corrections = [{
+    id: 'known',
+    name: 'Pixeldrain - one connection',
+    site: 'pixeldrain',
+    status: 'confirmed',
+    successCount: 3,
+    lastVerifiedVersion: '0.4.70',
+  }];
+  const result = AI.respond('o pixeldrain voltou a dar erro', { locale: 'pt-BR', corrections, appVersion: '0.4.70' });
+  assert.equal(result.intent, 'known_correction');
+  assert.equal(result.correctionId, 'known');
+  assert.match(result.text, /3 vez/);
+  assert.match(result.text, /0\.4\.70/);
+  assert.match(aiUi, /successCount/);
+  assert.match(aiUi, /lastVerifiedVersion/);
+});
+
+test('update details use official GitHub release notes instead of guessing', () => {
+  const result = AI.respond('o que mudou nessa atualização?', {
+    locale: 'pt-BR',
+    appVersion: '0.4.70',
+    updateState: { latest: '0.4.71', notesSummary: 'Corrige downloads e melhora o aria2.' },
+  });
+  assert.equal(result.intent, 'update_details');
+  assert.match(result.text, /Corrige downloads/);
+
+  const missing = AI.respond('quais são as novas correções da versão?', { locale: 'pt-BR', appVersion: '0.4.70' });
+  assert.equal(missing.action.type, 'check_app_update');
+  assert.equal(missing.action.wantDetails, true);
+  assert.match(aiUi, /summarizeReleaseNotes/);
+  assert.match(aiUi, /release_notes/);
+  assert.match(desktop, /release_notes: String/);
+  assert.match(desktop, /published_at: String/);
+});
