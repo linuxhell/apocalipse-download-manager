@@ -214,6 +214,40 @@ let linkTransferCancelRequested = false;
 let linkActiveTransferId = "";
 let linkActiveTransferDirection = "";
 let linkActiveTransferName = "";
+let linkTransferPollTimer = null;
+let linkLastProgressEventAt = 0;
+
+function stopLinkTransferProgressPolling() {
+  if (linkTransferPollTimer !== null) {
+    clearInterval(linkTransferPollTimer);
+    linkTransferPollTimer = null;
+  }
+}
+
+function startLinkTransferProgressPolling(transferId) {
+  stopLinkTransferProgressPolling();
+  const poll = async () => {
+    if (!linkTransferActive || !transferId || transferId !== linkActiveTransferId || !rawInvoke) {
+      if (!linkTransferActive || transferId !== linkActiveTransferId) stopLinkTransferProgressPolling();
+      return;
+    }
+    // Tauri events remain the primary path. Poll only when no fresh event was
+    // observed recently, which keeps this as a fallback without duplicating work.
+    if (performance.now() - linkLastProgressEventAt < 450) return;
+    try {
+      const progress = await rawInvoke("get_link_transfer_progress", { transferId });
+      if (progress && linkTransferActive && transferId === linkActiveTransferId) {
+        renderLinkTransferProgress(progress);
+      }
+    } catch (error) {
+      if (String(error) !== "link_transfer_not_found") {
+        console.debug("Apocalipse Link progress poll", error);
+      }
+    }
+  };
+  void poll();
+  linkTransferPollTimer = setInterval(poll, 250);
+}
 
 const linkParent = (path) => /^[A-Za-z]:[\\/]?$/.test(path) || /^\/shares\/[^/]+\/?$/.test(path)
   ? ""
@@ -281,6 +315,8 @@ function beginLinkTransfer(direction, name = "") {
   detail.textContent = t("linkTransferPreparing");
   track.setAttribute("aria-valuenow", "0");
   syncLinkTransferLanguage();
+  linkLastProgressEventAt = 0;
+  startLinkTransferProgressPolling(linkActiveTransferId);
   return linkActiveTransferId;
 }
 
@@ -304,6 +340,7 @@ function renderLinkTransferProgress(progress) {
 }
 
 function finishLinkTransfer({ success = false, cancelled = false } = {}) {
+  stopLinkTransferProgressPolling();
   if (success) {
     document.querySelector("#link-transfer-fill").style.width = "100%";
     document.querySelector("#link-transfer-percent").textContent = "100%";
@@ -617,6 +654,7 @@ document.querySelector("#link-transfer-cancel").onclick = async () => {
 };
 
 window.__TAURI__?.event?.listen?.("link-transfer-progress", (event) => {
+  linkLastProgressEventAt = performance.now();
   renderLinkTransferProgress(event.payload || {});
 }).catch(console.error);
 
