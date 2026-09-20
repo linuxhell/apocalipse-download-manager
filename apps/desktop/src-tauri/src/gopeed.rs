@@ -77,12 +77,22 @@ pub struct ResourceFile {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct ConnectionStatsSummary {
+    pub downloaded: u64,
+    pub total: u64,
+    pub completed: bool,
+    pub failed: bool,
+    pub retry_times: u64,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct StatsSummary {
     pub active_connections: u64,
     pub total_peers: u64,
     pub active_peers: u64,
     pub seeders: u64,
     pub leechers: u64,
+    pub connections: Vec<ConnectionStatsSummary>,
 }
 
 #[derive(Clone, Default)]
@@ -343,25 +353,41 @@ impl Endpoint {
             .await?;
         let snapshot = value.get("snapshot").unwrap_or(&Value::Null);
         let runtime = value.get("runtime").unwrap_or(&Value::Null);
-        let active_connections = snapshot
+        let connections = snapshot
             .get("connections")
             .and_then(Value::as_array)
             .map(|connections| {
                 connections
                     .iter()
-                    .filter(|connection| {
-                        !connection
+                    .map(|connection| ConnectionStatsSummary {
+                        downloaded: connection
+                            .get("downloaded")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0),
+                        total: connection
+                            .get("total")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0),
+                        completed: connection
                             .get("completed")
                             .and_then(Value::as_bool)
-                            .unwrap_or(false)
-                            && !connection
-                                .get("failed")
-                                .and_then(Value::as_bool)
-                                .unwrap_or(false)
+                            .unwrap_or(false),
+                        failed: connection
+                            .get("failed")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                        retry_times: connection
+                            .get("retryTimes")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0),
                     })
-                    .count() as u64
+                    .collect::<Vec<_>>()
             })
-            .unwrap_or(0);
+            .unwrap_or_default();
+        let active_connections = connections
+            .iter()
+            .filter(|connection| !connection.completed && !connection.failed)
+            .count() as u64;
         Ok(StatsSummary {
             active_connections,
             total_peers: runtime
@@ -380,6 +406,7 @@ impl Endpoint {
                 .get("connectedLeechers")
                 .and_then(Value::as_u64)
                 .unwrap_or(0),
+            connections,
         })
     }
 
