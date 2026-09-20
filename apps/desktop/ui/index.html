@@ -273,6 +273,10 @@
             Browse…
           </button>
         </div>
+        <label id="auto-extract-option" class="setting-toggle compact-toggle" hidden>
+          <input id="auto-extract" type="checkbox" />
+          <span><b data-i18n="autoExtract">Extract automatically after download</b><small data-i18n="autoExtractHint">Shown only for archive files. Loose root files are kept inside a folder named after the archive.</small></span>
+        </label>
         <section class="destination-history">
           <div>
             <b data-i18n="recentLocations">Download locations</b>
@@ -563,6 +567,7 @@
             <label data-tool="qjs"><span>QuickJS (qjs) <small></small></span><div><input id="tool-qjs" type="text" /><button type="button" data-tool-pick="qjs" data-i18n="browse">Browse…</button><button type="button" data-tool-update="qjs" data-i18n="update">Update</button></div></label>
             <label data-tool="n-m3u8dl-re"><span>N_m3u8DL-RE <small></small></span><div><input id="tool-n-m3u8dl-re" type="text" /><button type="button" data-tool-pick="n-m3u8dl-re" data-i18n="browse">Browse…</button><button type="button" data-tool-update="n-m3u8dl-re" data-i18n="update">Update</button></div></label>
             <label data-tool="aria2"><span><span data-i18n="aria2Backend">aria2 (HTTP/HTTPS, FTP, torrent and magnet)</span> <small></small></span><div><input id="tool-aria2" type="text" /><button type="button" data-tool-pick="aria2" data-i18n="browse">Browse…</button><button type="button" data-tool-update="aria2" data-i18n="update">Update</button></div></label>
+            <label data-tool="extractor"><span><span data-i18n="archiveExtractor">Archive extractor</span> <small></small></span><div><input id="tool-extractor" type="text" /><button type="button" data-tool-pick="extractor" data-i18n="browse">Browse…</button></div></label>
           </div>
           <label for="media-player" data-i18n="mediaPlayer">VLC / mpv / player</label>
           <div class="path-picker"><input id="media-player" type="text" /><button id="pick-media-player" type="button" data-i18n="browse">Browse…</button></div>
