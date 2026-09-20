@@ -5743,19 +5743,29 @@ async fn run_external_download(
             status
                 .map_err(|error| error.to_string())
                 .and_then(|status| {
+                    let engine = engine_log_name(kind, &task);
+                    if let Some(path) = write_engine_diagnostic(
+                        &app,
+                        id,
+                        engine,
+                        &text,
+                        status.code(),
+                        status.success(),
+                    ) {
+                        diagnostic_log(
+                            &app.state::<AppState>(),
+                            "INFO",
+                            "external.engine_report",
+                            &format!(
+                                "task={id} engine={engine} success={} exit_code={} file={}",
+                                status.success(),
+                                status.code().unwrap_or(-1),
+                                path.display()
+                            ),
+                        );
+                    }
                     if status.success() {
                         return Ok(());
-                    }
-                    if kind == DownloadKind::MediaPage {
-                        if let Some(path) = write_yt_dlp_diagnostic(&app, id, &text, status.code())
-                        {
-                            diagnostic_log(
-                                &app.state::<AppState>(),
-                                "INFO",
-                                "yt_dlp.report",
-                                &format!("task={id} file={}", path.display()),
-                            );
-                        }
                     }
                     Err(external_error_detail(&text, status.code()))
                 })
@@ -5827,16 +5837,34 @@ async fn terminate_process_tree(child: &mut tokio::process::Child) {
     let _ = child.wait().await;
 }
 
-fn write_yt_dlp_diagnostic(
+fn engine_log_name(kind: DownloadKind, task: &DownloadTask) -> &'static str {
+    match kind {
+        DownloadKind::MediaPage => "yt-dlp",
+        DownloadKind::Hls if task
+            .format_selection
+            .as_deref()
+            .is_some_and(|value| value.starts_with("audio:")) => "ffmpeg",
+        DownloadKind::Hls => "n-m3u8dl-re",
+        _ => "external",
+    }
+}
+
+fn write_engine_diagnostic(
     app: &tauri::AppHandle,
     id: DownloadId,
+    engine: &str,
     output: &str,
     exit_code: Option<i32>,
+    success: bool,
 ) -> Option<PathBuf> {
     let state = app.state::<AppState>();
-    let directory = state.queue_path.parent()?.join("logs");
+    let directory = state.queue_path.parent()?.join("logs").join("engines");
     fs::create_dir_all(&directory).ok()?;
-    let path = directory.join(format!("yt-dlp-{id}.log"));
+    let safe_engine = engine
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .collect::<String>();
+    let path = directory.join(format!("{safe_engine}-{id}.log"));
     let proxy_password = state
         .settings
         .lock()
@@ -5845,26 +5873,32 @@ fn write_yt_dlp_diagnostic(
     let sanitized = output
         .lines()
         .map(|line| {
-            if line.to_ascii_lowercase().contains("cookie:") {
-                "[linha com cookie ocultada]".to_owned()
-            } else {
-                proxy_password
-                    .as_deref()
-                    .filter(|value| !value.is_empty())
-                    .map_or_else(
-                        || sanitize_log_detail(line),
-                        |password| sanitize_log_detail(&line.replace(password, "<redacted>")),
-                    )
-            }
+            proxy_password
+                .as_deref()
+                .filter(|value| !value.is_empty())
+                .map_or_else(
+                    || sanitize_log_detail(line),
+                    |password| sanitize_log_detail(&line.replace(password, "<redacted>")),
+                )
         })
         .collect::<Vec<_>>()
         .join("\n");
     let contents = format!(
-        "Apocalipse Download Manager - diagnóstico do yt-dlp\nTarefa: {id}\nCódigo de saída: {}\n\n{sanitized}\n",
-        exit_code.map_or_else(|| "indisponível".to_owned(), |code| code.to_string()),
+        "Apocalipse Download Manager - engine diagnostic\nLocal time: {}\nEngine: {engine}\nTask: {id}\nSuccess: {success}\nExit code: {}\n\n{sanitized}\n",
+        chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        exit_code.map_or_else(|| "unavailable".to_owned(), |code| code.to_string()),
     );
     fs::write(&path, contents).ok()?;
     Some(path)
+}
+
+fn write_yt_dlp_diagnostic(
+    app: &tauri::AppHandle,
+    id: DownloadId,
+    output: &str,
+    exit_code: Option<i32>,
+) -> Option<PathBuf> {
+    write_engine_diagnostic(app, id, "yt-dlp", output, exit_code, false)
 }
 
 #[tauri::command]
