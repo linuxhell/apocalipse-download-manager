@@ -6686,7 +6686,7 @@ fn extract_zip_archive(bytes: &[u8], destination: &Path) -> Result<(), String> {
     let mut archive = zip::ZipArchive::new(cursor).map_err(|error| error.to_string())?;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
-        let Some(relative) = entry.enclosed_name().map(Path::to_path_buf) else {
+        let Some(relative) = entry.enclosed_name() else {
             return Err("release_archive_contains_unsafe_path".to_owned());
         };
         let target = destination.join(relative);
