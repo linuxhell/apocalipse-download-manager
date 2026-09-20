@@ -6741,22 +6741,19 @@ fn release_platform_architecture() -> Result<(&'static str, &'static str), Strin
     Ok((platform, architecture))
 }
 
-fn gopeed_platform_asset_markers() -> Result<[&'static str; 3], String> {
-    let platform = if cfg!(target_os = "windows") {
-        "windows"
+fn aria2_platform_asset_markers() -> Result<[&'static str; 3], String> {
+    if !cfg!(target_arch = "x86_64") {
+        return Err("aria2_update_architecture_unsupported".to_owned());
+    }
+    if cfg!(target_os = "windows") {
+        Ok(["x86_64", "w64-mingw32", ".zip"])
     } else if cfg!(target_os = "linux") {
-        "linux"
+        Ok(["x86_64", "linux-musl", ".zip"])
     } else if cfg!(target_os = "macos") {
-        "macos"
+        Err("manual_update_required:aria2 macOS".to_owned())
     } else {
-        return Err("gopeed_update_platform_unsupported".to_owned());
-    };
-    let architecture = if cfg!(target_arch = "x86_64") {
-        "amd64"
-    } else {
-        return Err("gopeed_update_architecture_unsupported".to_owned());
-    };
-    Ok([platform, architecture, ".zip"])
+        Err("aria2_update_platform_unsupported".to_owned())
+    }
 }
 
 fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
@@ -6867,7 +6864,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &settings.qjs_path,
                 if cfg!(windows) { "qjs.exe" } else { "qjs" },
             ),
-            "gopeed" => configured_aria2(&settings),
+            "aria2" => configured_aria2(&settings),
             "n-m3u8dl-re" => configured_tool(
                 &settings.n_m3u8dl_re_path,
                 if cfg!(windows) {
@@ -6920,7 +6917,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
 
     {
         let (platform, architecture) = release_platform_architecture()?;
-        let gopeed_markers = gopeed_platform_asset_markers()?;
+        let aria2_markers = aria2_platform_asset_markers()?;
         let (repository, executable_name, asset_markers, version_args): (
             &str,
             &str,
@@ -6933,14 +6930,10 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &[],
                 &["--version"],
             ),
-            "gopeed" => (
-                "GopeedLab/gopeed",
-                if cfg!(windows) {
-                    "gopeed.exe"
-                } else {
-                    "gopeed"
-                },
-                gopeed_markers.as_slice(),
+            "aria2" => (
+                "abcfy2/aria2-static-build",
+                if cfg!(windows) { "aria2c.exe" } else { "aria2c" },
+                aria2_markers.as_slice(),
                 &["--version"],
             ),
             "n-m3u8dl-re" => (
@@ -6969,32 +6962,14 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             ),
             _ => return Err("unknown_tool".to_owned()),
         };
-        let version_marker = executable
-            .parent()
-            .map(|parent| parent.join(".gopeed-version"));
-        let before = if id == "gopeed" {
-            version_marker
-                .as_ref()
-                .and_then(|path| fs::read_to_string(path).ok())
-                .map(|value| value.trim().to_owned())
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| {
-                    if executable.is_file() {
-                        "installed"
-                    } else {
-                        "not installed"
-                    }
-                    .to_owned()
-                })
-        } else {
-            version_line(&executable, version_args).unwrap_or_else(|| "unknown".to_owned())
-        };
+        let before =
+            version_line(&executable, version_args).unwrap_or_else(|| "not installed".to_owned());
+
         let client = reqwest::Client::builder()
             .user_agent("Apocalipse-Download-Manager")
             .build()
             .map_err(|error| error.to_string())?;
-        // GitHub's /latest endpoint excludes drafts and prereleases, so
-        // Gopeed updates can never silently move users onto a beta build.
+        // GitHub's /latest endpoint excludes drafts and prereleases.
         let release: serde_json::Value = client
             .get(format!(
                 "https://api.github.com/repos/{repository}/releases/latest"
@@ -7055,12 +7030,9 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                         }
                         _ => false,
                     },
-                    "gopeed" => {
-                        name.starts_with("gopeed-web-")
-                            && asset_markers
-                                .iter()
-                                .all(|marker| name.contains(&marker.to_ascii_lowercase()))
-                    }
+                    "aria2" => asset_markers
+                        .iter()
+                        .all(|marker| name.contains(&marker.to_ascii_lowercase()))
                     _ => asset_markers
                         .iter()
                         .all(|marker| name.contains(&marker.to_ascii_lowercase())),
@@ -7152,8 +7124,8 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         if replacement.len() < 32_768 || (id == "ffmpeg" && ffprobe_replacement.len() < 32_768) {
             return Err(format!("replacement_executable_invalid:{asset_name}"));
         }
-        if id == "gopeed" {
-            stop_gopeed_runtime(&state);
+        if id == "aria2" {
+            stop_aria2_runtime(&state);
         }
         let parent = executable
             .parent()
@@ -7185,33 +7157,21 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                     .map_err(|error| error.to_string())?;
             }
         }
-        let candidate_version = if id == "gopeed" {
-            if staged
-                .metadata()
-                .map(|metadata| metadata.len())
-                .unwrap_or(0)
-                < 32_768
-            {
+        let candidate_version = match version_line(&staged, version_args) {
+            Some(version) => version,
+            None => {
                 let _ = fs::remove_file(&staged);
+                let _ = fs::remove_file(&ffprobe_staged);
                 return Err("downloaded_tool_validation_failed".to_owned());
             }
-            tag.to_owned()
-        } else {
-            match version_line(&staged, version_args) {
-                Some(version) => version,
-                None => {
-                    let _ = fs::remove_file(&staged);
-                    let _ = fs::remove_file(&ffprobe_staged);
-                    return Err("downloaded_tool_validation_failed".to_owned());
-                }
-            }
         };
+
         if id == "ffmpeg" && version_line(&ffprobe_staged, &["-version"]).is_none() {
             let _ = fs::remove_file(&staged);
             let _ = fs::remove_file(&ffprobe_staged);
             return Err("downloaded_ffprobe_validation_failed".to_owned());
         }
-        if id != "gopeed" && candidate_version == before {
+        if candidate_version == before {
             let _ = fs::remove_file(&staged);
             let _ = fs::remove_file(&ffprobe_staged);
             diagnostic_log(
@@ -7222,16 +7182,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             );
             return Ok(format!("{id} already current ({before})"));
         }
-        if id == "gopeed" && candidate_version == before {
-            let _ = fs::remove_file(&staged);
-            diagnostic_log(
-                &state,
-                "INFO",
-                "tool.already_current",
-                &format!("tool={id} version={before} asset={asset_name}"),
-            );
-            return Ok(format!("{id} already current ({before})"));
-        }
+
         if backup.exists() {
             fs::remove_file(&backup).map_err(|error| error.to_string())?;
         }
@@ -7265,11 +7216,8 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 return Err(error.to_string());
             }
         }
-        let after = if id == "gopeed" {
-            executable.is_file().then(|| tag.to_owned())
-        } else {
-            version_line(&executable, version_args)
-        };
+        let after = version_line(&executable, version_args);
+
         let ffprobe_valid = id != "ffmpeg" || version_line(&ffprobe, &["-version"]).is_some();
         if after.is_none() || !ffprobe_valid {
             let _ = fs::remove_file(&executable);
@@ -7291,11 +7239,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             fs::remove_file(&ffprobe_backup).map_err(|error| error.to_string())?;
         }
         let after = after.unwrap_or_else(|| tag.to_owned());
-        if id == "gopeed" {
-            if let Some(marker) = &version_marker {
-                fs::write(marker, format!("{after}\n")).map_err(|error| error.to_string())?;
-            }
-        }
+
         diagnostic_log(&state, "INFO", "tool.updated", &format!("tool={id} repository={repository} tag={tag} asset={asset_name} sha256={sha256} before={before} after={after} target={}", executable.display()));
         Ok(format!("{id} updated: {before} → {after}"))
     }
