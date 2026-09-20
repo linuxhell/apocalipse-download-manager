@@ -4430,6 +4430,23 @@ async fn run_external_download(
             .join("media-work")
             .join(id.to_string())
     });
+    let aria2_debug_log = matches!(
+        kind,
+        DownloadKind::Torrent
+            | DownloadKind::Magnet
+            | DownloadKind::Ftp
+            | DownloadKind::AcceleratedHttp
+    )
+    .then(|| {
+        let directory = app
+            .state::<AppState>()
+            .queue_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("logs");
+        let _ = fs::create_dir_all(&directory);
+        directory.join(format!("aria2-{id}.log"))
+    });
     if let Some(work_directory) = media_work_directory.as_ref() {
         if let Err(error) = fs::create_dir_all(work_directory) {
             update_task(&app, id, true, |item| {
@@ -4845,6 +4862,11 @@ async fn run_external_download(
         | DownloadKind::Ftp
         | DownloadKind::AcceleratedHttp => {
             let mut command = tokio::process::Command::new(&tools.3);
+            if let Some(log_path) = aria2_debug_log.as_ref() {
+                command
+                    .arg(format!("--log={}", log_path.display()))
+                    .args(["--log-level=debug", "--console-log-level=notice"]);
+            }
             if !tools.8.is_empty() {
                 command.arg(format!(
                     "--async-dns-server={}",
@@ -5318,6 +5340,31 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         if let Ok(contents) = fs::read(source) {
             all_events.push_str(&String::from_utf8_lossy(&contents));
             entries.push((name.to_owned(), contents));
+        }
+    }
+    if let Some(log_directory) = state.log_path.parent() {
+        if let Ok(files) = fs::read_dir(log_directory) {
+            for entry in files.flatten() {
+                let source = entry.path();
+                let Some(name) = source.file_name().and_then(|value| value.to_str()) else {
+                    continue;
+                };
+                if !name.starts_with("aria2-") || !name.ends_with(".log") {
+                    continue;
+                }
+                if let Ok(contents) = fs::read(&source) {
+                    let limit = contents.len().min(4 * 1024 * 1024);
+                    let mut sanitized = String::from_utf8_lossy(&contents[..limit])
+                        .lines()
+                        .map(sanitize_log_detail)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if contents.len() > limit {
+                        sanitized.push_str("\n[truncated after 4 MiB; startup portion preserved]\n");
+                    }
+                    entries.push((format!("logs/aria2/{name}"), sanitized.into_bytes()));
+                }
+            }
         }
     }
     let mut buckets = HashMap::<&str, String>::new();
