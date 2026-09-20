@@ -201,6 +201,26 @@ test("Loopback Link file operations bypass the legacy remote transport", () => {
 });
 
 
+test("Archive extraction is cross-platform, localized and only offered for archives", () => {
+  assert.match(html, /data-tool="extractor"/);
+  assert.match(html, /id="tool-extractor"/);
+  assert.doesNotMatch(html, /data-tool-update="extractor"/);
+  assert.match(html, /id="auto-extract-option"[^>]*hidden/);
+  assert.match(html, /id="auto-extract"/);
+  assert.match(app, /archiveExtractor: "Archive extractor/);
+  assert.match(app, /archiveExtractor: "Extrator de arquivos/);
+  assert.match(app, /archiveExtractor: "压缩文件解压工具/);
+  assert.match(app, /function isArchiveFileName/);
+  assert.match(app, /autoExtract: document\.querySelector\("#auto-extract-option"\)/);
+  assert.match(rust, /extractor_path: Option<PathBuf>/);
+  assert.match(rust, /enum ExtractorKind \{ SevenZip, Rar, Unrar, Unar, Bsdtar, Tar \}/);
+  assert.match(rust, /archive_member_is_safe/);
+  assert.match(rust, /\.apocalipse-extract-/);
+  assert.match(rust, /maybe_auto_extract_completed/);
+  assert.match(rust, /run_network_change_monitor/);
+  assert.match(rust, /resolve_file_host_url/);
+});
+
 test("About page is localized, sits immediately below PayPal and keeps the main window size", () => {
   assert.match(html, /id="donate-paypal"[\s\S]*data-page="about"/);
   assert.match(html, /id="about-panel"/);
