@@ -217,6 +217,10 @@ test("Archive extraction is cross-platform, localized and only offered for archi
   assert.match(rust, /archive_member_is_safe/);
   assert.match(rust, /\.apocalipse-extract-/);
   assert.match(rust, /maybe_auto_extract_completed/);
+  assert.match(rust, /prompt_for_destination: bool/);
+  assert.match(rust, /browser-captures/);
+  assert.match(rust, /blob\.destination_prompt_pending/);
+  assert.match(rust, /app\.emit\("browser-assisted-ready"/);
   assert.match(rust, /run_network_change_monitor/);
   assert.match(rust, /resolve_file_host_url/);
 });
