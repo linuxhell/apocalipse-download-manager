@@ -26,7 +26,7 @@ const catalogs = {
     aiStatusProposed: "Awaiting approval", aiStatusTesting: "Testing", aiStatusSaved: "Saved", aiStatusConfirmed: "Confirmed", aiStatusRejected: "Did not work",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
-    toolbox: "TOOLBOX", update: "Update", gopeedBackend: "Gopeed (backend engine)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "VLC / mpv / media player",
+    toolbox: "TOOLBOX", update: "Update", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "VLC / mpv / media player",
     donatePaypal: "Donate via PayPal",
     about: "About", aboutDescription: "About the creator of Apocalipse Download Manager.", aboutCreator: "Creator: Juliano - Brazil - Sátia Mortadela", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume",
     overview: "OVERVIEW",
@@ -163,7 +163,7 @@ const catalogs = {
     dnsProvider: "Provider",
     dnsCustom: "Custom",
     dnsServers: "DNS servers",
-    dnsScopeHint: "Applied to the native HTTP engine. Gopeed uses its own network stack; SOCKS5H continues resolving through the proxy.",
+    dnsScopeHint: "Applied to the native HTTP engine. aria2 uses the system resolver; SOCKS5H continues resolving through the proxy.",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
     automatic: "Automatic",
@@ -235,7 +235,7 @@ const catalogs = {
     aiStatusProposed: "Aguardando aprovação", aiStatusTesting: "Em teste", aiStatusSaved: "Guardada", aiStatusConfirmed: "Confirmada", aiStatusRejected: "Não funcionou",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
-    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", gopeedBackend: "Gopeed (motor em segundo plano)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "VLC / mpv / reprodutor de mídia",
+    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "VLC / mpv / reprodutor de mídia",
     donatePaypal: "Faça uma doação pelo PayPal",
     about: "Sobre", aboutDescription: "Sobre o criador do Apocalipse Download Manager.", aboutCreator: "Criador: Juliano - Brasil - Sátia Mortadela", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume",
     overview: "VISÃO GERAL",
@@ -372,7 +372,7 @@ const catalogs = {
     dnsProvider: "Provedor",
     dnsCustom: "Personalizado",
     dnsServers: "Servidores DNS",
-    dnsScopeHint: "Aplicado ao motor HTTP nativo. O Gopeed usa sua própria pilha de rede; o SOCKS5H continua resolvendo pelo proxy.",
+    dnsScopeHint: "Aplicado ao motor HTTP nativo. O aria2 usa a resolução do sistema; o SOCKS5H continua resolvendo pelo proxy.",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
     automatic: "Automático",
@@ -444,7 +444,7 @@ const catalogs = {
     aiStatusProposed: "等待批准", aiStatusTesting: "测试中", aiStatusSaved: "已保存", aiStatusConfirmed: "已确认", aiStatusRejected: "未解决",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
-    toolbox: "工具箱", update: "更新", gopeedBackend: "Gopeed（后台引擎）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "VLC / mpv / 媒体播放器",
+    toolbox: "工具箱", update: "更新", aria2Backend: "aria2（HTTP/HTTPS、FTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "VLC / mpv / 媒体播放器",
     donatePaypal: "通过 PayPal 捐赠",
     about: "关于", aboutDescription: "关于 Apocalipse Download Manager 的创作者。", aboutCreator: "创作者：Juliano - 巴西 - Sátia Mortadela", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量",
     overview: "概览",
@@ -580,7 +580,7 @@ const catalogs = {
     dnsProvider: "提供商",
     dnsCustom: "自定义",
     dnsServers: "DNS 服务器",
-    dnsScopeHint: "应用于原生 HTTP 引擎。Gopeed 使用自己的网络栈；SOCKS5H 仍通过代理解析。",
+    dnsScopeHint: "应用于原生 HTTP 引擎。aria2 使用系统解析器；SOCKS5H 仍通过代理解析。",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
     automatic: "自动",
@@ -2047,7 +2047,7 @@ document.querySelector("#save-tools").onclick = async (event) => {
       ytDlp: document.querySelector("#tool-yt-dlp").value,
       qjs: document.querySelector("#tool-qjs").value,
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
-      gopeed: document.querySelector("#tool-gopeed").value,
+      aria2: document.querySelector("#tool-aria2").value,
     });
     await invoke("set_media_player", { path: document.querySelector("#media-player").value });
     toolsDialog.close();
@@ -2287,7 +2287,7 @@ document.querySelector("#analyze").onclick = async () => {
     }
     box.textContent = `${plan.primary} · ${plan.reason}`;
     if (plan.primary === "YtDlp") await showMediaInspection(url.value);
-    else if (plan.primary === "Gopeed" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) {
+    else if (plan.primary === "Aria2Rpc" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) {
       const startedAt = Date.now();
       const updateMetadataStatus = () => {
         const seconds = Math.floor((Date.now() - startedAt) / 1000);
