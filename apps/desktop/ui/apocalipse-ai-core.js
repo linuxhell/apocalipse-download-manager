@@ -30,6 +30,8 @@
       genericFailure: "The latest related failure was: {detail}",
       historyEmpty: "There are no saved corrections.",
       historyCount: "There are {count} saved correction(s). Open Correction history to view, apply or remove them.",
+      knownCorrection: "I already have a locally confirmed correction for {site}: “{name}”. It worked {count} time(s), most recently with Apocalipse {version}. You can apply it again for testing if the problem returned.",
+      correctionLearned: "I saved “{name}” as a new local correction candidate for {site}. It will only become confirmed knowledge after a successful manual test.",
       noPending: "There is no correction waiting for your decision.",
       correctionTesting: "“{name}” is now marked for testing. Reproduce the problem and tell me whether it worked.",
       correctionRejected: "The correction did not solve the problem. I restored its previous state and will analyze the new records for another safe possibility.",
@@ -81,6 +83,8 @@
       updateNavTitle: "New Apocalipse version {latest} available",
       upToDate: "Apocalipse is up to date. This computer is running {current}.",
       updateUnavailable: "I couldn’t reach the official update service right now. The installed version is {current}.",
+      updateDetails: "Official notes for Apocalipse {latest}: {details}",
+      updateDetailsUnavailable: "I checked Apocalipse {latest}, but the official release does not include usable release notes. Open the official Releases page for the complete publication.",
       siteLogFound: "I found {count} diagnostic event(s) for {site}. The latest record is: {detail}",
       siteLogEmpty: "I found no diagnostic records for {site} in the current log.",
       offTopic: "I’m specialized in Apocalipse Download Manager. Ask me about its downloads, sites, extension, media, settings, tools or diagnostics.",
@@ -106,6 +110,8 @@
       genericFailure: "A última falha relacionada foi: {detail}",
       historyEmpty: "Não há correções guardadas.",
       historyCount: "Existem {count} correção(ões) guardada(s). Abra o Histórico de correções para visualizar, aplicar ou apagar.",
+      knownCorrection: "Já tenho uma correção confirmada localmente para {site}: “{name}”. Ela funcionou {count} vez(es), mais recentemente no Apocalipse {version}. Você pode aplicá-la novamente para teste se o problema voltou.",
+      correctionLearned: "Guardei “{name}” como uma nova candidata de correção local para {site}. Ela só vira conhecimento confirmado depois de um teste manual bem-sucedido.",
       noPending: "Não existe uma correção aguardando sua decisão.",
       correctionTesting: "“{name}” foi marcada para teste. Reproduza o problema e depois informe se funcionou.",
       correctionRejected: "A correção não resolveu o problema. Restaurei o estado anterior e vou analisar os novos registros procurando outra possibilidade segura.",
@@ -157,6 +163,8 @@
       updateNavTitle: "Nova versão do Apocalipse {latest} disponível",
       upToDate: "O Apocalipse está atualizado. Este computador está usando a versão {current}.",
       updateUnavailable: "Não consegui acessar o serviço oficial de atualização agora. A versão instalada é {current}.",
+      updateDetails: "Notas oficiais do Apocalipse {latest}: {details}",
+      updateDetailsUnavailable: "Conferi o Apocalipse {latest}, mas essa release não possui notas oficiais utilizáveis. Abra a página oficial de Releases para ver a publicação completa.",
       siteLogFound: "Encontrei {count} registro(s) de diagnóstico sobre {site}. O registro mais recente é: {detail}",
       siteLogEmpty: "Não encontrei registros de diagnóstico sobre {site} no log atual.",
       offTopic: "Sou especializada no Apocalipse Download Manager. Pergunte sobre downloads, sites, extensão, mídia, configurações, ferramentas ou diagnósticos.",
@@ -182,6 +190,8 @@
       genericFailure: "最近一次相关故障是：{detail}",
       historyEmpty: "没有保存的修正。",
       historyCount: "已保存 {count} 个修正。打开“修正历史”可以查看、应用或删除。",
+      knownCorrection: "我已经有一个针对 {site} 的本地已确认修正：“{name}”。它已成功 {count} 次，最近一次是在 Apocalipse {version}。如果问题再次出现，可以重新应用它进行测试。",
+      correctionLearned: "我已将“{name}”保存为 {site} 的新本地修正候选。只有在手动测试成功后，它才会成为已确认知识。",
       noPending: "没有等待你决定的修正。",
       correctionTesting: "“{name}”已标记为测试。请重现问题，然后告诉我是否有效。",
       correctionRejected: "此修正没有解决问题。我已恢复之前的状态，并会分析新记录以寻找另一种安全方案。",
@@ -233,6 +243,8 @@
       updateNavTitle: "Apocalipse 新版本 {latest} 可用",
       upToDate: "Apocalipse 已是最新版本。这台电脑当前使用 {current}。",
       updateUnavailable: "目前无法连接官方更新服务。已安装版本为 {current}。",
+      updateDetails: "Apocalipse {latest} 的官方更新说明：{details}",
+      updateDetailsUnavailable: "我已检查 Apocalipse {latest}，但该版本没有可用的官方更新说明。请打开官方 Releases 页面查看完整发布内容。",
       siteLogFound: "我找到了 {count} 条关于 {site} 的诊断记录。最新记录是：{detail}",
       siteLogEmpty: "当前日志中没有找到关于 {site} 的诊断记录。",
       offTopic: "我专用于 Apocalipse Download Manager。你可以询问下载、网站、扩展、媒体、设置、工具或诊断。",
@@ -460,12 +472,78 @@
     return [...(corrections || [])].reverse().find(item => q.includes(fold(item.name))) || null;
   }
 
+  function parseCorrectionTeachCommand(input) {
+    const value = String(input || "").trim();
+    const patterns = [
+      /^(?:aprenda|aprender|guarde|guardar|salve|salvar|nova)\s+(?:esta\s+)?(?:corre[cç][aã]o|solu[cç][aã]o)(?:\s+(?:para|do|de)\s+([a-z0-9.-]+))?\s*[:\-]\s*(.{4,})$/iu,
+      /^(?:learn|remember|save|new)\s+(?:this\s+)?(?:fix|correction)(?:\s+for\s+([a-z0-9.-]+))?\s*[:\-]\s*(.{4,})$/iu,
+      /^(?:保存|记住|学习)(?:这个)?(?:修正|解决方案)(?:\s*([a-z0-9.-]+))?\s*[:：\-]\s*(.{2,})$/u,
+    ];
+    for (const pattern of patterns) {
+      const match = value.match(pattern);
+      if (!match) continue;
+      const name = String(match[2] || "").trim().replace(/\s+/g, " ").slice(0, 160);
+      if (!name) return null;
+      const site = String(match[1] || siteFrom(name) || "Apocalipse").trim().toLowerCase().slice(0, 120);
+      return { name, site };
+    }
+    return null;
+  }
+
+  function findRelevantConfirmedCorrection(input, corrections) {
+    const q = normalizeQuestion(input);
+    const site = siteFrom(q);
+    const confirmed = [...(corrections || [])].reverse().filter(item => item?.status === "confirmed");
+    if (!confirmed.length) return null;
+    if (site) {
+      const foldedSite = fold(site);
+      const match = confirmed.find(item => {
+        const savedSite = fold(item?.site || "");
+        const name = fold(item?.name || "");
+        return savedSite === foldedSite || savedSite.endsWith(`.${foldedSite}`) || name.includes(foldedSite);
+      });
+      if (match) return match;
+    }
+    if (!/(corre|fix|soluc|falh|erro|error|problem|修正|解决|失败|错误)/.test(q)) return null;
+    return confirmed.find(item => {
+      const name = fold(item?.name || "");
+      return name.length >= 8 && q.includes(name);
+    }) || null;
+  }
+
   function respond(input, context = {}) {
     const locale = localeOf(context.locale);
     const q = normalizeQuestion(input);
     const corrections = context.corrections || [];
     const pending = [...corrections].reverse().find(item => ["proposed", "testing"].includes(item.status));
     if (!q) return { text: say(locale, "unknown"), intent: "unknown" };
+
+    const taughtCorrection = parseCorrectionTeachCommand(input);
+    if (taughtCorrection) {
+      return {
+        text: say(locale, "correctionLearned", taughtCorrection),
+        intent: "correction_learned",
+        learnCorrection: { ...taughtCorrection, status: "saved" },
+      };
+    }
+
+    const asksUpdateDetails = /(o que mudou|o que tem de novo|novidad|corre[cç][oõ]es?.*(?:atualiz|vers)|changelog|release notes?|what changed|what(?:'s| is) new|new fixes|fixes?.*(?:update|version)|更新内容|更新了什么|新修正|修复内容)/.test(q);
+    if (asksUpdateDetails) {
+      const update = context.updateState || {};
+      const details = String(update.notesSummary || "").trim();
+      if (details) {
+        return {
+          text: say(locale, "updateDetails", { latest: update.latest || context.appVersion || "—", details }),
+          intent: "update_details",
+        };
+      }
+      return {
+        text: say(locale, "updateChecking"),
+        intent: "update_details",
+        action: { type: "check_app_update", wantDetails: true },
+      };
+    }
+
     if (/(?:^|\b)(?:limpe|limpar|apague|apagar|clear|erase|delete)(?:\s+(?:essa|esta|a|the))?\s+(?:tela\s+do\s+)?(?:chat|conversa|conversation)(?:\b|$)|清除(?:聊天|对话)/.test(q)) {
       return { text: say(locale, "chatCleared"), intent: "chat_clear", action: { type: "clear_chat" } };
     }
@@ -519,6 +597,20 @@
       return { text: say(locale, "correctionRemoved", { name: found.name }), intent: "correction_removed", correctionId: found.id, remove: true };
     }
 
+    const knownCorrection = findRelevantConfirmedCorrection(input, corrections);
+    if (knownCorrection) {
+      return {
+        text: say(locale, "knownCorrection", {
+          site: knownCorrection.site || siteFrom(knownCorrection.name) || "Apocalipse",
+          name: knownCorrection.name,
+          count: Math.max(1, Number(knownCorrection.successCount || 1)),
+          version: knownCorrection.lastVerifiedVersion || context.appVersion || "—",
+        }),
+        intent: "known_correction",
+        correctionId: knownCorrection.id,
+      };
+    }
+
     if (/(botao|button|按钮)/.test(q) && !/(video|download|baix|gravar|record|visuali|preview|视频|下载|录制|预览)/.test(q)) {
       return { text: say(locale, "clarifyButton"), intent: "clarification", confidence: 0.45 };
     }
@@ -531,5 +623,5 @@
       : { text: say(locale, "offTopic"), intent: "unknown" };
   }
 
-  return { contextualQuestion, copy, diagnose, fold, formatRate, localeOf, normalizeQuestion, parseCredentialCommand, parseEvents, performanceDiagnosis, previousSubject, redactCredentialCommand, respond, say, siteFrom };
+  return { contextualQuestion, copy, diagnose, findRelevantConfirmedCorrection, fold, formatRate, localeOf, normalizeQuestion, parseCorrectionTeachCommand, parseCredentialCommand, parseEvents, performanceDiagnosis, previousSubject, redactCredentialCommand, respond, say, siteFrom };
 });
