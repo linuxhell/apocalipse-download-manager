@@ -7163,8 +7163,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 }
                 let replacement_path = find_named_file(&extracted, executable_name, 0)
                     .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
-                let replacement =
-                    fs::read(replacement_path).map_err(|error| error.to_string())?;
+                let replacement = fs::read(replacement_path).map_err(|error| error.to_string())?;
                 let ffprobe_replacement = if id == "ffmpeg" {
                     fs::read(
                         find_named_file(
