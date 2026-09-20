@@ -4430,6 +4430,340 @@ async fn log_network_route(state: &AppState, operation: &str, engine: &str) {
     }
 }
 
+
+fn gopeed_request_context(state: &AppState, task: &DownloadTask) -> (gopeed::RequestContext, usize) {
+    let settings = state.settings.lock().ok().map(|value| value.clone()).unwrap_or_default();
+    let identity = state
+        .request_identities
+        .lock()
+        .ok()
+        .and_then(|items| items.get(&task.id).cloned());
+    let host_rule = host_rule_for_url(&settings, &task.source).cloned();
+    let connections = task
+        .connections_override
+        .or_else(|| host_rule.as_ref().and_then(|rule| rule.connections))
+        .unwrap_or(settings.connections_per_download)
+        .clamp(1, 32);
+    let mut headers = HashMap::new();
+    if let Some(referer) = task.referer.as_deref() {
+        headers.insert("Referer".to_owned(), referer.to_owned());
+    }
+    if let Some(user_agent) = host_rule
+        .as_ref()
+        .and_then(|rule| rule.user_agent.as_ref())
+        .or(settings.user_agent.as_ref())
+        .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_ref()))
+    {
+        headers.insert("User-Agent".to_owned(), user_agent.clone());
+    }
+    if let Some(cookie) = identity
+        .as_ref()
+        .and_then(|value| value.cookie_header.as_ref())
+    {
+        headers.insert("Cookie".to_owned(), cookie.clone());
+    }
+    if let Some(content_type) = identity
+        .as_ref()
+        .and_then(|value| value.request_content_type.as_ref())
+    {
+        headers.insert("Content-Type".to_owned(), content_type.clone());
+    }
+    if let Some(credential) =
+        effective_credential_for_download(&settings, &task.source, task.referer.as_deref())
+    {
+        let basic = BASE64.encode(format!("{}:{}", credential.username, credential.password));
+        headers.insert("Authorization".to_owned(), format!("Basic {basic}"));
+    }
+    (
+        gopeed::RequestContext {
+            method: identity
+                .as_ref()
+                .map(|value| value.request_method.clone())
+                .unwrap_or_else(|| "GET".to_owned()),
+            headers,
+            body: identity
+                .and_then(|value| value.request_body)
+                .unwrap_or_default(),
+        },
+        connections,
+    )
+}
+
+async fn run_gopeed_download(
+    app: tauri::AppHandle,
+    id: DownloadId,
+    task: DownloadTask,
+    kind: DownloadKind,
+    mut cancellation: oneshot::Receiver<()>,
+) {
+    let state = app.state::<AppState>();
+    update_task(&app, id, true, |item| {
+        item.state = DownloadState::Downloading;
+        item.progress_percent = Some(0.0);
+        item.resume_supported = Some(true);
+    });
+    let route_app = app.clone();
+    let route_operation = id.to_string();
+    tauri::async_runtime::spawn(async move {
+        let state = route_app.state::<AppState>();
+        log_network_route(&state, &route_operation, "Gopeed").await;
+    });
+    let endpoint = match gopeed_endpoint(&state).await {
+        Ok(endpoint) => endpoint,
+        Err(message) => {
+            update_task(&app, id, true, |item| {
+                item.state = DownloadState::Failed {
+                    message: format!("gopeed_unavailable:{message}"),
+                }
+            });
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    };
+    let (context, connections) = gopeed_request_context(&state, &task);
+    let existing_task = state
+        .gopeed_tasks
+        .lock()
+        .ok()
+        .and_then(|items| items.get(&id).cloned());
+    let gopeed_id = match existing_task {
+        Some(gopeed_id) => {
+            if let Err(error) = endpoint.resume(&gopeed_id).await {
+                update_task(&app, id, true, |item| {
+                    item.state = DownloadState::Failed {
+                        message: format!("gopeed_resume_failed:{error}"),
+                    }
+                });
+                if let Ok(mut workers) = state.workers.lock() {
+                    workers.remove(&id);
+                }
+                start_next_queued(&app);
+                return;
+            }
+            gopeed_id
+        }
+        None => {
+            let selected_files = task
+                .torrent_selection
+                .iter()
+                .filter_map(|index| index.checked_sub(1))
+                .collect::<Vec<_>>();
+            let is_http = matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp);
+            let resolved_id = if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
+                let cached = state
+                    .gopeed_resolves
+                    .lock()
+                    .ok()
+                    .and_then(|items| items.get(&task.source).cloned());
+                match cached {
+                    Some(value) => Some(value),
+                    None => {
+                        let directory = task
+                            .destination
+                            .parent()
+                            .unwrap_or_else(|| Path::new("."))
+                            .to_string_lossy()
+                            .into_owned();
+                        match endpoint.resolve(&task.source, &directory, &context).await {
+                            Ok(resolved) => {
+                                if let Ok(mut items) = state.gopeed_resolves.lock() {
+                                    items.insert(task.source.clone(), resolved.id.clone());
+                                }
+                                Some(resolved.id)
+                            }
+                            Err(error) => {
+                                update_task(&app, id, true, |item| {
+                                    item.state = DownloadState::Failed {
+                                        message: format!("gopeed_torrent_resolve_failed:{error}"),
+                                    }
+                                });
+                                if let Ok(mut workers) = state.workers.lock() {
+                                    workers.remove(&id);
+                                }
+                                start_next_queued(&app);
+                                return;
+                            }
+                        }
+                    }
+                }
+            } else {
+                None
+            };
+            match endpoint
+                .create_task(
+                    &task.source,
+                    &task.destination,
+                    connections,
+                    &selected_files,
+                    &context,
+                    resolved_id.as_deref(),
+                    is_http,
+                )
+                .await
+            {
+                Ok(gopeed_id) => {
+                    if let Ok(mut items) = state.gopeed_tasks.lock() {
+                        items.insert(id, gopeed_id.clone());
+                    }
+                    gopeed_id
+                }
+                Err(error) => {
+                    update_task(&app, id, true, |item| {
+                        item.state = DownloadState::Failed {
+                            message: format!("gopeed_create_failed:{error}"),
+                        }
+                    });
+                    if let Ok(mut workers) = state.workers.lock() {
+                        workers.remove(&id);
+                    }
+                    start_next_queued(&app);
+                    return;
+                }
+            }
+        }
+    };
+    diagnostic_log(
+        &state,
+        "INFO",
+        "gopeed.task_started",
+        &format!(
+            "task={id} gopeed_task={gopeed_id} engine={kind:?} connections={connections}"
+        ),
+    );
+    state.diagnostics.record(
+        "http.engine_selected",
+        "INFO",
+        None,
+        Some(&id.to_string()),
+        serde_json::json!({
+            "engine": "gopeed",
+            "connections": connections,
+            "kind": format!("{kind:?}")
+        }),
+    );
+
+    let mut last_at = Instant::now();
+    let mut last_downloaded = 0_u64;
+    let mut interval = tokio::time::interval(Duration::from_millis(350));
+    let mut terminal = false;
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut cancellation => {
+                let _ = endpoint.pause(&gopeed_id).await;
+                diagnostic_log(&state, "INFO", "gopeed.paused", &format!("task={id} gopeed_task={gopeed_id}"));
+                return;
+            }
+            _ = interval.tick() => {
+                let status = match endpoint.status(&gopeed_id).await {
+                    Ok(status) => status,
+                    Err(error) => {
+                        diagnostic_log(&state, "WARN", "gopeed.status_failed", &format!("task={id} error={error}"));
+                        continue;
+                    }
+                };
+                let stats = endpoint.stats(&gopeed_id).await.unwrap_or_default();
+                let now = Instant::now();
+                let elapsed = now.duration_since(last_at).as_secs_f64().max(0.001);
+                let raw_speed = if status.downloaded >= last_downloaded {
+                    ((status.downloaded - last_downloaded) as f64 / elapsed) as u64
+                } else {
+                    status.speed
+                };
+                last_at = now;
+                last_downloaded = status.downloaded;
+                let percent = if status.total > 0 {
+                    Some((status.downloaded as f64 * 100.0 / status.total as f64).clamp(0.0, 100.0))
+                } else {
+                    None
+                };
+                let eta = if status.speed > 0 && status.total > status.downloaded {
+                    Some(format!("{}s", (status.total - status.downloaded) / status.speed))
+                } else {
+                    None
+                };
+                update_task(&app, id, false, |item| {
+                    item.received = status.downloaded;
+                    item.total = (status.total > 0).then_some(status.total);
+                    item.progress_percent = percent;
+                    item.download_speed = Some(status.speed.max(raw_speed));
+                    item.upload_speed = Some(status.upload_speed);
+                    item.torrent_seeders = Some(stats.seeders);
+                    item.torrent_leechers = Some(stats.leechers);
+                    item.torrent_eta = eta.clone();
+                });
+                state.diagnostics.record(
+                    if is_http_kind(kind) { "http.performance_sample" } else { "gopeed.performance_sample" },
+                    "INFO",
+                    None,
+                    Some(&id.to_string()),
+                    serde_json::json!({
+                        "engine": "gopeed",
+                        "bytesPerSecond": raw_speed,
+                        "reportedBytesPerSecond": status.speed,
+                        "receivedBytes": status.downloaded,
+                        "totalBytes": status.total,
+                        "progressPercent": percent,
+                        "activeConnections": stats.active_connections,
+                        "activePeers": stats.active_peers,
+                        "totalPeers": stats.total_peers,
+                        "seeders": stats.seeders,
+                        "leechers": stats.leechers,
+                        "sampleWindowMs": 350
+                    }),
+                );
+                match status.status.as_str() {
+                    "done" => {
+                        update_task(&app, id, true, |item| {
+                            item.received = status.total.max(status.downloaded);
+                            item.total = Some(status.total.max(status.downloaded));
+                            item.progress_percent = Some(100.0);
+                            item.download_speed = Some(0);
+                            item.upload_speed = Some(0);
+                            item.state = DownloadState::Completed;
+                            item.completed_at = Some(epoch_seconds());
+                        });
+                        terminal = true;
+                        break;
+                    }
+                    "error" => {
+                        update_task(&app, id, true, |item| {
+                            item.state = DownloadState::Failed {
+                                message: "gopeed_task_failed".to_owned(),
+                            };
+                        });
+                        terminal = true;
+                        break;
+                    }
+                    "pause" => {
+                        update_task(&app, id, true, |item| {
+                            item.state = DownloadState::Paused;
+                            item.download_speed = Some(0);
+                            item.upload_speed = Some(0);
+                        });
+                        terminal = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    if terminal {
+        if let Ok(mut workers) = state.workers.lock() {
+            workers.remove(&id);
+        }
+        start_next_queued(&app);
+    }
+}
+
+fn is_http_kind(kind: DownloadKind) -> bool {
+    matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp)
+}
+
 async fn run_external_download(
     app: tauri::AppHandle,
     id: DownloadId,
