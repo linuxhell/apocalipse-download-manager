@@ -1368,24 +1368,56 @@ body.link-window .link-window-header h1 {
 body.link-window .link-panel {
   height: calc(100vh - 116px);
   grid-template-columns: minmax(320px, .85fr) minmax(420px, 1.15fr);
-  grid-template-rows: auto minmax(0, 1fr);
+  /* Keep a dedicated row for transfer controls so it never steals the file-list row. */
+  grid-template-rows: auto minmax(300px, 1fr) auto;
   align-items: stretch;
   margin: 0;
 }
 body.link-window .link-panel > div {
   min-height: 0;
 }
+/* The connection area is intentionally denser in the dedicated Link window.
+   This reserves most of the maximized window for browsing local/remote files. */
+body.link-window .link-identity,
+body.link-window .link-connect {
+  gap: 7px;
+  padding: 13px 16px;
+}
+body.link-window .link-identity input,
+body.link-window .link-connect input {
+  padding: 8px 10px;
+}
+body.link-window .link-identity label,
+body.link-window .link-connect label {
+  gap: 4px;
+}
+body.link-window .link-share-actions,
+body.link-window .link-connection-actions {
+  gap: 6px;
+}
 body.link-window .link-files {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  min-height: 0;
+  min-height: 300px;
+  padding: 14px 16px;
 }
 body.link-window .link-files > div {
   height: auto;
   min-height: 0;
 }
+body.link-window .link-transfer-panel {
+  padding: 11px 16px;
+  gap: 5px!important;
+}
+body.link-window .link-transfer-track {
+  height: 10px;
+}
+body.link-window .link-transfer-actions button {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
 body.link-window #link-share-list {
-  max-height: 180px;
+  max-height: 120px;
 }
 @media (max-width: 980px) {
   body.link-window .link-panel {
