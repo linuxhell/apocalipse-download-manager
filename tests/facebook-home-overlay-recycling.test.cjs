@@ -13,9 +13,10 @@ test('Facebook Home revalidates recycled video elements before keeping an overla
   assert.match(content, /bindingId: isFacebookVideo \? playerIdentity\(element\) : null/);
 });
 
-test('Facebook overlay keeps sponsored and audio-only content filtered', () => {
-  assert.match(content, /facebook\.overlay_skipped_sponsored/);
-  assert.match(content, /isSponsoredFacebookPlayer\(element\)/);
+test('Facebook Home keeps sponsored media eligible for overlays while audio-only stays filtered', () => {
+  assert.match(content, /facebook\.sponsored_home_allowed/);
+  assert.match(content, /allow_sponsored_home/);
+  assert.doesNotMatch(content, /facebook\.overlay_skipped_sponsored/);
   assert.match(content, /facebookPage && element\.tagName === "AUDIO"/);
   assert.match(content, /facebook\.overlay_skipped_audio_only/);
 });
@@ -32,10 +33,11 @@ test('stale dataset marker cannot block overlay reinstall after DOM recycling', 
 });
 
 
-test('Facebook sponsored filtering requires a visible explicit marker and avoids generic ads links', () => {
-  assert.match(content, /const visibleMarker = marker =>/);
-  assert.match(content, /style\.display !== "none"/);
-  assert.match(content, /style\.visibility !== "hidden"/);
+test('Facebook popup sponsored filtering requires same-article header evidence', () => {
+  assert.match(content, /const facebookSponsoredEvidence = \(element\) =>/);
+  assert.match(content, /exact_header_label_same_article/);
+  assert.match(content, /rect\.bottom <= playerRect\.top \+ 18/);
+  assert.match(content, /facebook\.popup_sponsored_filtered/);
   assert.doesNotMatch(content, /a\[href\*="\/ads\/"\]/);
   assert.doesNotMatch(content, /a\[href\*="ads\/about"\]/);
 });
@@ -66,4 +68,15 @@ test('social debugger supports Facebook, Instagram, TikTok and future generic ha
   assert.match(content, /return "tiktok"/);
   assert.match(content, /return "x"/);
   assert.match(content, /return "generic"/);
+});
+
+
+test('Facebook popup purges sponsored media already retained in the catalog', () => {
+  assert.match(content, /mediaCatalog\.delete/);
+  assert.match(content, /retainedPurged: Boolean\(sponsoredUrl\)/);
+});
+
+test('Facebook Home permalink discovery uses the deep V3 resolver before the legacy fallback', () => {
+  assert.match(content, /ADM_SOCIAL_HOME_FEED_V3\?\.facebookDom\?\.\(element\)/);
+  assert.match(content, /if \(v3\?\.url && isFacebookMediaUrl\(v3\.url\)\) return v3\.url/);
 });
