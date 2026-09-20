@@ -210,6 +210,50 @@ impl Drop for Runtime {
     }
 }
 
+fn runtime_status_from_task(value: &Value) -> Result<RuntimeStatus, String> {
+    if let Some(progress) = value.get("progress") {
+        let status = value
+            .get("status")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "gopeed_task_status_missing".to_owned())?
+            .to_owned();
+        let resource = value.pointer("/meta/res").unwrap_or(&Value::Null);
+        let resource_files = resource
+            .get("files")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut total = resource.get("size").and_then(Value::as_u64).unwrap_or(0);
+        if total == 0 {
+            total = resource_files
+                .iter()
+                .filter_map(|file| file.get("size").and_then(Value::as_u64))
+                .sum();
+        }
+        return Ok(RuntimeStatus {
+            status,
+            used: progress.get("used").and_then(Value::as_u64).unwrap_or(0),
+            speed: progress.get("speed").and_then(Value::as_u64).unwrap_or(0),
+            downloaded: progress
+                .get("downloaded")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            total,
+            upload_speed: progress
+                .get("uploadSpeed")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            uploaded: progress
+                .get("uploaded")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            files: Vec::new(),
+        });
+    }
+
+    serde_json::from_value(value.clone()).map_err(|error| error.to_string())
+}
+
 impl Endpoint {
     async fn request(
         &self,
@@ -358,21 +402,22 @@ impl Endpoint {
     }
 
     pub async fn status(&self, task_id: &str) -> Result<RuntimeStatus, String> {
+        // Gopeed v1.9.3 exposes the task state at /api/v1/tasks/{id};
+        // newer builds keep this endpoint as well. The /status suffix is not
+        // available in the backend bundled by ADM.
         let value = self
-            .request(
-                Method::GET,
-                &format!("/api/v1/tasks/{task_id}/status"),
-                None,
-            )
+            .request(Method::GET, &format!("/api/v1/tasks/{task_id}"), None)
             .await?;
-        serde_json::from_value(value).map_err(|error| error.to_string())
+        runtime_status_from_task(&value)
     }
 
     pub async fn stats(&self, task_id: &str) -> Result<StatsSummary, String> {
         let value = self
             .request(Method::GET, &format!("/api/v1/tasks/{task_id}/stats"), None)
             .await?;
-        let snapshot = value.get("snapshot").unwrap_or(&Value::Null);
+        // v1.9.3 returns {connections:[...]}; newer builds wrap HTTP stats in
+        // {snapshot:{connections:[...]}, runtime:{...}}.
+        let snapshot = value.get("snapshot").unwrap_or(&value);
         let runtime = value.get("runtime").unwrap_or(&Value::Null);
         let connections = snapshot
             .get("connections")
@@ -468,4 +513,50 @@ fn http_request_extra(context: &RequestContext) -> Value {
         "header": context.headers,
         "body": context.body,
     })
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn parses_gopeed_v193_task_progress() {
+        let value = serde_json::json!({
+            "status": "running",
+            "meta": {
+                "res": {
+                    "size": 6482409472_u64,
+                    "files": [{"name": "ubuntu.iso", "size": 6482409472_u64}]
+                }
+            },
+            "progress": {
+                "used": 1_000_000_u64,
+                "speed": 123_000_000_u64,
+                "downloaded": 456_000_000_u64,
+                "uploadSpeed": 0,
+                "uploaded": 0
+            }
+        });
+        let status = runtime_status_from_task(&value).expect("v1.9.3 task should parse");
+        assert_eq!(status.status, "running");
+        assert_eq!(status.total, 6482409472);
+        assert_eq!(status.downloaded, 456_000_000);
+        assert_eq!(status.speed, 123_000_000);
+    }
+
+    #[test]
+    fn parses_gopeed_v193_direct_connection_stats_shape() {
+        let value = serde_json::json!({
+            "connections": [
+                {"downloaded": 10, "completed": false, "failed": false, "retryTimes": 0},
+                {"downloaded": 20, "completed": true, "failed": false, "retryTimes": 0}
+            ]
+        });
+        let snapshot = value.get("snapshot").unwrap_or(&value);
+        let connections = snapshot
+            .get("connections")
+            .and_then(Value::as_array)
+            .expect("v1.9.3 connections should be visible");
+        assert_eq!(connections.len(), 2);
+    }
 }
