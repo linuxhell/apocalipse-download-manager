@@ -5840,10 +5840,14 @@ async fn terminate_process_tree(child: &mut tokio::process::Child) {
 fn engine_log_name(kind: DownloadKind, task: &DownloadTask) -> &'static str {
     match kind {
         DownloadKind::MediaPage => "yt-dlp",
-        DownloadKind::Hls if task
-            .format_selection
-            .as_deref()
-            .is_some_and(|value| value.starts_with("audio:")) => "ffmpeg",
+        DownloadKind::Hls
+            if task
+                .format_selection
+                .as_deref()
+                .is_some_and(|value| value.starts_with("audio:")) =>
+        {
+            "ffmpeg"
+        }
         DownloadKind::Hls => "n-m3u8dl-re",
         _ => "external",
     }
@@ -5862,7 +5866,13 @@ fn write_engine_diagnostic(
     fs::create_dir_all(&directory).ok()?;
     let safe_engine = engine
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect::<String>();
     let path = directory.join(format!("{safe_engine}-{id}.log"));
     let proxy_password = state
@@ -6180,10 +6190,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         ));
     }
 
-    let runtime_root = state
-        .queue_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
+    let runtime_root = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
     let engines_dir = runtime_root.join("logs").join("engines");
     if let Ok(files) = fs::read_dir(&engines_dir) {
         let mut files = files.filter_map(Result::ok).collect::<Vec<_>>();
