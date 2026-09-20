@@ -6905,7 +6905,11 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             ),
             "gopeed" => (
                 "GopeedLab/gopeed",
-                if cfg!(windows) { "gopeed.exe" } else { "gopeed" },
+                if cfg!(windows) {
+                    "gopeed.exe"
+                } else {
+                    "gopeed"
+                },
                 gopeed_markers.as_slice(),
                 &["--version"],
             ),
@@ -6932,7 +6936,14 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 .and_then(|path| fs::read_to_string(path).ok())
                 .map(|value| value.trim().to_owned())
                 .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| if executable.is_file() { "installed" } else { "not installed" }.to_owned())
+                .unwrap_or_else(|| {
+                    if executable.is_file() {
+                        "installed"
+                    } else {
+                        "not installed"
+                    }
+                    .to_owned()
+                })
         } else {
             version_line(&executable, version_args).unwrap_or_else(|| "unknown".to_owned())
         };
@@ -6973,10 +6984,12 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 match id.as_str() {
                     "qjs" => name == "qjs-windows-x86_64.exe",
                     "ffmpeg" => name.ends_with("win64-gpl.zip") && !name.contains("shared"),
-                    "gopeed" => name.starts_with("gopeed-web-")
-                        && asset_markers
-                            .iter()
-                            .all(|marker| name.contains(&marker.to_ascii_lowercase())),
+                    "gopeed" => {
+                        name.starts_with("gopeed-web-")
+                            && asset_markers
+                                .iter()
+                                .all(|marker| name.contains(&marker.to_ascii_lowercase()))
+                    }
                     _ => asset_markers
                         .iter()
                         .all(|marker| name.contains(&marker.to_ascii_lowercase())),
