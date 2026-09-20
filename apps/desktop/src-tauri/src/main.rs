@@ -6980,7 +6980,11 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             ),
             "n-m3u8dl-re" => (
                 "nilaoda/N_m3u8DL-RE",
-                if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" },
+                if cfg!(windows) {
+                    "N_m3u8DL-RE.exe"
+                } else {
+                    "N_m3u8DL-RE"
+                },
                 &[],
                 &["--version"],
             ),
@@ -6990,7 +6994,11 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 } else {
                     "BtbN/FFmpeg-Builds"
                 },
-                if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" },
+                if cfg!(windows) {
+                    "ffmpeg.exe"
+                } else {
+                    "ffmpeg"
+                },
                 &[],
                 &["-version"],
             ),
@@ -7073,7 +7081,8 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                         "windows" => name.ends_with("win64-gpl.zip") && !name.contains("shared"),
                         "linux" => {
                             let marker = "linux64";
-                            name.ends_with(&format!("{marker}-gpl.tar.xz")) && !name.contains("shared")
+                            name.ends_with(&format!("{marker}-gpl.tar.xz"))
+                                && !name.contains("shared")
                         }
                         "macos" => {
                             let marker = "x64";
@@ -7146,32 +7155,33 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 };
                 (bytes.to_vec(), ffprobe_replacement)
             } else {
-            let extracted = temporary.join("extracted");
-            fs::create_dir_all(&extracted).map_err(|error| error.to_string())?;
-            if let Err(error) = extract_release_archive(&bytes, asset_name, &extracted) {
-                let _ = fs::remove_dir_all(&temporary);
-                return Err(format!("release_extraction_failed:{error}"));
-            }
-            let replacement_path = find_named_file(&extracted, executable_name, 0)
-                .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
-            let replacement = fs::read(replacement_path).map_err(|error| error.to_string())?;
-            let ffprobe_replacement = if id == "ffmpeg" {
-                fs::read(
-                    find_named_file(
-                        &extracted,
-                        if cfg!(windows) {
-                            "ffprobe.exe"
-                        } else {
-                            "ffprobe"
-                        },
-                        0,
+                let extracted = temporary.join("extracted");
+                fs::create_dir_all(&extracted).map_err(|error| error.to_string())?;
+                if let Err(error) = extract_release_archive(&bytes, asset_name, &extracted) {
+                    let _ = fs::remove_dir_all(&temporary);
+                    return Err(format!("release_extraction_failed:{error}"));
+                }
+                let replacement_path = find_named_file(&extracted, executable_name, 0)
+                    .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
+                let replacement =
+                    fs::read(replacement_path).map_err(|error| error.to_string())?;
+                let ffprobe_replacement = if id == "ffmpeg" {
+                    fs::read(
+                        find_named_file(
+                            &extracted,
+                            if cfg!(windows) {
+                                "ffprobe.exe"
+                            } else {
+                                "ffprobe"
+                            },
+                            0,
+                        )
+                        .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?,
                     )
-                    .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?,
-                )
-                .map_err(|error| error.to_string())?
-            } else {
-                Vec::new()
-            };
+                    .map_err(|error| error.to_string())?
+                } else {
+                    Vec::new()
+                };
                 (replacement, ffprobe_replacement)
             };
         let _ = fs::remove_dir_all(&temporary);
@@ -7187,7 +7197,11 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         let staged = parent.join(format!(".apocalipse-new-{executable_name}"));
         let backup = parent.join(format!(".{executable_name}.apocalipse-backup"));
-        let ffprobe_name = if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" };
+        let ffprobe_name = if cfg!(windows) {
+            "ffprobe.exe"
+        } else {
+            "ffprobe"
+        };
         let ffprobe = parent.join(ffprobe_name);
         let ffprobe_staged = parent.join(format!(".apocalipse-new-{ffprobe_name}"));
         let ffprobe_backup = parent.join(format!(".{ffprobe_name}.apocalipse-backup"));
