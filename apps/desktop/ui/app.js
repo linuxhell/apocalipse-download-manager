@@ -3,6 +3,8 @@ const catalogs = {
     archiveExtractor: "Archive extractor (7-Zip / RAR / UnRAR / unar / bsdtar / tar)",
     autoExtract: "Extract automatically after download",
     autoExtractHint: "Shown only for archive files. Loose root files are kept inside a folder named after the archive.",
+    networkWaiting: "Waiting for network",
+    networkWaitingHint: "The connection changed or went offline. This task will resume automatically when a network interface is available.",
     downloads: "Downloads",
     media: "Media",
     recordings: "Recordings",
@@ -229,6 +231,8 @@ const catalogs = {
     archiveExtractor: "Extrator de arquivos (7-Zip / RAR / UnRAR / unar / bsdtar / tar)",
     autoExtract: "Extrair automaticamente após o download",
     autoExtractHint: "Aparece somente para arquivos compactados. Arquivos soltos ficam dentro de uma pasta com o nome do arquivo compactado.",
+    networkWaiting: "Aguardando rede",
+    networkWaitingHint: "A conexão mudou ou ficou offline. Esta tarefa será retomada automaticamente quando uma interface de rede estiver disponível.",
     downloads: "Downloads",
     media: "Mídia",
     recordings: "Gravações",
@@ -455,6 +459,8 @@ const catalogs = {
     archiveExtractor: "压缩文件解压工具（7-Zip / RAR / UnRAR / unar / bsdtar / tar）",
     autoExtract: "下载完成后自动解压",
     autoExtractHint: "仅在压缩文件时显示。根目录中的零散文件会解压到以压缩文件命名的文件夹中。",
+    networkWaiting: "等待网络",
+    networkWaitingHint: "网络连接已更改或断开。可用网络接口恢复后，此任务会自动继续。",
     downloads: "下载",
     media: "媒体",
     recordings: "录制",
@@ -1094,15 +1100,21 @@ function renderDownloads(force = false) {
     resumeCapability.textContent = `${t("resumeCapability")} ${resumeValue}`;
     resumeCapability.dataset.supported = task.resume_supported === true ? "true" : task.resume_supported === false ? "false" : "unknown";
     info.append(resumeCapability);
+    const failureMessage = typeof task.state === "object" ? task.state.failed?.message || "" : "";
     const state = Object.assign(document.createElement("span"), {
       className: "download-state",
-      textContent: /\.recording\.webm$/i.test(task.destination) && stateKey(task.state) === "downloading" ? t("recordingActive") : stateName(task.state),
+      textContent: failureMessage === "network_waiting_for_reconnect"
+        ? t("networkWaiting")
+        : /\.recording\.webm$/i.test(task.destination) && stateKey(task.state) === "downloading"
+          ? t("recordingActive")
+          : stateName(task.state),
     });
     if (typeof task.state === "object") {
-      const failure = task.state.failed?.message || "";
-      state.title = failure === "facebook_direct_download_unavailable_use_recording"
+      state.title = failureMessage === "facebook_direct_download_unavailable_use_recording"
         ? t("facebookRecordingFallback")
-        : failure;
+        : failureMessage === "network_waiting_for_reconnect"
+          ? t("networkWaitingHint")
+          : failureMessage;
     }
     const actions = document.createElement("div");
     actions.className = "task-actions";
