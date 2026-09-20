@@ -3096,12 +3096,21 @@ fn list_archive_members(executable: &Path, kind: ExtractorKind, archive: &Path) 
     let text = String::from_utf8_lossy(&output.stdout);
     let mut names = match kind {
         ExtractorKind::SevenZip => {
-            let archive_display = archive.to_string_lossy();
-            text.lines()
-                .filter_map(|line| line.strip_prefix("Path = ").map(str::trim))
-                .filter(|name| !name.is_empty() && *name != archive_display)
-                .map(str::to_owned)
-                .collect::<Vec<_>>()
+            let mut members = Vec::new();
+            let mut inside_members = false;
+            for line in text.lines() {
+                if line.trim() == "----------" {
+                    inside_members = true;
+                    continue;
+                }
+                if !inside_members {
+                    continue;
+                }
+                if let Some(name) = line.strip_prefix("Path = ").map(str::trim).filter(|name| !name.is_empty()) {
+                    members.push(name.to_owned());
+                }
+            }
+            members
         }
         ExtractorKind::Unar => {
             let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())?;
@@ -3182,7 +3191,10 @@ fn extract_archive_safely(settings: &UserSettings, archive: &Path) -> Result<Pat
         return Err("archive_extraction_empty".to_owned());
     }
     let destination = if entries.len() == 1 && entries[0].is_dir() {
-        parent.join(entries[0].file_name().unwrap_or_default())
+        let root_name = entries[0]
+            .file_name()
+            .ok_or_else(|| "archive_root_name_missing".to_owned())?;
+        parent.join(root_name)
     } else {
         parent.join(archive_name_without_extensions(archive))
     };
@@ -3191,7 +3203,10 @@ fn extract_archive_safely(settings: &UserSettings, archive: &Path) -> Result<Pat
     } else {
         fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
         for entry in entries {
-            let target = destination.join(entry.file_name().unwrap_or_default());
+            let entry_name = entry
+                .file_name()
+                .ok_or_else(|| "archive_entry_name_missing".to_owned())?;
+            let target = destination.join(entry_name);
             move_tree(&entry, &target)?;
         }
     }
