@@ -7142,10 +7142,7 @@ async fn inspect_torrent_metadata(
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
         configured_gopeed(&settings)
     };
-    let app_data = state
-        .queue_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
+    let app_data = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
     let inspection_root = app_data
         .join("gopeed-metadata-inspection")
         .join(uuid::Uuid::new_v4().simple().to_string());
