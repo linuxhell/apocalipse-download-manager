@@ -7146,11 +7146,6 @@ async fn inspect_torrent_metadata(
         .queue_path
         .parent()
         .unwrap_or_else(|| Path::new("."));
-    // Remove the legacy inspection directory used by older experimental builds;
-    // it could contain stale .part payloads from incorrectly bound torrents.
-    let legacy_metadata_root = app_data.join("gopeed-runtime").join("metadata");
-    let _ = fs::remove_dir_all(&legacy_metadata_root);
-
     let inspection_root = app_data
         .join("gopeed-metadata-inspection")
         .join(uuid::Uuid::new_v4().simple().to_string());
