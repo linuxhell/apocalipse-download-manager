@@ -4283,7 +4283,7 @@ fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
     if let Some(parent) = state.log_path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    if fs::metadata(&state.log_path).is_ok_and(|metadata| metadata.len() > 2 * 1024 * 1024) {
+    if fs::metadata(&state.log_path).is_ok_and(|metadata| metadata.len() > 8 * 1024 * 1024) {
         let rotated = state.log_path.with_extension("log.1");
         let _ = fs::remove_file(&rotated);
         let _ = fs::rename(&state.log_path, rotated);
