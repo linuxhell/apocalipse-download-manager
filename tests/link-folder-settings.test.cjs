@@ -237,6 +237,26 @@ test("Apocalipse Link opens as a dedicated maximized native window with normal c
   assert.match(css, /body\.link-window[\s\S]*height: 100vh/);
 });
 
+test("Link lists scroll independently, disconnect explicitly and tray opens with one click", () => {
+  assert.match(html, /id="link-disconnect"/);
+  assert.match(linkHtml, /id="link-disconnect"/);
+  assert.match(app, /function disconnectLink\(\)/);
+  assert.match(linkJs, /function disconnectLink\(\)/);
+  assert.match(css, /\.link-files > div[^}]*overflow-y:auto[^}]*scrollbar-gutter:stable/);
+  assert.match(rust, /TrayIconEvent::Click[\s\S]*button: MouseButton::Left/);
+  assert.doesNotMatch(rust, /TrayIconEvent::DoubleClick/);
+});
+
+test("audio HLS analysis offers an optional localized FFmpeg conversion", () => {
+  assert.match(html, /id="hls-convert-audio"/);
+  assert.match(html, /id="hls-audio-format"[\s\S]*value="mp3"[\s\S]*value="wav"/);
+  assert.match(app, /convertWithFfmpeg: "Converter usando FFmpeg ao final do download para:"/);
+  assert.match(app, /convertWithFfmpeg: "下载完成后使用 FFmpeg 转换为："/);
+  assert.match(app, /const selection = enabled \? `audio:\$\{format\}` : "original"/);
+  assert.match(rust, /DownloadKind::Hls[\s\S]*strip_prefix\("audio:"\)[\s\S]*Command::new\(&tools\.0\)/);
+  assert.match(rust, /DownloadKind::Hls[\s\S]*Command::new\(&tools\.2\)/);
+});
+
 test("Windows Link retries Microsoft and Azure account forms after ERROR_LOGON_FAILURE", () => {
   assert.match(rust, /fn windows_logon_candidates/);
   assert.match(rust, /Some\("MicrosoftAccount"\.to_owned\(\)\)/);
