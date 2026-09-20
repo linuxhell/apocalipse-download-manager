@@ -217,6 +217,7 @@ struct AppState {
     clipboard_suppressed_until: Mutex<Option<Instant>>,
     clipboard_suppressed_value: Mutex<Option<String>>,
     bridge_pending: Mutex<Vec<BridgeDownload>>,
+    browser_assisted_pending: Mutex<Vec<BrowserDownloadComplete>>,
     blob_uploads: Mutex<HashMap<uuid::Uuid, BlobUpload>>,
     recording_stops: Mutex<HashSet<DownloadId>>,
     request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
@@ -3516,7 +3517,7 @@ struct BridgeDownload {
     start_immediately: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BrowserDownloadComplete {
     url: String,
@@ -10613,35 +10614,51 @@ fn register_browser_download(
     if host_from_url(&request.url).is_none() {
         return Err("invalid_browser_download_url".to_owned());
     }
-    let destination = PathBuf::from(request.file_name);
-    if !destination.is_absolute() || !destination.is_file() {
+    let source = PathBuf::from(&request.file_name);
+    if !source.is_absolute() || !source.is_file() {
         return Err("browser_download_not_found".to_owned());
     }
-    let destination = destination
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    let size = fs::metadata(&destination)
-        .map_err(|error| error.to_string())?
-        .len();
+    let source = source.canonicalize().map_err(|error| error.to_string())?;
+    let file_name = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "invalid_file_name".to_owned())?;
     let state = app.state::<AppState>();
+
+    if is_archive_file_name(file_name) {
+        let mut request = request;
+        request.file_name = source.to_string_lossy().into_owned();
+        state
+            .browser_assisted_pending
+            .lock()
+            .map_err(|error| error.to_string())?
+            .push(request);
+        diagnostic_log(
+            &state,
+            "INFO",
+            "browser_assisted.archive_prompt_pending",
+            &format!("file={}", source.display()),
+        );
+        show_main_window(app);
+        let _ = app.emit("browser-assisted-ready", ());
+        return Ok(());
+    }
+
+    let size = fs::metadata(&source).map_err(|error| error.to_string())?.len();
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
     if queue.iter().any(|task| {
-        task.destination == destination
+        task.destination == source
             && task.source == request.url
             && task.state == DownloadState::Completed
     }) {
         return Ok(());
     }
-    let mut task = DownloadTask::new(&request.url, destination);
+    let mut task = DownloadTask::new(&request.url, source);
     task.state = DownloadState::Completed;
     task.received = size;
     task.total = Some(request.total.unwrap_or(size).max(size));
     task.progress_percent = Some(100.0);
-    task.completed_at = Some(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |value| value.as_secs()),
-    );
+    task.completed_at = Some(epoch_seconds());
     queue.push(task.clone());
     save_queue(&state, &queue)?;
     drop(queue);
@@ -10659,6 +10676,93 @@ fn register_browser_download(
     );
     show_main_window(app);
     Ok(())
+}
+
+#[tauri::command]
+fn take_browser_assisted_download(
+    state: State<'_, AppState>,
+) -> Result<Option<BrowserDownloadComplete>, String> {
+    let mut pending = state
+        .browser_assisted_pending
+        .lock()
+        .map_err(|error| error.to_string())?;
+    Ok((!pending.is_empty()).then(|| pending.remove(0)))
+}
+
+#[tauri::command]
+fn import_browser_assisted_download(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    local_path: String,
+    url: String,
+    destination_directory: String,
+    file_name: String,
+    auto_extract: Option<bool>,
+) -> Result<DownloadTask, String> {
+    if host_from_url(&url).is_none() {
+        return Err("invalid_browser_download_url".to_owned());
+    }
+    let source = PathBuf::from(local_path.trim());
+    if !source.is_absolute() || !source.is_file() {
+        return Err("browser_download_not_found".to_owned());
+    }
+    let source = source.canonicalize().map_err(|error| error.to_string())?;
+    let directory = PathBuf::from(destination_directory.trim());
+    if !directory.is_absolute() {
+        return Err("invalid_destination_directory".to_owned());
+    }
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let file_name = validate_file_name(&file_name)?;
+    remember_download_directory(&state, &directory)?;
+
+    let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+    let requested = directory.join(&file_name);
+    let destination = if destination_key(&requested) == destination_key(&source) {
+        source.clone()
+    } else {
+        unique_destination_with_queue(&directory, &file_name, &queue)?
+    };
+
+    if destination_key(&destination) != destination_key(&source) {
+        fs::rename(&source, &destination).or_else(|_| {
+            fs::copy(&source, &destination)
+                .map(|_| ())
+                .and_then(|_| fs::remove_file(&source))
+        }).map_err(|error| error.to_string())?;
+    }
+
+    let size = fs::metadata(&destination).map_err(|error| error.to_string())?.len();
+    let mut task = DownloadTask::new(&url, destination);
+    task.state = DownloadState::Completed;
+    task.received = size;
+    task.total = Some(size);
+    task.progress_percent = Some(100.0);
+    task.completed_at = Some(epoch_seconds());
+    task.auto_extract = auto_extract.unwrap_or(false)
+        && task
+            .destination
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(is_archive_file_name);
+    queue.push(task.clone());
+    save_queue(&state, &queue)?;
+    drop(queue);
+
+    diagnostic_log(
+        &state,
+        "INFO",
+        "browser_assisted.imported",
+        &format!(
+            "task={} auto_extract={} file={}",
+            task.id,
+            task.auto_extract,
+            task.destination.display()
+        ),
+    );
+    if task.auto_extract {
+        maybe_auto_extract_completed(&app, task.id);
+    }
+    Ok(task)
 }
 
 fn association_id(source: &str) -> Option<&'static str> {
@@ -12103,6 +12207,7 @@ fn main() {
                 clipboard_suppressed_until: Mutex::new(None),
                 clipboard_suppressed_value: Mutex::new(None),
                 bridge_pending: Mutex::new(Vec::new()),
+                browser_assisted_pending: Mutex::new(Vec::new()),
                 blob_uploads: Mutex::new(HashMap::new()),
                 recording_stops: Mutex::new(HashSet::new()),
                 request_identities: Mutex::new(HashMap::new()),
@@ -12290,7 +12395,9 @@ fn main() {
             list_download_directories,
             remove_download_directory,
             clear_download_directories,
-            take_bridge_download
+            take_bridge_download,
+            take_browser_assisted_download,
+            import_browser_assisted_download
         ])
         .build(tauri::generate_context!())
         .expect("failed to build Apocalipse Download Manager")
