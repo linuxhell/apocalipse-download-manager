@@ -77,7 +77,7 @@ test('direct downloads use automatic high-speed defaults without bypassing site 
   assert.match(app, /taskConnectionsManuallyChanged = false/);
   assert.match(desktop, /limits\.connections_per_download\.max\(16\)/);
   assert.match(downloadCore, /MIN_SEGMENT_CHUNK_SIZE: u64 = 4 \* 1024 \* 1024/);
-  assert.match(downloadCore, /MAX_SEGMENT_CHUNK_SIZE: u64 = 256 \* 1024 \* 1024/);
+  assert.match(downloadCore, /MAX_SEGMENT_CHUNK_SIZE: u64 = 512 \* 1024 \* 1024/);
   assert.match(downloadCore, /adaptive_chunk_size/);
   assert.match(downloadCore, /download_from_sources/);
   assert.match(downloadCore, /WORKER_START_INTERVAL_MS: u64 = 35/);
