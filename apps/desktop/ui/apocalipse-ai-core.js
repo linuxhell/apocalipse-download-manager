@@ -27,6 +27,8 @@
       sponsored: "The video was classified as sponsored content, so it was intentionally excluded from the extension list.",
       recordOnly: "The page did not expose a complete downloadable address. Recording may remain available because it captures the media while it plays.",
       missingButton: "I found the page activity, but not enough evidence to prove why the Download button was missing. Play the video, click the area where the button should appear and ask me to analyze the new records.",
+      socialMissing: "The structured social debugger found {count} visible player(s) without a live overlay on {site}. The latest confirmed reason is “{reason}” for player {player}. This conclusion comes from player-decision telemetry, not a guess.",
+      socialSummary: "Social debugger for {site}: {visible} visible player(s), {eligible} eligible, {overlays} overlay(s), {missing} missing, {sponsored} sponsored, {inactive} inactive and {noAction} without a supported action.",
       genericFailure: "The latest related failure was: {detail}",
       historyEmpty: "There are no saved corrections.",
       historyCount: "There are {count} saved correction(s). Open Correction history to view, apply or remove them.",
@@ -107,6 +109,8 @@
       sponsored: "O vídeo foi classificado como conteúdo patrocinado e, por isso, foi retirado intencionalmente da lista da extensão.",
       recordOnly: "A página não forneceu um endereço completo que pudesse ser baixado. A gravação pode continuar disponível porque captura a mídia enquanto ela é reproduzida.",
       missingButton: "Encontrei a atividade da página, mas ainda não há provas suficientes para confirmar por que o botão Baixar não apareceu. Reproduza o vídeo, clique na área onde o botão deveria estar e depois me peça para analisar os novos registros.",
+      socialMissing: "O debugger social estruturado encontrou {count} player(s) visível(is) sem overlay ativo no {site}. O motivo confirmado mais recente é “{reason}” no player {player}. Essa conclusão vem da telemetria de decisão do player, não de uma suposição.",
+      socialSummary: "Debugger social do {site}: {visible} player(s) visível(is), {eligible} elegível(is), {overlays} overlay(s), {missing} faltando, {sponsored} patrocinado(s), {inactive} inativo(s) e {noAction} sem ação suportada.",
       genericFailure: "A última falha relacionada foi: {detail}",
       historyEmpty: "Não há correções guardadas.",
       historyCount: "Existem {count} correção(ões) guardada(s). Abra o Histórico de correções para visualizar, aplicar ou apagar.",
@@ -187,6 +191,8 @@
       sponsored: "该视频被识别为赞助内容，因此已从扩展列表中有意排除。",
       recordOnly: "页面没有提供完整的可下载地址。录制仍可能可用，因为它会在媒体播放时进行捕获。",
       missingButton: "我找到了页面活动，但证据不足以确认下载按钮未出现的原因。请播放视频，点击按钮本应出现的区域，然后让我分析新的记录。",
+      socialMissing: "结构化社交媒体调试器在 {site} 上发现 {count} 个可见播放器没有活动覆盖按钮。最近确认的原因是播放器 {player} 的“{reason}”。这个结论直接来自播放器决策遥测，而不是猜测。",
+      socialSummary: "{site} 社交调试摘要：{visible} 个可见播放器，{eligible} 个可处理，{overlays} 个覆盖按钮，{missing} 个缺失，{sponsored} 个赞助内容，{inactive} 个非活动播放器，{noAction} 个没有受支持操作。",
       genericFailure: "最近一次相关故障是：{detail}",
       historyEmpty: "没有保存的修正。",
       historyCount: "已保存 {count} 个修正。打开“修正历史”可以查看、应用或删除。",
@@ -268,7 +274,8 @@
     .replace(/\b(?:vlw|valeu demais)\b/g, "valeu")
     .replace(/\s+/g, " ").trim();
   const safeDetail = value => String(value || "").replace(/([?&](?:token|sig|key|auth|password|cookie)=[^\s&]+)/gi, " [protected]").slice(0, 360);
-  const eventText = event => fold(`${event?.event || ""} ${event?.detail || event?.raw || ""} ${event?.source || ""}`);
+  const detailText = value => typeof value === "string" ? value : value && typeof value === "object" ? JSON.stringify(value) : String(value || "");
+  const eventText = event => fold(`${event?.event || ""} ${detailText(event?.detail)} ${event?.raw || ""} ${event?.source || ""}`);
 
   function parseCredentialCommand(input) {
     const raw = String(input || "").trim();
@@ -405,12 +412,48 @@
     });
   }
 
+  function socialDiagnosis(events, site, locale, question = "") {
+    const all = parseEvents(events).filter(event => String(event?.event || "").startsWith("social."));
+    if (!all.length) return null;
+    const filtered = site
+      ? all.filter(event => fold(event?.detail?.platform || "").includes(fold(site)) || eventText(event).includes(fold(site)))
+      : all;
+    if (!filtered.length) return null;
+    const missing = filtered.filter(event => event.event === "social.overlay_missing");
+    const latestSummary = [...filtered].reverse().find(event => event.event === "social.scan_summary")?.detail || null;
+    const q = normalizeQuestion(question);
+    if (missing.length && /(botao|button|overlay|video|extensao|extension|falh|erro|problem|missing|按钮|视频|扩展)/.test(q)) {
+      const latest = missing.at(-1)?.detail || {};
+      return say(locale, "socialMissing", {
+        site: latest.platform || site || "social",
+        count: missing.length,
+        reason: latest.reason || latest.decision || "unknown",
+        player: latest.playerId || "unknown",
+      });
+    }
+    if (latestSummary && /(diagnost|debug|resumo|summary|estado|status|log|registro|诊断|调试|摘要|状态)/.test(q)) {
+      return say(locale, "socialSummary", {
+        site: latestSummary.platform || site || "social",
+        visible: latestSummary.visible ?? 0,
+        eligible: latestSummary.eligible ?? 0,
+        overlays: latestSummary.overlays ?? 0,
+        missing: latestSummary.missing ?? 0,
+        sponsored: latestSummary.sponsored ?? 0,
+        inactive: latestSummary.inactive ?? 0,
+        noAction: latestSummary.noAction ?? 0,
+      });
+    }
+    return null;
+  }
+
   function diagnose(question, context, locale) {
     const q = contextualQuestion(question, context.messages);
     const site = siteFrom(q);
     const scoped = relatedEvents(context.events, site);
     const text = scoped.map(eventText).join("\n");
     const failures = scoped.filter(event => String(event.level || "").toUpperCase() === "ERROR" || /failed|error=/.test(eventText(event)));
+    const social = socialDiagnosis(context.events, site, locale, q);
+    if (social) return social;
 
     if (site && /(?:log|registro|diagnost|record|日志|诊断)/.test(q)) {
       const latest = scoped.at(-1);
@@ -623,5 +666,5 @@
       : { text: say(locale, "offTopic"), intent: "unknown" };
   }
 
-  return { contextualQuestion, copy, diagnose, findRelevantConfirmedCorrection, fold, formatRate, localeOf, normalizeQuestion, parseCorrectionTeachCommand, parseCredentialCommand, parseEvents, performanceDiagnosis, previousSubject, redactCredentialCommand, respond, say, siteFrom };
+  return { contextualQuestion, copy, diagnose, findRelevantConfirmedCorrection, fold, formatRate, localeOf, normalizeQuestion, parseCorrectionTeachCommand, parseCredentialCommand, parseEvents, performanceDiagnosis, previousSubject, redactCredentialCommand, respond, say, siteFrom, socialDiagnosis };
 });
