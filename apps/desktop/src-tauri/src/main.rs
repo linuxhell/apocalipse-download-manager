@@ -4231,11 +4231,22 @@ fn sanitize_log_detail(detail: &str) -> String {
         "password=",
         "passwd:",
         "passwd=",
+        "token:",
+        "token=",
+        "secret:",
+        "secret=",
+        "rpc-secret",
+        "signature:",
+        "signature=",
+        "sig:",
+        "sig=",
+        "api-key",
+        "apikey",
     ]
     .iter()
     .any(|marker| lowered.contains(marker))
     {
-        return "<redacted>".to_owned();
+        return "<redacted-sensitive-line>".to_owned();
     }
     detail
         .split_whitespace()
@@ -4278,6 +4289,7 @@ fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
         let _ = fs::rename(&state.log_path, rotated);
     }
     let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let local_timestamp = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
         .append(true)
@@ -4285,6 +4297,7 @@ fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
     {
         let record = serde_json::json!({
             "timestamp": timestamp,
+            "localTimestamp": local_timestamp,
             "level": level,
             "event": event,
             "source": "desktop",
