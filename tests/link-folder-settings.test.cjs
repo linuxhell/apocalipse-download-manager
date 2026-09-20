@@ -64,6 +64,10 @@ test("Link lists remain readable and settings use the available window", () => {
   assert.match(css, /#settings-dialog \{ width: min\(1480px, calc\(100vw - 16px\)\)/);
   assert.match(css, /height: min\(960px, calc\(100vh - 16px\)\)/);
   assert.match(css, /height:clamp\(300px,42vh,460px\)/);
+  assert.match(css, /body\.link-window \.link-panel \{[\s\S]*grid-template-rows: auto minmax\(300px, 1fr\) auto/);
+  assert.match(css, /body\.link-window \.link-files \{[\s\S]*min-height: 300px/);
+  assert.match(css, /body\.link-window \.link-transfer-panel \{[\s\S]*padding: 11px 16px/);
+  assert.match(css, /body\.link-window #link-share-list \{[\s\S]*max-height: 120px/);
   assert.match(css, /text-overflow:ellipsis/);
 });
 
