@@ -3,6 +3,7 @@ const catalogs = {
     archiveExtractor: "Archive extractor (7-Zip / RAR / UnRAR / unar / bsdtar / tar)",
     autoExtract: "Extract automatically after download",
     autoExtractHint: "Shown only for archive files. Loose root files are kept inside a folder named after the archive.",
+    browserAssistedArchiveReady: "Archive received from the browser. Choose where to save it and whether to extract it automatically.",
     networkWaiting: "Waiting for network",
     networkWaitingHint: "The connection changed or went offline. This task will resume automatically when a network interface is available.",
     downloads: "Downloads",
@@ -231,6 +232,7 @@ const catalogs = {
     archiveExtractor: "Extrator de arquivos (7-Zip / RAR / UnRAR / unar / bsdtar / tar)",
     autoExtract: "Extrair automaticamente após o download",
     autoExtractHint: "Aparece somente para arquivos compactados. Arquivos soltos ficam dentro de uma pasta com o nome do arquivo compactado.",
+    browserAssistedArchiveReady: "Arquivo compactado recebido do navegador. Escolha onde salvar e se deseja extrair automaticamente.",
     networkWaiting: "Aguardando rede",
     networkWaitingHint: "A conexão mudou ou ficou offline. Esta tarefa será retomada automaticamente quando uma interface de rede estiver disponível.",
     downloads: "Downloads",
@@ -459,6 +461,7 @@ const catalogs = {
     archiveExtractor: "压缩文件解压工具（7-Zip / RAR / UnRAR / unar / bsdtar / tar）",
     autoExtract: "下载完成后自动解压",
     autoExtractHint: "仅在压缩文件时显示。根目录中的零散文件会解压到以压缩文件命名的文件夹中。",
+    browserAssistedArchiveReady: "已从浏览器接收压缩文件。请选择保存位置以及是否自动解压。",
     networkWaiting: "等待网络",
     networkWaitingHint: "网络连接已更改或断开。可用网络接口恢复后，此任务会自动继续。",
     downloads: "下载",
@@ -720,6 +723,7 @@ let pendingUserAgent = null;
 let pendingRequestMethod = null;
 let pendingRequestBody = null;
 let pendingRequestContentType = null;
+let pendingBrowserAssistedPath = null;
 let taskConnectionsManuallyChanged = false;
 let downloads = [];
 const downloadListState = createTaskListState();
@@ -2534,6 +2538,14 @@ document.querySelector("#analyze").onclick = async () => {
   box.textContent = "…";
   let metadataTimer = null;
   try {
+    if (pendingBrowserAssistedPath) {
+      const fileName = document.querySelector("#file-name");
+      box.textContent = t("browserAssistedArchiveReady");
+      refreshAutoExtractOption();
+      document.querySelector("#analyze").hidden = true;
+      document.querySelector("#enqueue").hidden = false;
+      return;
+    }
     try {
       const hostResolution = await invoke("resolve_file_host_url", { url: url.value });
       if (hostResolution?.adapted && hostResolution.url) {
@@ -2601,8 +2613,16 @@ document.querySelector("#enqueue").onclick = async () => {
     const torrentSelection = document.querySelector("#torrent-inspection").hidden
       ? null : [...document.querySelectorAll("[data-torrent-index]:checked")].map((input) => Number(input.dataset.torrentIndex));
     if (torrentSelection && !torrentSelection.length) throw new Error("Selecione pelo menos um arquivo do torrent.");
-    acceptEnqueuedTask(
-      await invoke("enqueue_download", {
+    const autoExtract = document.querySelector("#auto-extract-option").hidden ? false : document.querySelector("#auto-extract").checked;
+    const acceptedTask = pendingBrowserAssistedPath
+      ? await invoke("import_browser_assisted_download", {
+          localPath: pendingBrowserAssistedPath,
+          url: url.value,
+          destinationDirectory: document.querySelector("#destination").value,
+          fileName: document.querySelector("#file-name").value,
+          autoExtract,
+        })
+      : await invoke("enqueue_download", {
         url: url.value,
         destinationDirectory: document.querySelector("#destination").value,
         fileName: document.querySelector("#file-name").value,
@@ -2614,7 +2634,7 @@ document.querySelector("#enqueue").onclick = async () => {
         connectionsOverride: taskConnectionsManuallyChanged
           ? Number(document.querySelector("#task-connections").value) || 16
           : null,
-        autoExtract: document.querySelector("#auto-extract-option").hidden ? false : document.querySelector("#auto-extract").checked,
+        autoExtract,
         context: {
           traceId: pendingDiagnosticTrace,
           referer: pendingReferer,
@@ -2630,8 +2650,8 @@ document.querySelector("#enqueue").onclick = async () => {
           requestBody: pendingRequestBody,
           requestContentType: pendingRequestContentType,
         },
-      }),
-    );
+      });
+    acceptEnqueuedTask(acceptedTask);
     renderDownloads();
     dialog.close();
     url.value = "";
@@ -2646,6 +2666,7 @@ document.querySelector("#enqueue").onclick = async () => {
     pendingAudioUrl = null;
     pendingMediaKind = null;
     pendingExpectedSize = null;
+    pendingBrowserAssistedPath = null;
     resetMediaInspection();
   } catch (error) {
     const box = document.querySelector("#analysis");
@@ -2719,6 +2740,51 @@ setInterval(async () => {
     console.error(error);
   }
 }, 750);
+let consumingBrowserAssistedDownload = false;
+async function consumeBrowserAssistedDownload() {
+  if (consumingBrowserAssistedDownload || dialog.open) return;
+  consumingBrowserAssistedDownload = true;
+  try {
+    const request = await invoke("take_browser_assisted_download");
+    if (!request) return;
+    pendingBrowserAssistedPath = request.fileName || null;
+    pendingDiagnosticTrace = null;
+    pendingReferer = null;
+    pendingDuration = null;
+    pendingIsLive = false;
+    pendingTitle = null;
+    pendingThumbnail = null;
+    pendingAudioUrl = null;
+    pendingMediaKind = null;
+    pendingExpectedSize = Number.isFinite(request.total) ? request.total : null;
+    pendingCookieHeader = null;
+    pendingUserAgent = null;
+    pendingRequestMethod = null;
+    pendingRequestBody = null;
+    pendingRequestContentType = null;
+    resetTaskConnections();
+    document.querySelector("#url").value = request.url;
+    const sourceName = String(request.fileName || "").split(/[\\/]/).pop() || "download.zip";
+    document.querySelector("#file-name").value = sourceName;
+    document.querySelector("#analysis").hidden = true;
+    document.querySelector("#enqueue").hidden = true;
+    document.querySelector("#analyze").hidden = false;
+    document.querySelector("#destination").value = await invoke("default_download_directory");
+    resetMediaInspection();
+    refreshAutoExtractOption();
+    await refreshDestinationHistory();
+    await invoke("activate_main_window");
+    if (!dialog.open) dialog.showModal();
+    document.querySelector("#url").focus();
+  } catch (error) {
+    console.error(error);
+  } finally {
+    consumingBrowserAssistedDownload = false;
+  }
+}
+setInterval(consumeBrowserAssistedDownload, 400);
+window.__TAURI__?.event?.listen?.("browser-assisted-ready", consumeBrowserAssistedDownload).catch(console.error);
+
 let consumingBridgeDownload = false;
 async function consumeBridgeDownload() {
   if (consumingBridgeDownload) return;
