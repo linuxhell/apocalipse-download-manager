@@ -56,6 +56,16 @@
           <small id="link-remote-path">/</small>
           <div id="link-remote-files"></div>
         </div>
+        <div id="link-transfer-panel" class="link-transfer-panel" hidden>
+          <header>
+            <b id="link-transfer-title" data-i18n="linkTransfer">Transfer</b>
+            <strong id="link-transfer-percent">0%</strong>
+          </header>
+          <div class="link-transfer-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <span id="link-transfer-fill"></span>
+          </div>
+          <small id="link-transfer-detail"></small>
+        </div>
       </section>
     </main>
     <script src="link.js"></script>
