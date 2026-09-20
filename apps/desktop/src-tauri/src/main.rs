@@ -266,6 +266,10 @@ struct UserSettings {
     #[serde(default = "default_true")]
     adaptive_efficiency: bool,
     #[serde(default)]
+    http_global_capacity: HttpCapacityEstimate,
+    #[serde(default)]
+    http_host_capacities: HashMap<String, HttpCapacityEstimate>,
+    #[serde(default)]
     global_bandwidth_limit: u64,
     #[serde(default = "default_bridge_token", skip_serializing)]
     bridge_token: String,
@@ -357,6 +361,8 @@ impl Default for UserSettings {
             max_active_downloads: default_max_active(),
             connections_per_download: default_connections(),
             adaptive_efficiency: true,
+            http_global_capacity: HttpCapacityEstimate::default(),
+            http_host_capacities: HashMap::new(),
             global_bandwidth_limit: 0,
             bridge_token: default_bridge_token(),
             recent_download_directories: Vec::new(),
@@ -384,6 +390,15 @@ impl Default for UserSettings {
             theme: default_theme(),
         }
     }
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HttpCapacityEstimate {
+    #[serde(default)]
+    bytes_per_second: u64,
+    #[serde(default)]
+    low_runs: u32,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -3589,6 +3604,89 @@ fn save_settings(state: &AppState, settings: &UserSettings) -> Result<(), String
     write_settings(&state.settings_path, settings)
 }
 
+fn update_capacity_estimate(
+    estimate: &mut HttpCapacityEstimate,
+    observed: u64,
+    decay_after_low_runs: u32,
+) {
+    if observed == 0 {
+        return;
+    }
+    if estimate.bytes_per_second == 0 || observed > estimate.bytes_per_second {
+        estimate.bytes_per_second = observed;
+        estimate.low_runs = 0;
+        return;
+    }
+    if observed >= estimate.bytes_per_second.saturating_mul(85) / 100 {
+        estimate.low_runs = 0;
+        return;
+    }
+    estimate.low_runs = estimate.low_runs.saturating_add(1);
+    if estimate.low_runs >= decay_after_low_runs.max(1) {
+        estimate.bytes_per_second = (estimate.bytes_per_second.saturating_mul(95) / 100)
+            .max(observed);
+        estimate.low_runs = 0;
+    }
+}
+
+fn learn_http_capacity(state: &AppState, host: Option<&str>, observed: u64) {
+    if observed < 1024 * 1024 {
+        return;
+    }
+    let mut settings = match state.settings.lock() {
+        Ok(settings) => settings,
+        Err(_) => return,
+    };
+    let previous_global = settings.http_global_capacity.bytes_per_second;
+    let previous_host = host
+        .and_then(|host| settings.http_host_capacities.get(host))
+        .map(|estimate| estimate.bytes_per_second)
+        .unwrap_or(0);
+
+    if let Some(host) = host {
+        if settings.http_host_capacities.contains_key(host)
+            || settings.http_host_capacities.len() < 256
+        {
+            let estimate = settings
+                .http_host_capacities
+                .entry(host.to_owned())
+                .or_default();
+            update_capacity_estimate(estimate, observed, 4);
+        }
+    }
+
+    if observed > settings.http_global_capacity.bytes_per_second {
+        settings.http_global_capacity.bytes_per_second = observed;
+        settings.http_global_capacity.low_runs = 0;
+    } else if previous_global > 0
+        && previous_host >= previous_global.saturating_mul(85) / 100
+    {
+        // Only a host that historically came close to the user's global best
+        // is allowed to vote that the actual access link became slower.
+        update_capacity_estimate(&mut settings.http_global_capacity, observed, 8);
+    }
+
+    let global = settings.http_global_capacity.bytes_per_second;
+    let host_capacity = host
+        .and_then(|host| settings.http_host_capacities.get(host))
+        .map(|estimate| estimate.bytes_per_second)
+        .unwrap_or(0);
+    if save_settings(state, &settings).is_ok() {
+        state.diagnostics.record(
+            "http.capacity_learned",
+            "INFO",
+            None,
+            None,
+            serde_json::json!({
+                "observedSustainedBytesPerSecond": observed,
+                "globalCapacityBytesPerSecond": global,
+                "host": host,
+                "hostCapacityBytesPerSecond": host_capacity
+            }),
+        );
+    }
+}
+
 fn redact_url(url: &str) -> String {
     let (base, query) = match url.split_once('?') {
         Some(parts) => parts,
@@ -3955,6 +4053,10 @@ async fn run_download(
             };
             (proxy, dns)
         });
+    let request_host = host_from_url(&request.url);
+    let mut previous_perf_rate: Option<u64> = None;
+    let mut sustainable_peak = 0_u64;
+    let mut completed_ok = false;
     let engine_result = match network {
         Some((proxy, dns)) => {
             let (url, username, password) = proxy.unwrap_or_default();
@@ -4000,6 +4102,7 @@ async fn run_download(
             result = &mut download => {
                 match result {
                     Ok(()) => {
+                        completed_ok = true;
                         diagnostic_log(&app.state::<AppState>(), "INFO", "http.completed", &format!("task={id}"));
                         update_task(&app, id, true, |task| {
                             task.state = DownloadState::Completed;
@@ -4053,6 +4156,10 @@ async fn run_download(
                         } else {
                             0
                         };
+                        if let Some(previous) = previous_perf_rate {
+                            sustainable_peak = sustainable_peak.max(previous.min(bytes_per_second));
+                        }
+                        previous_perf_rate = Some(bytes_per_second);
                         app.state::<AppState>().diagnostics.record(
                             "http.performance_sample",
                             "INFO",
@@ -4072,6 +4179,14 @@ async fn run_download(
                     }
                 },
                 Some(DownloadEvent::Diagnostic { event, detail }) => {
+                    if event == "http.connection_admission" {
+                        if let Some(connections) = detail
+                            .get("admittedConnections")
+                            .and_then(serde_json::Value::as_u64)
+                        {
+                            active_connections = connections.max(1) as usize;
+                        }
+                    }
                     app.state::<AppState>().diagnostics.record(
                         event,
                         "INFO",
@@ -4089,6 +4204,13 @@ async fn run_download(
                 None => break,
             }
         }
+    }
+    if completed_ok && sustainable_peak > 0 {
+        learn_http_capacity(
+            &app.state::<AppState>(),
+            request_host.as_deref(),
+            sustainable_peak,
+        );
     }
     if !was_cancelled {
         if let Ok(mut workers) = app.state::<AppState>().workers.lock() {
@@ -7338,12 +7460,23 @@ fn start_download(
             headers.push(("Authorization".to_owned(), format!("Basic {basic}")));
         }
         let mirrors = task.mirrors.clone();
+        let capacity_host = host_from_url(&task.source);
+        let host_capacity_hint_bps = capacity_host
+            .as_ref()
+            .and_then(|host| limits.http_host_capacities.get(host))
+            .map(|estimate| estimate.bytes_per_second)
+            .filter(|value| *value > 0);
+        let network_capacity_hint_bps =
+            (limits.http_global_capacity.bytes_per_second > 0)
+                .then_some(limits.http_global_capacity.bytes_per_second);
         let request = DownloadRequest {
             url: task.source,
             destination: task.destination,
             overwrite: false,
             connections,
             adaptive_connections: true,
+            network_capacity_hint_bps,
+            host_capacity_hint_bps,
             method: identity
                 .as_ref()
                 .map(|item| item.request_method.clone())
@@ -10516,6 +10649,22 @@ mod tests {
             ),
             "download"
         );
+    }
+
+    #[test]
+    fn http_capacity_learning_rises_fast_and_falls_slowly() {
+        let mut estimate = HttpCapacityEstimate::default();
+        update_capacity_estimate(&mut estimate, 100_000_000, 4);
+        assert_eq!(estimate.bytes_per_second, 100_000_000);
+
+        update_capacity_estimate(&mut estimate, 117_000_000, 4);
+        assert_eq!(estimate.bytes_per_second, 117_000_000);
+        for _ in 0..3 {
+            update_capacity_estimate(&mut estimate, 60_000_000, 4);
+        }
+        assert_eq!(estimate.bytes_per_second, 117_000_000);
+        update_capacity_estimate(&mut estimate, 60_000_000, 4);
+        assert_eq!(estimate.bytes_per_second, 111_150_000);
     }
 
     #[test]
