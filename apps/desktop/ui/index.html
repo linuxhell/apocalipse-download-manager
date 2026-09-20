@@ -464,7 +464,7 @@
           </select>
           <label for="dns-servers" data-i18n="dnsServers">DNS servers</label>
           <input id="dns-servers" type="text" maxlength="400" placeholder="1.1.1.1, 1.0.0.1" />
-          <small data-i18n="dnsScopeHint">Applied to the native HTTP engine. Gopeed uses its own network stack; SOCKS5H continues resolving through the proxy.</small>
+          <small data-i18n="dnsScopeHint">Applied to the native HTTP engine. aria2 uses the system resolver; SOCKS5H continues resolving through the proxy.</small>
         </section>
         <div class="transfer-settings">
           <label>
@@ -539,7 +539,7 @@
             <label data-tool="yt-dlp"><span>yt-dlp <small></small></span><div><input id="tool-yt-dlp" type="text" /><button type="button" data-tool-pick="yt-dlp" data-i18n="browse">Browse…</button><button type="button" data-tool-update="yt-dlp" data-i18n="update">Update</button></div></label>
             <label data-tool="qjs"><span>QuickJS (qjs) <small></small></span><div><input id="tool-qjs" type="text" /><button type="button" data-tool-pick="qjs" data-i18n="browse">Browse…</button><button type="button" data-tool-update="qjs" data-i18n="update">Update</button></div></label>
             <label data-tool="n-m3u8dl-re"><span>N_m3u8DL-RE <small></small></span><div><input id="tool-n-m3u8dl-re" type="text" /><button type="button" data-tool-pick="n-m3u8dl-re" data-i18n="browse">Browse…</button><button type="button" data-tool-update="n-m3u8dl-re" data-i18n="update">Update</button></div></label>
-            <label data-tool="gopeed"><span><span data-i18n="gopeedBackend">Gopeed (backend engine)</span> <small></small></span><div><input id="tool-gopeed" type="text" /><button type="button" data-tool-pick="gopeed" data-i18n="browse">Browse…</button><button type="button" data-tool-update="gopeed" data-i18n="update">Update</button></div></label>
+            <label data-tool="aria2"><span><span data-i18n="aria2Backend">aria2 (HTTP/HTTPS, FTP, torrent and magnet)</span> <small></small></span><div><input id="tool-aria2" type="text" /><button type="button" data-tool-pick="aria2" data-i18n="browse">Browse…</button><button type="button" data-tool-update="aria2" data-i18n="update">Update</button></div></label>
           </div>
           <label for="media-player" data-i18n="mediaPlayer">VLC / mpv / player</label>
           <div class="path-picker"><input id="media-player" type="text" /><button id="pick-media-player" type="button" data-i18n="browse">Browse…</button></div>
