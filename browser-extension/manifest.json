@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.164",
+  "version": "0.3.165",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -144,5 +144,5 @@
       "48": "icons/alien-48.png"
     }
   },
-  "version_name": "0.3.164 - Apocalipse Forensic Debugger V4 - Facebook Home feed reliability"
+  "version_name": "0.3.165 - Apocalipse Forensic Debugger V4 - Facebook sponsored recording redirect"
 }
