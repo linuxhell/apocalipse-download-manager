@@ -1044,7 +1044,7 @@
       overlayActive: activeOverlays.has(element),
       ...detail,
     };
-    const signature = JSON.stringify(payload);
+    const signature = JSON.stringify({ ...payload, scanId: 0 });
     if (!force && socialDecisionCache.get(element) === signature) return;
     socialDecisionCache.set(element, signature);
     void globalThis.ADM_DIAG.emit("social.player_decision", payload, null,
