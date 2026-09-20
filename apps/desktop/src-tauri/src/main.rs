@@ -3285,7 +3285,7 @@ fn run_link_server(app: tauri::AppHandle, listener: TcpListener, tls_config: Arc
 #[tauri::command]
 fn inspect_url(url: String) -> Result<PlanResponse, String> {
     let capabilities = Capabilities {
-        aria2: true,
+        gopeed: true,
         yt_dlp: true,
         n_m3u8dl_re: true,
         torrent: false,
@@ -4845,14 +4845,7 @@ async fn run_external_download(
                         "N_m3u8DL-RE"
                     },
                 ),
-                configured_tool(
-                    &settings.aria2_path,
-                    if cfg!(windows) {
-                        "aria2c.exe"
-                    } else {
-                        "aria2c"
-                    },
-                ),
+                configured_gopeed(&settings),
                 settings.connections_per_download.clamp(1, 32),
                 settings
                     .proxy_enabled
@@ -4872,7 +4865,7 @@ async fn run_external_download(
                 "ffmpeg".into(),
                 "yt-dlp".into(),
                 "N_m3u8DL-RE".into(),
-                "aria2c".into(),
+                if cfg!(windows) { "gopeed.exe".into() } else { "gopeed".into() },
                 8,
                 None,
                 None,
@@ -4956,7 +4949,6 @@ async fn run_external_download(
             let mut command = tokio::process::Command::new(&tools.1);
             let media_source =
                 canonical_facebook_video_url(&task.source).unwrap_or_else(|| task.source.clone());
-            let facebook_media = media_source.contains("facebook.com/");
             if let Some(proxy_url) = proxy_url.as_deref() {
                 command.arg("--proxy").arg(proxy_url);
             }
@@ -4985,15 +4977,6 @@ async fn run_external_download(
                 .arg(media_connections.to_string());
             if task.is_live {
                 command.args(["--live-from-start", "--hls-use-mpegts"]);
-            }
-            if facebook_media {
-                command
-                    .arg("--downloader")
-                    .arg(&tools.3)
-                    .arg("--downloader-args")
-                    .arg(format!(
-                        "aria2c:-x{media_connections} -s{media_connections} -k1M --file-allocation=none"
-                    ));
             }
             let quickjs_name = if cfg!(windows) { "qjs.exe" } else { "qjs" };
             let configured_quickjs = app
@@ -5228,88 +5211,6 @@ async fn run_external_download(
                 ]);
                 command
             }
-        }
-        DownloadKind::Torrent
-        | DownloadKind::Magnet
-        | DownloadKind::Ftp
-        | DownloadKind::AcceleratedHttp => {
-            let mut command = tokio::process::Command::new(&tools.3);
-            if !tools.8.is_empty() {
-                command.arg(format!(
-                    "--async-dns-server={}",
-                    tools
-                        .8
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(",")
-                ));
-            }
-            if let Some(proxy_url) = tools.5.as_deref() {
-                command.arg(format!("--all-proxy={proxy_url}"));
-                if let Some(username) = tools.6.as_deref() {
-                    command.arg(format!("--all-proxy-user={username}"));
-                }
-                if let Some(password) = tools.7.as_deref() {
-                    command.arg(format!("--all-proxy-passwd={password}"));
-                }
-            }
-            if kind == DownloadKind::Ftp {
-                if let Some(credential) = website_credential.as_ref() {
-                    command
-                        .arg(format!("--ftp-user={}", credential.username))
-                        .arg(format!("--ftp-passwd={}", credential.password));
-                }
-            }
-            if kind == DownloadKind::AcceleratedHttp {
-                command.args([
-                    "--split=16",
-                    "--max-connection-per-server=16",
-                    "--min-split-size=1M",
-                    "--optimize-concurrent-downloads=true",
-                    "--stream-piece-selector=geom",
-                ]);
-                command.arg(format!("--out={file_name}"));
-                command.arg(format!("--user-agent={user_agent}"));
-                if let Some(referer) = task.referer.as_deref() {
-                    command.arg(format!("--referer={referer}"));
-                }
-                if let Some(cookie) = identity
-                    .as_ref()
-                    .and_then(|value| value.cookie_header.as_deref())
-                {
-                    command.arg(format!("--header=Cookie: {cookie}"));
-                }
-            }
-            command.arg(format!("--dir={}", directory.display())).args([
-                "--summary-interval=1",
-                "--console-log-level=notice",
-                "--show-console-readout=true",
-                "--download-result=hide",
-                "--continue=true",
-                "--enable-dht=true",
-                "--enable-peer-exchange=true",
-                "--bt-enable-lpd=true",
-                "--bt-max-peers=100",
-                "--bt-prioritize-piece=head=64M,tail=64M",
-                "--file-allocation=trunc",
-                "--seed-time=0",
-            ]);
-            if bandwidth_limit > 0 {
-                command.arg(format!("--max-download-limit={bandwidth_limit}"));
-            }
-            if !task.torrent_selection.is_empty() {
-                command.arg(format!(
-                    "--select-file={}",
-                    task.torrent_selection
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(",")
-                ));
-            }
-            command.arg(&task.source);
-            command
         }
         _ => return,
     };
@@ -5627,7 +5528,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "ytDlp": settings.yt_dlp_path.as_ref().is_some_and(|path| path.is_file()),
             "qjs": settings.qjs_path.as_ref().is_some_and(|path| path.is_file()),
             "nM3u8DlRe": settings.n_m3u8dl_re_path.as_ref().is_some_and(|path| path.is_file()),
-            "aria2": settings.aria2_path.as_ref().is_some_and(|path| path.is_file()),
+            "gopeed": settings.gopeed_path.as_ref().is_some_and(|path| path.is_file()),
             "mediaPlayer": settings.media_player_path.as_ref().is_some_and(|path| path.is_file()),
         },
         "pairingTokenPresent": !settings.bridge_token.is_empty(),
@@ -5963,36 +5864,7 @@ async fn read_process_tail(
                 }
                 progress_buffer.push_str(&text);
                 if let Some((app, id, kind)) = progress.as_ref() {
-                    if matches!(
-                        *kind,
-                        DownloadKind::Torrent
-                            | DownloadKind::Magnet
-                            | DownloadKind::Ftp
-                            | DownloadKind::AcceleratedHttp
-                    ) {
-                        if let Some((
-                            received,
-                            total,
-                            percent,
-                            download_speed,
-                            upload_speed,
-                            seeders,
-                            leechers,
-                            eta,
-                        )) = parse_aria2_progress(&progress_buffer)
-                        {
-                            update_task(app, *id, false, |task| {
-                                task.received = received;
-                                task.total = Some(total);
-                                task.progress_percent = Some(percent);
-                                task.download_speed = Some(download_speed);
-                                task.upload_speed = Some(upload_speed);
-                                task.torrent_seeders = Some(seeders);
-                                task.torrent_leechers = Some(leechers);
-                                task.torrent_eta = eta;
-                            });
-                        }
-                    } else if *kind == DownloadKind::MediaPage {
+                    if *kind == DownloadKind::MediaPage {
                         if let Some((received, total, percent, speed)) =
                             parse_yt_dlp_progress(&progress_buffer)
                         {
@@ -6006,17 +5878,6 @@ async fn read_process_tail(
                                     );
                                 }
                             });
-                        } else if let Some((received, total, percent, speed, _, _, _, _)) =
-                            parse_aria2_progress(&progress_buffer)
-                        {
-                            update_task(app, *id, false, |task| {
-                                task.received = received;
-                                task.total = Some(total);
-                                task.download_speed = Some(speed);
-                                task.progress_percent = Some(
-                                    task.progress_percent.unwrap_or(0.0).max(percent.min(90.0)),
-                                );
-                            });
                         } else if let Some(percent) = parse_external_progress(&progress_buffer) {
                             update_task(app, *id, false, |task| {
                                 task.progress_percent = Some(
@@ -6026,11 +5887,6 @@ async fn read_process_tail(
                         }
                     } else if let Some(percent) = parse_external_progress(&progress_buffer) {
                         update_task(app, *id, false, |task| {
-                            let percent = if *kind == DownloadKind::MediaPage {
-                                percent.min(90.0)
-                            } else {
-                                percent
-                            };
                             task.progress_percent =
                                 Some(task.progress_percent.unwrap_or(0.0).max(percent));
                         });
@@ -6044,79 +5900,6 @@ async fn read_process_tail(
         }
     }
     tail
-}
-
-fn parse_aria2_size(value: &str) -> Option<u64> {
-    let value =
-        value.trim_start_matches(|character: char| !character.is_ascii_digit() && character != '.');
-    let split = value
-        .find(|character: char| !character.is_ascii_digit() && character != '.')
-        .unwrap_or(value.len());
-    let number = value[..split].parse::<f64>().ok()?;
-    let unit = value[split..].to_ascii_lowercase();
-    let multiplier = match unit.as_str() {
-        "" | "b" => 1.0,
-        "k" | "kb" | "kib" => 1024.0,
-        "m" | "mb" | "mib" => 1024.0 * 1024.0,
-        "g" | "gb" | "gib" => 1024.0 * 1024.0 * 1024.0,
-        "t" | "tb" | "tib" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
-        _ => return None,
-    };
-    Some((number * multiplier) as u64)
-}
-
-#[allow(clippy::type_complexity)]
-fn parse_aria2_progress(text: &str) -> Option<(u64, u64, f64, u64, u64, u64, u64, Option<String>)> {
-    text.lines().rev().find_map(|line| {
-        let ratio = line.split_whitespace().find_map(|token| {
-            let slash = token.find('/')?;
-            let open = token[slash + 1..]
-                .find('(')
-                .map(|index| slash + 1 + index)?;
-            let close = token[open + 1..].find('%').map(|index| open + 1 + index)?;
-            let received = parse_aria2_size(&token[..slash])?;
-            let total = parse_aria2_size(&token[slash + 1..open])?;
-            let percent = token[open + 1..close].parse::<f64>().ok()?;
-            if total > 0 && received <= total && (0.0..=100.0).contains(&percent) {
-                Some((received, total, percent))
-            } else {
-                None
-            }
-        })?;
-        let field = |prefix: &str| {
-            line.split_whitespace()
-                .find_map(|token| token.strip_prefix(prefix).and_then(parse_aria2_size))
-                .unwrap_or(0)
-        };
-        let count = |prefix: &str| {
-            line.split_whitespace()
-                .find_map(|token| {
-                    token
-                        .strip_prefix(prefix)?
-                        .trim_end_matches(']')
-                        .parse::<u64>()
-                        .ok()
-                })
-                .unwrap_or(0)
-        };
-        let connections = count("CN:");
-        let seeders = count("SD:");
-        let eta = line.split_whitespace().find_map(|token| {
-            token
-                .strip_prefix("ETA:")
-                .map(|value| value.trim_end_matches(']').to_owned())
-        });
-        Some((
-            ratio.0,
-            ratio.1,
-            ratio.2,
-            field("DL:"),
-            field("UL:"),
-            seeders,
-            connections.saturating_sub(seeders),
-            eta,
-        ))
-    })
 }
 
 fn parse_external_progress(text: &str) -> Option<f64> {
@@ -6672,7 +6455,13 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
     Ok(definitions
         .into_iter()
         .map(|(id, executable, args)| {
-            let version = version_line(&executable, args);
+            let version = if id == "gopeed" {
+                executable
+                    .is_file()
+                    .then(|| "Gopeed 2.x beta".to_owned())
+            } else {
+                version_line(&executable, args)
+            };
             ToolStatus {
                 id: id.to_owned(),
                 path: executable.to_string_lossy().into_owned(),
@@ -6822,11 +6611,8 @@ fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
             continue;
         };
         let size = metadata.len();
-        let control = PathBuf::from(format!("{}.aria2", candidate.display()));
-        let priority = if control.exists() { u64::MAX / 2 } else { 0 };
-        let score = priority.saturating_add(size);
-        if best.as_ref().is_none_or(|(current, _)| score > *current) {
-            best = Some((score, candidate));
+        if best.as_ref().is_none_or(|(current, _)| size > *current) {
+            best = Some((size, candidate));
         }
     }
     best.map(|(_, path)| path)
@@ -7003,8 +6789,15 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             ),
             _ => return Err("unknown_tool".to_owned()),
         };
-        let before =
-            version_line(&executable, version_args).unwrap_or_else(|| "unknown".to_owned());
+        let before = if id == "gopeed" {
+            if executable.is_file() {
+                "installed".to_owned()
+            } else {
+                "not installed".to_owned()
+            }
+        } else {
+            version_line(&executable, version_args).unwrap_or_else(|| "unknown".to_owned())
+        };
         let client = reqwest::Client::builder()
             .user_agent("Apocalipse-Download-Manager")
             .build()
@@ -7148,12 +6941,20 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         if id == "ffmpeg" {
             fs::write(&ffprobe_staged, &ffprobe_replacement).map_err(|error| error.to_string())?;
         }
-        let candidate_version = match version_line(&staged, version_args) {
-            Some(version) => version,
-            None => {
+        let candidate_version = if id == "gopeed" {
+            if staged.metadata().map(|metadata| metadata.len()).unwrap_or(0) < 32_768 {
                 let _ = fs::remove_file(&staged);
-                let _ = fs::remove_file(&ffprobe_staged);
                 return Err("downloaded_tool_validation_failed".to_owned());
+            }
+            tag.to_owned()
+        } else {
+            match version_line(&staged, version_args) {
+                Some(version) => version,
+                None => {
+                    let _ = fs::remove_file(&staged);
+                    let _ = fs::remove_file(&ffprobe_staged);
+                    return Err("downloaded_tool_validation_failed".to_owned());
+                }
             }
         };
         if id == "ffmpeg" && version_line(&ffprobe_staged, &["-version"]).is_none() {
@@ -7161,7 +6962,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             let _ = fs::remove_file(&ffprobe_staged);
             return Err("downloaded_ffprobe_validation_failed".to_owned());
         }
-        if candidate_version == before {
+        if id != "gopeed" && candidate_version == before {
             let _ = fs::remove_file(&staged);
             let _ = fs::remove_file(&ffprobe_staged);
             diagnostic_log(
@@ -7205,7 +7006,11 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 return Err(error.to_string());
             }
         }
-        let after = version_line(&executable, version_args);
+        let after = if id == "gopeed" {
+            executable.is_file().then(|| tag.to_owned())
+        } else {
+            version_line(&executable, version_args)
+        };
         let ffprobe_valid = id != "ffmpeg" || version_line(&ffprobe, &["-version"]).is_some();
         if after.is_none() || !ffprobe_valid {
             let _ = fs::remove_file(&executable);
@@ -11345,24 +11150,6 @@ mod tests {
             canonical_facebook_video_url("https://www.facebook.com/reel/1084652417273846")
                 .is_none()
         );
-    }
-
-    #[test]
-    fn parses_real_aria2_transfer_progress() {
-        assert_eq!(
-            parse_aria2_progress("[#abc 5.0MiB/20MiB(25%) CN:4 SD:2 DL:1MiB ETA:15s]"),
-            Some((
-                5 * 1024 * 1024,
-                20 * 1024 * 1024,
-                25.0,
-                1024 * 1024,
-                0,
-                2,
-                2,
-                Some("15s".to_owned())
-            ))
-        );
-        assert_eq!(parse_aria2_progress("[#abc 0B/0B CN:1 DL:0B]"), None);
     }
 
     #[test]
