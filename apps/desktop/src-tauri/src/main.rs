@@ -3623,8 +3623,8 @@ fn update_capacity_estimate(
     }
     estimate.low_runs = estimate.low_runs.saturating_add(1);
     if estimate.low_runs >= decay_after_low_runs.max(1) {
-        estimate.bytes_per_second = (estimate.bytes_per_second.saturating_mul(95) / 100)
-            .max(observed);
+        estimate.bytes_per_second =
+            (estimate.bytes_per_second.saturating_mul(95) / 100).max(observed);
         estimate.low_runs = 0;
     }
 }
@@ -3658,9 +3658,7 @@ fn learn_http_capacity(state: &AppState, host: Option<&str>, observed: u64) {
     if observed > settings.http_global_capacity.bytes_per_second {
         settings.http_global_capacity.bytes_per_second = observed;
         settings.http_global_capacity.low_runs = 0;
-    } else if previous_global > 0
-        && previous_host >= previous_global.saturating_mul(85) / 100
-    {
+    } else if previous_global > 0 && previous_host >= previous_global.saturating_mul(85) / 100 {
         // Only a host that historically came close to the user's global best
         // is allowed to vote that the actual access link became slower.
         update_capacity_estimate(&mut settings.http_global_capacity, observed, 8);
@@ -7466,9 +7464,8 @@ fn start_download(
             .and_then(|host| limits.http_host_capacities.get(host))
             .map(|estimate| estimate.bytes_per_second)
             .filter(|value| *value > 0);
-        let network_capacity_hint_bps =
-            (limits.http_global_capacity.bytes_per_second > 0)
-                .then_some(limits.http_global_capacity.bytes_per_second);
+        let network_capacity_hint_bps = (limits.http_global_capacity.bytes_per_second > 0)
+            .then_some(limits.http_global_capacity.bytes_per_second);
         let request = DownloadRequest {
             url: task.source,
             destination: task.destination,
