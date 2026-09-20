@@ -1,7 +1,7 @@
 // Diagnostics v3: bounded, data-minimizing records. No cookies, page text or media bytes.
 (() => {
   if (globalThis.ADM_DIAG_CORE) return;
-  const MAX_EVENTS = 1200, MAX_BATCH = 40, MAX_DETAIL_BYTES = 6000;
+  const MAX_EVENTS = 5000, MAX_BATCH = 80, MAX_DETAIL_BYTES = 12000;
   const uuid = value => typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(value);
   const code = value => typeof value === 'string' && /^[a-z0-9_.:-]{1,96}$/i.test(value);
   const enums = new Set(['reason','kind','mediaKind','contentType','method','component','world','readyState',
