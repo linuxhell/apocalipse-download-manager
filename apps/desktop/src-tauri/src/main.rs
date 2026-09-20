@@ -4434,7 +4434,6 @@ async fn log_network_route(state: &AppState, operation: &str, engine: &str) {
     }
 }
 
-
 fn gopeed_request_context(
     state: &AppState,
     task: &DownloadTask,
