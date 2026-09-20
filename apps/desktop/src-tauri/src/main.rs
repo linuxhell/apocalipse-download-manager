@@ -7343,6 +7343,7 @@ fn start_download(
             destination: task.destination,
             overwrite: false,
             connections,
+            adaptive_connections: true,
             method: identity
                 .as_ref()
                 .map(|item| item.request_method.clone())
