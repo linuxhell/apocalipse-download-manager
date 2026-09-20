@@ -1247,7 +1247,7 @@
       button.className = "apocalipse-media-download";
       button.textContent = `⇩ ${downloadLabel()}`;
       button.title = "Apocalipse Download Manager";
-      button.hidden = !canDownload;
+      button.hidden = !canDownload || Boolean(isFacebookVideo && facebookSponsoredEvidence(element));
       let recordButton = null;
       let refreshRecordLabels = () => {};
       button.addEventListener("click", async (event) => {
@@ -1263,19 +1263,17 @@
         trace("overlay_download_clicked", "download", { tag: element.tagName, facebook: isFacebookVideo, tiktokPage: isTikTokPage, tiktokPermalink: isTikTokVideo, overlays: activeOverlays.size });
         const visibleFacebookUrl = isFacebookVideo && isFacebookMediaUrl(location.href) ? location.href : null;
         const immediateFacebookUrl = isFacebookVideo ? facebookUrlFor(element) : null;
-        const sponsoredEvidence = isFacebookVideo ? facebookSponsoredEvidence(element) : null;
-        // Facebook Home sponsored/stream players are frequently MediaStreams
-        // without a stable permalink. Opening the three-dots menu to discover a
-        // URL can recycle the virtualized player before Download completes.
-        // In that exact case, Download means "record this player now" and uses
-        // the same proven capture path as the visible Record button.
+        // Non-sponsored Facebook stream players without a stable permalink can
+        // still fall back to recording from Download. Sponsored posts never
+        // expose Download at all; they show only the Record control.
         if (isFacebookVideo && canRecord && recordButton
-          && (sponsoredEvidence || (element.srcObject && !immediateFacebookUrl))) {
+          && element.srcObject && !immediateFacebookUrl
+          && !facebookSponsoredEvidence(element)) {
           trace("overlay_download_recording_redirect", "download", {
-            reason: sponsoredEvidence?.reason || "facebook_stream_without_permalink",
-            sponsored: Boolean(sponsoredEvidence),
-            hasSrcObject: Boolean(element.srcObject),
-            permalinkFound: Boolean(immediateFacebookUrl),
+            reason: "facebook_stream_without_permalink",
+            sponsored: false,
+            hasSrcObject: true,
+            permalinkFound: false,
           });
           button.textContent = "●";
           button.title = recordingLabels().record;
@@ -1630,9 +1628,10 @@
         button.style.left = `${left}px`;
         button.style.top = `${Math.max(6, top)}px`;
         const liveCanDownload = canDownload || downloadReady();
-        button.hidden = !liveCanDownload || rect.width < 100 || rect.height < 55;
+        const sponsoredHomeVideo = Boolean(isFacebookVideo && facebookSponsoredEvidence(element));
+        button.hidden = sponsoredHomeVideo || !liveCanDownload || rect.width < 100 || rect.height < 55;
         if (recordButton) {
-          const recordLeft = liveCanDownload && !button.hidden
+          const recordLeft = !sponsoredHomeVideo && liveCanDownload && !button.hidden
             ? left + button.offsetWidth + 8
             : left;
           recordButton.style.left = `${recordLeft}px`;
@@ -1665,7 +1664,7 @@
         refreshLabels: refreshOverlayLanguage,
       });
       const duplicateButtons = document.querySelectorAll(".apocalipse-media-download").length - activeOverlays.size * 2;
-      trace("overlay_installed", "overlay", { tag: element.tagName, canDownload, canRecord, active: activeOverlays.size, duplicateDelta: duplicateButtons });
+      trace("overlay_installed", "overlay", { tag: element.tagName, canDownload, canRecord, sponsoredRecordOnly: Boolean(isFacebookVideo && facebookSponsoredEvidence(element)), active: activeOverlays.size, duplicateDelta: duplicateButtons });
       if (isSocialVideo) {
         socialSummary.overlays += 1;
         socialSummary.installed += 1;
