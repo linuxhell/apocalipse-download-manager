@@ -364,10 +364,7 @@ impl Endpoint {
                             .get("downloaded")
                             .and_then(Value::as_u64)
                             .unwrap_or(0),
-                        total: connection
-                            .get("total")
-                            .and_then(Value::as_u64)
-                            .unwrap_or(0),
+                        total: connection.get("total").and_then(Value::as_u64).unwrap_or(0),
                         completed: connection
                             .get("completed")
                             .and_then(Value::as_bool)
