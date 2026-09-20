@@ -480,9 +480,9 @@ test('Apocalipse AI always answers diagnostic evidence in the selected UI langua
   const events = [
     { event: 'social.overlay_missing', level: 'WARN', detail: { platform: 'facebook', playerId: '11111111-1111-4111-8111-111111111111', reason: 'no_supported_action' } },
   ];
-  const pt = AI.respond('why is this failing?', { locale: 'pt-BR', engineEvents: events });
-  const en = AI.respond('por que isso falhou?', { locale: 'en', engineEvents: events });
-  const zh = AI.respond('por que isso falhou?', { locale: 'zh-CN', engineEvents: events });
+  const pt = AI.respond('why is the facebook video button missing?', { locale: 'pt-BR', engineEvents: events });
+  const en = AI.respond('por que o botão do vídeo do facebook sumiu?', { locale: 'en', engineEvents: events });
+  const zh = AI.respond('por que o botão do vídeo do facebook sumiu?', { locale: 'zh-CN', engineEvents: events });
   assert.match(pt.text, /debugger social estruturado|telemetria/i);
   assert.match(en.text, /structured social debugger|telemetry/i);
   assert.match(zh.text, /结构化社交媒体调试器|遥测/);
