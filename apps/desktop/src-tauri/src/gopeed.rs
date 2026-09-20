@@ -245,14 +245,39 @@ impl Endpoint {
     }
 
     pub async fn wait_ready(&self) -> Result<(), String> {
-        let mut last_error = String::new();
-        for _ in 0..60 {
-            match self.request(Method::GET, "/api/v1/info", None).await {
-                Ok(_) => return Ok(()),
-                Err(error) => last_error = error,
+        const READY_BUDGET: Duration = Duration::from_secs(6);
+        const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
+        const RETRY_DELAY: Duration = Duration::from_millis(100);
+
+        let started = std::time::Instant::now();
+        let mut last_error = "gopeed_not_ready".to_owned();
+
+        while started.elapsed() < READY_BUDGET {
+            let remaining = READY_BUDGET.saturating_sub(started.elapsed());
+            let probe_budget = PROBE_TIMEOUT.min(remaining);
+            match tokio::time::timeout(
+                probe_budget,
+                self.request(Method::GET, "/api/v1/info", None),
+            )
+            .await
+            {
+                Ok(Ok(_)) => return Ok(()),
+                Ok(Err(error)) => last_error = error,
+                Err(_) => {
+                    last_error = format!(
+                        "gopeed_info_probe_timeout:{}ms",
+                        probe_budget.as_millis()
+                    )
+                }
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let remaining = READY_BUDGET.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                break;
+            }
+            tokio::time::sleep(RETRY_DELAY.min(remaining)).await;
         }
+
         Err(format!("gopeed_start_timeout:{last_error}"))
     }
 
