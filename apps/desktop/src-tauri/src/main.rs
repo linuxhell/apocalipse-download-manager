@@ -6883,71 +6883,66 @@ async fn inspect_torrent_metadata(
     state: State<'_, AppState>,
     source: String,
 ) -> Result<TorrentInspection, String> {
-    match classify_url(&source) {
-        Some(DownloadKind::Torrent) => inspect_torrent_file(Path::new(&source)),
-        Some(DownloadKind::Magnet) => {
-            let (aria2, root) = {
-                let settings = state.settings.lock().map_err(|error| error.to_string())?;
-                let root = state
-                    .queue_path
-                    .parent()
-                    .unwrap_or(Path::new("."))
-                    .join("torrent-metadata")
-                    .join(uuid::Uuid::new_v4().to_string());
-                (
-                    configured_tool(
-                        &settings.aria2_path,
-                        if cfg!(windows) {
-                            "aria2c.exe"
-                        } else {
-                            "aria2c"
-                        },
-                    ),
-                    root,
-                )
-            };
-            fs::create_dir_all(&root).map_err(|error| error.to_string())?;
-            let mut command = tokio::process::Command::new(aria2);
-            command
-                .args([
-                    "--bt-metadata-only=true",
-                    "--bt-save-metadata=true",
-                    "--seed-time=0",
-                    "--summary-interval=0",
-                ])
-                .arg(format!("--dir={}", root.display()))
-                .arg(&source);
-            #[cfg(target_os = "windows")]
-            {
-                use std::os::windows::process::CommandExt;
-                command.as_std_mut().creation_flags(0x08000000);
-            }
-            let output = tokio::time::timeout(Duration::from_secs(120), command.output())
-                .await
-                .map_err(|_| "torrent_metadata_timeout".to_owned())?
-                .map_err(|error| error.to_string())?;
-            if !output.status.success() {
-                let _ = fs::remove_dir_all(&root);
-                return Err(external_error_detail(
-                    &String::from_utf8_lossy(&output.stderr),
-                    output.status.code(),
-                ));
-            }
-            let torrent = fs::read_dir(&root)
-                .map_err(|error| error.to_string())?
-                .flatten()
-                .map(|entry| entry.path())
-                .find(|path| {
-                    path.extension()
-                        .is_some_and(|extension| extension.eq_ignore_ascii_case("torrent"))
-                })
-                .ok_or_else(|| "torrent_metadata_missing".to_owned())?;
-            let result = inspect_torrent_file(&torrent);
-            let _ = fs::remove_dir_all(&root);
-            result
-        }
-        _ => Err("not_a_torrent".to_owned()),
+    if !matches!(
+        classify_url(&source),
+        Some(DownloadKind::Torrent | DownloadKind::Magnet)
+    ) {
+        return Err("not_a_torrent".to_owned());
     }
+    let endpoint = gopeed_endpoint(&state).await?;
+    let metadata_root = state
+        .queue_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("gopeed-runtime")
+        .join("metadata");
+    fs::create_dir_all(&metadata_root).map_err(|error| error.to_string())?;
+    let resolved = endpoint
+        .resolve(
+            &source,
+            &metadata_root.to_string_lossy(),
+            &gopeed::RequestContext::default(),
+        )
+        .await?;
+    state
+        .gopeed_resolves
+        .lock()
+        .map_err(|error| error.to_string())?
+        .insert(source.clone(), resolved.id.clone());
+    let files = resolved
+        .res
+        .files
+        .iter()
+        .enumerate()
+        .map(|(offset, file)| {
+            let path = if file.path.trim().is_empty() {
+                file.name.clone()
+            } else {
+                format!("{}/{}", file.path.trim_matches('/'), file.name)
+            };
+            TorrentFileInfo {
+                index: offset + 1,
+                path,
+                size: file.size,
+            }
+        })
+        .collect::<Vec<_>>();
+    if files.is_empty() {
+        return Err("torrent_has_no_files".to_owned());
+    }
+    let total_size = files.iter().map(|file| file.size).sum();
+    Ok(TorrentInspection {
+        name: if resolved.res.name.trim().is_empty() {
+            files
+                .first()
+                .map(|file| file.path.clone())
+                .unwrap_or_else(|| "torrent".to_owned())
+        } else {
+            resolved.res.name
+        },
+        files,
+        total_size,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
