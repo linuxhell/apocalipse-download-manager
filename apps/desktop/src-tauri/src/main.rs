@@ -10474,76 +10474,52 @@ async fn remove_downloads(
         .cloned()
         .collect::<Vec<_>>();
 
-    let gopeed_targets = {
-        let gopeed_tasks = state
-            .gopeed_tasks
+    let aria2_targets = {
+        let aria2_tasks = state
+            .aria2_tasks
             .lock()
             .map_err(|error| error.to_string())?;
         removed
             .iter()
             .filter_map(|task| {
-                gopeed_tasks
+                aria2_tasks
                     .get(&task.id)
                     .cloned()
-                    .map(|gopeed_id| (task.clone(), gopeed_id))
+                    .map(|gid| (task.clone(), gid))
             })
             .collect::<Vec<_>>()
     };
-    let mut torrent_payload_cleanup = false;
-    if !gopeed_targets.is_empty() {
-        let endpoint = gopeed_endpoint(&state).await?;
-        for (task, gopeed_id) in &gopeed_targets {
-            let torrent_task = matches!(
-                classify_url(&task.source),
-                Some(DownloadKind::Torrent | DownloadKind::Magnet)
-            );
-            // Backend force deletion is unsafe for BT on Windows: it can
-            // attempt to unlink .part files while anacrolix still owns them,
-            // and a subsequent Close may dereference the already-closed global
-            // BT client. Close/remove the backend task without force and let
-            // ADM delete the payload after the handles are released.
-            let backend_delete_files = delete_files && !gopeed_torrent;
-            endpoint.delete(gopeed_id, backend_delete_files).await?;
-            torrent_payload_cleanup |= delete_files && gopeed_torrent;
-            if let Ok(mut items) = state.gopeed_tasks.lock() {
-                items.remove(&task.id);
+    if !aria2_targets.is_empty() {
+        match aria2_endpoint(&state, true).await {
+            Ok(endpoint) => {
+                for (task, gid) in &aria2_targets {
+                    let _ = endpoint.remove(gid).await;
+                    let _ = endpoint.remove_result(gid).await;
+                    if let Ok(mut items) = state.aria2_tasks.lock() {
+                        items.remove(&task.id);
+                    }
+                    state.diagnostics.record(
+                        "aria2.task_removed",
+                        "INFO",
+                        Some(&removal_trace),
+                        Some(&task.id.to_string()),
+                        serde_json::json!({
+                            "gid": gid,
+                            "deleteFiles": delete_files
+                        }),
+                    );
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             }
-            state.diagnostics.record(
-                "gopeed.task_removed",
-                "INFO",
-                Some(&removal_trace),
-                Some(&task.id.to_string()),
-                serde_json::json!({
-                    "gopeedTask": gopeed_id,
-                    "deleteFiles": delete_files,
-                    "backendDeleteFiles": backend_delete_files,
-                    "torrentPayloadCleanupByAdm": delete_files && gopeed_torrent
-                }),
-            );
+            Err(error) => {
+                diagnostic_log(
+                    &state,
+                    "WARN",
+                    "aria2.remove_unavailable",
+                    &format!("error={error}"),
+                );
+            }
         }
-    }
-    if torrent_payload_cleanup {
-        let other_gopeed_tasks_remain = state
-            .gopeed_tasks
-            .lock()
-            .map_err(|error| error.to_string())?
-            .keys()
-            .any(|task_id| !ids.contains(task_id));
-        if !other_gopeed_tasks_remain {
-            // Gopeed is a shared local backend. If the removed torrent was the
-            // last Gopeed task, terminate it before deleting the payload so
-            // Windows can release every anacrolix file handle. It will be
-            // started lazily again on the next Gopeed download.
-            stop_gopeed_runtime(&state);
-            state.diagnostics.record(
-                "gopeed.runtime_stopped_for_cleanup",
-                "INFO",
-                Some(&removal_trace),
-                None,
-                serde_json::json!({"reason":"last_gopeed_torrent_removed"}),
-            );
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(750)).await;
     }
     if delete_files {
         for task in &removed {
@@ -10594,7 +10570,7 @@ async fn remove_downloads(
     if let Ok(mut identities) = state.request_identities.lock() {
         identities.retain(|id, _| !ids.contains(id));
     }
-    if let Ok(mut mappings) = state.gopeed_tasks.lock() {
+    if let Ok(mut mappings) = state.aria2_tasks.lock() {
         mappings.retain(|id, _| !ids.contains(id));
     }
     save_queue(&state, &queue)?;
@@ -10619,15 +10595,11 @@ async fn remove_downloads(
 fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
     let partial = partial_path(&task.destination);
     let mut paths = vec![task.destination.clone(), partial];
-    if matches!(
-        classify_url(&task.source),
-        Some(DownloadKind::Torrent | DownloadKind::Magnet)
-    ) {
-        let gopeed_part = PathBuf::from(format!("{}.part", task.destination.display()));
-        if !paths.contains(&gopeed_part) {
-            paths.push(gopeed_part);
-        }
+    let aria2_control = PathBuf::from(format!("{}.aria2", task.destination.display()));
+    if !paths.contains(&aria2_control) {
+        paths.push(aria2_control);
     }
+
     let recording_source = PathBuf::from(&task.source);
     if task.source.ends_with(".recording.webm") && recording_source.is_absolute() {
         paths.push(recording_source);
@@ -10706,13 +10678,13 @@ fn main() {
             let log_path = app_data.join("logs").join("apocalipse.log");
             let mut initial_settings =
                 load_settings(&settings_path).map_err(std::io::Error::other)?;
-            if initial_settings.gopeed_path.is_none() {
-                let gopeed_dir = app_data.join("tools").join("gopeed");
-                fs::create_dir_all(&gopeed_dir)?;
-                initial_settings.gopeed_path = Some(gopeed_dir.join(if cfg!(windows) {
-                    "gopeed.exe"
+            if initial_settings.aria2_path.is_none() {
+                let aria2_dir = app_data.join("tools").join("aria2");
+                fs::create_dir_all(&aria2_dir)?;
+                initial_settings.aria2_path = Some(aria2_dir.join(if cfg!(windows) {
+                    "aria2c.exe"
                 } else {
-                    "gopeed"
+                    "aria2c"
                 }));
                 write_settings(&settings_path, &initial_settings).map_err(std::io::Error::other)?;
             }
@@ -10754,8 +10726,8 @@ fn main() {
                 blob_uploads: Mutex::new(HashMap::new()),
                 recording_stops: Mutex::new(HashSet::new()),
                 request_identities: Mutex::new(HashMap::new()),
-                gopeed_runtime: Mutex::new(None),
-                gopeed_tasks: Mutex::new(HashMap::new()),
+                aria2_runtime: Mutex::new(None),
+                aria2_tasks: Mutex::new(HashMap::new()),
                 log_path,
                 log_write_lock: Mutex::new(()),
                 diagnostics: diagnostics_v3::Diagnostics::new(&app_data.join("logs")),
