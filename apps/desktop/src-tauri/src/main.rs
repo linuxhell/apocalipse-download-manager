@@ -6170,9 +6170,22 @@ fn record_diagnostics_ui(state: State<'_, AppState>, event: String, detail: serd
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"_.".contains(&b))
     {
+        let trace = detail
+            .get("traceId")
+            .and_then(|value| value.as_str())
+            .filter(|value| uuid::Uuid::parse_str(value).is_ok());
+        let task = detail
+            .get("taskId")
+            .and_then(|value| value.as_str())
+            .filter(|value| uuid::Uuid::parse_str(value).is_ok());
+        let level = detail
+            .get("level")
+            .and_then(|value| value.as_str())
+            .filter(|value| matches!(*value, "DEBUG" | "INFO" | "WARN" | "ERROR"))
+            .unwrap_or("INFO");
         state
             .diagnostics
-            .record(&format!("ui.{event}"), "INFO", None, None, detail);
+            .record(&format!("ui.{event}"), level, trace, task, detail);
     }
 }
 
