@@ -13,7 +13,8 @@ use url::Url;
 const MAX_THUMBNAIL_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CACHE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
-const CACHE_VERSION: u8 = 2;
+const CACHE_VERSION: u8 = 3;
+const MAX_NORMALIZED_EDGE: u32 = 640;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,7 +47,7 @@ pub(super) async fn resolve(
     original_url: &str,
 ) -> Result<Option<ThumbnailResolution>, String> {
     let initial = validate_remote_url(original_url)?;
-    let cache_dir = cache_root.join("thumbnails-v2");
+    let cache_dir = cache_root.join("thumbnails-v3");
     fs::create_dir_all(&cache_dir)
         .await
         .map_err(|error| error.to_string())?;
@@ -56,7 +57,8 @@ pub(super) async fn resolve(
         return Ok(Some(hit));
     }
 
-    let (bytes, kind) = fetch_validated(client, initial).await?;
+    let (source_bytes, source_kind) = fetch_validated(client, initial).await?;
+    let (bytes, kind) = normalize_to_webp(&source_bytes, source_kind).unwrap_or((source_bytes, source_kind));
     let content_hash = sha256_hex(&bytes);
     let content_path = cache_dir.join(format!("{content_hash}.{}", kind.extension));
 
@@ -94,6 +96,33 @@ pub(super) async fn resolve(
         bytes: bytes.len(),
         content_hash,
     }))
+}
+
+fn normalize_to_webp(bytes: &[u8], source_kind: ImageKind) -> Result<(Vec<u8>, ImageKind), String> {
+    if source_kind.mime == "image/avif" {
+        return Err("thumbnail_avif_passthrough".to_owned());
+    }
+    let image = image::load_from_memory(bytes).map_err(|error| error.to_string())?;
+    let normalized = if image.width() > MAX_NORMALIZED_EDGE || image.height() > MAX_NORMALIZED_EDGE {
+        image.thumbnail(MAX_NORMALIZED_EDGE, MAX_NORMALIZED_EDGE)
+    } else {
+        image
+    };
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    normalized
+        .write_to(&mut cursor, image::ImageFormat::WebP)
+        .map_err(|error| error.to_string())?;
+    let encoded = cursor.into_inner();
+    if encoded.is_empty() {
+        return Err("thumbnail_webp_empty".to_owned());
+    }
+    Ok((
+        encoded,
+        ImageKind {
+            extension: "webp",
+            mime: "image/webp",
+        },
+    ))
 }
 
 async fn read_cached(
