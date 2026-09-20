@@ -7128,6 +7128,8 @@ fn release_platform_architecture() -> Result<(&'static str, &'static str), Strin
     };
     let architecture = if cfg!(target_arch = "x86_64") {
         "x86_64"
+    } else if cfg!(target_arch = "aarch64") {
+        "aarch64"
     } else {
         return Err("tool_update_architecture_unsupported".to_owned());
     };
@@ -7135,17 +7137,14 @@ fn release_platform_architecture() -> Result<(&'static str, &'static str), Strin
 }
 
 fn aria2_platform_asset_markers() -> Result<[&'static str; 3], String> {
-    if !cfg!(target_arch = "x86_64") {
-        return Err("aria2_update_architecture_unsupported".to_owned());
-    }
-    if cfg!(target_os = "windows") {
-        Ok(["x86_64", "w64-mingw32", ".zip"])
-    } else if cfg!(target_os = "linux") {
-        Ok(["x86_64", "linux-musl", ".zip"])
-    } else if cfg!(target_os = "macos") {
-        Err("manual_update_required:aria2 macOS".to_owned())
+    if cfg!(target_os = "windows") && cfg!(target_arch = "x86_64") {
+        Ok(["aria2c-windows", "x86_64", ".exe"])
+    } else if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
+        Ok(["aria2c-linux", "x86_64", ""])
+    } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+        Ok(["aria2c-macos", "arm64", ""])
     } else {
-        Err("aria2_update_platform_unsupported".to_owned())
+        Err("manual_update_required:aria2".to_owned())
     }
 }
 
@@ -7324,7 +7323,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &["--version"],
             ),
             "aria2" => (
-                "abcfy2/aria2-static-build",
+                "Kenshin9977/aria2",
                 if cfg!(windows) { "aria2c.exe" } else { "aria2c" },
                 aria2_markers.as_slice(),
                 &["--version"],
@@ -7454,7 +7453,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         let temporary =
             std::env::temp_dir().join(format!("apocalipse-tool-update-{}", uuid::Uuid::new_v4()));
         let (replacement, ffprobe_replacement) =
-            if id == "qjs" || (id == "ffmpeg" && platform == "macos") {
+            if id == "qjs" || id == "aria2" || (id == "ffmpeg" && platform == "macos") {
                 let ffprobe_replacement = if id == "ffmpeg" {
                     let marker = "x64";
                     let expected = format!("ffprobe-darwin-{marker}");
