@@ -305,10 +305,7 @@ impl Endpoint {
                 Ok(Ok(_)) => return Ok(()),
                 Ok(Err(error)) => last_error = error,
                 Err(_) => {
-                    last_error = format!(
-                        "gopeed_info_probe_timeout:{}ms",
-                        probe_budget.as_millis()
-                    )
+                    last_error = format!("gopeed_info_probe_timeout:{}ms", probe_budget.as_millis())
                 }
             }
 
