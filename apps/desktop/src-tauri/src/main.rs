@@ -4047,6 +4047,119 @@ fn run_link_server(app: tauri::AppHandle, listener: TcpListener, tls_config: Arc
     }
 }
 
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileHostResolution {
+    url: String,
+    adapted: bool,
+    adapter: Option<String>,
+}
+
+fn supported_file_host(host: &str) -> Option<&'static str> {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    if host == "gofile.io" || host.ends_with(".gofile.io") {
+        Some("gofile")
+    } else if host == "mediafire.com" || host.ends_with(".mediafire.com") {
+        Some("mediafire")
+    } else if host == "datanodes.to" || host.ends_with(".datanodes.to") {
+        Some("datanodes")
+    } else if host == "archive.org" || host.ends_with(".archive.org") {
+        Some("archive")
+    } else {
+        None
+    }
+}
+
+fn html_attribute_urls(html: &str, attribute: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    for quote in ['"', '\''] {
+        let needle = format!("{attribute}={quote}");
+        let mut rest = html;
+        while let Some(start) = rest.find(&needle) {
+            let value = &rest[start + needle.len()..];
+            let Some(end) = value.find(quote) else { break };
+            let candidate = value[..end]
+                .replace("&amp;", "&")
+                .replace("&#38;", "&");
+            if !candidate.trim().is_empty() {
+                urls.push(candidate);
+            }
+            rest = &value[end + quote.len_utf8()..];
+        }
+    }
+    urls
+}
+
+fn file_host_candidate_score(adapter: &str, value: &url::Url) -> i32 {
+    let path = value.path().to_ascii_lowercase();
+    let host = value.host_str().unwrap_or_default().to_ascii_lowercase();
+    let mut score = 0;
+    if path.contains("/download") { score += 60; }
+    if path.contains("/file/") || path.contains("/files/") { score += 20; }
+    if [".zip", ".7z", ".rar", ".tar", ".gz", ".xz", ".zst", ".iso", ".exe", ".msi", ".dmg", ".pkg", ".deb", ".rpm", ".mp4", ".mkv", ".pdf"]
+        .iter().any(|extension| path.ends_with(extension)) { score += 50; }
+    match adapter {
+        "mediafire" if host.contains("download") || host.contains("mediafire") => score += 35,
+        "gofile" if host.contains("gofile") => score += 25,
+        "datanodes" if host.contains("datanodes") => score += 25,
+        "archive" if path.starts_with("/download/") => score += 70,
+        _ => {}
+    }
+    score
+}
+
+async fn resolve_file_host_url_internal(url: &str) -> Result<FileHostResolution, String> {
+    let parsed = url::Url::parse(url).map_err(|_| "invalid_url".to_owned())?;
+    let host = parsed.host_str().ok_or_else(|| "invalid_url".to_owned())?;
+    let Some(adapter) = supported_file_host(host) else {
+        return Ok(FileHostResolution { url: url.to_owned(), adapted: false, adapter: None });
+    };
+    if adapter == "archive" && parsed.path().starts_with("/download/") {
+        return Ok(FileHostResolution { url: url.to_owned(), adapted: false, adapter: Some(adapter.to_owned()) });
+    }
+    let response = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 ApocalipseDownloadManager/0.4")
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| error.to_string())?
+        .get(parsed.clone())
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?;
+    let final_url = response.url().clone();
+    let html = response.text().await.map_err(|error| error.to_string())?;
+    let mut best: Option<(i32, String)> = None;
+    for value in html_attribute_urls(&html, "href")
+        .into_iter()
+        .chain(html_attribute_urls(&html, "data-url"))
+        .chain(html_attribute_urls(&html, "data-download"))
+    {
+        let Ok(candidate) = final_url.join(value.trim()) else { continue };
+        if !matches!(candidate.scheme(), "http" | "https") { continue; }
+        let candidate_host = candidate.host_str().unwrap_or_default();
+        if candidate_host.eq_ignore_ascii_case("localhost") { continue; }
+        let score = file_host_candidate_score(adapter, &candidate);
+        if score >= 50 && best.as_ref().is_none_or(|(current, _)| score > *current) {
+            best = Some((score, candidate.to_string()));
+        }
+    }
+    let resolved = best.map(|(_, value)| value).unwrap_or_else(|| url.to_owned());
+    Ok(FileHostResolution {
+        adapted: resolved != url,
+        url: resolved,
+        adapter: Some(adapter.to_owned()),
+    })
+}
+
+#[tauri::command]
+async fn resolve_file_host_url(url: String) -> Result<FileHostResolution, String> {
+    resolve_file_host_url_internal(&url).await
+}
+
 #[tauri::command]
 fn inspect_url(url: String) -> Result<PlanResponse, String> {
     let capabilities = Capabilities {
@@ -11866,6 +11979,7 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            resolve_file_host_url,
             inspect_url,
             inspect_media_formats,
             inspect_torrent_metadata,
@@ -12008,6 +12122,16 @@ mod tests {
             "http://github.com/linuxhell/apocalipse-download-manager/releases"
         )
         .is_none());
+    }
+
+    #[test]
+    fn file_host_adapters_match_only_real_supported_domains() {
+        assert_eq!(supported_file_host("www.mediafire.com"), Some("mediafire"));
+        assert_eq!(supported_file_host("gofile.io"), Some("gofile"));
+        assert_eq!(supported_file_host("cdn.datanodes.to"), Some("datanodes"));
+        assert_eq!(supported_file_host("archive.org"), Some("archive"));
+        assert_eq!(supported_file_host("mediafire.com.evil.test"), None);
+        assert_eq!(supported_file_host("fakearchive.org"), None);
     }
 
     #[test]
