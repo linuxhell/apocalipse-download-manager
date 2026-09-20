@@ -39,6 +39,9 @@ const RANGE_STEAL_INTERVAL_MS: u64 = 400;
 const RANGE_STEAL_COOLDOWN_MS: u64 = 800;
 const MIN_STEAL_TAIL_BYTES: u64 = 4 * 1024 * 1024;
 const RANGE_STEAL_ALIGNMENT: u64 = 64 * 1024;
+const ADMISSION_SAMPLE_INTERVAL_MS: u64 = 1_200;
+const ADMISSION_MIN_GAIN_FRAC: f64 = 0.08;
+const ADMISSION_INITIAL_WORKERS: usize = 2;
 
 #[derive(Debug, Clone, Copy)]
 struct SegmentWork {
@@ -93,6 +96,9 @@ pub struct DownloadRequest {
     pub destination: PathBuf,
     pub overwrite: bool,
     pub connections: usize,
+    /// Allow the native HTTP engine to ramp concurrency up to `connections`
+    /// only while each newly admitted worker produces useful marginal goodput.
+    pub adaptive_connections: bool,
     pub method: String,
     pub body: Option<Vec<u8>>,
     pub headers: Vec<(String, String)>,
@@ -499,6 +505,7 @@ impl DownloadEngine {
                                     "totalBytes": total,
                                     "requestedConnections": requested,
                                     "activeConnections": useful_connections,
+                                    "connectionMode": if request.adaptive_connections { "adaptive" } else { "fixed" },
                                     "chunkBytes": planned_chunk_size,
                                     "chunkCount": total.div_ceil(planned_chunk_size),
                                     "sourceCount": sources.len(),
@@ -955,6 +962,12 @@ impl DownloadEngine {
         let journal = Arc::new(Mutex::new(journal));
         let sources = Arc::new(sources);
         let worker_count = connections.min(chunk_count).max(1);
+        let initial_active_workers = if request.adaptive_connections {
+            worker_count.min(ADMISSION_INITIAL_WORKERS).max(1)
+        } else {
+            worker_count
+        };
+        let active_worker_limit = Arc::new(AtomicUsize::new(initial_active_workers));
         let worker_states = Arc::new(
             (0..worker_count)
                 .map(|_| AdaptiveWorkerState::new())
@@ -966,7 +979,7 @@ impl DownloadEngine {
             .send(DownloadEvent::Started {
                 resumed_at: resumed,
                 total: Some(total),
-                connections: worker_count,
+                connections: initial_active_workers,
                 resume_supported: resume_validator(&identity).is_some(),
             })
             .await;
@@ -988,8 +1001,16 @@ impl DownloadEngine {
             let outstanding = remaining_parts.clone();
             let sender = events.clone();
             let done = scheduler_done.clone();
+            let active_limit = active_worker_limit.clone();
+            let shared_progress = progress.clone();
+            let adaptive_admission = request.adaptive_connections;
             tokio::spawn(async move {
                 let mut ewma_rates = vec![0_f64; states.len()];
+                let mut admission_baseline: Option<(usize, f64)> = None;
+                let mut admission_settled =
+                    !adaptive_admission || initial_active_workers >= states.len();
+                let mut last_admission_ms = 0_u64;
+                let mut last_admission_bytes = shared_progress.load(Ordering::Acquire);
                 let mut interval =
                     tokio::time::interval(Duration::from_millis(RANGE_STEAL_INTERVAL_MS));
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -1001,8 +1022,10 @@ impl DownloadEngine {
                     }
 
                     let now_ms = transfer_started.elapsed().as_millis() as u64;
-                    for (index, state) in states.iter().enumerate() {
+                    let mut aggregate_window_bytes = 0_u64;
+                    for (index, state) in states.iter().take(admitted_workers).enumerate() {
                         let bytes = state.window_bytes.swap(0, Ordering::AcqRel);
+                        aggregate_window_bytes = aggregate_window_bytes.saturating_add(bytes);
                         let rate = bytes as f64 * 1000.0 / RANGE_STEAL_INTERVAL_MS as f64;
                         if rate > 0.0 {
                             ewma_rates[index] = if ewma_rates[index] > 0.0 {
@@ -1012,12 +1035,120 @@ impl DownloadEngine {
                             };
                         }
                     }
+                    let aggregate_rate = aggregate_window_bytes
+                        .saturating_mul(1000)
+                        / RANGE_STEAL_INTERVAL_MS.max(1);
+                    let _ = sender.try_send(DownloadEvent::Diagnostic {
+                        event: "http.performance_sample",
+                        detail: serde_json::json!({
+                            "bytesPerSecond": aggregate_rate,
+                            "admittedConnections": active_limit.load(Ordering::Acquire),
+                            "maxConnections": states.len()
+                        }),
+                    });
+
+                    if !admission_settled
+                        && now_ms.saturating_sub(last_admission_ms) >= ADMISSION_SAMPLE_INTERVAL_MS
+                    {
+                        let current_bytes = shared_progress.load(Ordering::Acquire);
+                        let elapsed_ms = now_ms.saturating_sub(last_admission_ms).max(1);
+                        let interval_bytes = current_bytes.saturating_sub(last_admission_bytes);
+                        let interval_rate =
+                            interval_bytes as f64 * 1000.0 / elapsed_ms as f64;
+                        last_admission_ms = now_ms;
+                        last_admission_bytes = current_bytes;
+
+                        let current_limit = active_limit.load(Ordering::Acquire).max(1);
+                        if let Some((baseline_limit, baseline_rate)) = admission_baseline {
+                            if current_limit > baseline_limit {
+                                let gain_frac = if baseline_rate > 0.0 {
+                                    (interval_rate - baseline_rate) / baseline_rate
+                                } else if interval_rate > 0.0 {
+                                    1.0
+                                } else {
+                                    0.0
+                                };
+                                if gain_frac >= ADMISSION_MIN_GAIN_FRAC {
+                                    admission_baseline = Some((current_limit, interval_rate));
+                                    if current_limit < states.len() {
+                                        let next = current_limit + 1;
+                                        active_limit.store(next, Ordering::Release);
+                                        notify.notify_waiters();
+                                        let _ = sender.try_send(DownloadEvent::Diagnostic {
+                                            event: "http.connection_admission",
+                                            detail: serde_json::json!({
+                                                "decision": "accept_and_probe_next",
+                                                "previousConnections": baseline_limit,
+                                                "admittedConnections": next,
+                                                "measuredConnections": current_limit,
+                                                "baselineBytesPerSecond": baseline_rate as u64,
+                                                "measuredBytesPerSecond": interval_rate as u64,
+                                                "marginalGainFraction": gain_frac,
+                                                "minimumGainFraction": ADMISSION_MIN_GAIN_FRAC,
+                                                "settled": false
+                                            }),
+                                        });
+                                    } else {
+                                        admission_settled = true;
+                                        let _ = sender.try_send(DownloadEvent::Diagnostic {
+                                            event: "http.connection_admission",
+                                            detail: serde_json::json!({
+                                                "decision": "max_reached",
+                                                "admittedConnections": current_limit,
+                                                "measuredBytesPerSecond": interval_rate as u64,
+                                                "settled": true
+                                            }),
+                                        });
+                                    }
+                                } else {
+                                    active_limit.store(baseline_limit, Ordering::Release);
+                                    notify.notify_waiters();
+                                    admission_settled = true;
+                                    let _ = sender.try_send(DownloadEvent::Diagnostic {
+                                        event: "http.connection_admission",
+                                        detail: serde_json::json!({
+                                            "decision": "reject_marginal_worker",
+                                            "admittedConnections": baseline_limit,
+                                            "measuredConnections": current_limit,
+                                            "baselineBytesPerSecond": baseline_rate as u64,
+                                            "measuredBytesPerSecond": interval_rate as u64,
+                                            "marginalGainFraction": gain_frac,
+                                            "minimumGainFraction": ADMISSION_MIN_GAIN_FRAC,
+                                            "settled": true
+                                        }),
+                                    });
+                                }
+                            }
+                        } else {
+                            admission_baseline = Some((current_limit, interval_rate));
+                            if current_limit < states.len() {
+                                let next = current_limit + 1;
+                                active_limit.store(next, Ordering::Release);
+                                notify.notify_waiters();
+                                let _ = sender.try_send(DownloadEvent::Diagnostic {
+                                    event: "http.connection_admission",
+                                    detail: serde_json::json!({
+                                        "decision": "probe_next",
+                                        "previousConnections": current_limit,
+                                        "admittedConnections": next,
+                                        "baselineBytesPerSecond": interval_rate as u64,
+                                        "minimumGainFraction": ADMISSION_MIN_GAIN_FRAC,
+                                        "settled": false
+                                    }),
+                                });
+                            } else {
+                                admission_settled = true;
+                            }
+                        }
+                    }
 
                     if !queue.lock().await.is_empty() {
                         continue;
                     }
+                    let admitted_workers = active_limit.load(Ordering::Acquire).min(states.len());
                     let idle_workers = states
                         .iter()
+                        .take(admitted_workers)
                         .filter(|state| !state.active.load(Ordering::Acquire))
                         .count();
                     if idle_workers == 0 {
@@ -1027,6 +1158,7 @@ impl DownloadEngine {
                     let mut victim = None::<(usize, u64, f64, bool)>;
                     let positive_rates = ewma_rates
                         .iter()
+                        .take(admitted_workers)
                         .copied()
                         .filter(|rate| *rate > 0.0)
                         .collect::<Vec<_>>();
@@ -1168,6 +1300,7 @@ impl DownloadEngine {
             let outstanding = remaining_parts.clone();
             let parts = parent_parts.clone();
             let states = worker_states.clone();
+            let active_limit = active_worker_limit.clone();
             jobs.push(async move {
                 if worker_index > 0 {
                     tokio::time::sleep(Duration::from_millis(
@@ -1177,6 +1310,17 @@ impl DownloadEngine {
                 }
 
                 loop {
+                    while worker_index >= active_limit.load(Ordering::Acquire) {
+                        if outstanding.load(Ordering::Acquire) == 0 {
+                            return Result::<()>::Ok(());
+                        }
+                        states[worker_index].finish();
+                        tokio::select! {
+                            _ = notify.notified() => {}
+                            _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+                        }
+                    }
+
                     let work = loop {
                         if let Some(work) = queue.lock().await.pop_front() {
                             break work;
@@ -2006,6 +2150,7 @@ mod tests {
             destination: destination.clone(),
             overwrite: false,
             connections: 1,
+            adaptive_connections: false,
             method: "GET".into(),
             body: None,
             headers: Vec::new(),
