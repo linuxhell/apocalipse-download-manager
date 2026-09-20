@@ -6326,12 +6326,17 @@ fn reserve_queued_task(
     reject_active_duplicate: bool,
 ) -> Result<(), String> {
     if reject_active_duplicate {
+        let gopeed_torrent = matches!(
+            classify_url(&task.source),
+            Some(DownloadKind::Torrent | DownloadKind::Magnet)
+        );
         if let Some(existing) = queue.iter().find(|existing| {
             existing.source == task.source
-                && !matches!(
-                    existing.state,
-                    DownloadState::Completed | DownloadState::Failed { .. }
-                )
+                && (gopeed_torrent
+                    || !matches!(
+                        existing.state,
+                        DownloadState::Completed | DownloadState::Failed { .. }
+                    ))
         }) {
             return Err(format!("duplicate_active_download:{}", existing.id));
         }
@@ -10301,27 +10306,44 @@ async fn remove_downloads(
         .filter_map(|task| {
             task.gopeed_task_id
                 .clone()
-                .map(|gopeed_id| (task.id, gopeed_id))
+                .map(|gopeed_id| (task.clone(), gopeed_id))
         })
         .collect::<Vec<_>>();
+    let mut torrent_payload_cleanup = false;
     if !gopeed_targets.is_empty() {
         let endpoint = gopeed_endpoint(&state).await?;
-        for (task_id, gopeed_id) in &gopeed_targets {
-            endpoint.delete(gopeed_id, delete_files).await?;
+        for (task, gopeed_id) in &gopeed_targets {
+            let gopeed_torrent = matches!(
+                classify_url(&task.source),
+                Some(DownloadKind::Torrent | DownloadKind::Magnet)
+            );
+            // Gopeed beta.3 force deletion is unsafe for BT on Windows: it can
+            // attempt to unlink .part files while anacrolix still owns them,
+            // and a subsequent Close may dereference the already-closed global
+            // BT client. Close/remove the backend task without force and let
+            // ADM delete the payload after the handles are released.
+            let backend_delete_files = delete_files && !gopeed_torrent;
+            endpoint.delete(gopeed_id, backend_delete_files).await?;
+            torrent_payload_cleanup |= delete_files && gopeed_torrent;
             if let Ok(mut items) = state.gopeed_tasks.lock() {
-                items.remove(task_id);
+                items.remove(&task.id);
             }
             state.diagnostics.record(
                 "gopeed.task_removed",
                 "INFO",
                 Some(&removal_trace),
-                Some(&task_id.to_string()),
+                Some(&task.id.to_string()),
                 serde_json::json!({
                     "gopeedTask": gopeed_id,
-                    "deleteFiles": delete_files
+                    "deleteFiles": delete_files,
+                    "backendDeleteFiles": backend_delete_files,
+                    "torrentPayloadCleanupByAdm": delete_files && gopeed_torrent
                 }),
             );
         }
+    }
+    if torrent_payload_cleanup {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
     if delete_files {
         for task in &removed {
