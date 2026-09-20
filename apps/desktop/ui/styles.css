@@ -912,7 +912,20 @@ footer .bridge-connected i {
 .link-files header > span { display:flex; gap:6px; flex-shrink:0; }
 .link-files header button[id*="delete"] { border-color:#713443; color:#ff9aaa; }
 .link-files > small { color:var(--muted); overflow-wrap:anywhere; }
-.link-files > div { display:grid; gap:4px; height:clamp(300px,42vh,460px); overflow-y:auto; overflow-x:hidden; scrollbar-gutter:stable; padding:5px; border:1px solid var(--line); border-radius:9px; background:var(--surface); isolation:isolate; }
+.link-files > div { display:grid; gap:4px; height:clamp(300px,42vh,460px); overflow-y:scroll; overflow-x:hidden; scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:var(--accent) var(--surface-2); padding:5px; border:1px solid var(--line); border-radius:9px; background:var(--surface); isolation:isolate; }
+.link-files > div::-webkit-scrollbar { width:10px; }
+.link-files > div::-webkit-scrollbar-track { background:var(--surface-2); border-radius:9px; }
+.link-files > div::-webkit-scrollbar-thumb { background:color-mix(in srgb,var(--accent) 72%,var(--muted)); border:2px solid var(--surface-2); border-radius:9px; }
+.link-transfer-panel { grid-column:1 / -1; gap:8px!important; min-width:0; }
+.link-transfer-panel[hidden] { display:none!important; }
+.link-transfer-panel header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.link-transfer-panel header strong { color:var(--accent); font-variant-numeric:tabular-nums; }
+.link-transfer-track { width:100%; height:12px; overflow:hidden; border:1px solid var(--line); border-radius:99px; background:var(--surface-2); }
+.link-transfer-track > span { display:block; width:0%; height:100%; border-radius:inherit; background:linear-gradient(90deg,var(--accent),var(--accent-2)); transition:width .12s linear; }
+.link-transfer-panel > small { color:var(--muted); font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.link-transfer-actions { display:flex; justify-content:flex-end; gap:8px; height:auto!important; overflow:visible!important; padding:0!important; border:0!important; background:transparent!important; }
+#link-transfer-pause { min-width:110px; }
+#link-transfer-cancel { min-width:110px; border-color:#713443; color:#ff9aaa; }
 .link-file { display:grid; grid-template-columns:24px minmax(0,1fr) auto; gap:8px; align-items:center; width:100%; min-width:0; min-height:40px; padding:9px; border:0; border-radius:7px; overflow:hidden; text-align:left; color:var(--text); background:transparent; }
 .link-file > span:nth-child(2) { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .link-file:hover { background:var(--surface-2); }
