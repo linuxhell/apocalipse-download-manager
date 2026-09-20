@@ -943,6 +943,64 @@ function renderDownloads(force = false) {
   for (const task of visible) {
     const row = document.createElement("article");
     row.className = "download-row";
+    row.dataset.taskId = task.id;
+    const reorderable = ["queued", "paused"].includes(stateKey(task.state))
+      && activeFilter === "all"
+      && !historyQuery;
+    row.draggable = reorderable;
+    row.classList.toggle("reorderable", reorderable);
+    row.addEventListener("dragstart", (event) => {
+      if (!reorderable || event.target.closest("button,input,select,a")) {
+        event.preventDefault();
+        return;
+      }
+      selectionPointerActive = true;
+      row.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", task.id);
+    });
+    row.addEventListener("dragend", () => {
+      row.classList.remove("dragging");
+      document.querySelectorAll(".download-row.drag-over").forEach((item) => item.classList.remove("drag-over"));
+      selectionPointerActive = false;
+    });
+    row.addEventListener("dragover", (event) => {
+      if (!reorderable) return;
+      const sourceId = event.dataTransfer.getData("text/plain");
+      if (!sourceId || sourceId === task.id) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      row.classList.add("drag-over");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("drag-over"));
+    row.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      row.classList.remove("drag-over");
+      const sourceId = event.dataTransfer.getData("text/plain");
+      if (!sourceId || sourceId === task.id) return;
+      const movable = downloads.filter((item) => ["queued", "paused"].includes(stateKey(item.state)));
+      const ids = movable.map((item) => item.id);
+      const from = ids.indexOf(sourceId);
+      const target = ids.indexOf(task.id);
+      if (from < 0 || target < 0) return;
+      const [moved] = ids.splice(from, 1);
+      ids.splice(target, 0, moved);
+      const byId = new Map(downloads.map((item) => [item.id, item]));
+      const reordered = ids.map((id) => byId.get(id)).filter(Boolean);
+      let cursor = 0;
+      downloads = downloads.map((item) => ["queued", "paused"].includes(stateKey(item.state)) ? reordered[cursor++] : item);
+      renderDownloads(true);
+      try {
+        await invoke("reorder_downloads", { ids });
+        downloadListState.invalidate();
+        await refreshDownloads();
+      } catch (error) {
+        console.error(error);
+        await refreshDownloads();
+      } finally {
+        selectionPointerActive = false;
+      }
+    });
     const select = document.createElement("input");
     select.type = "checkbox";
     select.className = "task-select";
