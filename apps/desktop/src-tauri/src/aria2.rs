@@ -70,8 +70,7 @@ fn number(value: Option<&Value>) -> u64 {
 
 fn reserve_loopback_port(requested: Option<u16>) -> Result<u16, String> {
     if let Some(port) = requested.filter(|port| *port > 0) {
-        let listener =
-            TcpListener::bind(("127.0.0.1", port)).map_err(|error| error.to_string())?;
+        let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|error| error.to_string())?;
         drop(listener);
         return Ok(port);
     }
@@ -185,7 +184,10 @@ impl Endpoint {
             .map_err(|error| error.to_string())?;
         let payload: Value = response.json().await.map_err(|error| error.to_string())?;
         if let Some(error) = payload.get("error") {
-            let code = error.get("code").and_then(Value::as_i64).unwrap_or_default();
+            let code = error
+                .get("code")
+                .and_then(Value::as_i64)
+                .unwrap_or_default();
             let message = error
                 .get("message")
                 .and_then(Value::as_str)
@@ -295,8 +297,7 @@ impl Endpoint {
                 .is_some_and(|value| value.eq_ignore_ascii_case("torrent"))
         {
             let bytes = fs::read(local_torrent).map_err(|error| error.to_string())?;
-            let encoded =
-                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
+            let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
             self.call(
                 "aria2.addTorrent",
                 vec![
