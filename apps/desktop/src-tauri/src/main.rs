@@ -6607,6 +6607,20 @@ fn set_media_player(state: State<'_, AppState>, path: String) -> Result<(), Stri
     save_settings(&state, &settings)
 }
 
+fn is_previewable_video_path(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let lower = name.to_ascii_lowercase();
+    let payload_name = lower.strip_suffix(".part").unwrap_or(&lower);
+    Path::new(payload_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| {
+            matches!(extension, "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts")
+        })
+}
+
 fn find_video_file(root: &Path, depth: usize) -> Option<PathBuf> {
     if depth > 6 {
         return None;
@@ -6623,16 +6637,7 @@ fn find_video_file(root: &Path, depth: usize) -> Option<PathBuf> {
                     }
                 }
             }
-        } else if path
-            .extension()
-            .and_then(|value| value.to_str())
-            .is_some_and(|extension| {
-                matches!(
-                    extension.to_ascii_lowercase().as_str(),
-                    "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts"
-                )
-            })
-        {
+        } else if is_previewable_video_path(&path) {
             if let Ok(metadata) = path.metadata() {
                 let size = metadata.len();
                 if best.as_ref().is_none_or(|(current, _)| size > *current) {
@@ -6672,16 +6677,7 @@ fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
         let path = entry.path();
         let candidate = if path.is_dir() {
             find_video_file(&path, 0)
-        } else if path
-            .extension()
-            .and_then(|value| value.to_str())
-            .is_some_and(|extension| {
-                matches!(
-                    extension.to_ascii_lowercase().as_str(),
-                    "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts"
-                )
-            })
-        {
+        } else if is_previewable_video_path(&path) {
             Some(path)
         } else {
             None
@@ -10343,7 +10339,27 @@ async fn remove_downloads(
         }
     }
     if torrent_payload_cleanup {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let other_gopeed_tasks_remain = state
+            .queue
+            .lock()
+            .map_err(|error| error.to_string())?
+            .iter()
+            .any(|task| !ids.contains(&task.id) && task.gopeed_task_id.is_some());
+        if !other_gopeed_tasks_remain {
+            // Gopeed is a shared local backend. If the removed torrent was the
+            // last Gopeed task, terminate it before deleting the payload so
+            // Windows can release every anacrolix file handle. It will be
+            // started lazily again on the next Gopeed download.
+            stop_gopeed_runtime(&state);
+            state.diagnostics.record(
+                "gopeed.runtime_stopped_for_cleanup",
+                "INFO",
+                Some(&removal_trace),
+                None,
+                serde_json::json!({"reason":"last_gopeed_torrent_removed"}),
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(750)).await;
     }
     if delete_files {
         for task in &removed {
