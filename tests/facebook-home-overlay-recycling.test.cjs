@@ -49,3 +49,21 @@ test('Facebook unresolved Download falls back to recording even without srcObjec
   assert.match(content, /if \(isFacebookVideo && canRecord && recordButton\)/);
   assert.doesNotMatch(content, /if \(isFacebookVideo && element\.srcObject && canRecord && recordButton\)/);
 });
+
+
+test('universal social debugger records player decisions, missing overlays and scan summaries', () => {
+  assert.match(content, /social\.player_decision/);
+  assert.match(content, /social\.overlay_missing/);
+  assert.match(content, /social\.scan_summary/);
+  assert.match(content, /visible_player_without_overlay_after_reconcile/);
+  assert.match(content, /no_supported_action/);
+  assert.match(content, /platform: socialPlatform\(\)/);
+});
+
+test('social debugger supports Facebook, Instagram, TikTok and future generic handling', () => {
+  assert.match(content, /return "facebook"/);
+  assert.match(content, /return "instagram"/);
+  assert.match(content, /return "tiktok"/);
+  assert.match(content, /return "x"/);
+  assert.match(content, /return "generic"/);
+});
