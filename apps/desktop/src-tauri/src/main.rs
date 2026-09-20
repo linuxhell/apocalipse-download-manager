@@ -257,10 +257,10 @@ fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize
             || value == "software.download.prss.microsoft.com"
             || value.ends_with(".download.prss.microsoft.com")
     }) {
-        // Microsoft's ISO CDN supports byte ranges. Start wide enough to avoid
-        // the slow single-stream ramp while keeping the setting below the
-        // application's global safety ceiling.
-        Some(requested.unwrap_or(16).max(16).clamp(1, 32))
+        // Microsoft's ISO CDN supports byte ranges. Keep enough headroom for
+        // adaptive admission without creating more than eight native HTTP
+        // workers for a single file.
+        Some(requested.unwrap_or(8).max(8).clamp(1, 8))
     } else {
         requested.map(|value| value.clamp(1, 32))
     }
@@ -7993,7 +7993,7 @@ fn start_download(
         let configured_connections =
             if limits.adaptive_efficiency && limits.max_active_downloads <= 3 && task.priority >= 0
             {
-                limits.connections_per_download.max(16)
+                8
             } else {
                 limits.connections_per_download
             };
@@ -8001,8 +8001,8 @@ fn start_download(
         let connections = task
             .connections_override
             .or_else(|| host_rule.as_ref().and_then(|rule| rule.connections))
-            .unwrap_or_else(|| configured_connections.clamp(1, 32))
-            .clamp(1, 32);
+            .unwrap_or_else(|| configured_connections.clamp(1, 8))
+            .clamp(1, 8);
         let mut headers = Vec::new();
         if let Some(referer) = task.referer.as_ref() {
             headers.push(("Referer".to_owned(), referer.clone()));
@@ -11051,6 +11051,24 @@ mod tests {
         assert_eq!(
             site_connection_override("https://example.test/file", None),
             None
+        );
+    }
+
+    #[test]
+    fn microsoft_native_http_override_is_capped_at_eight() {
+        assert_eq!(
+            site_connection_override(
+                "https://software.download.prss.microsoft.com/example.iso",
+                None,
+            ),
+            Some(8)
+        );
+        assert_eq!(
+            site_connection_override(
+                "https://download.microsoft.com/example.iso",
+                Some(32),
+            ),
+            Some(8)
         );
     }
 
