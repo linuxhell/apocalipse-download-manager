@@ -2522,6 +2522,14 @@ document.querySelector("#analyze").onclick = async () => {
   box.textContent = "…";
   let metadataTimer = null;
   try {
+    try {
+      const hostResolution = await invoke("resolve_file_host_url", { url: url.value });
+      if (hostResolution?.adapted && hostResolution.url) {
+        url.value = hostResolution.url;
+      }
+    } catch (error) {
+      console.warn("file-host-adapter", error);
+    }
     const plan = await invoke("inspect_url", { url: url.value });
     const fileName = document.querySelector("#file-name");
     const suggestedFileName = await invoke(
