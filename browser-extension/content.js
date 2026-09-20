@@ -1262,7 +1262,29 @@
         button.textContent = "…";
         trace("overlay_download_clicked", "download", { tag: element.tagName, facebook: isFacebookVideo, tiktokPage: isTikTokPage, tiktokPermalink: isTikTokVideo, overlays: activeOverlays.size });
         const visibleFacebookUrl = isFacebookVideo && isFacebookMediaUrl(location.href) ? location.href : null;
-        const resolved = visibleFacebookUrl || (isFacebookVideo ? await revealFacebookUrl(element) : tikTokUrlFor(element) || await resolveDownloadUrl(element));
+        const immediateFacebookUrl = isFacebookVideo ? facebookUrlFor(element) : null;
+        const sponsoredEvidence = isFacebookVideo ? facebookSponsoredEvidence(element) : null;
+        // Facebook Home sponsored/stream players are frequently MediaStreams
+        // without a stable permalink. Opening the three-dots menu to discover a
+        // URL can recycle the virtualized player before Download completes.
+        // In that exact case, Download means "record this player now" and uses
+        // the same proven capture path as the visible Record button.
+        if (isFacebookVideo && canRecord && recordButton
+          && (sponsoredEvidence || (element.srcObject && !immediateFacebookUrl))) {
+          trace("overlay_download_recording_redirect", "download", {
+            reason: sponsoredEvidence?.reason || "facebook_stream_without_permalink",
+            sponsored: Boolean(sponsoredEvidence),
+            hasSrcObject: Boolean(element.srcObject),
+            permalinkFound: Boolean(immediateFacebookUrl),
+          });
+          button.textContent = "●";
+          button.title = recordingLabels().record;
+          recordButton.click();
+          setTimeout(() => { restoreDownloadLabel(); button.title = "Apocalipse Download Manager"; }, 1800);
+          return;
+        }
+        const resolved = visibleFacebookUrl || immediateFacebookUrl
+          || (isFacebookVideo ? await revealFacebookUrl(element) : tikTokUrlFor(element) || await resolveDownloadUrl(element));
         // The Reel/post permalink represents the complete video. A recent CDN
         // response can be only one DASH track (even when labelled video/mp4).
         // Use the same page-extractor route as the popup, before blobs or CDN URLs.
