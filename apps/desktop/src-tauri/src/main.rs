@@ -8327,6 +8327,7 @@ fn enqueue_download_impl(
     priority: Option<i8>,
     bandwidth_limit: Option<u64>,
     connections_override: Option<usize>,
+    auto_extract: Option<bool>,
     expected_size: Option<u64>,
     expected_sha256: Option<String>,
     context: Option<DownloadContext>,
@@ -8370,6 +8371,7 @@ fn enqueue_download_impl(
         .as_deref()
         .is_some_and(|value| value == "pixeldrain.com" || value.ends_with(".pixeldrain.com"));
     task.connections_override = site_connection_override(&url, connections_override);
+    task.auto_extract = auto_extract.unwrap_or(false) && is_archive_file_name(&file_name);
     task.expected_size = expected_size.filter(|value| *value > 0);
     if let Some(context) = context {
         if task.expected_size.is_none() {
@@ -8490,6 +8492,7 @@ fn enqueue_download(
     priority: Option<i8>,
     bandwidth_limit: Option<u64>,
     connections_override: Option<usize>,
+    auto_extract: Option<bool>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
     enqueue_download_impl(
@@ -8504,6 +8507,7 @@ fn enqueue_download(
         priority,
         bandwidth_limit,
         connections_override,
+        auto_extract,
         None,
         None,
         context,
