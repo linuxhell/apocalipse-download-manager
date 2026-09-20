@@ -3693,7 +3693,11 @@ fn active_network_ip() -> Option<std::net::IpAddr> {
         .filter(|address| !address.is_unspecified() && !address.is_loopback())
 }
 
-fn reconnect_active_downloads_after_network_change(app: &tauri::AppHandle, previous: Option<std::net::IpAddr>, current: Option<std::net::IpAddr>) {
+fn reconnect_active_downloads_after_network_change(
+    app: &tauri::AppHandle,
+    previous: Option<std::net::IpAddr>,
+    current: Option<std::net::IpAddr>,
+) {
     let state = app.state::<AppState>();
     let active = state
         .workers
@@ -3713,7 +3717,9 @@ fn reconnect_active_downloads_after_network_change(app: &tauri::AppHandle, previ
     if current.is_some() {
         if let Ok(queue) = state.queue.lock() {
             ids.extend(queue.iter().filter_map(|task| match &task.state {
-                DownloadState::Failed { message } if message == "network_waiting_for_reconnect" => Some(task.id),
+                DownloadState::Failed { message } if message == "network_waiting_for_reconnect" => {
+                    Some(task.id)
+                }
                 _ => None,
             }));
         }
@@ -3761,7 +3767,11 @@ fn reconnect_active_downloads_after_network_change(app: &tauri::AppHandle, previ
             let _ = save_queue(&state, &queue);
         }
         state.diagnostics.record(
-            if current.is_some() { "network.reconnect_queued" } else { "network.waiting" },
+            if current.is_some() {
+                "network.reconnect_queued"
+            } else {
+                "network.waiting"
+            },
             "INFO",
             None,
             None,
