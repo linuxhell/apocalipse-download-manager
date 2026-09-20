@@ -2998,12 +2998,24 @@ fn extractor_kind(path: &Path) -> Option<ExtractorKind> {
     else { None }
 }
 
-fn extractor_version_args(kind: ExtractorKind) -> &'static [&'static str] {
-    match kind {
-        ExtractorKind::SevenZip | ExtractorKind::Rar | ExtractorKind::Unrar => &[],
+fn extractor_version(executable: &Path, kind: ExtractorKind) -> Option<String> {
+    let stem = executable
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if stem == "winrar" {
+        // WinRAR.exe without an archive is a GUI application and must never be
+        // launched merely to populate the Tools status line.
+        return executable.is_file().then(|| "WinRAR".to_owned());
+    }
+    let args: &[&str] = match kind {
+        ExtractorKind::SevenZip => &[],
+        ExtractorKind::Rar | ExtractorKind::Unrar => &["-?"],
         ExtractorKind::Unar => &["-v"],
         ExtractorKind::Bsdtar | ExtractorKind::Tar => &["--version"],
-    }
+    };
+    version_line(executable, args).or_else(|| executable.is_file().then(|| format!("{kind:?}")))
 }
 
 fn archive_name_without_extensions(path: &Path) -> String {
@@ -7623,7 +7635,7 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
         .collect::<Vec<_>>();
     let extractor = settings.extractor_path.clone().unwrap_or_default();
     let kind = extractor_kind(&extractor);
-    let version = kind.and_then(|kind| version_line(&extractor, extractor_version_args(kind)));
+    let version = kind.and_then(|kind| extractor_version(&extractor, kind));
     statuses.push(ToolStatus {
         id: "extractor".to_owned(),
         path: extractor.to_string_lossy().into_owned(),
