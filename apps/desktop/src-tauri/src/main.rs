@@ -3551,9 +3551,11 @@ struct BlobUpload {
     task_id: DownloadId,
     partial: PathBuf,
     destination: PathBuf,
+    source: String,
     received: u64,
     total: Option<u64>,
     recording: bool,
+    prompt_for_destination: bool,
     speed_sample_at: Instant,
     speed_sample_bytes: u64,
     smoothed_speed: u64,
@@ -3569,6 +3571,8 @@ struct BlobBegin {
     streaming: bool,
     #[serde(default)]
     recording: bool,
+    #[serde(default)]
+    prompt_for_destination: bool,
 }
 
 #[derive(Deserialize)]
@@ -10884,11 +10888,21 @@ fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid:
         return Err("empty_blob".to_owned());
     }
     let state = app.state::<AppState>();
-    let directory = configured_download_directory(app, &state)?;
+    let prompt_for_destination = request.prompt_for_destination && !request.recording;
+    let directory = if prompt_for_destination {
+        state
+            .queue_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("staging")
+            .join("browser-captures")
+    } else {
+        configured_download_directory(app, &state)?
+    };
     let file_name = validate_file_name(&request.file_name)?;
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
-    let mut task = DownloadTask::new(request.source, directory.join(&file_name));
+    let mut task = DownloadTask::new(request.source.clone(), directory.join(&file_name));
     task.state = DownloadState::Downloading;
     task.total = (!request.streaming).then_some(request.total);
     let task_id = task.id;
@@ -10920,9 +10934,11 @@ fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid:
                 task_id,
                 partial,
                 destination,
+                source: request.source,
                 received: 0,
                 total: (!request.streaming).then_some(request.total),
                 recording: request.recording,
+                prompt_for_destination,
                 speed_sample_at: Instant::now(),
                 speed_sample_bytes: 0,
                 smoothed_speed: 0,
@@ -10933,7 +10949,7 @@ fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid:
         "INFO",
         "blob.start",
         &format!(
-            "task={task_id} bytes={} streaming={}",
+            "task={task_id} bytes={} streaming={} prompt_for_destination={prompt_for_destination}",
             request.total, request.streaming
         ),
     );
@@ -11011,6 +11027,38 @@ fn finish_blob_upload(app: &tauri::AppHandle, request: BlobFinish) -> Result<(),
         return Err("incomplete_blob".to_owned());
     }
     fs::rename(&upload.partial, &upload.destination).map_err(|error| error.to_string())?;
+
+    if upload.prompt_for_destination {
+        {
+            let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+            queue.retain(|task| task.id != upload.task_id);
+            save_queue(&state, &queue)?;
+        }
+        state
+            .browser_assisted_pending
+            .lock()
+            .map_err(|error| error.to_string())?
+            .push(BrowserDownloadComplete {
+                url: upload.source.clone(),
+                file_name: upload.destination.to_string_lossy().into_owned(),
+                total: Some(upload.received),
+            });
+        diagnostic_log(
+            &state,
+            "INFO",
+            "blob.destination_prompt_pending",
+            &format!(
+                "task={} bytes={} file={}",
+                upload.task_id,
+                upload.received,
+                upload.destination.display()
+            ),
+        );
+        show_main_window(app);
+        let _ = app.emit("browser-assisted-ready", ());
+        return Ok(());
+    }
+
     update_task(app, upload.task_id, true, |task| {
         task.received = upload.received;
         task.total = Some(upload.received);
