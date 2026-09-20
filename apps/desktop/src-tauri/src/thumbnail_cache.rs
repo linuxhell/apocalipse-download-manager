@@ -58,7 +58,8 @@ pub(super) async fn resolve(
     }
 
     let (source_bytes, source_kind) = fetch_validated(client, initial).await?;
-    let (bytes, kind) = normalize_to_webp(&source_bytes, source_kind).unwrap_or((source_bytes, source_kind));
+    let (bytes, kind) =
+        normalize_to_webp(&source_bytes, source_kind).unwrap_or((source_bytes, source_kind));
     let content_hash = sha256_hex(&bytes);
     let content_path = cache_dir.join(format!("{content_hash}.{}", kind.extension));
 
@@ -103,11 +104,12 @@ fn normalize_to_webp(bytes: &[u8], source_kind: ImageKind) -> Result<(Vec<u8>, I
         return Err("thumbnail_avif_passthrough".to_owned());
     }
     let image = image::load_from_memory(bytes).map_err(|error| error.to_string())?;
-    let normalized = if image.width() > MAX_NORMALIZED_EDGE || image.height() > MAX_NORMALIZED_EDGE {
-        image.thumbnail(MAX_NORMALIZED_EDGE, MAX_NORMALIZED_EDGE)
-    } else {
-        image
-    };
+    let normalized =
+        if image.width() > MAX_NORMALIZED_EDGE || image.height() > MAX_NORMALIZED_EDGE {
+            image.thumbnail(MAX_NORMALIZED_EDGE, MAX_NORMALIZED_EDGE)
+        } else {
+            image
+        };
     let mut cursor = std::io::Cursor::new(Vec::new());
     normalized
         .write_to(&mut cursor, image::ImageFormat::WebP)
