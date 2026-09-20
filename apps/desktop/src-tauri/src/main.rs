@@ -10394,6 +10394,34 @@ async fn remove_downloads(
         .filter(|task| ids.contains(&task.id))
         .cloned()
         .collect::<Vec<_>>();
+
+    let gopeed_targets = removed
+        .iter()
+        .filter_map(|task| {
+            task.gopeed_task_id
+                .clone()
+                .map(|gopeed_id| (task.id, gopeed_id))
+        })
+        .collect::<Vec<_>>();
+    if !gopeed_targets.is_empty() {
+        let endpoint = gopeed_endpoint(&state).await?;
+        for (task_id, gopeed_id) in &gopeed_targets {
+            endpoint.delete(gopeed_id, delete_files).await?;
+            if let Ok(mut items) = state.gopeed_tasks.lock() {
+                items.remove(task_id);
+            }
+            state.diagnostics.record(
+                "gopeed.task_removed",
+                "INFO",
+                Some(&removal_trace),
+                Some(&task_id.to_string()),
+                serde_json::json!({
+                    "gopeedTask": gopeed_id,
+                    "deleteFiles": delete_files
+                }),
+            );
+        }
+    }
     if delete_files {
         for task in &removed {
             cleanup_chunk_artifacts(&task.destination)
@@ -10442,6 +10470,9 @@ async fn remove_downloads(
     queue.retain(|task| !ids.contains(&task.id));
     if let Ok(mut identities) = state.request_identities.lock() {
         identities.retain(|id, _| !ids.contains(id));
+    }
+    if let Ok(mut mappings) = state.gopeed_tasks.lock() {
+        mappings.retain(|id, _| !ids.contains(id));
     }
     save_queue(&state, &queue)?;
     diagnostic_log(
