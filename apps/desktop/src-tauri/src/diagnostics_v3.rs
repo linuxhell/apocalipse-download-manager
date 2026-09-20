@@ -544,6 +544,7 @@ impl Diagnostics {
         let mut players = HashMap::<String, Value>::new();
         let mut decisions = Vec::new();
         let mut media_replay = Vec::new();
+        let mut social_debugger = Vec::new();
         let mut transfer_engine = Vec::new();
         let mut contexts = HashSet::new();
         let mut warnings = Vec::new();
@@ -572,6 +573,14 @@ impl Diagnostics {
             if name == "players.snapshot" || name == "popup.render" || name == "popup.row_state" {
                 let key = format!("{}:{}", record["contextId"], name);
                 players.insert(key, record.clone());
+            }
+            if name.starts_with("social.")
+                || name.starts_with("dom.media_")
+                || name == "player.lifecycle"
+                || name.starts_with("collector.visibility")
+                || name.starts_with("collector.network_state")
+            {
+                social_debugger.push(record.clone());
             }
             if name.starts_with("http.engine_")
                 || name.starts_with("http.resume_")
@@ -603,6 +612,32 @@ impl Diagnostics {
             "firstSequence":items.first().map(|v| &v["serverSequence"]),
             "lastStage":items.last().map(|v| &v["event"]),"interpretation":"last_observed_stage_not_proven_root_cause"})).collect::<Vec<_>>();
         action_rows.sort_by_key(|v| v["firstSequence"].as_u64().unwrap_or(0));
+
+        let mut social_platforms = HashMap::<String, Value>::new();
+        for record in &social_debugger {
+            if record["event"] != "social.scan_summary" {
+                continue;
+            }
+            let detail = &record["detail"];
+            let platform = detail["platform"].as_str().unwrap_or("unknown").to_owned();
+            social_platforms.insert(platform, detail.clone());
+        }
+        let social_missing = social_debugger
+            .iter()
+            .filter(|record| record["event"] == "social.overlay_missing")
+            .count();
+        let social_decisions = social_debugger
+            .iter()
+            .filter(|record| record["event"] == "social.player_decision")
+            .count();
+        let social_summary = json!({
+            "telemetryVersion": 1,
+            "events": social_debugger.len(),
+            "playerDecisions": social_decisions,
+            "overlayMissing": social_missing,
+            "latestPlatformScans": social_platforms,
+            "interpretation": "structured_observations_not_guesses"
+        });
 
         let performance_samples = transfer_engine
             .iter()
@@ -805,6 +840,11 @@ impl Diagnostics {
             ("traces/actions.jsonl".into(), jsonl(&action_rows)),
             ("traces/replay-de-midia.jsonl".into(), jsonl(&media_replay)),
             ("capture/media-decisions.jsonl".into(), jsonl(&decisions)),
+            ("social/player-debugger.jsonl".into(), jsonl(&social_debugger)),
+            (
+                "social/summary.json".into(),
+                serde_json::to_vec_pretty(&social_summary).unwrap_or_default(),
+            ),
             (
                 "performance/transfer-engine.jsonl".into(),
                 jsonl(&transfer_engine),
