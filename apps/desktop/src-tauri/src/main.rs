@@ -6220,19 +6220,26 @@ fn record_diagnostics_ui(state: State<'_, AppState>, event: String, detail: serd
         let trace = detail
             .get("traceId")
             .and_then(|value| value.as_str())
-            .filter(|value| uuid::Uuid::parse_str(value).is_ok());
+            .filter(|value| uuid::Uuid::parse_str(value).is_ok())
+            .map(str::to_owned);
         let task = detail
             .get("taskId")
             .and_then(|value| value.as_str())
-            .filter(|value| uuid::Uuid::parse_str(value).is_ok());
+            .filter(|value| uuid::Uuid::parse_str(value).is_ok())
+            .map(str::to_owned);
         let level = detail
             .get("level")
             .and_then(|value| value.as_str())
             .filter(|value| matches!(*value, "DEBUG" | "INFO" | "WARN" | "ERROR"))
-            .unwrap_or("INFO");
-        state
-            .diagnostics
-            .record(&format!("ui.{event}"), level, trace, task, detail);
+            .unwrap_or("INFO")
+            .to_owned();
+        state.diagnostics.record(
+            &format!("ui.{event}"),
+            &level,
+            trace.as_deref(),
+            task.as_deref(),
+            detail,
+        );
     }
 }
 
