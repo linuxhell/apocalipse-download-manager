@@ -268,3 +268,13 @@ test('recording seals each segment and resumes only after real media progress', 
   assert.match(script, /recorder\.state !== "paused" \|\| element\.paused/);
   assert.match(script, /recorder\.resume\(\)/);
 });
+
+
+test('Facebook stream Download redirects to the proven Record path before permalink discovery', () => {
+  assert.match(script, /overlay_download_recording_redirect/);
+  assert.match(script, /element\.srcObject && !immediateFacebookUrl/);
+  assert.match(script, /recordButton\.click\(\)/);
+  const redirect = script.indexOf('overlay_download_recording_redirect');
+  const reveal = script.indexOf('await revealFacebookUrl(element)');
+  assert.ok(redirect >= 0 && reveal >= 0 && redirect < reveal, 'recording redirect must happen before menu/permalink discovery');
+});
