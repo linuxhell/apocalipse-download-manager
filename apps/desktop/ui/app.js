@@ -164,6 +164,20 @@ const catalogs = {
     dnsCustom: "Custom",
     dnsServers: "DNS servers",
     dnsScopeHint: "Applied to the native HTTP engine. aria2 uses the system resolver; SOCKS5H continues resolving through the proxy.",
+    aria2RpcTitle: "aria2 RPC",
+    aria2RpcEnabled: "Use aria2 RPC",
+    aria2RpcEnabledHint: "Control accelerated HTTP/HTTPS, FTP, torrent and magnet transfers through the local aria2 engine.",
+    aria2RpcAutoStart: "Start aria2 automatically when needed",
+    aria2RpcAutoStartHint: "Keeps one local aria2 backend for the current Apocalipse session.",
+    aria2RpcPort: "RPC port",
+    aria2RpcPortHint: "Automatic",
+    aria2RpcStatus: "RPC status",
+    aria2RpcConnected: "Connected",
+    aria2RpcDisconnected: "Disconnected",
+    aria2RpcTesting: "Testing…",
+    aria2RpcTest: "Test RPC connection",
+    aria2RpcRegenerateToken: "Regenerate RPC token",
+    aria2RpcTokenRegenerated: "RPC token regenerated",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
     automatic: "Automatic",
@@ -373,6 +387,20 @@ const catalogs = {
     dnsCustom: "Personalizado",
     dnsServers: "Servidores DNS",
     dnsScopeHint: "Aplicado ao motor HTTP nativo. O aria2 usa a resolução do sistema; o SOCKS5H continua resolvendo pelo proxy.",
+    aria2RpcTitle: "aria2 RPC",
+    aria2RpcEnabled: "Usar aria2 RPC",
+    aria2RpcEnabledHint: "Controla HTTP/HTTPS acelerado, FTP, torrent e magnet pelo motor aria2 local.",
+    aria2RpcAutoStart: "Iniciar o aria2 automaticamente quando necessário",
+    aria2RpcAutoStartHint: "Mantém um único backend aria2 local durante a sessão atual do Apocalipse.",
+    aria2RpcPort: "Porta RPC",
+    aria2RpcPortHint: "Automática",
+    aria2RpcStatus: "Status RPC",
+    aria2RpcConnected: "Conectado",
+    aria2RpcDisconnected: "Desconectado",
+    aria2RpcTesting: "Testando…",
+    aria2RpcTest: "Testar conexão RPC",
+    aria2RpcRegenerateToken: "Regenerar token RPC",
+    aria2RpcTokenRegenerated: "Token RPC regenerado",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
     automatic: "Automático",
@@ -581,6 +609,20 @@ const catalogs = {
     dnsCustom: "自定义",
     dnsServers: "DNS 服务器",
     dnsScopeHint: "应用于原生 HTTP 引擎。aria2 使用系统解析器；SOCKS5H 仍通过代理解析。",
+    aria2RpcTitle: "aria2 RPC",
+    aria2RpcEnabled: "使用 aria2 RPC",
+    aria2RpcEnabledHint: "通过本地 aria2 引擎控制加速 HTTP/HTTPS、FTP、种子和磁力链接传输。",
+    aria2RpcAutoStart: "需要时自动启动 aria2",
+    aria2RpcAutoStartHint: "当前 Apocalipse 会话只保留一个本地 aria2 后端。",
+    aria2RpcPort: "RPC 端口",
+    aria2RpcPortHint: "自动",
+    aria2RpcStatus: "RPC 状态",
+    aria2RpcConnected: "已连接",
+    aria2RpcDisconnected: "未连接",
+    aria2RpcTesting: "测试中…",
+    aria2RpcTest: "测试 RPC 连接",
+    aria2RpcRegenerateToken: "重新生成 RPC 令牌",
+    aria2RpcTokenRegenerated: "RPC 令牌已重新生成",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
     automatic: "自动",
@@ -1840,9 +1882,24 @@ document.querySelector("#save-host-rule").onclick = async (event) => {
   }
 };
 
+function renderAria2RpcStatus(status = {}) {
+  const target = document.querySelector("#aria2-rpc-status");
+  if (!target) return;
+  if (!status.connected) {
+    target.textContent = t("aria2RpcDisconnected");
+    return;
+  }
+  const details = [
+    t("aria2RpcConnected"),
+    status.activePort ? `127.0.0.1:${status.activePort}` : "",
+    status.version ? `aria2 ${status.version}` : "",
+  ].filter(Boolean);
+  target.textContent = details.join(" · ");
+}
+
 const openSettings = async (target = "general") => {
   try {
-    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations, hostRules] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, rpc, associations, hostRules] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
@@ -1852,6 +1909,7 @@ const openSettings = async (target = "general") => {
       invoke("get_log_editor"),
       invoke("get_proxy_setting"),
       invoke("get_dns_setting"),
+      invoke("get_aria2_rpc_settings"),
       invoke("get_associations"),
       invoke("list_host_rules"),
     ]);
@@ -1893,6 +1951,10 @@ const openSettings = async (target = "general") => {
       ? dnsValue
       : "custom";
     updateDnsControls();
+    document.querySelector("#aria2-rpc-enabled").checked = rpc.enabled;
+    document.querySelector("#aria2-rpc-auto-start").checked = rpc.autoStart;
+    document.querySelector("#aria2-rpc-port").value = rpc.configuredPort || "";
+    renderAria2RpcStatus(rpc);
     renderHostRules(hostRules);
     updateLogEditorControls();
     settingsDialog.showModal();
@@ -1920,6 +1982,39 @@ document
     applyTheme(localStorage.getItem("apocalipse.theme") || "void");
     settingsDialog.close();
   }));
+document.querySelector("#aria2-rpc-test").onclick = async () => {
+  const status = document.querySelector("#aria2-rpc-status");
+  const button = document.querySelector("#aria2-rpc-test");
+  button.disabled = true;
+  status.textContent = t("aria2RpcTesting");
+  try {
+    const rpcPortValue = Number(document.querySelector("#aria2-rpc-port").value) || 0;
+    await invoke("set_aria2_rpc_settings", {
+      enabled: document.querySelector("#aria2-rpc-enabled").checked,
+      autoStart: document.querySelector("#aria2-rpc-auto-start").checked,
+      port: rpcPortValue > 0 ? rpcPortValue : null,
+    });
+    renderAria2RpcStatus(await invoke("test_aria2_rpc"));
+  } catch (error) {
+    status.textContent = `${t("aria2RpcDisconnected")} · ${error}`;
+  } finally {
+    button.disabled = false;
+  }
+};
+document.querySelector("#aria2-rpc-regenerate-token").onclick = async () => {
+  const button = document.querySelector("#aria2-rpc-regenerate-token");
+  button.disabled = true;
+  try {
+    await invoke("regenerate_aria2_rpc_token");
+    document.querySelector("#aria2-rpc-status").textContent = t("aria2RpcTokenRegenerated");
+  } catch (error) {
+    console.error(error);
+    window.alert(String(error));
+  } finally {
+    button.disabled = false;
+  }
+};
+
 document.querySelector("#theme").onchange = (event) => {
   localStorage.setItem("apocalipse.theme", event.target.value);
   applyTheme(event.target.value);
@@ -1997,6 +2092,12 @@ document.querySelector("#save-settings").onclick = async () => {
         .split(/[;,\s]+/)
         .map((server) => server.trim())
         .filter(Boolean),
+    });
+    const rpcPortValue = Number(document.querySelector("#aria2-rpc-port").value) || 0;
+    await invoke("set_aria2_rpc_settings", {
+      enabled: document.querySelector("#aria2-rpc-enabled").checked,
+      autoStart: document.querySelector("#aria2-rpc-auto-start").checked,
+      port: rpcPortValue > 0 ? rpcPortValue : null,
     });
     for (const input of document.querySelectorAll("[data-association]")) {
       if (!input.disabled && input.dataset.initial !== String(input.checked)) await invoke("set_association", {
