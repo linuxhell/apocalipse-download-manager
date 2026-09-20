@@ -4904,7 +4904,7 @@ async fn run_external_download(
                     "--enable-http-keep-alive=true",
                     "--enable-http-pipelining=false",
                     "--reuse-uri=true",
-                    "--file-allocation=none",
+                    "--file-allocation=trunc",
                     "--disk-cache=64M",
                     "--auto-file-renaming=false",
                     "--allow-overwrite=false",
@@ -7515,7 +7515,7 @@ fn start_download(
                 "split": 4,
                 "maxConnectionPerServer": 4,
                 "minSplitSize": "1M",
-                "fileAllocation": "none",
+                "fileAllocation": "trunc",
                 "diskCache": "64M"
             }),
         );
