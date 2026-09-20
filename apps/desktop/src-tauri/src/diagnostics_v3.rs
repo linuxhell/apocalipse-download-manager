@@ -669,15 +669,17 @@ impl Diagnostics {
         let summarize_group = |id: &str, items: &[&Value]| {
             let first = items.first().copied();
             let last = items.last().copied();
-            let warning_events = items.iter().filter(|record|
-                matches!(record["level"].as_str(), Some("WARN" | "ERROR"))
-            ).map(|record| json!({
+            let warning_events = items
+                .iter()
+                .filter(|record| matches!(record["level"].as_str(), Some("WARN" | "ERROR")))
+                .map(|record| json!({
                 "sequence": record["serverSequence"],
                 "localTime": record["receivedAtLocal"],
                 "level": record["level"],
                 "event": record["event"],
-                "detail": record["detail"]
-            })).collect::<Vec<_>>();
+                    "detail": record["detail"]
+                }))
+                .collect::<Vec<_>>();
             json!({
                 "id": id,
                 "firstSequence": first.map(|record| record["serverSequence"].clone()),
@@ -692,16 +694,19 @@ impl Diagnostics {
                 "interpretation": "ordered_observations_not_proven_root_cause"
             })
         };
-        let mut trace_index = actions.iter()
+        let mut trace_index = actions
+            .iter()
             .map(|(trace, items)| summarize_group(trace, items))
             .collect::<Vec<_>>();
         trace_index.sort_by_key(|item| item["firstSequence"].as_u64().unwrap_or(0));
-        let mut task_index = tasks.iter()
+        let mut task_index = tasks
+            .iter()
             .map(|(task, items)| summarize_group(task, items))
             .collect::<Vec<_>>();
         task_index.sort_by_key(|item| item["firstSequence"].as_u64().unwrap_or(0));
 
-        let marker_records = timeline.iter()
+        let marker_records = timeline
+            .iter()
             .filter(|record| record["event"] == "session.problem_marked")
             .collect::<Vec<_>>();
         let mut incident_windows = Vec::new();
@@ -710,15 +715,22 @@ impl Diagnostics {
             let marker_sequence = marker["serverSequence"].as_u64().unwrap_or(0);
             let start_ms = marker_ms.saturating_sub(90_000);
             let end_ms = marker_ms.saturating_add(45_000);
-            let events = timeline.iter()
+            let events = timeline
+                .iter()
                 .filter(|record| {
                     let observed = record["receivedAt"].as_u64().unwrap_or(0);
                     observed >= start_ms && observed <= end_ms
                 })
                 .cloned()
                 .collect::<Vec<_>>();
-            let errors = events.iter().filter(|record| record["level"] == "ERROR").count();
-            let warnings_count = events.iter().filter(|record| record["level"] == "WARN").count();
+            let errors = events
+                .iter()
+                .filter(|record| record["level"] == "ERROR")
+                .count();
+            let warnings_count = events
+                .iter()
+                .filter(|record| record["level"] == "WARN")
+                .count();
             incident_windows.push(json!({
                 "markerSequence": marker_sequence,
                 "markerLocalTime": marker["receivedAtLocal"],
