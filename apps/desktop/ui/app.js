@@ -163,7 +163,7 @@ const catalogs = {
     dnsProvider: "Provider",
     dnsCustom: "Custom",
     dnsServers: "DNS servers",
-    dnsScopeHint: "Applied to the native HTTP engine and aria2. SOCKS5H continues resolving through the proxy.",
+    dnsScopeHint: "Applied to the native HTTP engine. Gopeed uses its own network stack; SOCKS5H continues resolving through the proxy.",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
     automatic: "Automatic",
@@ -372,7 +372,7 @@ const catalogs = {
     dnsProvider: "Provedor",
     dnsCustom: "Personalizado",
     dnsServers: "Servidores DNS",
-    dnsScopeHint: "Aplicado ao motor HTTP nativo e ao aria2. O SOCKS5H continua resolvendo pelo proxy.",
+    dnsScopeHint: "Aplicado ao motor HTTP nativo. O Gopeed usa sua própria pilha de rede; o SOCKS5H continua resolvendo pelo proxy.",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
     automatic: "Automático",
@@ -580,7 +580,7 @@ const catalogs = {
     dnsProvider: "提供商",
     dnsCustom: "自定义",
     dnsServers: "DNS 服务器",
-    dnsScopeHint: "应用于原生 HTTP 引擎和 aria2。SOCKS5H 仍通过代理解析。",
+    dnsScopeHint: "应用于原生 HTTP 引擎。Gopeed 使用自己的网络栈；SOCKS5H 仍通过代理解析。",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
     automatic: "自动",
@@ -733,10 +733,9 @@ function updateSpeeds(tasks) {
     const active = stateKey(task.state) === "downloading";
     const changed = !previous || task.received !== previous.bytes;
     const changedAt = changed ? now : previous.changedAt;
-    // aria2's received byte counter is formatted in coarse units and can remain
-    // unchanged across several polls while DL still reports live throughput.
-    // Trust the engine's explicit speed while the task is active; aria2 reports
-    // zero itself when the transfer really stalls.
+    // External engines can report byte counters at a different cadence from
+    // their live throughput. Prefer the explicit engine speed while active and
+    // use byte deltas as a second signal for a responsive ADM display.
     const externalSpeed = active ? Number(task.download_speed) || 0 : 0;
     let speed = active ? previous?.speed || 0 : 0;
     if (previous && active) {
@@ -2048,7 +2047,7 @@ document.querySelector("#save-tools").onclick = async (event) => {
       ytDlp: document.querySelector("#tool-yt-dlp").value,
       qjs: document.querySelector("#tool-qjs").value,
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
-      aria2: document.querySelector("#tool-aria2").value,
+      gopeed: document.querySelector("#tool-gopeed").value,
     });
     await invoke("set_media_player", { path: document.querySelector("#media-player").value });
     toolsDialog.close();
@@ -2284,7 +2283,7 @@ document.querySelector("#analyze").onclick = async () => {
     }
     box.textContent = `${plan.primary} · ${plan.reason}`;
     if (plan.primary === "YtDlp") await showMediaInspection(url.value);
-    else if (plan.primary === "Aria2Rpc" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) {
+    else if (plan.primary === "Gopeed" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) {
       const startedAt = Date.now();
       const updateMetadataStatus = () => {
         const seconds = Math.floor((Date.now() - startedAt) / 1000);
