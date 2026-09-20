@@ -5892,15 +5892,6 @@ fn write_engine_diagnostic(
     Some(path)
 }
 
-fn write_yt_dlp_diagnostic(
-    app: &tauri::AppHandle,
-    id: DownloadId,
-    output: &str,
-    exit_code: Option<i32>,
-) -> Option<PathBuf> {
-    write_engine_diagnostic(app, id, "yt-dlp", output, exit_code, false)
-}
-
 #[tauri::command]
 fn read_general_log(state: State<'_, AppState>) -> Result<String, String> {
     diagnostic_log(&state, "INFO", "log.viewed", "viewed_inside_application");
