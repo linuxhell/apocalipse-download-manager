@@ -702,9 +702,7 @@ impl Diagnostics {
             .count();
         let suppressed_recent_reprobes = admission_events
             .iter()
-            .filter(|record| {
-                record["detail"]["decision"] == "reprobe_suppressed_recent_rejection"
-            })
+            .filter(|record| record["detail"]["decision"] == "reprobe_suppressed_recent_rejection")
             .count();
         let worker_stall_snapshots = scheduler_samples
             .iter()

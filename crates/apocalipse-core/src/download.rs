@@ -1202,13 +1202,12 @@ impl DownloadEngine {
                             {
                                 let next = next_admission_level(current_limit, states.len());
                                 let below_target_ms = recovery_below_target_ms;
-                                let recent_rejection = last_rejected_level.is_some_and(
-                                    |(level, rejected_at_ms)| {
+                                let recent_rejection =
+                                    last_rejected_level.is_some_and(|(level, rejected_at_ms)| {
                                         level == next
                                             && now_ms.saturating_sub(rejected_at_ms)
                                                 < ADMISSION_REJECT_BACKOFF_MS
-                                    },
-                                );
+                                    });
                                 recovery_below_target_ms = 0;
                                 last_reprobe_ms = now_ms;
 

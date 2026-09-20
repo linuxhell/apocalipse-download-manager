@@ -7,9 +7,8 @@ mod tiktok_preview;
 
 use apocalipse_core::{
     chunk_directory, classify_url, cleanup_chunk_artifacts, contextual_media_page, parse_metalink,
-    partial_path,
-    plan_download, BandwidthLimiter, Capabilities, DownloadEngine, DownloadEvent, DownloadId,
-    DownloadKind, DownloadRequest, DownloadState, DownloadTask,
+    partial_path, plan_download, BandwidthLimiter, Capabilities, DownloadEngine, DownloadEvent,
+    DownloadId, DownloadKind, DownloadRequest, DownloadState, DownloadTask,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rustls::{
