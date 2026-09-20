@@ -242,9 +242,28 @@ test("Link lists scroll independently, disconnect explicitly and tray opens with
   assert.match(linkHtml, /id="link-disconnect"/);
   assert.match(app, /function disconnectLink\(\)/);
   assert.match(linkJs, /function disconnectLink\(\)/);
-  assert.match(css, /\.link-files > div[^}]*overflow-y:auto[^}]*scrollbar-gutter:stable/);
+  assert.match(css, /\.link-files > div[^}]*overflow-y:scroll[^}]*scrollbar-gutter:stable/);
   assert.match(rust, /TrayIconEvent::Click[\s\S]*button: MouseButton::Left/);
   assert.doesNotMatch(rust, /TrayIconEvent::DoubleClick/);
+});
+
+test("Link transfer progress supports localized pause, continue and cancel", () => {
+  assert.match(linkHtml, /id="link-transfer-panel"/);
+  assert.match(linkHtml, /id="link-transfer-pause"/);
+  assert.match(linkHtml, /id="link-transfer-cancel"/);
+  assert.match(linkJs, /linkPause: "Pause"/);
+  assert.match(linkJs, /linkPause: "Pausar"/);
+  assert.match(linkJs, /linkPause: "暂停"/);
+  assert.match(linkJs, /linkContinue: "Continuar"/);
+  assert.match(linkJs, /linkCancel: "Cancelar"/);
+  assert.match(linkJs, /linkTransferCancelled: "传输已取消"/);
+  assert.match(linkJs, /listen\?\.\("link-transfer-progress"/);
+  assert.match(linkJs, /invoke\("pause_link_transfer"/);
+  assert.match(linkJs, /invoke\("cancel_link_transfer"/);
+  assert.match(rust, /fn pause_link_transfer/);
+  assert.match(rust, /fn cancel_link_transfer/);
+  assert.match(rust, /"link-transfer-progress"/);
+  assert.match(rust, /reporter\.checkpoint\(\)\?/);
 });
 
 test("audio HLS analysis offers an optional localized FFmpeg conversion", () => {
