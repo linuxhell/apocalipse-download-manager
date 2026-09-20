@@ -21,10 +21,10 @@ function node({tag='DIV', r=rect(), parent=null, attrs={}, videos=[], click=null
   };
 }
 
-test('0.3.162 manifest version is exact', () => {
+test('0.3.163 manifest version is exact', () => {
   const manifest = JSON.parse(src('manifest.json'));
-  assert.equal(manifest.version, '0.3.162');
-  assert.match(manifest.version_name, /Universal forensic social debugger/);
+  assert.equal(manifest.version, '0.3.163');
+  assert.match(manifest.version_name, /Apocalipse Forensic Debugger V4/);
 });
 
 test('0.3.132 resolved Preview and Download are dispatched explicitly, never synthetic re-click', () => {
