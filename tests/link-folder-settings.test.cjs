@@ -213,7 +213,7 @@ test("Archive extraction is cross-platform, localized and only offered for archi
   assert.match(app, /function isArchiveFileName/);
   assert.match(app, /autoExtract: document\.querySelector\("#auto-extract-option"\)/);
   assert.match(rust, /extractor_path: Option<PathBuf>/);
-  assert.match(rust, /enum ExtractorKind \{ SevenZip, Rar, Unrar, Unar, Bsdtar, Tar \}/);
+  assert.match(rust, /enum ExtractorKind \{[\s\S]*SevenZip,[\s\S]*Rar,[\s\S]*Unrar,[\s\S]*Unar,[\s\S]*Bsdtar,[\s\S]*Tar,/);
   assert.match(rust, /archive_member_is_safe/);
   assert.match(rust, /\.apocalipse-extract-/);
   assert.match(rust, /maybe_auto_extract_completed/);
