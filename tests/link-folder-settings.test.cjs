@@ -224,7 +224,10 @@ test("About page is localized, sits immediately below PayPal and keeps the main 
   assert.match(app, /backgroundDataUrl/);
   assert.match(css, /var\(--about-background\)/);
   assert.match(app, /document\.querySelector\("#add"\)\.hidden = activePage === "about"/);
-  assert.match(css, /\.about-creator-line[\s\S]*font-size: clamp\(17px, 1\.8vw, 23px\)/);
+  assert.match(html, /class="about-toolbar"[\s\S]*about-audio-controls[\s\S]*about-creator-line[\s\S]*about-creator-photo/);
+  assert.match(html, /class="about-scene"/);
+  assert.match(css, /\.about-creator-line[\s\S]*font-size: clamp\(12px, 1vw, 15px\)/);
+  assert.match(css, /\.about-scene[\s\S]*background-size: contain/);
   assert.match(app, /option\(select, "original", pendingMediaKind === "audio"/);
   assert.match(css, /\.media-inspection:has\(> img\[hidden\]\)[^}]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(app, /\["mp3", "m4a", "opus", "flac", "wav"\]/);
