@@ -4514,10 +4514,10 @@ async fn log_network_route(state: &AppState, operation: &str, engine: &str) {
     }
 }
 
-fn gopeed_request_context(
+fn aria2_request_context(
     state: &AppState,
     task: &DownloadTask,
-) -> (gopeed::RequestContext, usize) {
+) -> (aria2::RequestContext, usize) {
     let settings = state
         .settings
         .lock()
@@ -4543,11 +4543,7 @@ fn gopeed_request_context(
         .as_ref()
         .and_then(|rule| rule.user_agent.as_ref())
         .or(settings.user_agent.as_ref())
-        .or_else(|| {
-            identity
-                .as_ref()
-                .and_then(|value| value.user_agent.as_ref())
-        })
+        .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_ref()))
     {
         headers.insert("User-Agent".to_owned(), user_agent.clone());
     }
@@ -4570,7 +4566,7 @@ fn gopeed_request_context(
         headers.insert("Authorization".to_owned(), format!("Basic {basic}"));
     }
     (
-        gopeed::RequestContext {
+        aria2::RequestContext {
             method: identity
                 .as_ref()
                 .map(|value| value.request_method.clone())
@@ -4584,7 +4580,7 @@ fn gopeed_request_context(
     )
 }
 
-async fn run_gopeed_download(
+async fn run_aria2_download(
     app: tauri::AppHandle,
     id: DownloadId,
     task: DownloadTask,
@@ -4601,14 +4597,14 @@ async fn run_gopeed_download(
     let route_operation = id.to_string();
     tauri::async_runtime::spawn(async move {
         let state = route_app.state::<AppState>();
-        log_network_route(&state, &route_operation, "Gopeed").await;
+        log_network_route(&state, &route_operation, "aria2").await;
     });
-    let endpoint = match gopeed_endpoint(&state).await {
+    let endpoint = match aria2_endpoint(&state, false).await {
         Ok(endpoint) => endpoint,
         Err(message) => {
             update_task(&app, id, true, |item| {
                 item.state = DownloadState::Failed {
-                    message: format!("gopeed_unavailable:{message}"),
+                    message: format!("aria2_unavailable:{message}"),
                 }
             });
             if let Ok(mut workers) = state.workers.lock() {
@@ -4618,18 +4614,18 @@ async fn run_gopeed_download(
             return;
         }
     };
-    let (context, connections) = gopeed_request_context(&state, &task);
+    let (context, connections) = aria2_request_context(&state, &task);
     let existing_task = state
-        .gopeed_tasks
+        .aria2_tasks
         .lock()
         .ok()
         .and_then(|items| items.get(&id).cloned());
-    let gopeed_id = match existing_task {
-        Some(gopeed_id) => {
-            if let Err(error) = endpoint.resume(&gopeed_id).await {
+    let gid = match existing_task {
+        Some(gid) => {
+            if let Err(error) = endpoint.resume(&gid).await {
                 update_task(&app, id, true, |item| {
                     item.state = DownloadState::Failed {
-                        message: format!("gopeed_resume_failed:{error}"),
+                        message: format!("aria2_resume_failed:{error}"),
                     }
                 });
                 if let Ok(mut workers) = state.workers.lock() {
@@ -4638,66 +4634,31 @@ async fn run_gopeed_download(
                 start_next_queued(&app);
                 return;
             }
-            gopeed_id
+            gid
         }
         None => {
-            let selected_files = task
-                .torrent_selection
-                .iter()
-                .filter_map(|index| index.checked_sub(1))
-                .collect::<Vec<_>>();
             let is_http = matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp);
-            let resolved_id = if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
-                // A BitTorrent fetcher binds its anacrolix storage during Resolve.
-                // Always resolve against the user's actual destination immediately
-                // before creating the task. Reusing a metadata-inspection resolve
-                // would keep writing to the inspection directory instead.
-                let directory = task
-                    .destination
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .to_string_lossy()
-                    .into_owned();
-                match endpoint.resolve(&task.source, &directory, &context).await {
-                    Ok(resolved) => Some(resolved.id),
-                    Err(error) => {
-                        update_task(&app, id, true, |item| {
-                            item.state = DownloadState::Failed {
-                                message: format!("gopeed_torrent_resolve_failed:{error}"),
-                            }
-                        });
-                        if let Ok(mut workers) = state.workers.lock() {
-                            workers.remove(&id);
-                        }
-                        start_next_queued(&app);
-                        return;
-                    }
-                }
-            } else {
-                None
-            };
             match endpoint
-                .create_task(
+                .add_download(
                     &task.source,
                     &task.destination,
                     connections,
-                    &selected_files,
+                    &task.torrent_selection,
                     &context,
-                    resolved_id.as_deref(),
                     is_http,
                 )
                 .await
             {
-                Ok(gopeed_id) => {
-                    if let Ok(mut items) = state.gopeed_tasks.lock() {
-                        items.insert(id, gopeed_id.clone());
+                Ok(gid) => {
+                    if let Ok(mut items) = state.aria2_tasks.lock() {
+                        items.insert(id, gid.clone());
                     }
-                    gopeed_id
+                    gid
                 }
                 Err(error) => {
                     update_task(&app, id, true, |item| {
                         item.state = DownloadState::Failed {
-                            message: format!("gopeed_create_failed:{error}"),
+                            message: format!("aria2_create_failed:{error}"),
                         }
                     });
                     if let Ok(mut workers) = state.workers.lock() {
@@ -4712,8 +4673,8 @@ async fn run_gopeed_download(
     diagnostic_log(
         &state,
         "INFO",
-        "gopeed.task_started",
-        &format!("task={id} gopeed_task={gopeed_id} engine={kind:?} connections={connections}"),
+        "aria2.task_started",
+        &format!("task={id} gid={gid} engine={kind:?} connections={connections}"),
     );
     state.diagnostics.record(
         "http.engine_selected",
@@ -4721,9 +4682,11 @@ async fn run_gopeed_download(
         None,
         Some(&id.to_string()),
         serde_json::json!({
-            "engine": "gopeed",
+            "engine": "aria2-rpc",
             "connections": connections,
-            "kind": format!("{kind:?}")
+            "kind": format!("{kind:?}"),
+            "minSplitSize": "1M",
+            "fileAllocation": "none"
         }),
     );
 
@@ -4735,19 +4698,23 @@ async fn run_gopeed_download(
         tokio::select! {
             biased;
             _ = &mut cancellation => {
-                let _ = endpoint.pause(&gopeed_id).await;
-                diagnostic_log(&state, "INFO", "gopeed.paused", &format!("task={id} gopeed_task={gopeed_id}"));
+                let _ = endpoint.pause(&gid).await;
+                diagnostic_log(&state, "INFO", "aria2.paused", &format!("task={id} gid={gid}"));
                 return;
             }
             _ = interval.tick() => {
-                let status = match endpoint.status(&gopeed_id).await {
+                let status = match endpoint.status(&gid).await {
                     Ok(status) => status,
                     Err(error) => {
-                        diagnostic_log(&state, "WARN", "gopeed.status_failed", &format!("task={id} error={error}"));
+                        diagnostic_log(&state, "WARN", "aria2.status_failed", &format!("task={id} error={error}"));
                         continue;
                     }
                 };
-                let stats = endpoint.stats(&gopeed_id).await.unwrap_or_default();
+                let peers = if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
+                    endpoint.peers(&gid).await.unwrap_or_default()
+                } else {
+                    aria2::PeerSummary::default()
+                };
                 let now = Instant::now();
                 let elapsed = now.duration_since(last_at).as_secs_f64().max(0.001);
                 let raw_speed = if status.downloaded >= last_downloaded {
@@ -4773,73 +4740,31 @@ async fn run_gopeed_download(
                     item.progress_percent = percent;
                     item.download_speed = Some(status.speed.max(raw_speed));
                     item.upload_speed = Some(status.upload_speed);
-                    item.torrent_seeders = Some(stats.seeders);
-                    item.torrent_leechers = Some(stats.leechers);
+                    item.torrent_seeders = Some(status.seeders.max(peers.seeders));
+                    item.torrent_leechers = Some(peers.leechers);
                     item.torrent_eta = eta.clone();
                 });
                 state.diagnostics.record(
-                    if is_http_kind(kind) { "http.performance_sample" } else { "gopeed.performance_sample" },
+                    if is_http_kind(kind) { "http.performance_sample" } else { "aria2.performance_sample" },
                     "INFO",
                     None,
                     Some(&id.to_string()),
                     serde_json::json!({
-                        "engine": "gopeed",
+                        "engine": "aria2-rpc",
                         "bytesPerSecond": raw_speed,
                         "reportedBytesPerSecond": status.speed,
                         "receivedBytes": status.downloaded,
                         "totalBytes": status.total,
                         "progressPercent": percent,
-                        "activeConnections": stats.active_connections,
-                        "activePeers": stats.active_peers,
-                        "totalPeers": stats.total_peers,
-                        "seeders": stats.seeders,
-                        "leechers": stats.leechers,
-                        "connectionDownloads": stats.connections.iter().map(|connection| connection.downloaded).collect::<Vec<_>>(),
-                        "connectionTotals": stats.connections.iter().map(|connection| connection.total).collect::<Vec<_>>(),
-                        "connectionCompleted": stats.connections.iter().map(|connection| connection.completed).collect::<Vec<_>>(),
-                        "connectionFailed": stats.connections.iter().map(|connection| connection.failed).collect::<Vec<_>>(),
-                        "connectionRetries": stats.connections.iter().map(|connection| connection.retry_times).collect::<Vec<_>>(),
+                        "activeConnections": status.connections,
+                        "activePeers": peers.peers,
+                        "seeders": status.seeders.max(peers.seeders),
+                        "leechers": peers.leechers,
                         "sampleWindowMs": 350
                     }),
                 );
                 match status.status.as_str() {
-                    "done" => {
-                        let torrent_output_ready = if matches!(
-                            kind,
-                            DownloadKind::Torrent | DownloadKind::Magnet
-                        ) {
-                            let mut ready = task.destination.exists();
-                            for _ in 0..20 {
-                                if ready {
-                                    break;
-                                }
-                                tokio::time::sleep(Duration::from_millis(100)).await;
-                                ready = task.destination.exists();
-                            }
-                            ready
-                        } else {
-                            true
-                        };
-                        if !torrent_output_ready {
-                            diagnostic_log(
-                                &state,
-                                "ERROR",
-                                "gopeed.output_missing",
-                                &format!(
-                                    "task={id} destination={}",
-                                    task.destination.display()
-                                ),
-                            );
-                            update_task(&app, id, true, |item| {
-                                item.download_speed = Some(0);
-                                item.upload_speed = Some(0);
-                                item.state = DownloadState::Failed {
-                                    message: "gopeed_output_missing".to_owned(),
-                                };
-                            });
-                            terminal = true;
-                            break;
-                        }
+                    "complete" => {
                         update_task(&app, id, true, |item| {
                             item.received = status.total.max(status.downloaded);
                             item.total = Some(status.total.max(status.downloaded));
@@ -4849,19 +4774,26 @@ async fn run_gopeed_download(
                             item.state = DownloadState::Completed;
                             item.completed_at = Some(epoch_seconds());
                         });
+                        let _ = endpoint.remove_result(&gid).await;
+                        if let Ok(mut items) = state.aria2_tasks.lock() {
+                            items.remove(&id);
+                        }
                         terminal = true;
                         break;
                     }
-                    "error" => {
+                    "error" | "removed" => {
                         update_task(&app, id, true, |item| {
                             item.state = DownloadState::Failed {
-                                message: "gopeed_task_failed".to_owned(),
+                                message: "aria2_task_failed".to_owned(),
                             };
                         });
+                        if let Ok(mut items) = state.aria2_tasks.lock() {
+                            items.remove(&id);
+                        }
                         terminal = true;
                         break;
                     }
-                    "pause" => {
+                    "paused" => {
                         update_task(&app, id, true, |item| {
                             item.state = DownloadState::Paused;
                             item.download_speed = Some(0);
