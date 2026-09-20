@@ -4393,12 +4393,13 @@ async fn run_external_download(
         "external.start",
         &format!("task={id} engine={kind:?} url={}", redact_url(&task.source)),
     );
-    log_network_route(
-        &app.state::<AppState>(),
-        &id.to_string(),
-        &format!("{kind:?}"),
-    )
-    .await;
+    let route_app = app.clone();
+    let route_operation = id.to_string();
+    let route_engine = format!("{kind:?}");
+    tauri::async_runtime::spawn(async move {
+        let state = route_app.state::<AppState>();
+        log_network_route(&state, &route_operation, &route_engine).await;
+    });
     update_task(&app, id, true, |item| {
         item.state = DownloadState::Downloading;
         item.progress_percent = Some(0.0);
@@ -5576,6 +5577,7 @@ async fn read_process_tail(
 ) -> Vec<u8> {
     let mut tail = Vec::new();
     let mut progress_buffer = String::new();
+    let mut last_aria2_progress: Option<(u64, u64, u64)> = None;
     let mut chunk = [0_u8; 4096];
     loop {
         match stream.read(&mut chunk).await {
@@ -5605,32 +5607,36 @@ async fn read_process_tail(
                             eta,
                         )) = parse_aria2_progress(&progress_buffer)
                         {
-                            update_task(app, *id, false, |task| {
-                                task.received = received;
-                                task.total = Some(total);
-                                task.progress_percent = Some(percent);
-                                task.download_speed = Some(download_speed);
-                                task.upload_speed = Some(upload_speed);
-                                task.torrent_seeders = Some(seeders);
-                                task.torrent_leechers = Some(leechers);
-                                task.torrent_eta = eta;
-                            });
-                            if *kind == DownloadKind::AcceleratedHttp {
-                                app.state::<AppState>().diagnostics.record(
-                                    "http.performance_sample",
-                                    "INFO",
-                                    None,
-                                    Some(&id.to_string()),
-                                    serde_json::json!({
-                                        "engine": "aria2",
-                                        "bytesPerSecond": download_speed,
-                                        "receivedBytes": received,
-                                        "totalBytes": total,
-                                        "progressPercent": percent,
-                                        "activeConnections": seeders.saturating_add(leechers),
-                                        "sampleWindowMs": 1000
-                                    }),
-                                );
+                            let progress_signature = (received, total, download_speed);
+                            if last_aria2_progress != Some(progress_signature) {
+                                last_aria2_progress = Some(progress_signature);
+                                update_task(app, *id, false, |task| {
+                                    task.received = received;
+                                    task.total = Some(total);
+                                    task.progress_percent = Some(percent);
+                                    task.download_speed = Some(download_speed);
+                                    task.upload_speed = Some(upload_speed);
+                                    task.torrent_seeders = Some(seeders);
+                                    task.torrent_leechers = Some(leechers);
+                                    task.torrent_eta = eta;
+                                });
+                                if *kind == DownloadKind::AcceleratedHttp {
+                                    app.state::<AppState>().diagnostics.record(
+                                        "http.performance_sample",
+                                        "INFO",
+                                        None,
+                                        Some(&id.to_string()),
+                                        serde_json::json!({
+                                            "engine": "aria2",
+                                            "bytesPerSecond": download_speed,
+                                            "receivedBytes": received,
+                                            "totalBytes": total,
+                                            "progressPercent": percent,
+                                            "activeConnections": seeders.saturating_add(leechers),
+                                            "sampleWindowMs": 1000
+                                        }),
+                                    );
+                                }
                             }
                         }
                     } else if *kind == DownloadKind::MediaPage {
@@ -5708,7 +5714,8 @@ fn parse_aria2_size(value: &str) -> Option<u64> {
 
 #[allow(clippy::type_complexity)]
 fn parse_aria2_progress(text: &str) -> Option<(u64, u64, f64, u64, u64, u64, u64, Option<String>)> {
-    text.lines().rev().find_map(|line| {
+    text.rsplit(|character| character == '\r' || character == '\n')
+        .find_map(|line| {
         let ratio = line.split_whitespace().find_map(|token| {
             let slash = token.find('/')?;
             let open = token[slash + 1..]
@@ -10981,6 +10988,24 @@ mod tests {
             ))
         );
         assert_eq!(parse_aria2_progress("[#abc 0B/0B CN:1 DL:0B]"), None);
+    }
+
+    #[test]
+    fn aria2_progress_uses_latest_carriage_return_status() {
+        let output = "[#abc 5.0MiB/20MiB(25%) CN:4 SD:0 DL:1MiB ETA:15s]\r[#abc 10MiB/20MiB(50%) CN:4 SD:0 DL:8MiB ETA:1s]\r";
+        assert_eq!(
+            parse_aria2_progress(output),
+            Some((
+                10 * 1024 * 1024,
+                20 * 1024 * 1024,
+                50.0,
+                8 * 1024 * 1024,
+                0,
+                0,
+                4,
+                Some("1s".to_owned())
+            ))
+        );
     }
 
     #[test]
