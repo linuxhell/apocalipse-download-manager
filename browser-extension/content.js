@@ -989,8 +989,82 @@
   };
   let overlayTimer;
   const activeOverlays = new Map();
+
+  // Universal social-player diagnostics. Decisions are emitted only while the
+  // existing opt-in diagnostics session is active. A per-player signature
+  // suppresses identical repeats so long feeds remain readable.
+  const socialDecisionCache = new WeakMap();
+  let socialScanId = 0;
+  const socialPlatform = () => {
+    const host = String(location.hostname || "").toLowerCase();
+    if (/(^|\.)facebook\.com$/.test(host)) return "facebook";
+    if (/(^|\.)instagram\.com$/.test(host)) return "instagram";
+    if (/(^|\.)tiktok\.com$/.test(host)) return "tiktok";
+    if (/(^|\.)(?:x|twitter)\.com$/.test(host)) return "x";
+    return "generic";
+  };
+  const socialPlayerVisible = element => {
+    const rect = element?.getBoundingClientRect?.();
+    return Boolean(rect && rect.width >= 100 && rect.height >= 55
+      && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight
+      && rect.left < (Number(globalThis.innerWidth) || document.documentElement?.clientWidth || rect.right));
+  };
+  const socialSourceType = element => {
+    const source = String(element?.currentSrc || element?.src || "");
+    if (element?.srcObject) return "srcObject";
+    if (/^blob:/i.test(source)) return "blob";
+    if (/^https?:/i.test(source)) return "http";
+    return source ? "other" : "empty";
+  };
+  const emitSocialDecision = (element, decision, detail = {}, force = false) => {
+    if (!element || element.tagName !== "VIDEO" || !globalThis.ADM_DIAG?.active?.()) return;
+    const platform = socialPlatform();
+    if (platform === "generic") return;
+    const player = globalThis.ADM_DIAG?.player?.(element) || {};
+    const rect = element.getBoundingClientRect?.() || {};
+    const payload = {
+      platform,
+      scanId: socialScanId,
+      decision,
+      playerId: player.playerId || playerIdentity(element),
+      revision: player.revision ?? null,
+      visible: socialPlayerVisible(element),
+      sourceType: socialSourceType(element),
+      duration: Number.isFinite(element.duration) ? Number(element.duration.toFixed(3)) : null,
+      readyState: element.readyState ?? null,
+      paused: Boolean(element.paused),
+      muted: Boolean(element.muted),
+      volume: Number.isFinite(element.volume) ? element.volume : null,
+      hasSrcObject: Boolean(element.srcObject),
+      rect: {
+        left: Math.round(rect.left || 0), top: Math.round(rect.top || 0),
+        width: Math.round(rect.width || 0), height: Math.round(rect.height || 0),
+      },
+      datasetButton: Boolean(element.dataset?.apocalipseButton),
+      overlayActive: activeOverlays.has(element),
+      ...detail,
+    };
+    const signature = JSON.stringify(payload);
+    if (!force && socialDecisionCache.get(element) === signature) return;
+    socialDecisionCache.set(element, signature);
+    void globalThis.ADM_DIAG.emit("social.player_decision", payload, null,
+      decision === "missing" ? "WARN" : "INFO");
+    if (decision === "missing") {
+      void globalThis.ADM_DIAG.emit("social.overlay_missing", payload, null, "WARN");
+    }
+  };
+  const emitSocialSummary = summary => {
+    if (!globalThis.ADM_DIAG?.active?.() || socialPlatform() === "generic") return;
+    void globalThis.ADM_DIAG.emit("social.scan_summary", {
+      platform: socialPlatform(), scanId: socialScanId, ...summary,
+    });
+  };
+
   const installOverlays = () => {
     if (/(^|\.)chatgpt\.com$/.test(location.hostname)) return;
+    socialScanId += 1;
+    const socialSummary = { players: 0, visible: 0, eligible: 0, overlays: 0, missing: 0,
+      sponsored: 0, audioOnly: 0, inactive: 0, noAction: 0, kept: 0, installed: 0 };
     if (youtubeExtractorUrl()) {
       document.querySelectorAll(".apocalipse-media-record").forEach((button) => button.remove());
     }
@@ -1067,27 +1141,56 @@
 
     document.querySelectorAll("video,audio").forEach((element) => {
       const facebookPage = /(^|\.)facebook\.com$/i.test(location.hostname);
+      const isSocialVideo = element.tagName === "VIDEO" && socialPlatform() !== "generic";
+      if (isSocialVideo) {
+        socialSummary.players += 1;
+        if (socialPlayerVisible(element)) socialSummary.visible += 1;
+      }
       if (facebookPage && element.tagName === "AUDIO") {
+        socialSummary.audioOnly += 1;
         trace("facebook.overlay_skipped_audio_only", "overlay", { reason: "audio_element" });
         return;
       }
       const isFacebookVideo = element.tagName === "VIDEO" && facebookPage;
       if (isFacebookVideo && isSponsoredFacebookPlayer(element)) {
-        trace("facebook.overlay_skipped_sponsored", "overlay", { reason: "explicit_sponsored_marker" });
+        socialSummary.sponsored += 1;
+        emitSocialDecision(element, "skip_sponsored", {
+          reason: "explicit_visible_marker_same_card", sponsored: true,
+          permalinkFound: Boolean(facebookUrlFor(element)),
+        });
+        trace("facebook.overlay_skipped_sponsored", "overlay", { reason: "explicit_visible_marker_same_card" });
         return;
       }
       if (element.dataset.apocalipseButton && !activeOverlays.has(element)) {
         delete element.dataset.apocalipseButton;
       }
-      if (element.dataset.apocalipseButton) return;
+      if (element.dataset.apocalipseButton) {
+        if (isSocialVideo) {
+          socialSummary.eligible += 1; socialSummary.overlays += 1; socialSummary.kept += 1;
+          emitSocialDecision(element, "keep", { reason: "overlay_already_active", sponsored: false });
+        }
+        return;
+      }
       const youtubeUrl = element.tagName === "VIDEO" ? youtubeExtractorUrl() : null;
       const isYouTubeVideo = Boolean(youtubeUrl);
       // Extractor-first pages already have a complete, higher-quality download
       // route. Recording would only duplicate yt-dlp with a less reliable path.
       const usesExtractorOnlyDownload = isYouTubeVideo;
-      if (isFacebookReelsPage && isFacebookVideo && element !== activeFacebookReel) return;
-      if (isInstagramReelsPage && element.tagName === "VIDEO" && element !== activeInstagramReel) return;
-      if (isTikTokPage && element.tagName === "VIDEO" && element !== activeTikTokVideo) return;
+      if (isFacebookReelsPage && isFacebookVideo && element !== activeFacebookReel) {
+        socialSummary.inactive += 1;
+        emitSocialDecision(element, "skip_inactive_player", { reason: "not_active_facebook_reel", sponsored: false });
+        return;
+      }
+      if (isInstagramReelsPage && element.tagName === "VIDEO" && element !== activeInstagramReel) {
+        socialSummary.inactive += 1;
+        emitSocialDecision(element, "skip_inactive_player", { reason: "not_active_instagram_reel" });
+        return;
+      }
+      if (isTikTokPage && element.tagName === "VIDEO" && element !== activeTikTokVideo) {
+        socialSummary.inactive += 1;
+        emitSocialDecision(element, "skip_inactive_player", { reason: "not_active_tiktok_player" });
+        return;
+      }
       const tikTokUrl = element.tagName === "VIDEO" ? tikTokUrlFor(element) : null;
       const isTikTokVideo = Boolean(tikTokUrl);
       const url = isFacebookVideo ? facebookUrlFor(element) || location.href : tikTokUrl || downloadUrlFor(element);
@@ -1106,7 +1209,27 @@
       const canRecord = !isYouTubeVideo && element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
         && Boolean(element.captureStream || element.webkitCaptureStream)
         && (!hasDirectHttpMedia || isFacebookVideo);
-      if (!canDownload && !canRecord) return;
+      if (!canDownload && !canRecord) {
+        if (isSocialVideo) {
+          socialSummary.noAction += 1;
+          if (socialPlayerVisible(element)) {
+            socialSummary.missing += 1;
+            emitSocialDecision(element, "missing", {
+              reason: "no_supported_action", sponsored: false,
+              canDownload, canRecord, hasDirectHttpMedia,
+              permalinkFound: Boolean(isFacebookVideo ? facebookUrlFor(element) : tikTokUrl),
+              downloadCandidate: Boolean(url),
+            }, true);
+          } else {
+            emitSocialDecision(element, "skip_no_action", {
+              reason: "no_supported_action_offscreen", sponsored: false,
+              canDownload, canRecord, hasDirectHttpMedia,
+            });
+          }
+        }
+        return;
+      }
+      if (isSocialVideo) socialSummary.eligible += 1;
       element.dataset.apocalipseButton = "1";
       const button = document.createElement("button");
       globalThis.ApocalipseTikTokIdentity?.bind(button, element);
@@ -1511,11 +1634,41 @@
       });
       const duplicateButtons = document.querySelectorAll(".apocalipse-media-download").length - activeOverlays.size * 2;
       trace("overlay_installed", "overlay", { tag: element.tagName, canDownload, canRecord, active: activeOverlays.size, duplicateDelta: duplicateButtons });
+      if (isSocialVideo) {
+        socialSummary.overlays += 1;
+        socialSummary.installed += 1;
+        emitSocialDecision(element, "install", {
+          reason: "eligible_overlay_installed", sponsored: false,
+          canDownload, canRecord, hasDirectHttpMedia,
+          permalinkFound: Boolean(isFacebookVideo ? facebookUrlFor(element) : tikTokUrl),
+          downloadCandidate: Boolean(url),
+        }, true);
+      }
       position();
       addEventListener("scroll", position, { passive: true });
       addEventListener("resize", position, { passive: true });
       if (isYouTubeVideo) positionTimer = setInterval(position, 1000);
     });
+
+    // Final reconciliation catches the exact class of bug where a visible
+    // social player passed through scanning but still ended the cycle without
+    // a live overlay. This is the highest-value event for post-mortem analysis.
+    for (const video of document.querySelectorAll("video")) {
+      if (socialPlatform() === "generic" || !socialPlayerVisible(video)) continue;
+      const active = activeOverlays.has(video);
+      const cached = socialDecisionCache.get(video) || "";
+      if (!active && !/"decision":"skip_sponsored"/.test(cached)
+        && !/"decision":"skip_inactive_player"/.test(cached)
+        && !/"decision":"missing"/.test(cached)) {
+        socialSummary.missing += 1;
+        emitSocialDecision(video, "missing", {
+          reason: "visible_player_without_overlay_after_reconcile",
+          sponsored: socialPlatform() === "facebook" ? isSponsoredFacebookPlayer(video) : false,
+          datasetButton: Boolean(video.dataset?.apocalipseButton),
+        }, true);
+      }
+    }
+    emitSocialSummary(socialSummary);
   };
   refreshOverlayLanguages = () => {
     for (const overlay of activeOverlays.values()) overlay.refreshLabels?.();
