@@ -10,6 +10,7 @@
   const RELEASES_URL = "https://github.com/linuxhell/apocalipse-download-manager/releases";
   const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
   const MAX_MESSAGES = 160;
+  const MAX_RELEASE_SUMMARY = 900;
   const read = (key, fallback) => {
     try { return JSON.parse(localStorage.getItem(key) || "") || fallback; }
     catch { return fallback; }
@@ -32,9 +33,21 @@
     write(CHAT_KEY, messages);
   }
   function persistCorrections() {
-    corrections = corrections.slice(-100);
+    corrections = corrections.slice(-160);
     write(FIX_KEY, corrections);
     updateAlert();
+  }
+  function summarizeReleaseNotes(value) {
+    const text = String(value || "")
+      .replace(/\r/g, "")
+      .replace(/^#{1,6}\s*/gm, "")
+      .replace(/^\s*[-*+]\s+/gm, "• ")
+      .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
+      .replace(/`{1,3}/g, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    if (!text) return "";
+    return text.length > MAX_RELEASE_SUMMARY ? text.slice(0, MAX_RELEASE_SUMMARY).trim() + "…" : text;
   }
   function allowedReleaseUrl(value) {
     try {
@@ -136,7 +149,7 @@
     return {
       // The application-selected language is authoritative. Apocalipse AI must
       // never switch output language by guessing from the user's sentence.
-      locale: language(), events, engineEvents, downloads: tasks, corrections, messages,
+      locale: language(), events, engineEvents, downloads: tasks, corrections, messages, updateState,
       appVersion: document.querySelector("#app-version")?.textContent?.replace(/^v/, "") || "—",
       extensionVersion: parseExtensionVersion(events),
     };
@@ -146,7 +159,16 @@
     const index = corrections.findIndex(item => item.id === result.correctionId);
     if (index < 0) return;
     if (result.remove) corrections.splice(index, 1);
-    else corrections[index] = { ...corrections[index], status: result.status, updatedAt: Date.now() };
+    else {
+      const previous = corrections[index];
+      const next = { ...previous, status: result.status, updatedAt: Date.now() };
+      if (result.status === "confirmed") {
+        next.successCount = Math.max(0, Number(previous.successCount || 0)) + 1;
+        next.lastVerifiedAt = Date.now();
+        next.lastVerifiedVersion = document.querySelector("#app-version")?.textContent?.replace(/^v/, "") || previous.lastVerifiedVersion || "";
+      }
+      corrections[index] = next;
+    }
     persistCorrections();
     renderCorrections();
   }
@@ -157,6 +179,10 @@
       current: status.current_version || "",
       latest: status.latest_version || "",
       releaseUrl: allowedReleaseUrl(status.release_url),
+      releaseName: status.release_name || "",
+      releaseNotes: status.release_notes || "",
+      notesSummary: summarizeReleaseNotes(status.release_notes),
+      publishedAt: status.published_at || "",
       checkedAt: Date.now(),
     };
     write(UPDATE_KEY, updateState);
@@ -204,9 +230,17 @@
       if (result.action?.type === "check_app_update") {
         const status = await checkForUpdate({ announce: false });
         if (status) {
-          result.text = AI.say(language(), status.update_available ? "updateAvailable" : "upToDate", {
-            current: status.current_version, latest: status.latest_version,
-          });
+          const notesSummary = summarizeReleaseNotes(status.release_notes);
+          if (result.action.wantDetails) {
+            result.text = AI.say(language(), notesSummary ? "updateDetails" : "updateDetailsUnavailable", {
+              latest: status.latest_version,
+              details: notesSummary,
+            });
+          } else {
+            result.text = AI.say(language(), status.update_available ? "updateAvailable" : "upToDate", {
+              current: status.current_version, latest: status.latest_version,
+            });
+          }
           if (status.update_available) {
             result.kind = "update_available";
             result.currentVersion = status.current_version;
@@ -221,6 +255,27 @@
         messages = [];
         persistMessages();
         renderMessages();
+      }
+      if (result.learnCorrection) {
+        const learned = result.learnCorrection;
+        const duplicate = corrections.find(item => AI.fold(item.name) === AI.fold(learned.name) && AI.fold(item.site || "") === AI.fold(learned.site || ""));
+        if (duplicate) {
+          duplicate.updatedAt = Date.now();
+          if (duplicate.status === "rejected") duplicate.status = "saved";
+        } else {
+          corrections.push({
+            id: crypto.randomUUID(),
+            name: learned.name,
+            site: learned.site,
+            status: learned.status || "saved",
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            successCount: 0,
+            source: "user",
+          });
+        }
+        persistCorrections();
+        renderCorrections();
       }
       if (result.action?.type === "save_website_credential") {
         const { host, username, password } = result.action;
