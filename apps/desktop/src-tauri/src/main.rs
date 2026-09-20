@@ -161,6 +161,7 @@ const VAULT_SERVICE: &str = "com.linuxhell.apocalipse";
 const VAULT_BRIDGE_TOKEN: &str = "extension-bridge-token";
 const VAULT_LINK_PASSWORD: &str = "apocalipse-link-password";
 const VAULT_PROXY_PASSWORD: &str = "proxy-password";
+const FORCE_ARIA2_DIRECT_HTTP_BENCHMARK: bool = true;
 
 fn vault_entry(account: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(VAULT_SERVICE, account).map_err(|error| error.to_string())
@@ -4872,11 +4873,23 @@ async fn run_external_download(
             }
             if kind == DownloadKind::AcceleratedHttp {
                 command.args([
+                    "--no-conf=true",
                     "--split=16",
                     "--max-connection-per-server=16",
-                    "--min-split-size=1M",
-                    "--optimize-concurrent-downloads=true",
-                    "--stream-piece-selector=geom",
+                    "--min-split-size=4M",
+                    "--stream-piece-selector=default",
+                    "--enable-http-keep-alive=true",
+                    "--enable-http-pipelining=false",
+                    "--reuse-uri=true",
+                    "--file-allocation=none",
+                    "--disk-cache=64M",
+                    "--auto-file-renaming=false",
+                    "--allow-overwrite=false",
+                    "--max-tries=5",
+                    "--retry-wait=1",
+                    "--connect-timeout=10",
+                    "--timeout=30",
+                    "--lowest-speed-limit=0",
                 ]);
                 command.arg(format!("--out={file_name}"));
                 command.arg(format!("--user-agent={user_agent}"));
@@ -4901,9 +4914,11 @@ async fn run_external_download(
                 "--bt-enable-lpd=true",
                 "--bt-max-peers=100",
                 "--bt-prioritize-piece=head=64M,tail=64M",
-                "--file-allocation=trunc",
                 "--seed-time=0",
             ]);
+            if kind != DownloadKind::AcceleratedHttp {
+                command.arg("--file-allocation=trunc");
+            }
             if bandwidth_limit > 0 {
                 command.arg(format!("--max-download-limit={bandwidth_limit}"));
             }
@@ -5600,6 +5615,23 @@ async fn read_process_tail(
                                 task.torrent_leechers = Some(leechers);
                                 task.torrent_eta = eta;
                             });
+                            if *kind == DownloadKind::AcceleratedHttp {
+                                app.state::<AppState>().diagnostics.record(
+                                    "http.performance_sample",
+                                    "INFO",
+                                    None,
+                                    Some(&id.to_string()),
+                                    serde_json::json!({
+                                        "engine": "aria2",
+                                        "bytesPerSecond": download_speed,
+                                        "receivedBytes": received,
+                                        "totalBytes": total,
+                                        "progressPercent": percent,
+                                        "activeConnections": seeders.saturating_add(leechers),
+                                        "sampleWindowMs": 1000
+                                    }),
+                                );
+                            }
                         }
                     } else if *kind == DownloadKind::MediaPage {
                         if let Some((received, total, percent, speed)) =
@@ -7408,14 +7440,30 @@ fn start_download(
         return Ok(());
     }
     if kind == DownloadKind::Http
-        && task.source.starts_with("https://")
-        && task.source.contains(".freefilehub.com:")
+        && (FORCE_ARIA2_DIRECT_HTTP_BENCHMARK
+            || (task.source.starts_with("https://")
+                && task.source.contains(".freefilehub.com:")))
     {
         diagnostic_log(
             state,
             "INFO",
             "http.accelerated",
-            &format!("task={} engine=aria2", task.id),
+            &format!("task={} engine=aria2 benchmark=true", task.id),
+        );
+        state.diagnostics.record(
+            "http.engine_selected",
+            "INFO",
+            None,
+            Some(&task.id.to_string()),
+            serde_json::json!({
+                "engine": "aria2",
+                "benchmark": FORCE_ARIA2_DIRECT_HTTP_BENCHMARK,
+                "split": 16,
+                "maxConnectionPerServer": 16,
+                "minSplitSize": "4M",
+                "fileAllocation": "none",
+                "diskCache": "64M"
+            }),
         );
         tauri::async_runtime::spawn(run_external_download(
             app.clone(),
@@ -10015,9 +10063,10 @@ async fn remove_downloads(
                 .map_err(|error| error.to_string())?;
             let partial_remaining = partial_path(&task.destination).exists();
             let chunk_artifacts_remaining = chunk_directory(&task.destination).exists();
+            let aria2_control_remaining = aria2_control_path(&task.destination).exists();
             state.diagnostics.record(
                 "task.removal_disk_cleanup",
-                if partial_remaining || chunk_artifacts_remaining {
+                if partial_remaining || chunk_artifacts_remaining || aria2_control_remaining {
                     "ERROR"
                 } else {
                     "INFO"
@@ -10026,10 +10075,11 @@ async fn remove_downloads(
                 Some(&task.id.to_string()),
                 serde_json::json!({
                     "partialRemaining": partial_remaining,
-                    "chunkArtifactsRemaining": chunk_artifacts_remaining
+                    "chunkArtifactsRemaining": chunk_artifacts_remaining,
+                    "aria2ControlRemaining": aria2_control_remaining
                 }),
             );
-            if partial_remaining || chunk_artifacts_remaining {
+            if partial_remaining || chunk_artifacts_remaining || aria2_control_remaining {
                 return Err("download_cleanup_incomplete".to_owned());
             }
         }
@@ -10058,9 +10108,16 @@ async fn remove_downloads(
     Ok(removed.len())
 }
 
+fn aria2_control_path(destination: &Path) -> PathBuf {
+    let mut path = destination.as_os_str().to_os_string();
+    path.push(".aria2");
+    PathBuf::from(path)
+}
+
 fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
     let partial = partial_path(&task.destination);
-    let mut paths = vec![task.destination.clone(), partial];
+    let aria2_control = aria2_control_path(&task.destination);
+    let mut paths = vec![task.destination.clone(), partial, aria2_control];
     let recording_source = PathBuf::from(&task.source);
     if task.source.ends_with(".recording.webm") && recording_source.is_absolute() {
         paths.push(recording_source);
