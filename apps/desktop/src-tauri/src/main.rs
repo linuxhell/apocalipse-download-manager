@@ -2540,6 +2540,53 @@ fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(fallback))
 }
 
+fn configured_gopeed(settings: &UserSettings) -> PathBuf {
+    configured_tool(
+        &settings.gopeed_path,
+        if cfg!(windows) { "gopeed.exe" } else { "gopeed" },
+    )
+}
+
+async fn gopeed_endpoint(state: &AppState) -> Result<gopeed::Endpoint, String> {
+    let executable = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        configured_gopeed(&settings)
+    };
+    let runtime_root = state
+        .queue_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("gopeed-runtime");
+    let endpoint = {
+        let mut runtime = state
+            .gopeed_runtime
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let reuse = runtime.as_mut().is_some_and(gopeed::Runtime::is_running);
+        if !reuse {
+            if let Some(current) = runtime.as_mut() {
+                current.terminate();
+            }
+            *runtime = Some(gopeed::Runtime::spawn(&executable, &runtime_root)?);
+        }
+        runtime
+            .as_ref()
+            .map(gopeed::Runtime::endpoint)
+            .ok_or_else(|| "gopeed_runtime_missing".to_owned())?
+    };
+    endpoint.wait_ready().await?;
+    Ok(endpoint)
+}
+
+fn stop_gopeed_runtime(state: &AppState) {
+    if let Ok(mut runtime) = state.gopeed_runtime.lock() {
+        if let Some(runtime) = runtime.as_mut() {
+            runtime.terminate();
+        }
+        *runtime = None;
+    }
+}
+
 fn http_origin(url: &str) -> Option<&str> {
     let scheme_end = url.find("://")? + 3;
     let path_start = url[scheme_end..]
