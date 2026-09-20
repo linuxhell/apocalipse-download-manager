@@ -76,6 +76,9 @@ pub struct DownloadTask {
     pub sha256: Option<String>,
     #[serde(default)]
     pub integrity_verified: bool,
+    /// Extract a completed archive with the user-configured external extractor.
+    #[serde(default)]
+    pub auto_extract: bool,
     #[serde(default)]
     pub created_at: u64,
     #[serde(default)]
@@ -113,6 +116,7 @@ impl DownloadTask {
             expected_size: None,
             sha256: None,
             integrity_verified: false,
+            auto_extract: false,
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |value| value.as_secs()),
