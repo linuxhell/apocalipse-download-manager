@@ -720,20 +720,20 @@ dialog input:focus {
 #tool-list label > div { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 #tool-list button, #check-tools { border: 1px solid #29424f; border-radius: 8px; background: #111d25; color: #bcd1d9; padding: 7px 13px; cursor: pointer; }
 #check-tools { justify-self: end; }
-#settings-dialog { width: min(1360px, calc(100vw - 20px)); max-width: none; overflow: hidden; }
+#settings-dialog { width: min(1480px, calc(100vw - 16px)); max-width: none; overflow: hidden; }
 #tools-dialog { width: min(1080px, calc(100vw - 40px)); overflow: hidden; }
 #settings-dialog form, #tools-dialog form {
   display: grid;
   box-sizing: border-box;
-  height: min(920px, calc(100vh - 24px));
+  height: min(960px, calc(100vh - 16px));
   max-height: none;
   overflow-y: auto;
 }
 #settings-dialog form { grid-template-rows: auto minmax(0, 1fr) auto; }
 #tools-dialog form { grid-template-rows: auto auto minmax(0, 1fr) auto; }
-.settings-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; min-height: 0; }
+.settings-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; min-height: 0; }
 .settings-columns > div { min-width: 0; height: 100%; max-height: none; overflow-y: auto; padding-right: 7px; }
-.settings-columns > div + div { padding-left: 18px; border-left: 1px solid var(--line); }
+.settings-columns > div + div { padding-left: 24px; border-left: 1px solid var(--line); }
 #settings-dialog .website-credential-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 #settings-dialog .website-credential-form > button { width: 100%; }
 #settings-dialog .dialog-actions, #tools-dialog .dialog-actions {
