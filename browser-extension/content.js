@@ -216,16 +216,10 @@
   const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
   const isSponsoredFacebookPlayer = (element) => {
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return false;
-    // A MediaStream/srcObject is used by both ads and ordinary Reels. Only an
-    // explicit ad marker in this exact card is safe grounds for hiding it. Some
-    // Facebook ad layouts do not expose role=article, so walk upward only while
-    // the container still belongs to this one player/card.
-    const markerSelector = [
-      '[aria-label*="Sponsored" i]', '[aria-label*="Patrocinado" i]',
-      '[aria-label*="Publicidad" i]', '[aria-label*="Gesponsert" i]',
-      '[data-ad-preview]', '[data-testid*="sponsored" i]',
-    ].join(',');
-    const label = /(?:^|[\s·•|])(?:Sponsored|Patrocinado|Patrocinada|Publicidad|Gesponsert|Sponsorisé|Sponsorizzato|赞助内容|贊助內容)(?:$|[\s·•|])/iu;
+    // Facebook Home reuses large ancestors that may contain labels from
+    // neighbouring cards. Only accept an explicit, visible sponsored marker
+    // inside a tight single-video card that actually contains this player.
+    const sponsoredLabel = /^(?:Sponsored|Patrocinado|Patrocinada|Publicidad|Gesponsert|Sponsorisé|Sponsorizzato|赞助内容|贊助內容)$/iu;
     const visibleMarker = marker => {
       const rect = marker?.getBoundingClientRect?.();
       if (!rect || rect.width <= 0 || rect.height <= 0) return false;
@@ -233,41 +227,43 @@
       const style = globalThis.getComputedStyle?.(marker);
       return !style || (style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) > 0);
     };
-    const closeToPlayer = marker => {
+    const explicitSponsoredMarker = marker => {
       if (!visibleMarker(marker)) return false;
-      const playerRect = element?.getBoundingClientRect?.(), markerRect = marker?.getBoundingClientRect?.();
-      if (!playerRect || !markerRect) return false;
-      const markerY = markerRect.top + markerRect.height / 2;
-      return markerRect.right >= playerRect.left - 80 && markerRect.left <= playerRect.right + 80
-        && markerY >= playerRect.top - 220 && markerY <= playerRect.top + 80;
+      if (marker?.matches?.('[data-ad-preview],[data-testid*="sponsored" i]')) return true;
+      const aria = String(marker?.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();
+      const text = String(marker?.innerText || marker?.textContent || "").replace(/\s+/g, " ").trim();
+      return sponsoredLabel.test(aria) || sponsoredLabel.test(text);
     };
-    let exactPost = element.closest?.('[role="article"],article');
-    if (!exactPost) {
-      const playerRect = element?.getBoundingClientRect?.();
-      for (let node = element?.parentElement, depth = 0; node && depth < 18; node = node.parentElement, depth += 1) {
-        if (node === document.body || node === document.documentElement) break;
-        const rect = node.getBoundingClientRect?.();
-        const videos = [...(node.querySelectorAll?.('video') || [])];
-        if (videos.some(video => video !== element)) break;
-        const verticallyTight = rect && playerRect && rect.top >= playerRect.top - 420 && rect.bottom <= playerRect.bottom + 520;
-        if (verticallyTight && node.querySelector?.(markerSelector)) { exactPost = node; break; }
+    const playerRect = element?.getBoundingClientRect?.();
+    if (!playerRect) return false;
+    for (let card = element?.parentElement, depth = 0; card && depth < 14; card = card.parentElement, depth += 1) {
+      if (card === document.body || card === document.documentElement) break;
+      const rect = card.getBoundingClientRect?.();
+      if (!rect) continue;
+      const videos = [...(card.querySelectorAll?.("video") || [])];
+      if (videos.some(video => video !== element)) break;
+      if (!videos.includes(element) && card !== element.parentElement) continue;
+      // A Facebook post header sits just above the player. Refuse broad feed
+      // containers so a sponsored label from another card cannot leak in.
+      const tightCard = rect.top >= playerRect.top - 260
+        && rect.bottom <= playerRect.bottom + 260
+        && rect.left >= playerRect.left - 180
+        && rect.right <= playerRect.right + 180;
+      if (!tightCard) continue;
+      const markers = [
+        ...(card.matches?.('[data-ad-preview],[data-testid*="sponsored" i],[aria-label]') ? [card] : []),
+        ...(card.querySelectorAll?.('[data-ad-preview],[data-testid*="sponsored" i],[aria-label],span,a') || []),
+      ];
+      for (const marker of markers) {
+        if (!explicitSponsoredMarker(marker)) continue;
+        const markerRect = marker.getBoundingClientRect?.();
+        if (!markerRect) continue;
+        const markerY = markerRect.top + markerRect.height / 2;
+        const horizontallyAligned = markerRect.right >= playerRect.left - 40
+          && markerRect.left <= playerRect.right + 40;
+        const inPostHeader = markerY >= playerRect.top - 220 && markerY <= playerRect.top + 60;
+        if (horizontallyAligned && inPostHeader) return true;
       }
-    }
-    if (!exactPost) return false;
-    for (let node = element, depth = 0; node && depth < 24; node = node.parentElement, depth += 1) {
-      if (node === document.body || node === document.documentElement) break;
-      const videos = [...(node.querySelectorAll?.('video') || [])];
-      if (String(element?.tagName || '').toUpperCase() === 'VIDEO'
-        ? videos.some(video => video !== element) : videos.length > 1) break;
-      const explicit = [...(node.querySelectorAll?.(markerSelector) || [])].find(closeToPlayer);
-      if (explicit) return true;
-      const textual = [...(node.querySelectorAll?.('span,a,[role="button"],[aria-label]') || [])]
-        .find(candidate => {
-          const text = String(candidate.innerText || candidate.textContent || candidate.getAttribute?.('aria-label') || '').replace(/\s+/g, ' ').trim();
-          return text.length <= 80 && label.test(text) && closeToPlayer(candidate);
-        });
-      if (textual) return true;
-      if (node === exactPost) break;
     }
     return false;
   };
