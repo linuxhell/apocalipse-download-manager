@@ -2594,50 +2594,63 @@ fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(fallback))
 }
 
-fn configured_gopeed(settings: &UserSettings) -> PathBuf {
+fn configured_aria2(settings: &UserSettings) -> PathBuf {
     configured_tool(
-        &settings.gopeed_path,
+        &settings.aria2_path,
         if cfg!(windows) {
-            "gopeed.exe"
+            "aria2c.exe"
         } else {
-            "gopeed"
+            "aria2c"
         },
     )
 }
 
-async fn gopeed_endpoint(state: &AppState) -> Result<gopeed::Endpoint, String> {
-    let executable = {
-        let settings = state.settings.lock().map_err(|error| error.to_string())?;
-        configured_gopeed(&settings)
-    };
+async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::Endpoint, String> {
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    if !settings.aria2_rpc_enabled {
+        return Err("aria2_rpc_disabled".to_owned());
+    }
+    let executable = configured_aria2(&settings);
     let runtime_root = state
         .queue_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join("gopeed-runtime");
+        .join("aria2-rpc");
     let endpoint = {
         let mut runtime = state
-            .gopeed_runtime
+            .aria2_runtime
             .lock()
             .map_err(|error| error.to_string())?;
-        let reuse = runtime.as_mut().is_some_and(gopeed::Runtime::is_running);
+        let reuse = runtime.as_mut().is_some_and(aria2::Runtime::is_running);
         if !reuse {
+            if !force_start && !settings.aria2_rpc_auto_start {
+                return Err("aria2_rpc_not_running".to_owned());
+            }
             if let Some(current) = runtime.as_mut() {
                 current.terminate();
             }
-            *runtime = Some(gopeed::Runtime::spawn(&executable, &runtime_root)?);
+            *runtime = Some(aria2::Runtime::spawn(
+                &executable,
+                &runtime_root,
+                settings.aria2_rpc_port,
+                &settings.aria2_rpc_secret,
+            )?);
         }
         runtime
             .as_ref()
-            .map(gopeed::Runtime::endpoint)
-            .ok_or_else(|| "gopeed_runtime_missing".to_owned())?
+            .map(aria2::Runtime::endpoint)
+            .ok_or_else(|| "aria2_rpc_runtime_missing".to_owned())?
     };
     endpoint.wait_ready().await?;
     Ok(endpoint)
 }
 
-fn stop_gopeed_runtime(state: &AppState) {
-    if let Ok(mut runtime) = state.gopeed_runtime.lock() {
+fn stop_aria2_runtime(state: &AppState) {
+    if let Ok(mut runtime) = state.aria2_runtime.lock() {
         if let Some(runtime) = runtime.as_mut() {
             runtime.terminate();
         }
