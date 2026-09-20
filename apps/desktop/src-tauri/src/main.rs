@@ -251,9 +251,33 @@ fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize
         // transfer on its single original stream regardless of the global or
         // per-task connection preference.
         Some(1)
+    } else if host.as_deref().is_some_and(|value| {
+        value == "download.microsoft.com"
+            || value.ends_with(".download.microsoft.com")
+            || value == "software.download.prss.microsoft.com"
+            || value.ends_with(".download.prss.microsoft.com")
+    }) {
+        // Microsoft's ISO CDN supports byte ranges. Start wide enough to avoid
+        // the slow single-stream ramp while keeping the setting below the
+        // application's global safety ceiling.
+        Some(requested.unwrap_or(16).max(16).clamp(1, 32))
     } else {
         requested.map(|value| value.clamp(1, 32))
     }
+}
+
+fn requires_native_http_compatibility(url: &str) -> bool {
+    host_from_url(url).as_deref().is_some_and(|value| {
+        value == "download.microsoft.com"
+            || value.ends_with(".download.microsoft.com")
+            || value == "software.download.prss.microsoft.com"
+            || value.ends_with(".download.prss.microsoft.com")
+            // ChatGPT file links are short-lived signed URLs. Gopeed's task
+            // creation can stall on the captured browser context until the URL
+            // expires, so keep these transfers on ADM's native HTTP engine.
+            || value == "oaiusercontent.com"
+            || value.ends_with(".oaiusercontent.com")
+    })
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -7921,14 +7945,30 @@ fn start_download(
         ));
         return Ok(());
     }
-    if matches!(
+    let native_http_compatibility =
+        kind == DownloadKind::Http && requires_native_http_compatibility(&task.source);
+    if native_http_compatibility {
+        diagnostic_log(
+            state,
+            "INFO",
+            "http.native_compatibility_route",
+            &format!(
+                "task={} reason=gopeed_http_compatibility host={}",
+                task.id,
+                host_from_url(&task.source).unwrap_or_default()
+            ),
+        );
+    }
+    if !native_http_compatibility
+        && matches!(
         kind,
         DownloadKind::Http
             | DownloadKind::AcceleratedHttp
             | DownloadKind::Torrent
             | DownloadKind::Magnet
             | DownloadKind::Ftp
-    ) {
+        )
+    {
         diagnostic_log(
             state,
             "INFO",
@@ -11012,6 +11052,19 @@ mod tests {
             site_connection_override("https://example.test/file", None),
             None
         );
+    }
+
+    #[test]
+    fn temporary_chatgpt_files_use_native_http_without_matching_spoofed_hosts() {
+        assert!(requires_native_http_compatibility(
+            "https://sdmntprbrazilsouth.oaiusercontent.com/files/example/raw"
+        ));
+        assert!(requires_native_http_compatibility(
+            "https://oaiusercontent.com/files/example/raw"
+        ));
+        assert!(!requires_native_http_compatibility(
+            "https://oaiusercontent.com.evil.test/files/example/raw"
+        ));
     }
 
     #[test]
