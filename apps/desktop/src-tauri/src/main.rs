@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod diagnostics_v3;
+mod gopeed;
 mod prepared_preview;
 mod thumbnail_cache;
 mod tiktok_preview;
@@ -216,6 +217,9 @@ struct AppState {
     blob_uploads: Mutex<HashMap<uuid::Uuid, BlobUpload>>,
     recording_stops: Mutex<HashSet<DownloadId>>,
     request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
+    gopeed_runtime: Mutex<Option<gopeed::Runtime>>,
+    gopeed_tasks: Mutex<HashMap<DownloadId, String>>,
+    gopeed_resolves: Mutex<HashMap<String, String>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
     diagnostics: diagnostics_v3::Diagnostics,
@@ -283,7 +287,7 @@ struct UserSettings {
     #[serde(default)]
     n_m3u8dl_re_path: Option<PathBuf>,
     #[serde(default)]
-    aria2_path: Option<PathBuf>,
+    gopeed_path: Option<PathBuf>,
     #[serde(default)]
     media_player_path: Option<PathBuf>,
     #[serde(default)]
@@ -369,7 +373,7 @@ impl Default for UserSettings {
             yt_dlp_path: None,
             qjs_path: None,
             n_m3u8dl_re_path: None,
-            aria2_path: None,
+            gopeed_path: None,
             media_player_path: None,
             user_agent: None,
             log_editor_path: None,
@@ -10176,6 +10180,9 @@ fn main() {
                 blob_uploads: Mutex::new(HashMap::new()),
                 recording_stops: Mutex::new(HashSet::new()),
                 request_identities: Mutex::new(HashMap::new()),
+                gopeed_runtime: Mutex::new(None),
+                gopeed_tasks: Mutex::new(HashMap::new()),
+                gopeed_resolves: Mutex::new(HashMap::new()),
                 log_path,
                 log_write_lock: Mutex::new(()),
                 diagnostics: diagnostics_v3::Diagnostics::new(&app_data.join("logs")),
