@@ -7256,67 +7256,97 @@ async fn inspect_torrent_metadata(
     ) {
         return Err("not_a_torrent".to_owned());
     }
-    // Metadata inspection must not share the live Gopeed/anacrolix client.
-    // Resolve binds BitTorrent storage immediately, before the user chooses the
-    // final save directory. Use a short-lived backend so its storage can never
-    // leak into the real download task.
-    let executable = {
-        let settings = state.settings.lock().map_err(|error| error.to_string())?;
-        configured_aria2(&settings)
-    };
-    let app_data = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
-    let inspection_root = app_data
-        .join("gopeed-metadata-inspection")
-        .join(uuid::Uuid::new_v4().simple().to_string());
-    let payload_root = inspection_root.join("payload");
-    fs::create_dir_all(&payload_root).map_err(|error| error.to_string())?;
-    let mut runtime = gopeed::Runtime::spawn(&executable, &inspection_root)?;
-    let endpoint = runtime.endpoint();
-    let resolved_result = async {
-        endpoint.wait_ready().await?;
-        endpoint
-            .resolve(
-                &source,
-                &payload_root.to_string_lossy(),
-                &gopeed::RequestContext::default(),
-            )
-            .await
+
+    let local = PathBuf::from(&source);
+    if local.is_file() {
+        return inspect_torrent_file(&local);
     }
-    .await;
-    runtime.terminate();
-    let _ = fs::remove_dir_all(&inspection_root);
-    let resolved = resolved_result?;
-    let files = resolved
-        .res
-        .files
-        .iter()
-        .enumerate()
-        .map(|(offset, file)| {
-            let path = if file.path.trim().is_empty() {
-                file.name.clone()
-            } else {
-                format!("{}/{}", file.path.trim_matches('/'), file.name)
-            };
+
+    if (source.starts_with("http://") || source.starts_with("https://"))
+        && source
+            .split(['?', '#'])
+            .next()
+            .is_some_and(|value| value.to_ascii_lowercase().ends_with(".torrent"))
+    {
+        let bytes = reqwest::Client::builder()
+            .user_agent("Apocalipse-Download-Manager")
+            .build()
+            .map_err(|error| error.to_string())?
+            .get(&source)
+            .send()
+            .await
+            .map_err(|error| error.to_string())?
+            .error_for_status()
+            .map_err(|error| error.to_string())?
+            .bytes()
+            .await
+            .map_err(|error| error.to_string())?;
+        let temporary = std::env::temp_dir().join(format!(
+            "apocalipse-torrent-inspection-{}.torrent",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::write(&temporary, &bytes).map_err(|error| error.to_string())?;
+        let result = inspect_torrent_file(&temporary);
+        let _ = fs::remove_file(&temporary);
+        return result;
+    }
+
+    let endpoint = aria2_endpoint(&state, true).await?;
+    let inspection_root = state
+        .queue_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("aria2-metadata-inspection")
+        .join(uuid::Uuid::new_v4().simple().to_string());
+    fs::create_dir_all(&inspection_root).map_err(|error| error.to_string())?;
+    let gid = endpoint.add_metadata_only(&source, &inspection_root).await?;
+    let mut resolved_files = Vec::new();
+    for _ in 0..120 {
+        if let Ok(files) = endpoint.files(&gid).await {
+            if !files.is_empty() && files.iter().any(|file| file.size > 0) {
+                resolved_files = files;
+                break;
+            }
+        }
+        if let Ok(status) = endpoint.status(&gid).await {
+            if matches!(status.status.as_str(), "error" | "removed") {
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    let _ = endpoint.remove(&gid).await;
+    let _ = endpoint.remove_result(&gid).await;
+
+    let files = resolved_files
+        .into_iter()
+        .map(|file| {
+            let path = PathBuf::from(&file.path);
+            let relative = path
+                .strip_prefix(&inspection_root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
             TorrentFileInfo {
-                index: offset + 1,
-                path,
+                index: file.index,
+                path: relative,
                 size: file.size,
             }
         })
         .collect::<Vec<_>>();
+    let _ = fs::remove_dir_all(&inspection_root);
     if files.is_empty() {
-        return Err("torrent_has_no_files".to_owned());
+        return Err("torrent_metadata_unavailable".to_owned());
     }
+    let name = files
+        .first()
+        .and_then(|file| file.path.split('/').next())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("torrent")
+        .to_owned();
     let total_size = files.iter().map(|file| file.size).sum();
     Ok(TorrentInspection {
-        name: if resolved.res.name.trim().is_empty() {
-            files
-                .first()
-                .map(|file| file.path.clone())
-                .unwrap_or_else(|| "torrent".to_owned())
-        } else {
-            resolved.res.name
-        },
+        name,
         files,
         total_size,
     })
