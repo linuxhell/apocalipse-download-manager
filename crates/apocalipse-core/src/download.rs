@@ -1153,7 +1153,8 @@ impl DownloadEngine {
                                     admission_baseline = Some((current_limit, interval_rate));
                                     stable_capacity = stable_capacity.max(interval_rate);
                                     if current_limit < states.len() {
-                                        let next = next_admission_level(current_limit, states.len());
+                                        let next =
+                                            next_admission_level(current_limit, states.len());
                                         active_limit.store(next, Ordering::Release);
                                         notify.notify_waiters();
                                         admission_skip_sample = true;
