@@ -4575,6 +4575,12 @@ async fn run_gopeed_download(
         }
     };
     let (context, requested_connections) = gopeed_request_context(&state, &task);
+    let is_http = matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp);
+    let planned_connections = if is_http {
+        gopeed::applied_http_connections(requested_connections)
+    } else {
+        requested_connections
+    };
     let existing_task = task.gopeed_task_id.clone().or_else(|| {
         state
             .gopeed_tasks
@@ -4582,7 +4588,7 @@ async fn run_gopeed_download(
             .ok()
             .and_then(|items| items.get(&id).cloned())
     });
-    let gopeed_id = match existing_task {
+    let (gopeed_id, applied_connections) = match existing_task {
         Some(gopeed_id) => {
             if let Err(error) = endpoint.resume(&gopeed_id).await {
                 update_task(&app, id, true, |item| {
@@ -4596,7 +4602,7 @@ async fn run_gopeed_download(
                 start_next_queued(&app);
                 return;
             }
-            gopeed_id
+            (gopeed_id, None)
         }
         None => {
             let selected_files = task
@@ -4604,12 +4610,6 @@ async fn run_gopeed_download(
                 .iter()
                 .filter_map(|index| index.checked_sub(1))
                 .collect::<Vec<_>>();
-            let is_http = matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp);
-            let applied_connections = if is_http {
-                gopeed::applied_http_connections(requested_connections)
-            } else {
-                requested_connections
-            };
             let resolved_id = if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
                 // A BitTorrent fetcher binds its anacrolix storage during Resolve.
                 // Always resolve against the user's actual destination immediately
@@ -4659,7 +4659,7 @@ async fn run_gopeed_download(
                     update_task(&app, id, true, |item| {
                         item.gopeed_task_id = Some(persisted_id.clone());
                     });
-                    gopeed_id
+                    (gopeed_id, Some(planned_connections))
                 }
                 Err(error) => {
                     update_task(&app, id, true, |item| {
@@ -4681,7 +4681,7 @@ async fn run_gopeed_download(
         "INFO",
         "gopeed.task_started",
         &format!(
-            "task={id} gopeed_task={gopeed_id} engine={kind:?} requested_connections={requested_connections} applied_connections={applied_connections}"
+            "task={id} gopeed_task={gopeed_id} engine={kind:?} requested_connections={requested_connections} applied_connections={}" , applied_connections.map_or_else(|| "existing".to_owned(), |value| value.to_string())
         ),
     );
     state.diagnostics.record(
