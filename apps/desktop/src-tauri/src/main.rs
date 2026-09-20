@@ -3570,16 +3570,26 @@ fn reconnect_active_downloads_after_network_change(app: &tauri::AppHandle, previ
         .lock()
         .map(|mut workers| workers.drain().collect::<Vec<_>>())
         .unwrap_or_default();
-    if active.is_empty() {
-        return;
-    }
-    let ids = active.iter().map(|(id, _)| *id).collect::<HashSet<_>>();
+    let mut ids = active.iter().map(|(id, _)| *id).collect::<HashSet<_>>();
     for (_, cancel) in active {
         let _ = cancel.send(());
     }
-    stop_aria2_runtime(&state);
-    if let Ok(mut aria2_tasks) = state.aria2_tasks.lock() {
-        aria2_tasks.clear();
+    if !ids.is_empty() {
+        stop_aria2_runtime(&state);
+        if let Ok(mut aria2_tasks) = state.aria2_tasks.lock() {
+            aria2_tasks.clear();
+        }
+    }
+    if current.is_some() {
+        if let Ok(queue) = state.queue.lock() {
+            ids.extend(queue.iter().filter_map(|task| match &task.state {
+                DownloadState::Failed { message } if message == "network_waiting_for_reconnect" => Some(task.id),
+                _ => None,
+            }));
+        }
+    }
+    if ids.is_empty() {
+        return;
     }
     diagnostic_log(
         &state,
@@ -3598,7 +3608,15 @@ fn reconnect_active_downloads_after_network_change(app: &tauri::AppHandle, previ
         let state = resumed_app.state::<AppState>();
         if let Ok(mut queue) = state.queue.lock() {
             for task in queue.iter_mut().filter(|task| ids.contains(&task.id)) {
-                if matches!(
+                if current.is_none() {
+                    if task.state != DownloadState::Completed {
+                        task.state = DownloadState::Failed {
+                            message: "network_waiting_for_reconnect".to_owned(),
+                        };
+                        task.download_speed = Some(0);
+                        task.upload_speed = Some(0);
+                    }
+                } else if matches!(
                     task.state,
                     DownloadState::Downloading
                         | DownloadState::Inspecting
@@ -3613,13 +3631,15 @@ fn reconnect_active_downloads_after_network_change(app: &tauri::AppHandle, previ
             let _ = save_queue(&state, &queue);
         }
         state.diagnostics.record(
-            "network.reconnect_queued",
+            if current.is_some() { "network.reconnect_queued" } else { "network.waiting" },
             "INFO",
             None,
             None,
             serde_json::json!({"taskCount": ids.len()}),
         );
-        start_next_queued(&resumed_app);
+        if current.is_some() {
+            start_next_queued(&resumed_app);
+        }
     });
 }
 
