@@ -219,9 +219,12 @@ test("About page is localized, sits immediately below PayPal and keeps the main 
   assert.doesNotMatch(app, /invoke\("select_about_audio"\)/);
   assert.match(rust, /fn about_media_snapshot/);
   assert.match(rust, /include_bytes!\("\.\.\/assets\/about-creator\.jpg"\)/);
+  assert.match(rust, /include_bytes!\("\.\.\/assets\/about-background\.jpg"\)/);
   assert.match(rust, /include_bytes!\("\.\.\/assets\/about-theme\.mp4"\)/);
+  assert.match(app, /backgroundDataUrl/);
+  assert.match(css, /var\(--about-background\)/);
   assert.match(app, /document\.querySelector\("#add"\)\.hidden = activePage === "about"/);
-  assert.match(css, /\.about-creator-line[\s\S]*font-size: 20px/);
+  assert.match(css, /\.about-creator-line[\s\S]*font-size: clamp\(17px, 1\.8vw, 23px\)/);
   assert.match(app, /option\(select, "original", pendingMediaKind === "audio"/);
   assert.match(css, /\.media-inspection:has\(> img\[hidden\]\)[^}]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(app, /\["mp3", "m4a", "opus", "flac", "wav"\]/);

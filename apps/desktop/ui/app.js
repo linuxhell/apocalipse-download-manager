@@ -28,7 +28,7 @@ const catalogs = {
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
     toolbox: "TOOLBOX", update: "Update", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "VLC / mpv / media player",
     donatePaypal: "Donate via PayPal",
-    about: "About", aboutDescription: "About the creator of Apocalipse Download Manager.", aboutCreator: "Creator: Juliano - Brazil - Sátia Mortadela", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume",
+    about: "About", aboutDescription: "About the creator of Apocalipse Download Manager.", aboutCreator: "Creator: Juliano - Brazil - Sátia Mortadela", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume", facebookRecordingFallback: "Facebook could not provide this Reel for direct download. Use Record on the video while it is playing.",
     overview: "OVERVIEW",
     engineReady: "Engine ready",
     addDownload: "Add download",
@@ -251,7 +251,7 @@ const catalogs = {
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
     toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "VLC / mpv / reprodutor de mídia",
     donatePaypal: "Faça uma doação pelo PayPal",
-    about: "Sobre", aboutDescription: "Sobre o criador do Apocalipse Download Manager.", aboutCreator: "Criador: Juliano - Brasil - Sátia Mortadela", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume",
+    about: "Sobre", aboutDescription: "Sobre o criador do Apocalipse Download Manager.", aboutCreator: "Criador: Juliano - Brasil - Sátia Mortadela", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume", facebookRecordingFallback: "O Facebook não disponibilizou este Reel para download direto. Use Gravar no vídeo enquanto ele estiver em reprodução.",
     overview: "VISÃO GERAL",
     engineReady: "Motor pronto",
     addDownload: "Adicionar download",
@@ -474,7 +474,7 @@ const catalogs = {
     settingsDescription: "配置外观、集成、网络和应用行为。",
     toolbox: "工具箱", update: "更新", aria2Backend: "aria2（HTTP/HTTPS、FTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "VLC / mpv / 媒体播放器",
     donatePaypal: "通过 PayPal 捐赠",
-    about: "关于", aboutDescription: "关于 Apocalipse Download Manager 的创作者。", aboutCreator: "创作者：Juliano - 巴西 - Sátia Mortadela", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量",
+    about: "关于", aboutDescription: "关于 Apocalipse Download Manager 的创作者。", aboutCreator: "创作者：Juliano - 巴西 - Sátia Mortadela", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量", facebookRecordingFallback: "Facebook 无法提供此 Reel 的直接下载。请在视频播放时使用“录制”。",
     overview: "概览",
     engineReady: "引擎已就绪",
     addDownload: "添加下载",
@@ -1031,8 +1031,12 @@ function renderDownloads(force = false) {
       className: "download-state",
       textContent: /\.recording\.webm$/i.test(task.destination) && stateKey(task.state) === "downloading" ? t("recordingActive") : stateName(task.state),
     });
-    if (typeof task.state === "object")
-      state.title = task.state.failed?.message || "";
+    if (typeof task.state === "object") {
+      const failure = task.state.failed?.message || "";
+      state.title = failure === "facebook_direct_download_unavailable_use_recording"
+        ? t("facebookRecordingFallback")
+        : failure;
+    }
     const actions = document.createElement("div");
     actions.className = "task-actions";
     const addAction = (label, command) => {
@@ -1179,6 +1183,7 @@ function translate() {
   }
 }
 
+const warnedFacebookRecordingFallbacks = new Set();
 async function refreshDownloads() {
   try {
     const ticket = downloadListState.beginRead();
@@ -1187,6 +1192,13 @@ async function refreshDownloads() {
     const accepted = downloadListState.acceptRead(ticket, refreshed);
     if (!accepted) return;
     downloads = accepted;
+    for (const task of downloads) {
+      const failure = typeof task.state === "object" ? task.state.failed?.message : null;
+      if (failure !== "facebook_direct_download_unavailable_use_recording"
+          || warnedFacebookRecordingFallbacks.has(task.id)) continue;
+      warnedFacebookRecordingFallbacks.add(task.id);
+      window.alert(t("facebookRecordingFallback"));
+    }
     const ids = new Set(downloads.map((task) => task.id));
     for (const id of selectedIds) if (!ids.has(id)) selectedIds.delete(id);
     updateSpeeds(downloads);
@@ -1229,8 +1241,10 @@ document.querySelector("#import-list").onclick = async (event) => {
   finally { button.disabled = false; }
 };
 async function applyAboutMedia(media) {
+  const panel = document.querySelector("#about-panel");
   const photo = document.querySelector("#about-creator-photo");
   const audio = document.querySelector("#about-audio");
+  if (media?.backgroundDataUrl) panel.style.setProperty("--about-background", `url("${media.backgroundDataUrl}")`);
   if (media?.photoDataUrl) photo.src = media.photoDataUrl;
   if (media?.audioDataUrl && audio.src !== media.audioDataUrl) {
     audio.src = media.audioDataUrl;

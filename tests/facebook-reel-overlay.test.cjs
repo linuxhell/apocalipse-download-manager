@@ -14,6 +14,18 @@ test('Facebook unresolved download falls back to the exact player recording path
   assert.match(script, /recordButton\.click\(\)/);
 });
 
+test('Facebook extractor parse failures expose a localized recording fallback', () => {
+  const rust = readFileSync(join(__dirname, '../apps/desktop/src-tauri/src/main.rs'), 'utf8');
+  const app = readFileSync(join(__dirname, '../apps/desktop/ui/app.js'), 'utf8');
+  assert.match(rust, /cannot parse data/);
+  assert.match(rust, /facebook_direct_download_unavailable_use_recording/);
+  assert.match(app, /Facebook could not provide this Reel/);
+  assert.match(app, /O Facebook não disponibilizou este Reel/);
+  assert.match(app, /Facebook 无法提供此 Reel/);
+  assert.match(app, /t\("facebookRecordingFallback"\)/);
+  assert.match(app, /warnedFacebookRecordingFallbacks/);
+});
+
 // Execute the real content script and its installed click handler. Only browser
 // APIs/DOM geometry are mocked; URL selection and the outgoing payload are real.
 function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false } = {}) {

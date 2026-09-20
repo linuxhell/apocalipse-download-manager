@@ -804,6 +804,7 @@ struct LinkIdentity {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AboutMedia {
+    background_data_url: Option<String>,
     photo_data_url: Option<String>,
     audio_data_url: Option<String>,
 }
@@ -833,6 +834,7 @@ fn safe_link_path(path: &str) -> Result<PathBuf, String> {
 }
 
 const ABOUT_CREATOR_JPEG: &[u8] = include_bytes!("../assets/about-creator.jpg");
+const ABOUT_BACKGROUND_JPEG: &[u8] = include_bytes!("../assets/about-background.jpg");
 const ABOUT_THEME_MP4: &[u8] = include_bytes!("../assets/about-theme.mp4");
 
 fn about_data_url(bytes: &[u8], mime: &str) -> String {
@@ -841,6 +843,7 @@ fn about_data_url(bytes: &[u8], mime: &str) -> String {
 
 fn about_media_snapshot() -> AboutMedia {
     AboutMedia {
+        background_data_url: Some(about_data_url(ABOUT_BACKGROUND_JPEG, "image/jpeg")),
         photo_data_url: Some(about_data_url(ABOUT_CREATOR_JPEG, "image/jpeg")),
         audio_data_url: Some(about_data_url(ABOUT_THEME_MP4, "audio/mp4")),
     }
@@ -5767,7 +5770,15 @@ async fn run_external_download(
                     if status.success() {
                         return Ok(());
                     }
-                    Err(external_error_detail(&text, status.code()))
+                    let detail = external_error_detail(&text, status.code());
+                    if kind == DownloadKind::MediaPage
+                        && task.source.contains("facebook.com/")
+                        && text.to_ascii_lowercase().contains("cannot parse data")
+                    {
+                        Err("facebook_direct_download_unavailable_use_recording".to_owned())
+                    } else {
+                        Err(detail)
+                    }
                 })
         }
         Err(error) => Err(format!("external_engine_unavailable: {error}")),
