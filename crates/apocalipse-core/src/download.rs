@@ -2002,10 +2002,9 @@ fn confirmed_capacity_candidate(previous: Option<f64>, current: f64) -> Option<f
 }
 
 fn known_capacity_settle_threshold(host_hint: f64, network_hint: f64) -> Option<f64> {
-    let host_target = (host_hint > 0.0)
-        .then_some(host_hint * KNOWN_CAPACITY_SETTLE_HOST_FRACTION);
-    let network_target = (network_hint > 0.0)
-        .then_some(network_hint * KNOWN_CAPACITY_SETTLE_NETWORK_FRACTION);
+    let host_target = (host_hint > 0.0).then_some(host_hint * KNOWN_CAPACITY_SETTLE_HOST_FRACTION);
+    let network_target =
+        (network_hint > 0.0).then_some(network_hint * KNOWN_CAPACITY_SETTLE_NETWORK_FRACTION);
     let target = match (host_target, network_target) {
         (Some(host), Some(network)) => host.max(network),
         (Some(host), None) => host,
@@ -2704,8 +2703,7 @@ mod tests {
     #[test]
     fn known_capacity_fast_settle_uses_specific_host_and_network_floor() {
         let mib = 1024.0 * 1024.0;
-        let threshold =
-            known_capacity_settle_threshold(116.0 * mib, 116.0 * mib).unwrap();
+        let threshold = known_capacity_settle_threshold(116.0 * mib, 116.0 * mib).unwrap();
         assert!((threshold / mib - 110.2).abs() < 0.01);
         assert!(known_capacity_settle_threshold(0.0, 20.0 * mib).is_none());
         let network_only = known_capacity_settle_threshold(0.0, 100.0 * mib).unwrap();
