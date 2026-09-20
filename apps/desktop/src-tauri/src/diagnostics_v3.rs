@@ -11,10 +11,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-const MAX_FILE: u64 = 4 * 1024 * 1024;
+const MAX_FILE: u64 = 16 * 1024 * 1024;
 const MAX_BATCH: usize = 40;
-const MAX_EVENTS: usize = 20_000;
-const SESSION_MS: u64 = 10 * 60 * 1000;
+const MAX_EVENTS: usize = 50_000;
+const SESSION_MS: u64 = 30 * 60 * 1000;
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
