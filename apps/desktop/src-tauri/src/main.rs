@@ -4559,9 +4559,40 @@ async fn run_gopeed_download(
         let state = route_app.state::<AppState>();
         log_network_route(&state, &route_operation, "Gopeed").await;
     });
+    let gopeed_ready_started = Instant::now();
+    state.diagnostics.record(
+        "gopeed.runtime_wait_started",
+        "INFO",
+        None,
+        Some(&id.to_string()),
+        serde_json::json!({
+            "kind": format!("{kind:?}")
+        }),
+    );
     let endpoint = match gopeed_endpoint(&state).await {
-        Ok(endpoint) => endpoint,
+        Ok(endpoint) => {
+            state.diagnostics.record(
+                "gopeed.runtime_ready",
+                "INFO",
+                None,
+                Some(&id.to_string()),
+                serde_json::json!({
+                    "elapsedMs": gopeed_ready_started.elapsed().as_millis()
+                }),
+            );
+            endpoint
+        }
         Err(message) => {
+            state.diagnostics.record(
+                "gopeed.runtime_unavailable",
+                "WARN",
+                None,
+                Some(&id.to_string()),
+                serde_json::json!({
+                    "elapsedMs": gopeed_ready_started.elapsed().as_millis(),
+                    "error": message
+                }),
+            );
             update_task(&app, id, true, |item| {
                 item.state = DownloadState::Failed {
                     message: format!("gopeed_unavailable:{message}"),
@@ -4634,6 +4665,17 @@ async fn run_gopeed_download(
             } else {
                 None
             };
+            let create_started = Instant::now();
+            state.diagnostics.record(
+                "gopeed.task_create_started",
+                "INFO",
+                None,
+                Some(&id.to_string()),
+                serde_json::json!({
+                    "connections": connections,
+                    "http": is_http
+                }),
+            );
             match endpoint
                 .create_task(
                     &task.source,
@@ -4647,6 +4689,17 @@ async fn run_gopeed_download(
                 .await
             {
                 Ok(gopeed_id) => {
+                    state.diagnostics.record(
+                        "gopeed.task_create_completed",
+                        "INFO",
+                        None,
+                        Some(&id.to_string()),
+                        serde_json::json!({
+                            "elapsedMs": create_started.elapsed().as_millis(),
+                            "connections": connections,
+                            "http": is_http
+                        }),
+                    );
                     if let Ok(mut items) = state.gopeed_tasks.lock() {
                         items.insert(id, gopeed_id.clone());
                     }
@@ -4657,6 +4710,18 @@ async fn run_gopeed_download(
                     gopeed_id
                 }
                 Err(error) => {
+                    state.diagnostics.record(
+                        "gopeed.task_create_failed",
+                        "WARN",
+                        None,
+                        Some(&id.to_string()),
+                        serde_json::json!({
+                            "elapsedMs": create_started.elapsed().as_millis(),
+                            "connections": connections,
+                            "http": is_http,
+                            "error": error
+                        }),
+                    );
                     update_task(&app, id, true, |item| {
                         item.state = DownloadState::Failed {
                             message: format!("gopeed_create_failed:{error}"),
