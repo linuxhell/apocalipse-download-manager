@@ -26,7 +26,7 @@ const catalogs = {
     aiStatusProposed: "Awaiting approval", aiStatusTesting: "Testing", aiStatusSaved: "Saved", aiStatusConfirmed: "Confirmed", aiStatusRejected: "Did not work",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
-    toolbox: "TOOLBOX", update: "Update", mediaPlayer: "VLC / mpv / media player",
+    toolbox: "TOOLBOX", update: "Update", gopeedBackend: "Gopeed (backend engine)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "VLC / mpv / media player",
     donatePaypal: "Donate via PayPal",
     about: "About", aboutDescription: "About the creator of Apocalipse Download Manager.", aboutCreator: "Creator: Juliano - Brazil - Sátia Mortadela", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume",
     overview: "OVERVIEW",
@@ -235,7 +235,7 @@ const catalogs = {
     aiStatusProposed: "Aguardando aprovação", aiStatusTesting: "Em teste", aiStatusSaved: "Guardada", aiStatusConfirmed: "Confirmada", aiStatusRejected: "Não funcionou",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
-    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", mediaPlayer: "VLC / mpv / reprodutor de mídia",
+    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", gopeedBackend: "Gopeed (motor em segundo plano)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "VLC / mpv / reprodutor de mídia",
     donatePaypal: "Faça uma doação pelo PayPal",
     about: "Sobre", aboutDescription: "Sobre o criador do Apocalipse Download Manager.", aboutCreator: "Criador: Juliano - Brasil - Sátia Mortadela", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume",
     overview: "VISÃO GERAL",
@@ -444,7 +444,7 @@ const catalogs = {
     aiStatusProposed: "等待批准", aiStatusTesting: "测试中", aiStatusSaved: "已保存", aiStatusConfirmed: "已确认", aiStatusRejected: "未解决",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
-    toolbox: "工具箱", update: "更新", mediaPlayer: "VLC / mpv / 媒体播放器",
+    toolbox: "工具箱", update: "更新", gopeedBackend: "Gopeed（后台引擎）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "VLC / mpv / 媒体播放器",
     donatePaypal: "通过 PayPal 捐赠",
     about: "关于", aboutDescription: "关于 Apocalipse Download Manager 的创作者。", aboutCreator: "创作者：Juliano - 巴西 - Sátia Mortadela", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量",
     overview: "概览",
@@ -2058,11 +2058,15 @@ document.querySelectorAll("[data-tool-update]").forEach((button) => {
   button.onclick = async () => {
     button.disabled = true;
     try {
-      const message = await invoke("update_tool", { id: button.dataset.toolUpdate });
+      const message = String(await invoke("update_tool", { id: button.dataset.toolUpdate }));
       await refreshToolStatuses();
-      alert(message);
+      const updated = message.match(/^(.+) updated: (.+) → (.+)$/);
+      const current = message.match(/^(.+) already current \((.+)\)$/);
+      if (updated) alert(`${updated[1]} · ${t("toolUpdated")}: ${updated[2]} → ${updated[3]}`);
+      else if (current) alert(`${current[1]} · ${t("toolCurrent")} (${current[2]})`);
+      else alert(message);
     } catch (error) {
-      alert(String(error).replace("manual_update_required:", "Atualização manual necessária:"));
+      alert(String(error).replace("manual_update_required:", `${t("manualUpdateRequired")}:`));
     } finally {
       button.disabled = false;
     }
