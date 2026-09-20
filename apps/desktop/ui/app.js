@@ -724,17 +724,69 @@ let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
 const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", ai: "aiDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", about: "aboutDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
+let lastUiInteractionTrace = null;
+const freshUiTrace = () => {
+  const now = performance.now();
+  if (lastUiInteractionTrace && now - lastUiInteractionTrace.at < 2000) return lastUiInteractionTrace.id;
+  return crypto.randomUUID();
+};
+const recordStructuredUi = (bridge, event, detail = {}) =>
+  bridge("record_diagnostics_ui", { event, detail }).catch(() => {});
+document.addEventListener("click", (event) => {
+  const control = event.target?.closest?.("button,[role='button'],a,input[type='button'],input[type='submit']");
+  if (!control) return;
+  const bridge = window.__TAURI__?.core?.invoke;
+  if (!bridge) return;
+  const traceId = crypto.randomUUID();
+  lastUiInteractionTrace = { id: traceId, at: performance.now() };
+  const activePage = document.querySelector(".nav-item.active")?.dataset?.page || null;
+  recordStructuredUi(bridge, "control_clicked", {
+    traceId,
+    level: "INFO",
+    window: "main",
+    page: activePage,
+    controlTag: control.tagName?.toLowerCase() || "unknown",
+    controlType: control.getAttribute?.("type") || control.getAttribute?.("role") || "default",
+    controlId: control.id || null,
+    action: control.dataset?.action || control.dataset?.toolUpdate || control.dataset?.page || null,
+  });
+}, true);
 const invoke = (command, args = {}) => {
   const bridge = window.__TAURI__?.core?.invoke;
   if (!bridge) throw new Error("Desktop bridge unavailable in preview");
   const started = performance.now();
   const quiet = new Set(["list_downloads", "read_general_log", "get_bridge_pairing", "read_clipboard_link", "take_bridge_download", "diagnostics_status"]);
-  if (!quiet.has(command) && command !== "record_ui_diagnostic") bridge("record_ui_diagnostic", { level: "DEBUG", event: "command_started", detail: `command=${command}` }).catch(() => {});
+  const traceId = freshUiTrace();
+  const taskId = typeof args?.id === "string" ? args.id : null;
+  const detailBase = {
+    traceId,
+    taskId,
+    window: "main",
+    command,
+    argKeys: Object.keys(args || {}).sort(),
+  };
+  if (!quiet.has(command) && command !== "record_ui_diagnostic" && command !== "record_diagnostics_ui") {
+    recordStructuredUi(bridge, "command_started", { ...detailBase, level: "DEBUG" });
+  }
   return bridge(command, args).then((result) => {
-    if (!quiet.has(command) && command !== "record_ui_diagnostic") bridge("record_ui_diagnostic", { level: "DEBUG", event: "command_completed", detail: `command=${command} duration_ms=${Math.round(performance.now() - started)}` }).catch(() => {});
+    if (!quiet.has(command) && command !== "record_ui_diagnostic" && command !== "record_diagnostics_ui") {
+      recordStructuredUi(bridge, "command_completed", {
+        ...detailBase,
+        level: "DEBUG",
+        durationMs: Math.round(performance.now() - started),
+        resultType: result == null ? "null" : Array.isArray(result) ? "array" : typeof result,
+      });
+    }
     return result;
   }).catch((error) => {
-    if (!quiet.has(command) && command !== "record_ui_diagnostic") bridge("record_ui_diagnostic", { level: "ERROR", event: "command_failed", detail: `command=${command} duration_ms=${Math.round(performance.now() - started)} error=${String(error)}` }).catch(() => {});
+    if (!quiet.has(command) && command !== "record_ui_diagnostic" && command !== "record_diagnostics_ui") {
+      recordStructuredUi(bridge, "command_failed", {
+        ...detailBase,
+        level: "ERROR",
+        durationMs: Math.round(performance.now() - started),
+        errorName: String(error?.name || "command_error"),
+      });
+    }
     throw error;
   });
 };
