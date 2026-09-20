@@ -214,11 +214,11 @@
     }
   };
   const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
-  const isSponsoredFacebookPlayer = (element) => {
-    if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return false;
-    // Facebook Home reuses large ancestors that may contain labels from
-    // neighbouring cards. Only accept an explicit, visible sponsored marker
-    // inside a tight single-video card that actually contains this player.
+  const facebookSponsoredEvidence = (element) => {
+    if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
+    // Sponsored filtering belongs to popup inventory, not Home overlay
+    // eligibility. Facebook virtualizes/recycles feed DOM, so only trust an
+    // explicit label in the same article header as the media.
     const sponsoredLabel = /^(?:Sponsored|Patrocinado|Patrocinada|Publicidad|Gesponsert|Sponsorisé|Sponsorizzato|赞助内容|贊助內容)$/iu;
     const visibleMarker = marker => {
       const rect = marker?.getBoundingClientRect?.();
@@ -227,46 +227,44 @@
       const style = globalThis.getComputedStyle?.(marker);
       return !style || (style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) > 0);
     };
-    const explicitSponsoredMarker = marker => {
-      if (!visibleMarker(marker)) return false;
-      if (marker?.matches?.('[data-ad-preview],[data-testid*="sponsored" i]')) return true;
-      const aria = String(marker?.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();
-      const text = String(marker?.innerText || marker?.textContent || "").replace(/\s+/g, " ").trim();
-      return sponsoredLabel.test(aria) || sponsoredLabel.test(text);
-    };
-    const playerRect = element?.getBoundingClientRect?.();
-    if (!playerRect) return false;
-    for (let card = element?.parentElement, depth = 0; card && depth < 14; card = card.parentElement, depth += 1) {
-      if (card === document.body || card === document.documentElement) break;
-      const rect = card.getBoundingClientRect?.();
-      if (!rect) continue;
-      const videos = [...(card.querySelectorAll?.("video") || [])];
-      if (videos.some(video => video !== element)) break;
-      if (!videos.includes(element) && card !== element.parentElement) continue;
-      // A Facebook post header sits just above the player. Refuse broad feed
-      // containers so a sponsored label from another card cannot leak in.
-      const tightCard = rect.top >= playerRect.top - 260
-        && rect.bottom <= playerRect.bottom + 260
-        && rect.left >= playerRect.left - 180
-        && rect.right <= playerRect.right + 180;
-      if (!tightCard) continue;
-      const markers = [
-        ...(card.matches?.('[data-ad-preview],[data-testid*="sponsored" i],[aria-label]') ? [card] : []),
-        ...(card.querySelectorAll?.('[data-ad-preview],[data-testid*="sponsored" i],[aria-label],span,a') || []),
-      ];
-      for (const marker of markers) {
-        if (!explicitSponsoredMarker(marker)) continue;
-        const markerRect = marker.getBoundingClientRect?.();
-        if (!markerRect) continue;
-        const markerY = markerRect.top + markerRect.height / 2;
-        const horizontallyAligned = markerRect.right >= playerRect.left - 40
-          && markerRect.left <= playerRect.right + 40;
-        const inPostHeader = markerY >= playerRect.top - 220 && markerY <= playerRect.top + 60;
-        if (horizontallyAligned && inPostHeader) return true;
+    const compactLabel = value => String(value || "")
+      .replace(/\s+/g, " ").trim()
+      .replace(/\s*[·•|].*$/u, "").trim();
+    const markerReason = marker => {
+      if (!visibleMarker(marker)) return null;
+      if (marker?.matches?.('[data-ad-preview],[data-testid*="sponsored" i]')) {
+        return "explicit_attribute_same_article";
       }
+      const aria = compactLabel(marker?.getAttribute?.("aria-label"));
+      const text = compactLabel(marker?.innerText || marker?.textContent);
+      return sponsoredLabel.test(aria) || sponsoredLabel.test(text)
+        ? "exact_header_label_same_article" : null;
+    };
+    const article = element?.closest?.('article,[role="article"]');
+    if (!article) return null;
+    const player = element?.tagName === "VIDEO"
+      ? element
+      : article.querySelector?.("video");
+    const playerRect = player?.getBoundingClientRect?.() || element?.getBoundingClientRect?.();
+    if (!playerRect) return null;
+    const markers = [
+      ...(article.matches?.('[data-ad-preview],[data-testid*="sponsored" i],[aria-label]') ? [article] : []),
+      ...(article.querySelectorAll?.('[data-ad-preview],[data-testid*="sponsored" i],[aria-label],span,a') || []),
+    ];
+    for (const marker of markers) {
+      const reason = markerReason(marker);
+      if (!reason) continue;
+      const rect = marker.getBoundingClientRect?.();
+      if (!rect) continue;
+      const horizontallyAligned = rect.right >= playerRect.left - 32
+        && rect.left <= playerRect.right + 32;
+      const inPostHeader = rect.bottom <= playerRect.top + 18
+        && rect.top >= playerRect.top - 280;
+      if (horizontallyAligned && inPostHeader) return { sponsored: true, reason };
     }
-    return false;
+    return null;
   };
+  const isSponsoredFacebookPlayer = (element) => Boolean(facebookSponsoredEvidence(element));
   // Scoped to this document: closing the popup does not destroy the catalog.
   // A new document (including another site) creates a fresh isolated catalog.
   const mediaCatalog = new Map();
@@ -531,6 +529,8 @@
   const facebookUrlFor = (element) => {
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
     if (isFacebookMediaUrl(location.href)) return location.href;
+    const v3 = globalThis.ADM_SOCIAL_HOME_FEED_V3?.facebookDom?.(element);
+    if (v3?.url && isFacebookMediaUrl(v3.url)) return v3.url;
     const selector = [
       'a[href*="/reel/"]',
       'a[href*="/reels/"]',
@@ -695,7 +695,15 @@
       if (youtubeUrl) return;
       // Reject an explicitly sponsored Facebook card before any URL, Blob or
       // MediaStream path can turn it into a popup row.
-      if (isSponsoredFacebookPlayer(element)) return;
+      if (isSponsoredFacebookPlayer(element)) {
+        const sponsoredUrl = facebookUrlFor(element);
+        if (sponsoredUrl) mediaCatalog.delete(`video:${absolute(sponsoredUrl)}`);
+        void globalThis.ADM_DIAG?.emit?.("facebook.popup_sponsored_filtered", {
+          reason: facebookSponsoredEvidence(element)?.reason || "sponsored",
+          retainedPurged: Boolean(sponsoredUrl),
+        });
+        return;
+      }
       const candidateFacebookUrl = facebookUrlFor(element);
       const facebookUrl = isFacebookMediaUrl(candidateFacebookUrl) ? candidateFacebookUrl : null;
       const tikTokUrl = tikTokUrlFor(element);
@@ -741,7 +749,11 @@
     // create a <video>. Treat that card as a video candidate so its thumbnail
     // is available without starting playback.
     document.querySelectorAll("a[href]").forEach((anchor) => {
-      if (isSponsoredFacebookPlayer(anchor)) return;
+      if (isSponsoredFacebookPlayer(anchor)) {
+        const sponsoredUrl = socialCardUrl(anchor.href);
+        if (sponsoredUrl) mediaCatalog.delete(`video:${absolute(sponsoredUrl)}`);
+        return;
+      }
       const url = socialCardUrl(anchor.href);
       if (!url || items.has(`video:${url}`)) return;
       const thumbnail = cardThumbnailFor(anchor);
@@ -1076,11 +1088,6 @@
       const facebookOverlay = overlay.element?.tagName === "VIDEO"
         && /(^|\.)facebook\.com$/i.test(location.hostname);
       if (!facebookOverlay) continue;
-      if (isSponsoredFacebookPlayer(overlay.element)) {
-        trace("facebook.overlay_skipped_sponsored", "overlay", { reason: "explicit_sponsored_marker" });
-        overlay.cleanup();
-        continue;
-      }
       const currentBindingId = playerIdentity(overlay.element);
       if (overlay.bindingId && overlay.bindingId !== currentBindingId) {
         trace("facebook.video_reused", "overlay", {
@@ -1154,12 +1161,15 @@
       const isFacebookVideo = element.tagName === "VIDEO" && facebookPage;
       if (isFacebookVideo && isSponsoredFacebookPlayer(element)) {
         socialSummary.sponsored += 1;
-        emitSocialDecision(element, "skip_sponsored", {
-          reason: "explicit_visible_marker_same_card", sponsored: true,
+        const evidence = facebookSponsoredEvidence(element);
+        emitSocialDecision(element, "allow_sponsored_home", {
+          reason: evidence?.reason || "sponsored_home_allowed",
+          sponsored: true,
           permalinkFound: Boolean(facebookUrlFor(element)),
         });
-        trace("facebook.overlay_skipped_sponsored", "overlay", { reason: "explicit_visible_marker_same_card" });
-        return;
+        trace("facebook.sponsored_home_allowed", "overlay", {
+          reason: evidence?.reason || "sponsored_home_allowed",
+        });
       }
       if (element.dataset.apocalipseButton && !activeOverlays.has(element)) {
         delete element.dataset.apocalipseButton;
@@ -1657,8 +1667,7 @@
       if (socialPlatform() === "generic" || !socialPlayerVisible(video)) continue;
       const active = activeOverlays.has(video);
       const cached = socialDecisionCache.get(video) || "";
-      if (!active && !/"decision":"skip_sponsored"/.test(cached)
-        && !/"decision":"skip_inactive_player"/.test(cached)
+      if (!active && !/"decision":"skip_inactive_player"/.test(cached)
         && !/"decision":"missing"/.test(cached)) {
         socialSummary.missing += 1;
         emitSocialDecision(video, "missing", {
