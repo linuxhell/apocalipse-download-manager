@@ -227,20 +227,14 @@ test('ordinary direct HTTP players avoid Record while Facebook keeps its recordi
   assert.match(script, /\(!hasDirectHttpMedia \|\| isFacebookVideo\)/);
 });
 
-test('Facebook sponsored-player detection is limited to an explicit marker in the same tight single-video card', () => {
-  assert.match(script, /const isSponsoredFacebookPlayer = \(element\) =>/);
-  assert.match(script, /depth < 14/);
-  assert.match(script, /videos\.some\(video => video !== element\)/);
-  assert.match(script, /const tightCard =/);
-  assert.match(script, /rect\.top >= playerRect\.top - 260/);
-  assert.match(script, /const explicitSponsoredMarker = marker =>/);
-  assert.match(script, /sponsoredLabel\.test\(aria\) \|\| sponsoredLabel\.test\(text\)/);
-  assert.match(script, /markerY >= playerRect\.top - 220/);
-  assert.match(script, /const visibleMarker = marker =>/);
-  assert.doesNotMatch(script, /a\[href\*="\/ads\/"\]/);
-  assert.doesNotMatch(script, /a\[href\*="ads\/about"\]/);
-  assert.match(script, /if \(isSponsoredFacebookPlayer\(element\)\) return;/);
-  assert.match(script, /if \(isSponsoredFacebookPlayer\(anchor\)\) return;/);
+test('Facebook sponsored detection is strict and only filters popup inventory', () => {
+  assert.match(script, /const facebookSponsoredEvidence = \(element\) =>/);
+  assert.match(script, /exact_header_label_same_article/);
+  assert.match(script, /explicit_attribute_same_article/);
+  assert.match(script, /rect\.bottom <= playerRect\.top \+ 18/);
+  assert.match(script, /facebook\.popup_sponsored_filtered/);
+  assert.match(script, /facebook\.sponsored_home_allowed/);
+  assert.doesNotMatch(script, /facebook\.overlay_skipped_sponsored/);
 });
 
 test('recording follows player pauses without writing dead timeline gaps', () => {
