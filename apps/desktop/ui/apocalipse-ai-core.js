@@ -30,6 +30,7 @@
       socialMissing: "The structured social debugger found {count} visible player(s) without a live overlay on {site}. The latest confirmed reason is “{reason}” for player {player}. This conclusion comes from player-decision telemetry, not a guess.",
       socialSummary: "Social debugger for {site}: {visible} visible player(s), {eligible} eligible, {overlays} overlay(s), {missing} missing, {sponsored} sponsored, {inactive} inactive and {noAction} without a supported action.",
       genericFailure: "The latest related failure was: {detail}",
+      domainEvidence: "Forensic Debugger V4 found observed evidence for {domain}. Latest relevant event: {event}. Detail: {detail}. This is recorded telemetry, not a guessed cause.",
       historyEmpty: "There are no saved corrections.",
       historyCount: "There are {count} saved correction(s). Open Correction history to view, apply or remove them.",
       knownCorrection: "I already have a locally confirmed correction for {site}: “{name}”. It worked {count} time(s), most recently with Apocalipse {version}. You can apply it again for testing if the problem returned.",
@@ -112,6 +113,7 @@
       socialMissing: "O debugger social estruturado encontrou {count} player(s) visível(is) sem overlay ativo no {site}. O motivo confirmado mais recente é “{reason}” no player {player}. Essa conclusão vem da telemetria de decisão do player, não de uma suposição.",
       socialSummary: "Debugger social do {site}: {visible} player(s) visível(is), {eligible} elegível(is), {overlays} overlay(s), {missing} faltando, {sponsored} patrocinado(s), {inactive} inativo(s) e {noAction} sem ação suportada.",
       genericFailure: "A última falha relacionada foi: {detail}",
+      domainEvidence: "O Debugger Forense V4 encontrou evidência observada para {domain}. Último evento relevante: {event}. Detalhe: {detail}. Isso vem da telemetria registrada, não de uma causa presumida.",
       historyEmpty: "Não há correções guardadas.",
       historyCount: "Existem {count} correção(ões) guardada(s). Abra o Histórico de correções para visualizar, aplicar ou apagar.",
       knownCorrection: "Já tenho uma correção confirmada localmente para {site}: “{name}”. Ela funcionou {count} vez(es), mais recentemente no Apocalipse {version}. Você pode aplicá-la novamente para teste se o problema voltou.",
@@ -446,6 +448,35 @@
     return null;
   }
 
+  function debuggerDomainDiagnosis(question, context, locale) {
+    const q = normalizeQuestion(question);
+    const domains = [
+      { name: "aria2", test: /aria2|torrent|magnet/, event: /^(?:aria2\.|http\.engine_selected)/ },
+      { name: "FFmpeg/FFprobe", test: /ffmpeg|ffprobe/, event: /ffmpeg|ffprobe|media\.preview|preview\./i },
+      { name: "HLS/N_m3u8DL-RE", test: /hls|m3u8|n_m3u8dl|m3u8dl/, event: /hls|m3u8|external\./i },
+      { name: "yt-dlp", test: /yt-dlp|yt_dlp/, event: /yt_dlp|external\./i },
+      { name: "Apocalipse Link", test: /apocalipse link|\blink\b|computador remoto|remote computer|远程/, event: /^(?:link\.|ui\..*link)|link_transfer/i },
+      { name: "thumbnail", test: /thumbnail|miniatura|缩略图/, event: /^thumbnail\./ },
+      { name: "recording", test: /gravar|gravacao|recording|record|录制/, event: /recording|blob\./i },
+      { name: "browser extension", test: /extensao|extension|扩展/, event: /^(?:extension\.|social\.|capture\.|overlay\.)/ },
+    ];
+    const domain = domains.find(item => item.test.test(q));
+    if (!domain) return null;
+    const events = [...parseEvents(context.events), ...parseEvents(context.engineEvents || [])]
+      .filter(event => domain.event.test(String(event?.event || "")) || domain.event.test(eventText(event)));
+    if (!events.length) return null;
+    const latestFailure = [...events].reverse().find(event =>
+      ["ERROR", "WARN"].includes(String(event?.level || "").toUpperCase())
+      || /failed|error|missing|rejected|unavailable/i.test(String(event?.event || ""))
+    );
+    const latest = latestFailure || events.at(-1);
+    return say(locale, "domainEvidence", {
+      domain: domain.name,
+      event: latest?.event || "unknown",
+      detail: safeDetail(latest?.detail || latest?.raw || latest?.event || "unknown"),
+    });
+  }
+
   function diagnose(question, context, locale) {
     const q = contextualQuestion(question, context.messages);
     const site = siteFrom(q);
@@ -454,6 +485,8 @@
     const failures = scoped.filter(event => String(event.level || "").toUpperCase() === "ERROR" || /failed|error=/.test(eventText(event)));
     const social = socialDiagnosis([...parseEvents(context.events), ...parseEvents(context.engineEvents || [])], site, locale, q);
     if (social) return social;
+    const domainEvidence = debuggerDomainDiagnosis(q, context, locale);
+    if (domainEvidence) return domainEvidence;
 
     if (site && /(?:log|registro|diagnost|record|日志|诊断)/.test(q)) {
       const latest = scoped.at(-1);
@@ -666,5 +699,5 @@
       : { text: say(locale, "offTopic"), intent: "unknown" };
   }
 
-  return { contextualQuestion, copy, diagnose, findRelevantConfirmedCorrection, fold, formatRate, localeOf, normalizeQuestion, parseCorrectionTeachCommand, parseCredentialCommand, parseEvents, performanceDiagnosis, previousSubject, redactCredentialCommand, respond, say, siteFrom, socialDiagnosis };
+  return { contextualQuestion, copy, debuggerDomainDiagnosis, diagnose, findRelevantConfirmedCorrection, fold, formatRate, localeOf, normalizeQuestion, parseCorrectionTeachCommand, parseCredentialCommand, parseEvents, performanceDiagnosis, previousSubject, redactCredentialCommand, respond, say, siteFrom, socialDiagnosis };
 });
