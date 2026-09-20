@@ -10387,7 +10387,7 @@ fn main() {
                 } else {
                     "gopeed"
                 }));
-                save_settings_path(&settings_path, &initial_settings)
+                write_settings(&settings_path, &initial_settings)
                     .map_err(std::io::Error::other)?;
             }
             let (show_label, quit_label) = tray_labels(&initial_settings.language);
