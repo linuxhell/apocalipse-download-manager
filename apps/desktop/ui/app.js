@@ -2294,7 +2294,7 @@ document.querySelector("#analyze").onclick = async () => {
       metadataTimer = null;
       box.textContent = `${plan.primary} · ${plan.reason}`;
     }
-    else if (plan.primary === "NM3u8DlRe") {
+    else if (plan.reason === "hls_manifest") {
       const select = document.querySelector("#media-format");
       select.replaceChildren();
       option(select, "original", pendingMediaKind === "audio" ? "Original (MP4/M4A)" : t("bestQuality"));
