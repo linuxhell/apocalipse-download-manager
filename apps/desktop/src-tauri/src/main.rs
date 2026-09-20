@@ -6921,6 +6921,55 @@ fn list_downloads(state: State<'_, AppState>) -> Result<Vec<DownloadTask>, Strin
         .map_err(|error| error.to_string())
 }
 
+fn reorder_queue_subset(queue: &mut [DownloadTask], ids: &[DownloadId]) -> Result<(), String> {
+    if ids.len() < 2 {
+        return Ok(());
+    }
+    let requested = ids.iter().cloned().collect::<HashSet<_>>();
+    if requested.len() != ids.len() {
+        return Err("duplicate_download_id_in_order".to_owned());
+    }
+    let positions = queue
+        .iter()
+        .enumerate()
+        .filter_map(|(index, task)| requested.contains(&task.id).then_some(index))
+        .collect::<Vec<_>>();
+    if positions.len() != ids.len() {
+        return Err("download_not_found".to_owned());
+    }
+    let tasks = queue
+        .iter()
+        .filter(|task| requested.contains(&task.id))
+        .map(|task| (task.id, task.clone()))
+        .collect::<HashMap<_, _>>();
+    for (position, id) in positions.into_iter().zip(ids.iter()) {
+        queue[position] = tasks
+            .get(id)
+            .cloned()
+            .ok_or_else(|| "download_not_found".to_owned())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn reorder_downloads(state: State<'_, AppState>, ids: Vec<DownloadId>) -> Result<(), String> {
+    let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+    reorder_queue_subset(&mut queue, &ids)?;
+    save_queue(&state, &queue)?;
+    state.diagnostics.record(
+        "queue.reordered",
+        "INFO",
+        None,
+        None,
+        serde_json::json!({
+            "taskCount": ids.len(),
+            "taskRefs": ids.iter().take(24).map(ToString::to_string).collect::<Vec<_>>(),
+            "truncated": ids.len() > 24
+        }),
+    );
+    Ok(())
+}
+
 #[tauri::command]
 fn default_download_directory(
     app: tauri::AppHandle,
@@ -11501,6 +11550,7 @@ fn main() {
             delete_local_link_item,
             delete_remote_link_item,
             list_downloads,
+            reorder_downloads,
             enqueue_download,
             default_download_directory,
             set_default_download_directory,
@@ -11664,6 +11714,23 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn manual_queue_reordering_preserves_unfiltered_tasks() {
+        let first = DownloadTask::new("https://example.test/first", PathBuf::from("first.bin"));
+        let middle = DownloadTask::new("https://example.test/middle", PathBuf::from("middle.bin"));
+        let last = DownloadTask::new("https://example.test/last", PathBuf::from("last.bin"));
+        let first_id = first.id;
+        let middle_id = middle.id;
+        let last_id = last.id;
+        let mut queue = vec![first, middle, last];
+
+        reorder_queue_subset(&mut queue, &[last_id, first_id]).unwrap();
+
+        assert_eq!(queue[0].id, last_id);
+        assert_eq!(queue[1].id, middle_id);
+        assert_eq!(queue[2].id, first_id);
+    }
 
     struct HandoffTestDirectory(PathBuf);
 
