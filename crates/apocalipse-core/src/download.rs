@@ -1036,8 +1036,7 @@ impl DownloadEngine {
                             };
                         }
                     }
-                    let aggregate_rate = aggregate_window_bytes
-                        .saturating_mul(1000)
+                    let aggregate_rate = aggregate_window_bytes.saturating_mul(1000)
                         / RANGE_STEAL_INTERVAL_MS.max(1);
                     let _ = sender.try_send(DownloadEvent::Diagnostic {
                         event: "http.performance_sample",
@@ -1054,8 +1053,7 @@ impl DownloadEngine {
                         let current_bytes = shared_progress.load(Ordering::Acquire);
                         let elapsed_ms = now_ms.saturating_sub(last_admission_ms).max(1);
                         let interval_bytes = current_bytes.saturating_sub(last_admission_bytes);
-                        let interval_rate =
-                            interval_bytes as f64 * 1000.0 / elapsed_ms as f64;
+                        let interval_rate = interval_bytes as f64 * 1000.0 / elapsed_ms as f64;
                         last_admission_ms = now_ms;
                         last_admission_bytes = current_bytes;
 
