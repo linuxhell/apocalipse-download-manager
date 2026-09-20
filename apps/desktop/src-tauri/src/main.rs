@@ -4875,9 +4875,9 @@ async fn run_external_download(
             if kind == DownloadKind::AcceleratedHttp {
                 command.args([
                     "--no-conf=true",
-                    "--split=16",
-                    "--max-connection-per-server=16",
-                    "--min-split-size=4M",
+                    "--split=4",
+                    "--max-connection-per-server=4",
+                    "--min-split-size=1M",
                     "--stream-piece-selector=default",
                     "--enable-http-keep-alive=true",
                     "--enable-http-pipelining=false",
@@ -7464,9 +7464,9 @@ fn start_download(
             serde_json::json!({
                 "engine": "aria2",
                 "benchmark": FORCE_ARIA2_DIRECT_HTTP_BENCHMARK,
-                "split": 16,
-                "maxConnectionPerServer": 16,
-                "minSplitSize": "4M",
+                "split": 4,
+                "maxConnectionPerServer": 4,
+                "minSplitSize": "1M",
                 "fileAllocation": "none",
                 "diskCache": "64M"
             }),
