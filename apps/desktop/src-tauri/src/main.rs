@@ -28,7 +28,10 @@ use std::{
     net::{IpAddr, TcpListener, TcpStream, UdpSocket},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
@@ -217,6 +220,7 @@ struct AppState {
     blob_uploads: Mutex<HashMap<uuid::Uuid, BlobUpload>>,
     recording_stops: Mutex<HashSet<DownloadId>>,
     request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
+    link_transfers: Mutex<HashMap<String, Arc<LinkTransferControl>>>,
     gopeed_runtime: Mutex<Option<gopeed::Runtime>>,
     gopeed_tasks: Mutex<HashMap<DownloadId, String>>,
     log_path: PathBuf,
@@ -539,6 +543,12 @@ struct LinkTransferProgress {
     bytes_per_second: u64,
 }
 
+#[derive(Default)]
+struct LinkTransferControl {
+    paused: AtomicBool,
+    cancelled: AtomicBool,
+}
+
 struct LinkTransferReporter {
     app: tauri::AppHandle,
     transfer_id: String,
@@ -547,6 +557,7 @@ struct LinkTransferReporter {
     transferred: u64,
     started: Instant,
     last_emit: Instant,
+    control: Arc<LinkTransferControl>,
 }
 
 impl LinkTransferReporter {
@@ -556,6 +567,10 @@ impl LinkTransferReporter {
         direction: &str,
         total: u64,
     ) -> Self {
+        let control = Arc::new(LinkTransferControl::default());
+        if let Ok(mut transfers) = app.state::<AppState>().link_transfers.lock() {
+            transfers.insert(transfer_id.clone(), control.clone());
+        }
         let now = Instant::now();
         let mut reporter = Self {
             app,
@@ -565,9 +580,23 @@ impl LinkTransferReporter {
             transferred: 0,
             started: now,
             last_emit: now.checked_sub(Duration::from_secs(1)).unwrap_or(now),
+            control,
         };
         reporter.emit(true);
         reporter
+    }
+
+    fn checkpoint(&self) -> Result<(), String> {
+        while self.control.paused.load(Ordering::Acquire) {
+            if self.control.cancelled.load(Ordering::Acquire) {
+                return Err("cancelled".to_owned());
+            }
+            std::thread::sleep(Duration::from_millis(75));
+        }
+        if self.control.cancelled.load(Ordering::Acquire) {
+            return Err("cancelled".to_owned());
+        }
+        Ok(())
     }
 
     fn set_total(&mut self, total: u64) {
@@ -615,6 +644,42 @@ impl LinkTransferReporter {
             },
         );
     }
+}
+
+impl Drop for LinkTransferReporter {
+    fn drop(&mut self) {
+        if let Ok(mut transfers) = self.app.state::<AppState>().link_transfers.lock() {
+            transfers.remove(&self.transfer_id);
+        }
+    }
+}
+
+#[tauri::command]
+fn pause_link_transfer(
+    state: State<'_, AppState>,
+    transfer_id: String,
+    paused: bool,
+) -> Result<(), String> {
+    let transfers = state.link_transfers.lock().map_err(|error| error.to_string())?;
+    let control = transfers
+        .get(&transfer_id)
+        .ok_or_else(|| "link_transfer_not_found".to_owned())?;
+    control.paused.store(paused, Ordering::Release);
+    Ok(())
+}
+
+#[tauri::command]
+fn cancel_link_transfer(
+    state: State<'_, AppState>,
+    transfer_id: String,
+) -> Result<(), String> {
+    let transfers = state.link_transfers.lock().map_err(|error| error.to_string())?;
+    let control = transfers
+        .get(&transfer_id)
+        .ok_or_else(|| "link_transfer_not_found".to_owned())?;
+    control.cancelled.store(true, Ordering::Release);
+    control.paused.store(false, Ordering::Release);
+    Ok(())
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -1756,6 +1821,7 @@ fn copy_link_stream_with_progress<R: Read, W: Write>(
     let mut copied = 0_u64;
     let mut buffer = [0_u8; 128 * 1024];
     loop {
+        reporter.checkpoint()?;
         let limit = remaining
             .map(|total| total.saturating_sub(copied))
             .unwrap_or(buffer.len() as u64);
@@ -2000,6 +2066,7 @@ fn copy_local_link_directory(
     fs::create_dir_all(destination).map_err(|error| error.to_string())?;
     let mut pending = vec![(source.to_path_buf(), destination.to_path_buf())];
     while let Some((current_source, current_destination)) = pending.pop() {
+        reporter.checkpoint()?;
         fs::create_dir_all(&current_destination).map_err(|error| error.to_string())?;
         for entry in fs::read_dir(&current_source).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
@@ -2024,8 +2091,9 @@ async fn download_local_shared_link_item(
     path: String,
     directory: bool,
     file_name: Option<String>,
-    transfer_id: String,
+    transfer_id: Option<String>,
 ) -> Result<String, String> {
+    let transfer_id = transfer_id.unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
     let source = {
         let state = app.state::<AppState>();
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
@@ -2049,9 +2117,11 @@ async fn download_local_shared_link_item(
         let destination_for_copy = destination.clone();
         let progress_app = app.clone();
         tokio::task::spawn_blocking(move || {
-            let total = link_path_total_size(&source_for_copy)?;
             let mut reporter =
-                LinkTransferReporter::new(progress_app, transfer_id, "download", total);
+                LinkTransferReporter::new(progress_app, transfer_id, "download", 0);
+            reporter.checkpoint()?;
+            let total = link_path_total_size(&source_for_copy)?;
+            reporter.set_total(total);
             copy_local_link_directory(
                 &source_for_copy,
                 &destination_for_copy,
@@ -2075,8 +2145,10 @@ async fn download_local_shared_link_item(
     let source_for_copy = source.clone();
     let destination_for_copy = destination.clone();
     tokio::task::spawn_blocking(move || {
+        let mut reporter = LinkTransferReporter::new(app, transfer_id, "download", 0);
+        reporter.checkpoint()?;
         let total = link_path_total_size(&source_for_copy)?;
-        let mut reporter = LinkTransferReporter::new(app, transfer_id, "download", total);
+        reporter.set_total(total);
         copy_local_link_file(&source_for_copy, &destination_for_copy, &mut reporter)?;
         reporter.finish();
         Ok::<(), String>(())
@@ -2091,8 +2163,9 @@ async fn upload_local_shared_link_item(
     app: tauri::AppHandle,
     remote_directory: String,
     local_path: String,
-    transfer_id: String,
+    transfer_id: Option<String>,
 ) -> Result<String, String> {
+    let transfer_id = transfer_id.unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
     let (source, destination_root) = {
         let state = app.state::<AppState>();
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
@@ -2122,8 +2195,10 @@ async fn upload_local_shared_link_item(
     let source_for_copy = source.clone();
     let destination_for_copy = destination.clone();
     tokio::task::spawn_blocking(move || {
+        let mut reporter = LinkTransferReporter::new(app, transfer_id, "upload", 0);
+        reporter.checkpoint()?;
         let total = link_path_total_size(&source_for_copy)?;
-        let mut reporter = LinkTransferReporter::new(app, transfer_id, "upload", total);
+        reporter.set_total(total);
         if source_for_copy.is_dir() {
             copy_local_link_directory(
                 &source_for_copy,
@@ -2225,8 +2300,9 @@ async fn download_remote_link_file(
     path: String,
     directory: bool,
     file_name: Option<String>,
-    transfer_id: String,
+    transfer_id: Option<String>,
 ) -> Result<String, String> {
+    let transfer_id = transfer_id.unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
     let fallback_name = Path::new(&path)
         .file_name()
         .and_then(|value| value.to_str())
@@ -2244,10 +2320,13 @@ async fn download_remote_link_file(
         return tokio::task::spawn_blocking(move || {
             let state = app.state::<AppState>();
             fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
+            let mut reporter =
+                LinkTransferReporter::new(app.clone(), transfer_id, "download", 0);
             let mut pending = vec![(path, destination.clone())];
             let mut files = Vec::<(String, PathBuf, u64)>::new();
             let mut total = 0_u64;
             while let Some((remote_directory, local_directory)) = pending.pop() {
+                reporter.checkpoint()?;
                 fs::create_dir_all(&local_directory).map_err(|error| error.to_string())?;
                 for entry in
                     list_remote_link_directory_sync(&state, &id, &password, remote_directory)?
@@ -2261,9 +2340,9 @@ async fn download_remote_link_file(
                     }
                 }
             }
-            let mut reporter =
-                LinkTransferReporter::new(app.clone(), transfer_id, "download", total);
+            reporter.set_total(total);
             for (remote_path, local_path, _size) in files {
+                reporter.checkpoint()?;
                 download_link_file_to(
                     &state,
                     &id,
@@ -2285,6 +2364,7 @@ async fn download_remote_link_file(
     tokio::task::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let mut reporter = LinkTransferReporter::new(app.clone(), transfer_id, "download", 0);
+        reporter.checkpoint()?;
         download_link_file_to(
             &state,
             &id,
@@ -2321,8 +2401,9 @@ async fn upload_remote_link_file(
     password: String,
     remote_directory: String,
     local_path: String,
-    transfer_id: String,
+    transfer_id: Option<String>,
 ) -> Result<String, String> {
+    let transfer_id = transfer_id.unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
     tokio::task::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let source = {
@@ -2340,9 +2421,11 @@ async fn upload_remote_link_file(
             .and_then(|value| value.to_str())
             .ok_or_else(|| "invalid_file_name".to_owned())?;
         let remote_path = remote_link_join(&remote_directory, name);
-        let total = link_path_total_size(&source)?;
         let mut reporter =
-            LinkTransferReporter::new(app.clone(), transfer_id, "upload", total);
+            LinkTransferReporter::new(app.clone(), transfer_id, "upload", 0);
+        reporter.checkpoint()?;
+        let total = link_path_total_size(&source)?;
+        reporter.set_total(total);
         if source.is_file() {
             send_link_file(
                 &state,
@@ -2358,6 +2441,7 @@ async fn upload_remote_link_file(
         send_link_directory(&state, &id, &password, &remote_path)?;
         let mut pending = vec![(source, remote_path.clone())];
         while let Some((local_directory, target_directory)) = pending.pop() {
+            reporter.checkpoint()?;
             for entry in fs::read_dir(local_directory).map_err(|error| error.to_string())? {
                 let entry = entry.map_err(|error| error.to_string())?;
                 let file_type = entry.file_type().map_err(|error| error.to_string())?;
@@ -11065,6 +11149,7 @@ fn main() {
                 blob_uploads: Mutex::new(HashMap::new()),
                 recording_stops: Mutex::new(HashSet::new()),
                 request_identities: Mutex::new(HashMap::new()),
+                link_transfers: Mutex::new(HashMap::new()),
                 gopeed_runtime: Mutex::new(None),
                 gopeed_tasks: Mutex::new(HashMap::new()),
                 log_path,
@@ -11164,6 +11249,8 @@ fn main() {
             get_remote_link_capabilities,
             download_remote_link_file,
             upload_remote_link_file,
+            pause_link_transfer,
+            cancel_link_transfer,
             delete_local_link_item,
             delete_remote_link_item,
             list_downloads,
