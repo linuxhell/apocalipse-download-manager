@@ -506,13 +506,23 @@ impl DownloadEngine {
                         let identity = resume_identity_from_headers(probe.headers(), total);
                         let useful_connections = adaptive_connection_count(total, requested);
                         if useful_connections > 1 {
-                            let planned_chunk_size = adaptive_chunk_size(total, useful_connections);
+                            let planned_chunk_size = segmented_chunk_size(
+                                total,
+                                useful_connections,
+                                request.adaptive_connections,
+                            );
+                            let initial_connections = if request.adaptive_connections {
+                                useful_connections.min(ADMISSION_INITIAL_WORKERS).max(1)
+                            } else {
+                                useful_connections
+                            };
                             let _ = events.try_send(DownloadEvent::Diagnostic {
                                 event: "http.engine_plan",
                                 detail: serde_json::json!({
                                     "totalBytes": total,
                                     "requestedConnections": requested,
                                     "activeConnections": useful_connections,
+                                    "initialConnections": initial_connections,
                                     "connectionMode": if request.adaptive_connections { "adaptive" } else { "fixed" },
                                     "networkCapacityHintBytesPerSecond": request.network_capacity_hint_bps,
                                     "hostCapacityHintBytesPerSecond": request.host_capacity_hint_bps,
@@ -891,20 +901,29 @@ impl DownloadEngine {
         identity: ResumeIdentity,
         prefer_http3: bool,
     ) -> Result<()> {
-        let chunk_size = adaptive_chunk_size(total, connections);
-        let chunk_count = total.div_ceil(chunk_size) as usize;
+        let planned_chunk_size =
+            segmented_chunk_size(total, connections, request.adaptive_connections);
         let partial = partial_path(&request.destination);
 
         fs::create_dir_all(chunk_directory(&request.destination)).await?;
         let saved = load_segment_journal(&request.destination).await;
-        let can_resume = saved.as_ref().is_some_and(|journal| {
-            journal.version == JOURNAL_VERSION
-                && journal.chunk_size == chunk_size
-                && journal.completed.len() == chunk_count
-                && resume_identity_matches(&journal.identity, &identity)
-        }) && fs::metadata(&partial)
-            .await
-            .is_ok_and(|metadata| metadata.len() == total);
+        let saved_chunk_size = saved.as_ref().and_then(|journal| {
+            if journal.version != JOURNAL_VERSION
+                || journal.chunk_size < MIN_SEGMENT_CHUNK_SIZE
+                || journal.chunk_size > MAX_SEGMENT_CHUNK_SIZE
+                || !resume_identity_matches(&journal.identity, &identity)
+            {
+                return None;
+            }
+            let saved_chunk_count = total.div_ceil(journal.chunk_size) as usize;
+            (journal.completed.len() == saved_chunk_count).then_some(journal.chunk_size)
+        });
+        let chunk_size = saved_chunk_size.unwrap_or(planned_chunk_size);
+        let chunk_count = total.div_ceil(chunk_size) as usize;
+        let can_resume = saved_chunk_size.is_some()
+            && fs::metadata(&partial)
+                .await
+                .is_ok_and(|metadata| metadata.len() == total);
 
         let mut journal = if can_resume {
             saved.expect("checked above")
@@ -939,6 +958,9 @@ impl DownloadEngine {
                 "resumedBytes": resumed,
                 "completedChunks": journal.completed.iter().filter(|complete| **complete).count(),
                 "chunkCount": chunk_count,
+                "chunkBytes": chunk_size,
+                "plannedChunkBytes": planned_chunk_size,
+                "resumedWithExistingChunkPlan": can_resume && chunk_size != planned_chunk_size,
                 "validatorPresent": resume_validator(&identity).is_some(),
                 "reason": if can_resume {
                     "journal_and_remote_identity_match"
@@ -1395,8 +1417,10 @@ impl DownloadEngine {
                     .await;
                 }
 
+                let mut previous_segment_completed: Option<Instant> = None;
                 loop {
                     while worker_index >= active_limit.load(Ordering::Acquire) {
+                        previous_segment_completed = None;
                         if outstanding.load(Ordering::Acquire) == 0 {
                             return Result::<()>::Ok(());
                         }
@@ -1414,6 +1438,7 @@ impl DownloadEngine {
                         if outstanding.load(Ordering::Acquire) == 0 {
                             return Result::<()>::Ok(());
                         }
+                        previous_segment_completed = None;
                         states[worker_index].finish();
                         tokio::select! {
                             _ = notify.notified() => {}
@@ -1488,6 +1513,7 @@ impl DownloadEngine {
                         let mut downloaded = 0_u64;
                         let mut absolute = work.start;
                         let mut attempt_error = None;
+                        let mut transition_gap_ms = None;
 
                         while let Some(chunk) = stream.next().await {
                             match chunk {
@@ -1501,6 +1527,10 @@ impl DownloadEngine {
                                         as usize;
                                     if allowed == 0 {
                                         break;
+                                    }
+                                    if downloaded == 0 {
+                                        transition_gap_ms = previous_segment_completed
+                                            .map(|completed| completed.elapsed().as_millis() as u64);
                                     }
                                     apply_bandwidth_limits(&limiters, allowed).await;
                                     if let Err(error) = file.write_all(&chunk[..allowed]).await {
@@ -1589,6 +1619,7 @@ impl DownloadEngine {
                                 "http3Preferred": prefer_http3,
                                 "http3Used": used_http3,
                                 "elapsedMs": elapsed_ms,
+                                "transitionGapMs": transition_gap_ms,
                                 "bytesPerSecond": if elapsed_ms > 0 {
                                     completed_bytes.saturating_mul(1000) / elapsed_ms
                                 } else {
@@ -1597,6 +1628,7 @@ impl DownloadEngine {
                                 "transport": protocol
                             }),
                         });
+                        previous_segment_completed = Some(Instant::now());
                         completed = true;
                         break;
                     }
@@ -1674,14 +1706,44 @@ fn adaptive_connection_count(total: u64, requested: usize) -> usize {
     requested.min(size_cap).max(1)
 }
 
-fn adaptive_chunk_size(total: u64, connections: usize) -> u64 {
-    let workers = connections.max(1) as u64;
-    let target_chunks = workers.saturating_mul(TARGET_CHUNKS_PER_WORKER).max(1);
-    let raw = total.div_ceil(target_chunks);
+fn segmented_target_chunks(connections: usize, adaptive_connections: bool) -> u64 {
+    let max_workers = connections.max(1) as u64;
+    if !adaptive_connections {
+        return max_workers
+            .saturating_mul(TARGET_CHUNKS_PER_WORKER)
+            .max(1);
+    }
+
+    let initial_workers = connections.min(ADMISSION_INITIAL_WORKERS).max(1) as u64;
+    max_workers.max(
+        initial_workers
+            .saturating_mul(TARGET_CHUNKS_PER_WORKER)
+            .max(1),
+    )
+}
+
+fn chunk_size_for_target_chunks(total: u64, target_chunks: u64) -> u64 {
+    let raw = total.div_ceil(target_chunks.max(1));
     let mib = 1024 * 1024;
     raw.div_ceil(mib)
         .saturating_mul(mib)
         .clamp(MIN_SEGMENT_CHUNK_SIZE, MAX_SEGMENT_CHUNK_SIZE)
+}
+
+fn segmented_chunk_size(total: u64, connections: usize, adaptive_connections: bool) -> u64 {
+    chunk_size_for_target_chunks(
+        total,
+        segmented_target_chunks(connections, adaptive_connections),
+    )
+}
+
+fn adaptive_chunk_size(total: u64, connections: usize) -> u64 {
+    chunk_size_for_target_chunks(
+        total,
+        (connections.max(1) as u64)
+            .saturating_mul(TARGET_CHUNKS_PER_WORKER)
+            .max(1),
+    )
 }
 
 fn chunk_bounds(index: usize, chunk_size: u64, total: u64) -> (u64, u64, u64) {
@@ -2324,10 +2386,22 @@ mod tests {
     }
 
     #[test]
-    fn adaptive_scheduler_uses_smaller_chunks_to_reduce_tail_latency() {
+    fn adaptive_scheduler_uses_longer_ranges_without_blocking_future_workers() {
+        let total = 8 * 1024 * 1024 * 1024_u64;
+        let legacy_max_worker_plan = adaptive_chunk_size(total, 16);
+        let adaptive_plan = segmented_chunk_size(total, 16, true);
+
         assert_eq!(adaptive_chunk_size(64 * 1024 * 1024, 8), 4 * 1024 * 1024);
-        assert!(adaptive_chunk_size(8 * 1024 * 1024 * 1024, 8) <= MAX_SEGMENT_CHUNK_SIZE);
-        assert!(adaptive_chunk_size(8 * 1024 * 1024 * 1024, 8) >= MIN_SEGMENT_CHUNK_SIZE);
+        assert_eq!(segmented_target_chunks(16, true), 16);
+        assert_eq!(segmented_target_chunks(16, false), 64);
+        assert_eq!(legacy_max_worker_plan, 128 * 1024 * 1024);
+        assert_eq!(adaptive_plan, MAX_SEGMENT_CHUNK_SIZE);
+        assert!(adaptive_plan > legacy_max_worker_plan);
+        assert!(total.div_ceil(adaptive_plan) >= 16);
+        assert_eq!(
+            segmented_chunk_size(total, 16, false),
+            legacy_max_worker_plan
+        );
     }
 
     #[test]
