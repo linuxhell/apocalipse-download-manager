@@ -34,10 +34,9 @@ jobs:
 
           TOKEN='apocalipse-diagnostic-token'
           PORT=19999
-          "$GOPEED_BIN" --address 127.0.0.1 --port "$PORT" \
-            --username apocalipse --password diagnostic --api-token "$TOKEN" \
-            --storage-dir "$ROOT/storage" --temp-dir "$ROOT/temp" \
-            --config "$ROOT/gopeed.json" >"$ROOT/gopeed.log" 2>&1 &
+          "$GOPEED_BIN" -A 127.0.0.1 -P "$PORT" \
+            -u apocalipse -p diagnostic -T "$TOKEN" \
+            -d "$ROOT/storage" -c "$ROOT/gopeed.json" >"$ROOT/gopeed.log" 2>&1 &
           GPID=$!
           trap 'kill "$GPID" 2>/dev/null || true' EXIT
 
