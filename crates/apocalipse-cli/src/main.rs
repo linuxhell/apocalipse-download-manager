@@ -41,6 +41,7 @@ async fn main() -> Result<()> {
         destination: PathBuf::from(&args[destination_index]),
         overwrite: false,
         connections,
+        adaptive_connections: benchmark,
         method: "GET".to_owned(),
         body: None,
         headers: Vec::new(),
