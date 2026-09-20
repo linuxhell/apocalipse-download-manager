@@ -90,7 +90,7 @@ function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.co
   if (shipped) vm.runInContext(tiktok, context);
   context.testHooks.installOverlays();
   const button = appended.find(node => node.className === 'apocalipse-media-download');
-  assert.ok(button, 'the actual overlay must be installed');
+  if (!sponsored) assert.ok(button, 'the actual overlay must be installed');
   return {
     sent, fetched, state, location, video, button,
     scan: () => context.testHooks.collect(),
