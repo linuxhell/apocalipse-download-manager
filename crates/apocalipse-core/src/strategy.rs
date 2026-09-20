@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum Engine {
     NativeHttp,
-    Aria2Rpc,
+    Gopeed,
     YtDlp,
     NativeHls,
     NM3u8dlRe,
@@ -14,7 +14,7 @@ pub enum Engine {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Capabilities {
-    pub aria2: bool,
+    pub gopeed: bool,
     pub yt_dlp: bool,
     pub n_m3u8dl_re: bool,
     pub torrent: bool,
@@ -108,8 +108,8 @@ pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<Strategy
         DownloadKind::Http | DownloadKind::AcceleratedHttp => StrategyPlan {
             primary: Engine::NativeHttp,
             fallbacks: capabilities
-                .aria2
-                .then_some(Engine::Aria2Rpc)
+                .gopeed
+                .then_some(Engine::Gopeed)
                 .into_iter()
                 .collect(),
             reason: "direct_http",
@@ -142,7 +142,7 @@ pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<Strategy
             reason: "hls_manifest",
         },
         DownloadKind::Ftp => StrategyPlan {
-            primary: Engine::Aria2Rpc,
+            primary: Engine::Gopeed,
             fallbacks: Vec::new(),
             reason: "ftp_transfer",
         },
@@ -150,11 +150,11 @@ pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<Strategy
             primary: if capabilities.torrent {
                 Engine::NativeTorrent
             } else {
-                Engine::Aria2Rpc
+                Engine::Gopeed
             },
             fallbacks: capabilities
-                .aria2
-                .then_some(Engine::Aria2Rpc)
+                .gopeed
+                .then_some(Engine::Gopeed)
                 .into_iter()
                 .collect(),
             reason: "peer_to_peer",
@@ -168,17 +168,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn direct_download_prefers_native_and_keeps_aria_as_fallback() {
+    fn direct_download_prefers_native_and_keeps_gopeed_as_fallback() {
         let plan = plan_download(
             "https://example.test/file.zip",
             Capabilities {
-                aria2: true,
+                gopeed: true,
                 ..Default::default()
             },
         )
         .unwrap();
         assert_eq!(plan.primary, Engine::NativeHttp);
-        assert_eq!(plan.fallbacks, vec![Engine::Aria2Rpc]);
+        assert_eq!(plan.fallbacks, vec![Engine::Gopeed]);
     }
 
     #[test]
