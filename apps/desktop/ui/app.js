@@ -1661,7 +1661,7 @@ async function showTorrentInspection(source) {
 }
 function resetTaskConnections() {
   taskConnectionsManuallyChanged = false;
-  document.querySelector("#task-connections").value = "8";
+  document.querySelector("#task-connections").value = "16";
   document.querySelector("#task-connections-value").value = t("automatic");
 }
 document.querySelectorAll("#add").forEach(
@@ -2266,7 +2266,7 @@ document.querySelector("#max-tasks").oninput = updateLimitLabels;
 document.querySelector("#connections").oninput = updateLimitLabels;
 document.querySelector("#default-limits").onclick = () => {
   document.querySelector("#max-tasks").value = 3;
-  document.querySelector("#connections").value = 8;
+  document.querySelector("#connections").value = 16;
   updateLimitLabels();
 };
 document.querySelector("#copy-pairing").onclick = () => invoke("copy_bridge_token").catch(console.error);
@@ -2444,7 +2444,7 @@ document.querySelector("#enqueue").onclick = async () => {
         priority: Number(document.querySelector("#priority").value),
         bandwidthLimit: Math.round((Number(document.querySelector("#download-bandwidth-limit").value) || 0) * 1024 * 1024) || null,
         connectionsOverride: taskConnectionsManuallyChanged
-          ? Number(document.querySelector("#task-connections").value) || 8
+          ? Number(document.querySelector("#task-connections").value) || 16
           : null,
         context: {
           traceId: pendingDiagnosticTrace,
