@@ -3537,6 +3537,89 @@ fn local_link_ip() -> std::net::IpAddr {
         .unwrap_or_else(|| "127.0.0.1".parse().expect("valid loopback"))
 }
 
+fn active_network_ip() -> Option<std::net::IpAddr> {
+    UdpSocket::bind("0.0.0.0:0")
+        .and_then(|socket| {
+            socket.connect("1.1.1.1:80")?;
+            socket.local_addr()
+        })
+        .ok()
+        .map(|address| address.ip())
+        .filter(|address| !address.is_unspecified() && !address.is_loopback())
+}
+
+fn reconnect_active_downloads_after_network_change(app: &tauri::AppHandle, previous: Option<std::net::IpAddr>, current: Option<std::net::IpAddr>) {
+    let state = app.state::<AppState>();
+    let active = state
+        .workers
+        .lock()
+        .map(|mut workers| workers.drain().collect::<Vec<_>>())
+        .unwrap_or_default();
+    if active.is_empty() {
+        return;
+    }
+    let ids = active.iter().map(|(id, _)| *id).collect::<HashSet<_>>();
+    for (_, cancel) in active {
+        let _ = cancel.send(());
+    }
+    stop_aria2_runtime(&state);
+    if let Ok(mut aria2_tasks) = state.aria2_tasks.lock() {
+        aria2_tasks.clear();
+    }
+    diagnostic_log(
+        &state,
+        "INFO",
+        "network.interface_changed",
+        &format!(
+            "previous={} current={} tasks={}",
+            previous.map_or_else(|| "offline".to_owned(), |ip| ip.to_string()),
+            current.map_or_else(|| "offline".to_owned(), |ip| ip.to_string()),
+            ids.len()
+        ),
+    );
+    let resumed_app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(750));
+        let state = resumed_app.state::<AppState>();
+        if let Ok(mut queue) = state.queue.lock() {
+            for task in queue.iter_mut().filter(|task| ids.contains(&task.id)) {
+                if matches!(
+                    task.state,
+                    DownloadState::Downloading
+                        | DownloadState::Inspecting
+                        | DownloadState::Paused
+                        | DownloadState::Failed { .. }
+                ) {
+                    task.state = DownloadState::Queued;
+                    task.download_speed = Some(0);
+                    task.upload_speed = Some(0);
+                }
+            }
+            let _ = save_queue(&state, &queue);
+        }
+        state.diagnostics.record(
+            "network.reconnect_queued",
+            "INFO",
+            None,
+            None,
+            serde_json::json!({"taskCount": ids.len()}),
+        );
+        start_next_queued(&resumed_app);
+    });
+}
+
+fn run_network_change_monitor(app: tauri::AppHandle) {
+    let mut previous = active_network_ip();
+    loop {
+        std::thread::sleep(Duration::from_secs(2));
+        let current = active_network_ip();
+        if current != previous {
+            reconnect_active_downloads_after_network_change(&app, previous, current);
+            previous = current;
+        }
+    }
+}
+
 fn handle_link_connection<S: Read + Write>(app: &tauri::AppHandle, mut stream: S) {
     let mut buffer = Vec::with_capacity(8192);
     let mut chunk = [0_u8; 4096];
@@ -11722,6 +11805,12 @@ fn main() {
                 std::thread::Builder::new()
                     .name("apocalipse-extension-bridge".into())
                     .spawn(move || run_extension_bridge(bridge_app, listener))?;
+            }
+            {
+                let network_app = app.handle().clone();
+                std::thread::Builder::new()
+                    .name("apocalipse-network-monitor".into())
+                    .spawn(move || run_network_change_monitor(network_app))?;
             }
             // Apocalipse Link uses TLS on loopback, LAN and Internet-facing binds.
             // Only authenticated sessions can enumerate the explicitly allowed shares.
