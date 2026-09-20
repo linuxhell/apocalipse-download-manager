@@ -12347,10 +12347,19 @@ mod tests {
         assert_eq!(supported_file_host("archive.org"), Some("archive"));
         assert_eq!(supported_file_host("mediafire.com.evil.test"), None);
         assert_eq!(supported_file_host("fakearchive.org"), None);
-        assert!(file_host_candidate_trusted("mediafire", "download123.mediafire.com"));
-        assert!(file_host_candidate_trusted("archive", "ia801.example.archive.org"));
+        assert!(file_host_candidate_trusted(
+            "mediafire",
+            "download123.mediafire.com"
+        ));
+        assert!(file_host_candidate_trusted(
+            "archive",
+            "ia801.example.archive.org"
+        ));
         assert!(!file_host_candidate_trusted("mediafire", "evil.example"));
-        assert!(!file_host_candidate_trusted("gofile", "gofile.io.evil.test"));
+        assert!(!file_host_candidate_trusted(
+            "gofile",
+            "gofile.io.evil.test"
+        ));
     }
 
     #[test]
@@ -12405,15 +12414,34 @@ mod tests {
 
     #[test]
     fn extractor_detection_and_safe_destination_arguments_are_cross_platform() {
-        assert_eq!(extractor_kind(Path::new("7zz")), Some(ExtractorKind::SevenZip));
-        assert_eq!(extractor_kind(Path::new("WinRAR.exe")), Some(ExtractorKind::Rar));
-        assert_eq!(extractor_kind(Path::new("unrar")), Some(ExtractorKind::Unrar));
+        assert_eq!(
+            extractor_kind(Path::new("7zz")),
+            Some(ExtractorKind::SevenZip)
+        );
+        assert_eq!(
+            extractor_kind(Path::new("WinRAR.exe")),
+            Some(ExtractorKind::Rar)
+        );
+        assert_eq!(
+            extractor_kind(Path::new("unrar")),
+            Some(ExtractorKind::Unrar)
+        );
         assert_eq!(extractor_kind(Path::new("unar")), Some(ExtractorKind::Unar));
-        assert_eq!(extractor_kind(Path::new("bsdtar")), Some(ExtractorKind::Bsdtar));
+        assert_eq!(
+            extractor_kind(Path::new("bsdtar")),
+            Some(ExtractorKind::Bsdtar)
+        );
         assert_eq!(extractor_kind(Path::new("tar")), Some(ExtractorKind::Tar));
         assert!(is_archive_file_name("backup.tar.zst"));
-        assert_eq!(archive_name_without_extensions(Path::new("backup.tar.gz")), "backup");
-        let args = extraction_args(ExtractorKind::SevenZip, Path::new("a.zip"), Path::new("out"));
+        assert_eq!(
+            archive_name_without_extensions(Path::new("backup.tar.gz")),
+            "backup"
+        );
+        let args = extraction_args(
+            ExtractorKind::SevenZip,
+            Path::new("a.zip"),
+            Path::new("out"),
+        );
         assert_eq!(args[0], "x");
         assert!(args.iter().any(|arg| arg.starts_with("-o")));
     }
