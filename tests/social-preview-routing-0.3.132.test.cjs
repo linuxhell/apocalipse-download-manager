@@ -21,10 +21,10 @@ function node({tag='DIV', r=rect(), parent=null, attrs={}, videos=[], click=null
   };
 }
 
-test('0.3.161 manifest version is exact', () => {
+test('0.3.162 manifest version is exact', () => {
   const manifest = JSON.parse(src('manifest.json'));
-  assert.equal(manifest.version, '0.3.161');
-  assert.match(manifest.version_name, /Facebook Home strict sponsored-card filtering/);
+  assert.equal(manifest.version, '0.3.162');
+  assert.match(manifest.version_name, /Universal forensic social debugger/);
 });
 
 test('0.3.132 resolved Preview and Download are dispatched explicitly, never synthetic re-click', () => {
