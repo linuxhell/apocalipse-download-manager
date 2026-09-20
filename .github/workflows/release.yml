@@ -31,14 +31,20 @@ jobs:
             os: windows-latest
             artifact: apocalipse-download-manager-windows-x64-portable
             output: apocalipse-download-manager-windows-x64-portable.zip
+            gopeed_asset: gopeed-web-v1.9.3-windows-amd64.zip
+            gopeed_binary: gopeed.exe
           - name: Linux x64 portable
             os: ubuntu-latest
             artifact: apocalipse-download-manager-linux-x64-portable
             output: apocalipse-download-manager-linux-x64-portable.tar.gz
+            gopeed_asset: gopeed-web-v1.9.3-linux-amd64.zip
+            gopeed_binary: gopeed
           - name: macOS portable
             os: macos-latest
             artifact: apocalipse-download-manager-macos-portable
             output: apocalipse-download-manager-macos-portable.zip
+            gopeed_asset: gopeed-web-v1.9.3-macos-amd64.zip
+            gopeed_binary: gopeed
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
@@ -64,6 +70,40 @@ jobs:
       - name: Build desktop
         run: cargo build --release --locked -p apocalipse-desktop
 
+      - name: Download stable Gopeed backend
+        shell: bash
+        env:
+          GOPEED_VERSION: 1.9.3
+          GOPEED_ASSET: ${{ matrix.gopeed_asset }}
+          GOPEED_BINARY: ${{ matrix.gopeed_binary }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/$GOPEED_ASSET"
+          extracted="$RUNNER_TEMP/gopeed-stable"
+          curl --fail --location --retry 3 \
+            "https://github.com/GopeedLab/gopeed/releases/download/v${GOPEED_VERSION}/${GOPEED_ASSET}" \
+            --output "$archive"
+          mkdir -p "$extracted" dist/gopeed-backend
+          python3 - "$archive" "$extracted" <<'PY'
+          import pathlib
+          import sys
+          import zipfile
+
+          archive = pathlib.Path(sys.argv[1])
+          destination = pathlib.Path(sys.argv[2]).resolve()
+          with zipfile.ZipFile(archive) as source:
+              for member in source.infolist():
+                  target = (destination / member.filename).resolve()
+                  if destination not in target.parents and target != destination:
+                      raise SystemExit(f"unsafe archive path: {member.filename}")
+              source.extractall(destination)
+          PY
+          binary=$(find "$extracted" -type f -name "$GOPEED_BINARY" -print -quit)
+          test -n "$binary"
+          cp "$binary" "dist/gopeed-backend/$GOPEED_BINARY"
+          chmod 755 "dist/gopeed-backend/$GOPEED_BINARY"
+          printf 'v%s\n' "$GOPEED_VERSION" > dist/gopeed-backend/.gopeed-version
+
       - name: Stage Windows portable
         if: runner.os == 'Windows'
         shell: pwsh
@@ -71,6 +111,9 @@ jobs:
           $package = "dist/Apocalipse Download Manager"
           New-Item -ItemType Directory -Force $package | Out-Null
           Copy-Item "target/release/apocalipse-desktop.exe" "$package/Apocalipse Download Manager.exe"
+          New-Item -ItemType Directory -Force "$package/data/tools/gopeed" | Out-Null
+          Copy-Item "dist/gopeed-backend/gopeed.exe" "$package/data/tools/gopeed/gopeed.exe"
+          Copy-Item "dist/gopeed-backend/.gopeed-version" "$package/data/tools/gopeed/.gopeed-version"
           Copy-Item "README.md","LICENSE" $package
           Compress-Archive -Path $package -DestinationPath "dist/${{ matrix.output }}" -Force
 
@@ -79,8 +122,10 @@ jobs:
         shell: bash
         run: |
           package="dist/Apocalipse Download Manager"
-          mkdir -p "$package"
+          mkdir -p "$package/data/tools/gopeed"
           install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
+          install -m 755 dist/gopeed-backend/gopeed "$package/data/tools/gopeed/gopeed"
+          cp dist/gopeed-backend/.gopeed-version "$package/data/tools/gopeed/"
           cp README.md LICENSE "$package/"
           tar -C dist -czf "dist/${{ matrix.output }}" "Apocalipse Download Manager"
 
@@ -89,9 +134,11 @@ jobs:
         shell: bash
         run: |
           app="dist/Apocalipse Download Manager.app"
-          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          mkdir -p "$app/Contents/MacOS/data/tools/gopeed" "$app/Contents/Resources"
           cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
           chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
+          install -m 755 dist/gopeed-backend/gopeed "$app/Contents/MacOS/data/tools/gopeed/gopeed"
+          cp dist/gopeed-backend/.gopeed-version "$app/Contents/MacOS/data/tools/gopeed/"
           cp packaging/macos/Info.plist "$app/Contents/Info.plist"
           python3 - "$app/Contents/Info.plist" <<'PYMAC'
           import plistlib

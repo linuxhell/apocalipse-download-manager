@@ -6540,7 +6540,15 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
         .into_iter()
         .map(|(id, executable, args)| {
             let version = if id == "gopeed" {
-                executable.is_file().then(|| "Gopeed 2.x beta".to_owned())
+                let marker = executable
+                    .parent()
+                    .map(|parent| parent.join(".gopeed-version"))
+                    .and_then(|path| fs::read_to_string(path).ok())
+                    .map(|value| value.trim().to_owned())
+                    .filter(|value| !value.is_empty());
+                executable
+                    .is_file()
+                    .then(|| marker.unwrap_or_else(|| "Gopeed stable".to_owned()))
             } else {
                 version_line(&executable, args)
             };
@@ -6652,7 +6660,6 @@ fn find_video_file(root: &Path, depth: usize) -> Option<PathBuf> {
     best.map(|(_, path)| path)
 }
 
-#[cfg(target_os = "windows")]
 fn find_named_file(root: &Path, expected_name: &str, depth: usize) -> Option<PathBuf> {
     if depth > 8 {
         return None;
@@ -6672,6 +6679,50 @@ fn find_named_file(root: &Path, expected_name: &str, depth: usize) -> Option<Pat
         }
     }
     None
+}
+
+fn extract_zip_archive(bytes: &[u8], destination: &Path) -> Result<(), String> {
+    let cursor = std::io::Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|error| error.to_string())?;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        let Some(relative) = entry.enclosed_name().map(Path::to_path_buf) else {
+            return Err("release_archive_contains_unsafe_path".to_owned());
+        };
+        let target = destination.join(relative);
+        if entry.is_dir() {
+            fs::create_dir_all(&target).map_err(|error| error.to_string())?;
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let mut output = fs::File::create(&target).map_err(|error| error.to_string())?;
+        std::io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn gopeed_platform_asset_markers() -> Result<[&'static str; 3], String> {
+    let platform = if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        return Err("gopeed_update_platform_unsupported".to_owned());
+    };
+    let architecture = if cfg!(target_arch = "x86_64") {
+        "amd64"
+    } else if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else if cfg!(target_arch = "x86") {
+        "386"
+    } else {
+        return Err("gopeed_update_architecture_unsupported".to_owned());
+    };
+    Ok([platform, architecture, ".zip"])
 }
 
 fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
@@ -6834,10 +6885,12 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
     }
 
     #[cfg(not(target_os = "windows"))]
-    return Err("automatic_binary_update_not_available_for_this_platform".to_owned());
+    if id != "gopeed" {
+        return Err("automatic_binary_update_not_available_for_this_platform".to_owned());
+    }
 
-    #[cfg(target_os = "windows")]
     {
+        let gopeed_markers = gopeed_platform_asset_markers()?;
         let (repository, executable_name, asset_markers, version_args): (
             &str,
             &str,
@@ -6852,8 +6905,8 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             ),
             "gopeed" => (
                 "GopeedLab/gopeed",
-                "gopeed.exe",
-                &["gopeed-web-", "windows-amd64", ".zip"],
+                if cfg!(windows) { "gopeed.exe" } else { "gopeed" },
+                gopeed_markers.as_slice(),
                 &["--version"],
             ),
             "n-m3u8dl-re" => (
@@ -6870,12 +6923,16 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             ),
             _ => return Err("unknown_tool".to_owned()),
         };
+        let version_marker = executable
+            .parent()
+            .map(|parent| parent.join(".gopeed-version"));
         let before = if id == "gopeed" {
-            if executable.is_file() {
-                "installed".to_owned()
-            } else {
-                "not installed".to_owned()
-            }
+            version_marker
+                .as_ref()
+                .and_then(|path| fs::read_to_string(path).ok())
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| if executable.is_file() { "installed" } else { "not installed" }.to_owned())
         } else {
             version_line(&executable, version_args).unwrap_or_else(|| "unknown".to_owned())
         };
@@ -6883,46 +6940,20 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             .user_agent("Apocalipse-Download-Manager")
             .build()
             .map_err(|error| error.to_string())?;
-        let release: serde_json::Value = if id == "gopeed" {
-            let releases: Vec<serde_json::Value> = client
-                .get(format!(
-                    "https://api.github.com/repos/{repository}/releases?per_page=20"
-                ))
-                .send()
-                .await
-                .map_err(|error| error.to_string())?
-                .error_for_status()
-                .map_err(|error| error.to_string())?
-                .json()
-                .await
-                .map_err(|error| error.to_string())?;
-            releases
-                .into_iter()
-                .find(|release| {
-                    release
-                        .get("prerelease")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false)
-                        && !release
-                            .get("draft")
-                            .and_then(serde_json::Value::as_bool)
-                            .unwrap_or(false)
-                })
-                .ok_or_else(|| "gopeed_beta_release_not_found".to_owned())?
-        } else {
-            client
-                .get(format!(
-                    "https://api.github.com/repos/{repository}/releases/latest"
-                ))
-                .send()
-                .await
-                .map_err(|error| error.to_string())?
-                .error_for_status()
-                .map_err(|error| error.to_string())?
-                .json()
-                .await
-                .map_err(|error| error.to_string())?
-        };
+        // GitHub's /latest endpoint excludes drafts and prereleases, so
+        // Gopeed updates can never silently move users onto a beta build.
+        let release: serde_json::Value = client
+            .get(format!(
+                "https://api.github.com/repos/{repository}/releases/latest"
+            ))
+            .send()
+            .await
+            .map_err(|error| error.to_string())?
+            .error_for_status()
+            .map_err(|error| error.to_string())?
+            .json()
+            .await
+            .map_err(|error| error.to_string())?;
         let tag = release
             .get("tag_name")
             .and_then(|value| value.as_str())
@@ -6942,6 +6973,10 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 match id.as_str() {
                     "qjs" => name == "qjs-windows-x86_64.exe",
                     "ffmpeg" => name.ends_with("win64-gpl.zip") && !name.contains("shared"),
+                    "gopeed" => name.starts_with("gopeed-web-")
+                        && asset_markers
+                            .iter()
+                            .all(|marker| name.contains(&marker.to_ascii_lowercase())),
                     _ => asset_markers
                         .iter()
                         .all(|marker| name.contains(&marker.to_ascii_lowercase())),
@@ -6972,25 +7007,11 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         let (replacement, ffprobe_replacement) = if id == "qjs" {
             (bytes.to_vec(), Vec::new())
         } else {
-            let archive_path = temporary.join("release.zip");
             let extracted = temporary.join("extracted");
             fs::create_dir_all(&extracted).map_err(|error| error.to_string())?;
-            fs::write(&archive_path, &bytes).map_err(|error| error.to_string())?;
-            let mut extractor = Command::new("tar.exe");
-            extractor
-                .arg("-xf")
-                .arg(&archive_path)
-                .arg("-C")
-                .arg(&extracted);
-            use std::os::windows::process::CommandExt;
-            extractor.creation_flags(0x08000000);
-            let extraction = extractor.output().map_err(|error| error.to_string())?;
-            if !extraction.status.success() {
+            if let Err(error) = extract_zip_archive(&bytes, &extracted) {
                 let _ = fs::remove_dir_all(&temporary);
-                return Err(format!(
-                    "release_extraction_failed:{}",
-                    String::from_utf8_lossy(&extraction.stderr).trim()
-                ));
+                return Err(format!("release_extraction_failed:{error}"));
             }
             let replacement_path = find_named_file(&extracted, executable_name, 0)
                 .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
@@ -7023,6 +7044,12 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         let ffprobe_staged = parent.join(".apocalipse-new-ffprobe.exe");
         let ffprobe_backup = parent.join(".ffprobe.exe.apocalipse-backup");
         fs::write(&staged, &replacement).map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))
+                .map_err(|error| error.to_string())?;
+        }
         if id == "ffmpeg" {
             fs::write(&ffprobe_staged, &ffprobe_replacement).map_err(|error| error.to_string())?;
         }
@@ -7055,6 +7082,16 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         if id != "gopeed" && candidate_version == before {
             let _ = fs::remove_file(&staged);
             let _ = fs::remove_file(&ffprobe_staged);
+            diagnostic_log(
+                &state,
+                "INFO",
+                "tool.already_current",
+                &format!("tool={id} version={before} asset={asset_name}"),
+            );
+            return Ok(format!("{id} already current ({before})"));
+        }
+        if id == "gopeed" && candidate_version == before {
+            let _ = fs::remove_file(&staged);
             diagnostic_log(
                 &state,
                 "INFO",
@@ -7122,6 +7159,11 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             fs::remove_file(&ffprobe_backup).map_err(|error| error.to_string())?;
         }
         let after = after.unwrap_or_else(|| tag.to_owned());
+        if id == "gopeed" {
+            if let Some(marker) = &version_marker {
+                fs::write(marker, format!("{after}\n")).map_err(|error| error.to_string())?;
+            }
+        }
         diagnostic_log(&state, "INFO", "tool.updated", &format!("tool={id} repository={repository} tag={tag} asset={asset_name} sha256={sha256} before={before} after={after} target={}", executable.display()));
         Ok(format!("{id} updated: {before} → {after}"))
     }
@@ -10316,7 +10358,7 @@ async fn remove_downloads(
                 classify_url(&task.source),
                 Some(DownloadKind::Torrent | DownloadKind::Magnet)
             );
-            // Gopeed beta.3 force deletion is unsafe for BT on Windows: it can
+            // Backend force deletion is unsafe for BT on Windows: it can
             // attempt to unlink .part files while anacrolix still owns them,
             // and a subsequent Close may dereference the already-closed global
             // BT client. Close/remove the backend task without force and let

@@ -30,3 +30,4 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 
 keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync-secret-service"] }
 zeroize.workspace = true
+zip = { version = "2.4", default-features = false, features = ["deflate"] }

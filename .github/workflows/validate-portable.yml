@@ -6,9 +6,8 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - fix/hls-workdir-download-ui-0.4.41
-      - feature/next-gen-media-workflows
-      - experiment/gopeed-engine
+      - main
+      - engine/aria2-maintained
 
 permissions:
   contents: read
