@@ -543,7 +543,7 @@ impl Diagnostics {
             "clientHealth":store.client_health,"maxBytesPerFile":MAX_FILE,"filesRetained":2,
             "limitations":["webRequest_does_not_observe_memory_cache","cross_world_probe_is_not_trusted_page_evidence",
             "closed_page_may_lose_unflushed_events","player_started_does_not_prove_picture_or_sound","only_selected_tab_is_observed",
-            "no_page_text_cookies_credentials_or_media_bytes_collected","timestamps_from_different_contexts_are_not_causal_order"]});
+            "no_page_text_cookies_credentials_or_media_bytes_collected","client_clocks_are_not_used_for_causal_order_server_sequence_is_authoritative"]});
         let mut actions = HashMap::<String, Vec<&Value>>::new();
         let mut players = HashMap::<String, Value>::new();
         let mut decisions = Vec::new();
@@ -659,6 +659,93 @@ impl Diagnostics {
             "taskId": record["taskId"],
             "detail": record["detail"]
         })).collect::<Vec<_>>();
+
+        let mut tasks = HashMap::<String, Vec<&Value>>::new();
+        for record in &timeline {
+            if let Some(task) = record["taskId"].as_str() {
+                tasks.entry(task.to_owned()).or_default().push(record);
+            }
+        }
+        let summarize_group = |id: &str, items: &[&Value]| {
+            let first = items.first().copied();
+            let last = items.last().copied();
+            let warning_events = items.iter().filter(|record|
+                matches!(record["level"].as_str(), Some("WARN" | "ERROR"))
+            ).map(|record| json!({
+                "sequence": record["serverSequence"],
+                "localTime": record["receivedAtLocal"],
+                "level": record["level"],
+                "event": record["event"],
+                "detail": record["detail"]
+            })).collect::<Vec<_>>();
+            json!({
+                "id": id,
+                "firstSequence": first.map(|record| record["serverSequence"].clone()),
+                "lastSequence": last.map(|record| record["serverSequence"].clone()),
+                "firstLocalTime": first.map(|record| record["receivedAtLocal"].clone()),
+                "lastLocalTime": last.map(|record| record["receivedAtLocal"].clone()),
+                "firstEvent": first.map(|record| record["event"].clone()),
+                "lastEvent": last.map(|record| record["event"].clone()),
+                "eventCount": items.len(),
+                "warningOrErrorCount": warning_events.len(),
+                "warningsAndErrors": warning_events,
+                "interpretation": "ordered_observations_not_proven_root_cause"
+            })
+        };
+        let mut trace_index = actions.iter()
+            .map(|(trace, items)| summarize_group(trace, items))
+            .collect::<Vec<_>>();
+        trace_index.sort_by_key(|item| item["firstSequence"].as_u64().unwrap_or(0));
+        let mut task_index = tasks.iter()
+            .map(|(task, items)| summarize_group(task, items))
+            .collect::<Vec<_>>();
+        task_index.sort_by_key(|item| item["firstSequence"].as_u64().unwrap_or(0));
+
+        let marker_records = timeline.iter()
+            .filter(|record| record["event"] == "session.problem_marked")
+            .collect::<Vec<_>>();
+        let mut incident_windows = Vec::new();
+        for marker in marker_records {
+            let marker_ms = marker["receivedAt"].as_u64().unwrap_or(0);
+            let marker_sequence = marker["serverSequence"].as_u64().unwrap_or(0);
+            let start_ms = marker_ms.saturating_sub(90_000);
+            let end_ms = marker_ms.saturating_add(45_000);
+            let events = timeline.iter()
+                .filter(|record| {
+                    let observed = record["receivedAt"].as_u64().unwrap_or(0);
+                    observed >= start_ms && observed <= end_ms
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let errors = events.iter().filter(|record| record["level"] == "ERROR").count();
+            let warnings_count = events.iter().filter(|record| record["level"] == "WARN").count();
+            incident_windows.push(json!({
+                "markerSequence": marker_sequence,
+                "markerLocalTime": marker["receivedAtLocal"],
+                "windowBeforeMs": 90000,
+                "windowAfterMs": 45000,
+                "eventCount": events.len(),
+                "errors": errors,
+                "warnings": warnings_count,
+                "events": events,
+                "interpretation": "events_near_user_mark_not_automatic_root_cause"
+            }));
+        }
+        let causal_index = json!({
+            "version": 1,
+            "ordering": "receivedAt_then_serverSequence",
+            "localTimezoneEmbedded": true,
+            "traces": trace_index,
+            "tasks": task_index,
+            "problemMarkers": incident_windows.iter().map(|window| json!({
+                "markerSequence": window["markerSequence"],
+                "markerLocalTime": window["markerLocalTime"],
+                "eventCount": window["eventCount"],
+                "errors": window["errors"],
+                "warnings": window["warnings"]
+            })).collect::<Vec<_>>(),
+            "interpretation": "correlation_graph_not_proven_causation"
+        });
 
         let performance_samples = transfer_engine
             .iter()
@@ -821,14 +908,27 @@ impl Diagnostics {
                 record["detail"]
             ));
         }
+        report.push_str("\nINCIDENTES MARCADOS / MARKED INCIDENTS\n");
+        if incident_windows.is_empty() {
+            report.push_str("Nenhum marcador manual nesta sessao. / No manual problem marker in this session.\n");
+        } else {
+            for incident in &incident_windows {
+                report.push_str(&format!(
+                    "marker #{} local={} events={} WARN={} ERROR={}\n",
+                    incident["markerSequence"], incident["markerLocalTime"], incident["eventCount"],
+                    incident["warnings"], incident["errors"]
+                ));
+            }
+        }
         report.push_str("\nLINHA DO TEMPO POR TENTATIVA / ACTION TIMELINES (last 30)\n");
         for action in action_rows.iter().rev().take(30).rev() {
             report.push_str(&format!("\nTrace {}\n", action["traceId"]));
             if let Some(events) = action["events"].as_array() {
                 for record in events.iter().take(60) {
                     report.push_str(&format!(
-                        "  #{} {} {} task={}\n",
+                        "  #{} {} {} {} task={}\n",
                         record["serverSequence"],
+                        record["receivedAtLocal"],
                         record["component"],
                         record["event"],
                         record["taskId"]
@@ -862,6 +962,11 @@ impl Diagnostics {
             ("traces/replay-de-midia.jsonl".into(), jsonl(&media_replay)),
             ("capture/media-decisions.jsonl".into(), jsonl(&decisions)),
             ("timeline/events-local.jsonl".into(), jsonl(&timeline_rows)),
+            (
+                "correlation/index.json".into(),
+                serde_json::to_vec_pretty(&causal_index).unwrap_or_default(),
+            ),
+            ("incidents/problem-windows.jsonl".into(), jsonl(&incident_windows)),
             ("social/player-debugger.jsonl".into(), jsonl(&social_debugger)),
             (
                 "social/summary.json".into(),
