@@ -307,6 +307,8 @@ struct UserSettings {
     n_m3u8dl_re_path: Option<PathBuf>,
     #[serde(default)]
     aria2_path: Option<PathBuf>,
+    #[serde(default)]
+    extractor_path: Option<PathBuf>,
     #[serde(default = "default_true")]
     aria2_rpc_enabled: bool,
     #[serde(default = "default_true")]
@@ -404,6 +406,7 @@ impl Default for UserSettings {
             qjs_path: None,
             n_m3u8dl_re_path: None,
             aria2_path: None,
+            extractor_path: None,
             aria2_rpc_enabled: true,
             aria2_rpc_auto_start: true,
             aria2_rpc_port: None,
@@ -2979,6 +2982,56 @@ fn configured_aria2(settings: &UserSettings) -> PathBuf {
             "aria2c"
         },
     )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExtractorKind { SevenZip, Rar, Unrar, Unar, Bsdtar, Tar }
+
+fn extractor_kind(path: &Path) -> Option<ExtractorKind> {
+    let name = path.file_stem()?.to_string_lossy().to_ascii_lowercase();
+    if matches!(name.as_str(), "7z" | "7zz" | "7zr" | "7za") { Some(ExtractorKind::SevenZip) }
+    else if matches!(name.as_str(), "winrar" | "rar") { Some(ExtractorKind::Rar) }
+    else if name == "unrar" { Some(ExtractorKind::Unrar) }
+    else if name == "unar" { Some(ExtractorKind::Unar) }
+    else if name == "bsdtar" { Some(ExtractorKind::Bsdtar) }
+    else if name == "tar" { Some(ExtractorKind::Tar) }
+    else { None }
+}
+
+fn extractor_version_args(kind: ExtractorKind) -> &'static [&'static str] {
+    match kind {
+        ExtractorKind::SevenZip | ExtractorKind::Rar | ExtractorKind::Unrar => &[],
+        ExtractorKind::Unar => &["-v"],
+        ExtractorKind::Bsdtar | ExtractorKind::Tar => &["--version"],
+    }
+}
+
+fn archive_name_without_extensions(path: &Path) -> String {
+    let mut name = path.file_name().and_then(|v| v.to_str()).unwrap_or("archive").to_owned();
+    for suffix in [".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tgz", ".tbz2", ".txz", ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".zst", ".cab", ".arj", ".lha", ".lzh"] {
+        if name.to_ascii_lowercase().ends_with(suffix) {
+            name.truncate(name.len() - suffix.len());
+            break;
+        }
+    }
+    if name.trim().is_empty() { "archive".to_owned() } else { name }
+}
+
+fn is_archive_file_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [".zip", ".7z", ".rar", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst", ".gz", ".bz2", ".xz", ".zst", ".cab", ".arj", ".lha", ".lzh"]
+        .iter().any(|suffix| lower.ends_with(suffix))
+}
+
+fn extraction_args(kind: ExtractorKind, archive: &Path, destination: &Path) -> Vec<String> {
+    let a = archive.to_string_lossy().into_owned();
+    let d = destination.to_string_lossy().into_owned();
+    match kind {
+        ExtractorKind::SevenZip => vec!["x".into(), a, format!("-o{d}"), "-y".into()],
+        ExtractorKind::Rar | ExtractorKind::Unrar => vec!["x".into(), "-o+".into(), "-y".into(), a, format!("{d}{}", std::path::MAIN_SEPARATOR)],
+        ExtractorKind::Unar => vec!["-f".into(), "-o".into(), d, a],
+        ExtractorKind::Bsdtar | ExtractorKind::Tar => vec!["-xf".into(), a, "-C".into(), d],
+    }
 }
 
 async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::Endpoint, String> {
@@ -7140,7 +7193,7 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
             ["--version"].as_slice(),
         ),
     ];
-    Ok(definitions
+    let mut statuses = definitions
         .into_iter()
         .map(|(id, executable, args)| {
             let version = version_line(&executable, args);
@@ -7151,7 +7204,17 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
                 version,
             }
         })
-        .collect())
+        .collect::<Vec<_>>();
+    let extractor = settings.extractor_path.clone().unwrap_or_default();
+    let kind = extractor_kind(&extractor);
+    let version = kind.and_then(|kind| version_line(&extractor, extractor_version_args(kind)));
+    statuses.push(ToolStatus {
+        id: "extractor".to_owned(),
+        path: extractor.to_string_lossy().into_owned(),
+        found: kind.is_some() && extractor.is_file(),
+        version: version.or_else(|| kind.map(|value| format!("{value:?}"))),
+    });
+    Ok(statuses)
 }
 
 fn optional_path(value: String) -> Option<PathBuf> {
@@ -7178,6 +7241,7 @@ fn set_tool_paths(
     qjs: String,
     n_m3u8dl_re: String,
     aria2: String,
+    extractor: String,
 ) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.ffmpeg_path = optional_path(ffmpeg);
@@ -7185,6 +7249,7 @@ fn set_tool_paths(
     settings.qjs_path = optional_path(qjs);
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
     settings.aria2_path = optional_path(aria2);
+    settings.extractor_path = optional_path(extractor);
     save_settings(&state, &settings)
 }
 
@@ -11714,6 +11779,21 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn extractor_detection_and_safe_destination_arguments_are_cross_platform() {
+        assert_eq!(extractor_kind(Path::new("7zz")), Some(ExtractorKind::SevenZip));
+        assert_eq!(extractor_kind(Path::new("WinRAR.exe")), Some(ExtractorKind::Rar));
+        assert_eq!(extractor_kind(Path::new("unrar")), Some(ExtractorKind::Unrar));
+        assert_eq!(extractor_kind(Path::new("unar")), Some(ExtractorKind::Unar));
+        assert_eq!(extractor_kind(Path::new("bsdtar")), Some(ExtractorKind::Bsdtar));
+        assert_eq!(extractor_kind(Path::new("tar")), Some(ExtractorKind::Tar));
+        assert!(is_archive_file_name("backup.tar.zst"));
+        assert_eq!(archive_name_without_extensions(Path::new("backup.tar.gz")), "backup");
+        let args = extraction_args(ExtractorKind::SevenZip, Path::new("a.zip"), Path::new("out"));
+        assert_eq!(args[0], "x");
+        assert!(args.iter().any(|arg| arg.starts_with("-o")));
+    }
 
     #[test]
     fn manual_queue_reordering_preserves_unfiltered_tasks() {
