@@ -178,16 +178,64 @@ function syncPresentation() {
 }
 
 const rawInvoke = window.__TAURI__?.core?.invoke;
+let lastLinkInteractionTrace = null;
+const freshLinkTrace = () => {
+  const now = performance.now();
+  if (lastLinkInteractionTrace && now - lastLinkInteractionTrace.at < 2000) return lastLinkInteractionTrace.id;
+  return crypto.randomUUID();
+};
+const recordLinkUi = (event, detail = {}) =>
+  rawInvoke?.("record_diagnostics_ui", { event, detail }).catch(() => {});
+document.addEventListener("click", (event) => {
+  const control = event.target?.closest?.("button,[role='button'],a,input[type='button'],input[type='submit']");
+  if (!control || !rawInvoke) return;
+  const traceId = crypto.randomUUID();
+  lastLinkInteractionTrace = { id: traceId, at: performance.now() };
+  recordLinkUi("control_clicked", {
+    traceId,
+    level: "INFO",
+    window: "link",
+    controlTag: control.tagName?.toLowerCase() || "unknown",
+    controlType: control.getAttribute?.("type") || control.getAttribute?.("role") || "default",
+    controlId: control.id || null,
+    action: control.dataset?.action || null,
+  });
+}, true);
 const invoke = async (command, args = {}) => {
   if (!rawInvoke) throw new Error("Desktop bridge unavailable");
   const started = performance.now();
-  if (command !== "record_ui_diagnostic") rawInvoke("record_ui_diagnostic", { level: "DEBUG", event: "command_started", detail: `command=${command} window=link` }).catch(() => {});
+  const traceId = freshLinkTrace();
+  const taskId = typeof args?.id === "string" ? args.id : null;
+  const detailBase = {
+    traceId,
+    taskId,
+    window: "link",
+    command,
+    argKeys: Object.keys(args || {}).sort(),
+  };
+  if (command !== "record_ui_diagnostic" && command !== "record_diagnostics_ui") {
+    recordLinkUi("command_started", { ...detailBase, level: "DEBUG" });
+  }
   try {
     const result = await rawInvoke(command, args);
-    if (command !== "record_ui_diagnostic") rawInvoke("record_ui_diagnostic", { level: "DEBUG", event: "command_completed", detail: `command=${command} window=link duration_ms=${Math.round(performance.now() - started)}` }).catch(() => {});
+    if (command !== "record_ui_diagnostic" && command !== "record_diagnostics_ui") {
+      recordLinkUi("command_completed", {
+        ...detailBase,
+        level: "DEBUG",
+        durationMs: Math.round(performance.now() - started),
+        resultType: result == null ? "null" : Array.isArray(result) ? "array" : typeof result,
+      });
+    }
     return result;
   } catch (error) {
-    if (command !== "record_ui_diagnostic") rawInvoke("record_ui_diagnostic", { level: "ERROR", event: "command_failed", detail: `command=${command} window=link duration_ms=${Math.round(performance.now() - started)} error=${String(error)}` }).catch(() => {});
+    if (command !== "record_ui_diagnostic" && command !== "record_diagnostics_ui") {
+      recordLinkUi("command_failed", {
+        ...detailBase,
+        level: "ERROR",
+        durationMs: Math.round(performance.now() - started),
+        errorName: String(error?.name || "command_error"),
+      });
+    }
     throw error;
   }
 };
