@@ -644,21 +644,28 @@ impl Diagnostics {
         });
 
         let mut timeline = records.clone();
-        timeline.sort_by_key(|record| (
-            record["receivedAt"].as_u64().unwrap_or(0),
-            record["serverSequence"].as_u64().unwrap_or(0)
-        ));
-        let timeline_rows = timeline.iter().map(|record| json!({
-            "localTime": record["receivedAtLocal"],
-            "utcEpochMs": record["receivedAt"],
-            "sequence": record["serverSequence"],
-            "level": record["level"],
-            "event": record["event"],
-            "component": record["component"],
-            "traceId": record["traceId"],
-            "taskId": record["taskId"],
-            "detail": record["detail"]
-        })).collect::<Vec<_>>();
+        timeline.sort_by_key(|record| {
+            (
+                record["receivedAt"].as_u64().unwrap_or(0),
+                record["serverSequence"].as_u64().unwrap_or(0),
+            )
+        });
+        let timeline_rows = timeline
+            .iter()
+            .map(|record| {
+                json!({
+                    "localTime": record["receivedAtLocal"],
+                    "utcEpochMs": record["receivedAt"],
+                    "sequence": record["serverSequence"],
+                    "level": record["level"],
+                    "event": record["event"],
+                    "component": record["component"],
+                    "traceId": record["traceId"],
+                    "taskId": record["taskId"],
+                    "detail": record["detail"]
+                })
+            })
+            .collect::<Vec<_>>();
 
         let mut tasks = HashMap::<String, Vec<&Value>>::new();
         for record in &timeline {
@@ -672,13 +679,15 @@ impl Diagnostics {
             let warning_events = items
                 .iter()
                 .filter(|record| matches!(record["level"].as_str(), Some("WARN" | "ERROR")))
-                .map(|record| json!({
-                "sequence": record["serverSequence"],
-                "localTime": record["receivedAtLocal"],
-                "level": record["level"],
-                "event": record["event"],
-                    "detail": record["detail"]
-                }))
+                .map(|record| {
+                    json!({
+                        "sequence": record["serverSequence"],
+                        "localTime": record["receivedAtLocal"],
+                        "level": record["level"],
+                        "event": record["event"],
+                        "detail": record["detail"]
+                    })
+                })
                 .collect::<Vec<_>>();
             json!({
                 "id": id,
@@ -927,8 +936,11 @@ impl Diagnostics {
             for incident in &incident_windows {
                 report.push_str(&format!(
                     "marker #{} local={} events={} WARN={} ERROR={}\n",
-                    incident["markerSequence"], incident["markerLocalTime"], incident["eventCount"],
-                    incident["warnings"], incident["errors"]
+                    incident["markerSequence"],
+                    incident["markerLocalTime"],
+                    incident["eventCount"],
+                    incident["warnings"],
+                    incident["errors"]
                 ));
             }
         }
@@ -978,8 +990,14 @@ impl Diagnostics {
                 "correlation/index.json".into(),
                 serde_json::to_vec_pretty(&causal_index).unwrap_or_default(),
             ),
-            ("incidents/problem-windows.jsonl".into(), jsonl(&incident_windows)),
-            ("social/player-debugger.jsonl".into(), jsonl(&social_debugger)),
+            (
+                "incidents/problem-windows.jsonl".into(),
+                jsonl(&incident_windows),
+            ),
+            (
+                "social/player-debugger.jsonl".into(),
+                jsonl(&social_debugger),
+            ),
             (
                 "social/summary.json".into(),
                 serde_json::to_vec_pretty(&social_summary).unwrap_or_default(),
