@@ -1,5 +1,8 @@
 const catalogs = {
   en: {
+    archiveExtractor: "Archive extractor (7-Zip / RAR / UnRAR / unar / bsdtar / tar)",
+    autoExtract: "Extract automatically after download",
+    autoExtractHint: "Shown only for archive files. Loose root files are kept inside a folder named after the archive.",
     downloads: "Downloads",
     media: "Media",
     recordings: "Recordings",
