@@ -2571,6 +2571,7 @@ document.querySelector("#analyze").onclick = async () => {
     } else if (pendingMediaKind === "image" || /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)(?:$|[?#])/i.test(url.value)) {
       showCapturedPreview({ title: pendingTitle || fileName.value, thumbnail: pendingThumbnail || url.value, kind: pendingMediaKind || "image", duration: null, size: pendingExpectedSize });
     }
+    refreshAutoExtractOption();
     document.querySelector("#analyze").hidden = true;
     document.querySelector("#enqueue").hidden = false;
   } catch (error) {
