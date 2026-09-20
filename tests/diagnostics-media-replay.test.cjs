@@ -56,3 +56,11 @@ test('desktop ZIP exports the dedicated chronological media replay file', () => 
 test('an already-open tab receives the replay collector during extension recovery', () => {
   assert.match(popup, /"diagnostics\.js", "diagnostics-media-replay\.js", "tiktok-identity\.js"/);
 });
+
+
+test('desktop ZIP exports dedicated universal social debugger files', () => {
+  assert.match(native, /social\/player-debugger\.jsonl/);
+  assert.match(native, /social\/summary\.json/);
+  assert.match(native, /social\.overlay_missing/);
+  assert.match(native, /structured_observations_not_guesses/);
+});
