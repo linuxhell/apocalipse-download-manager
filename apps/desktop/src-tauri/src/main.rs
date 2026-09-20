@@ -219,7 +219,6 @@ struct AppState {
     request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
     gopeed_runtime: Mutex<Option<gopeed::Runtime>>,
     gopeed_tasks: Mutex<HashMap<DownloadId, String>>,
-    gopeed_resolves: Mutex<HashMap<String, String>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
     diagnostics: diagnostics_v3::Diagnostics,
@@ -4583,40 +4582,29 @@ async fn run_gopeed_download(
                 .collect::<Vec<_>>();
             let is_http = matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp);
             let resolved_id = if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
-                let cached = state
-                    .gopeed_resolves
-                    .lock()
-                    .ok()
-                    .and_then(|items| items.get(&task.source).cloned());
-                match cached {
-                    Some(value) => Some(value),
-                    None => {
-                        let directory = task
-                            .destination
-                            .parent()
-                            .unwrap_or_else(|| Path::new("."))
-                            .to_string_lossy()
-                            .into_owned();
-                        match endpoint.resolve(&task.source, &directory, &context).await {
-                            Ok(resolved) => {
-                                if let Ok(mut items) = state.gopeed_resolves.lock() {
-                                    items.insert(task.source.clone(), resolved.id.clone());
-                                }
-                                Some(resolved.id)
+                // A BitTorrent fetcher binds its anacrolix storage during Resolve.
+                // Always resolve against the user's actual destination immediately
+                // before creating the task. Reusing a metadata-inspection resolve
+                // would keep writing to the inspection directory instead.
+                let directory = task
+                    .destination
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .to_string_lossy()
+                    .into_owned();
+                match endpoint.resolve(&task.source, &directory, &context).await {
+                    Ok(resolved) => Some(resolved.id),
+                    Err(error) => {
+                        update_task(&app, id, true, |item| {
+                            item.state = DownloadState::Failed {
+                                message: format!("gopeed_torrent_resolve_failed:{error}"),
                             }
-                            Err(error) => {
-                                update_task(&app, id, true, |item| {
-                                    item.state = DownloadState::Failed {
-                                        message: format!("gopeed_torrent_resolve_failed:{error}"),
-                                    }
-                                });
-                                if let Ok(mut workers) = state.workers.lock() {
-                                    workers.remove(&id);
-                                }
-                                start_next_queued(&app);
-                                return;
-                            }
+                        });
+                        if let Ok(mut workers) = state.workers.lock() {
+                            workers.remove(&id);
                         }
+                        start_next_queued(&app);
+                        return;
                     }
                 }
             } else {
@@ -7110,26 +7098,44 @@ async fn inspect_torrent_metadata(
     ) {
         return Err("not_a_torrent".to_owned());
     }
-    let endpoint = gopeed_endpoint(&state).await?;
-    let metadata_root = state
+    // Metadata inspection must not share the live Gopeed/anacrolix client.
+    // Resolve binds BitTorrent storage immediately, before the user chooses the
+    // final save directory. Use a short-lived backend so its storage can never
+    // leak into the real download task.
+    let executable = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        configured_gopeed(&settings)
+    };
+    let app_data = state
         .queue_path
         .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("gopeed-runtime")
-        .join("metadata");
-    fs::create_dir_all(&metadata_root).map_err(|error| error.to_string())?;
-    let resolved = endpoint
-        .resolve(
-            &source,
-            &metadata_root.to_string_lossy(),
-            &gopeed::RequestContext::default(),
-        )
-        .await?;
-    state
-        .gopeed_resolves
-        .lock()
-        .map_err(|error| error.to_string())?
-        .insert(source.clone(), resolved.id.clone());
+        .unwrap_or_else(|| Path::new("."));
+    // Remove the legacy inspection directory used by older experimental builds;
+    // it could contain stale .part payloads from incorrectly bound torrents.
+    let legacy_metadata_root = app_data.join("gopeed-runtime").join("metadata");
+    let _ = fs::remove_dir_all(&legacy_metadata_root);
+
+    let inspection_root = app_data
+        .join("gopeed-metadata-inspection")
+        .join(uuid::Uuid::new_v4().simple().to_string());
+    let payload_root = inspection_root.join("payload");
+    fs::create_dir_all(&payload_root).map_err(|error| error.to_string())?;
+    let mut runtime = gopeed::Runtime::spawn(&executable, &inspection_root)?;
+    let endpoint = runtime.endpoint();
+    let resolved_result = async {
+        endpoint.wait_ready().await?;
+        endpoint
+            .resolve(
+                &source,
+                &payload_root.to_string_lossy(),
+                &gopeed::RequestContext::default(),
+            )
+            .await
+    }
+    .await;
+    runtime.terminate();
+    let _ = fs::remove_dir_all(&inspection_root);
+    let resolved = resolved_result?;
     let files = resolved
         .res
         .files
@@ -10363,6 +10369,15 @@ async fn remove_downloads(
 fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
     let partial = partial_path(&task.destination);
     let mut paths = vec![task.destination.clone(), partial];
+    if matches!(
+        classify_url(&task.source),
+        Some(DownloadKind::Torrent | DownloadKind::Magnet)
+    ) {
+        let gopeed_part = PathBuf::from(format!("{}.part", task.destination.display()));
+        if !paths.contains(&gopeed_part) {
+            paths.push(gopeed_part);
+        }
+    }
     let recording_source = PathBuf::from(&task.source);
     if task.source.ends_with(".recording.webm") && recording_source.is_absolute() {
         paths.push(recording_source);
@@ -10491,7 +10506,6 @@ fn main() {
                 request_identities: Mutex::new(HashMap::new()),
                 gopeed_runtime: Mutex::new(None),
                 gopeed_tasks: Mutex::new(HashMap::new()),
-                gopeed_resolves: Mutex::new(HashMap::new()),
                 log_path,
                 log_write_lock: Mutex::new(()),
                 diagnostics: diagnostics_v3::Diagnostics::new(&app_data.join("logs")),
