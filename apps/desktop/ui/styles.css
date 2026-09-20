@@ -951,6 +951,20 @@ footer .bridge-connected i {
 .download-row:last-child {
   border-bottom: 0;
 }
+.download-row.reorderable {
+  cursor: grab;
+}
+.download-row.reorderable:active {
+  cursor: grabbing;
+}
+.download-row.dragging {
+  opacity: 0.5;
+}
+.download-row.drag-over {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
 .download-icon {
   width: 32px;
   height: 32px;
