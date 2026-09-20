@@ -223,6 +223,9 @@ const catalogs = {
     searchHistory: "Search downloads…", importList: "Import list", advancedOptions: "Advanced options", mirrorUrls: "Mirror URLs (one per line)", priority: "Priority", priorityHigh: "High", priorityNormal: "Normal", priorityLow: "Low", verifyIntegrity: "Verify SHA-256", integrityPrompt: "Optional expected SHA-256 (leave blank to calculate only):", integrityOk: "SHA-256 verified",
   },
   "pt-BR": {
+    archiveExtractor: "Extrator de arquivos (7-Zip / RAR / UnRAR / unar / bsdtar / tar)",
+    autoExtract: "Extrair automaticamente após o download",
+    autoExtractHint: "Aparece somente para arquivos compactados. Arquivos soltos ficam dentro de uma pasta com o nome do arquivo compactado.",
     downloads: "Downloads",
     media: "Mídia",
     recordings: "Gravações",
@@ -446,6 +449,9 @@ const catalogs = {
     searchHistory: "Pesquisar downloads…", importList: "Importar lista", advancedOptions: "Opções avançadas", mirrorUrls: "URLs espelho (uma por linha)", priority: "Prioridade", priorityHigh: "Alta", priorityNormal: "Normal", priorityLow: "Baixa", verifyIntegrity: "Verificar SHA-256", integrityPrompt: "SHA-256 esperado opcional (deixe vazio apenas para calcular):", integrityOk: "SHA-256 verificado",
   },
   "zh-CN": {
+    archiveExtractor: "压缩文件解压工具（7-Zip / RAR / UnRAR / unar / bsdtar / tar）",
+    autoExtract: "下载完成后自动解压",
+    autoExtractHint: "仅在压缩文件时显示。根目录中的零散文件会解压到以压缩文件命名的文件夹中。",
     downloads: "下载",
     media: "媒体",
     recordings: "录制",
@@ -2273,6 +2279,7 @@ document.querySelector("#save-tools").onclick = async (event) => {
       qjs: document.querySelector("#tool-qjs").value,
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
       aria2: document.querySelector("#tool-aria2").value,
+      extractor: document.querySelector("#tool-extractor").value,
     });
     await invoke("set_media_player", { path: document.querySelector("#media-player").value });
     toolsDialog.close();
@@ -2402,10 +2409,22 @@ document.querySelector("#regenerate-pairing").onclick = async () => {
     console.error(error);
   }
 };
+function isArchiveFileName(name) {
+  return /\.(zip|7z|rar|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz|tar\.zst|gz|bz2|xz|zst|cab|arj|lha|lzh)$/i.test(String(name || ""));
+}
+function refreshAutoExtractOption() {
+  const option = document.querySelector("#auto-extract-option");
+  const archive = isArchiveFileName(document.querySelector("#file-name").value);
+  option.hidden = !archive;
+  if (!archive) document.querySelector("#auto-extract").checked = false;
+}
+document.querySelector("#file-name").addEventListener("input", refreshAutoExtractOption);
 document.querySelector("#url").oninput = () => {
   document.querySelector("#analysis").hidden = true;
   document.querySelector("#enqueue").hidden = true;
   document.querySelector("#analyze").hidden = false;
+  document.querySelector("#auto-extract").checked = false;
+  document.querySelector("#auto-extract-option").hidden = true;
   resetMediaInspection();
 };
 
@@ -2450,6 +2469,7 @@ async function showMediaInspection(url) {
     else thumbnail.removeAttribute("src");
     for (const format of media.formats) option(select, format.selection, format.label);
     document.querySelector("#file-name").value = media.suggestedFileName;
+    refreshAutoExtractOption();
     panel.hidden = false;
   } catch (error) {
     console.warn(error);
