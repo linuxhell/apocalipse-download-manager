@@ -5360,7 +5360,8 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
                         .collect::<Vec<_>>()
                         .join("\n");
                     if contents.len() > limit {
-                        sanitized.push_str("\n[truncated after 4 MiB; startup portion preserved]\n");
+                        sanitized
+                            .push_str("\n[truncated after 4 MiB; startup portion preserved]\n");
                     }
                     entries.push((format!("logs/aria2/{name}"), sanitized.into_bytes()));
                 }
