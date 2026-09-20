@@ -6,7 +6,8 @@ mod thumbnail_cache;
 mod tiktok_preview;
 
 use apocalipse_core::{
-    classify_url, cleanup_chunk_artifacts, contextual_media_page, parse_metalink, partial_path,
+    chunk_directory, classify_url, cleanup_chunk_artifacts, contextual_media_page, parse_metalink,
+    partial_path,
     plan_download, BandwidthLimiter, Capabilities, DownloadEngine, DownloadEvent, DownloadId,
     DownloadKind, DownloadRequest, DownloadState, DownloadTask,
 };
@@ -4052,6 +4053,7 @@ async fn run_download(
         });
     let request_host = host_from_url(&request.url);
     let mut previous_perf_rate: Option<u64> = None;
+    let mut display_rate_ewma = 0_f64;
     let mut sustainable_peak = 0_u64;
     let mut completed_ok = false;
     let engine_result = match network {
@@ -4157,6 +4159,15 @@ async fn run_download(
                             sustainable_peak = sustainable_peak.max(previous.min(bytes_per_second));
                         }
                         previous_perf_rate = Some(bytes_per_second);
+                        display_rate_ewma = if display_rate_ewma > 0.0 {
+                            bytes_per_second as f64 * 0.35 + display_rate_ewma * 0.65
+                        } else {
+                            bytes_per_second as f64
+                        };
+                        let smoothed_bytes_per_second = display_rate_ewma as u64;
+                        update_task(&app, id, false, |task| {
+                            task.download_speed = Some(smoothed_bytes_per_second);
+                        });
                         app.state::<AppState>().diagnostics.record(
                             "http.performance_sample",
                             "INFO",
@@ -4168,6 +4179,7 @@ async fn run_download(
                                 "intervalBytes": interval_bytes,
                                 "intervalMs": elapsed_ms,
                                 "bytesPerSecond": bytes_per_second,
+                                "smoothedBytesPerSecond": smoothed_bytes_per_second,
                                 "activeConnections": active_connections
                             }),
                         );
@@ -9991,6 +10003,28 @@ async fn remove_downloads(
                     let workspace = parent.join("media-work").join(task.id.to_string());
                     remove_path_with_retry(&workspace, true).await?;
                 }
+            }
+            cleanup_chunk_artifacts(&task.destination)
+                .await
+                .map_err(|error| error.to_string())?;
+            let partial_remaining = partial_path(&task.destination).exists();
+            let chunk_artifacts_remaining = chunk_directory(&task.destination).exists();
+            state.diagnostics.record(
+                "task.removal_disk_cleanup",
+                if partial_remaining || chunk_artifacts_remaining {
+                    "ERROR"
+                } else {
+                    "INFO"
+                },
+                Some(&removal_trace),
+                Some(&task.id.to_string()),
+                serde_json::json!({
+                    "partialRemaining": partial_remaining,
+                    "chunkArtifactsRemaining": chunk_artifacts_remaining
+                }),
+            );
+            if partial_remaining || chunk_artifacts_remaining {
+                return Err("download_cleanup_incomplete".to_owned());
             }
         }
     }

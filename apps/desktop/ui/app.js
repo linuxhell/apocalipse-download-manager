@@ -675,6 +675,7 @@ let clipboardMonitorPrimed = false;
 const busyIds = new Set();
 const selectedIds = new Set();
 const speedSamples = new Map();
+const SPEED_EWMA_SECONDS = 2.0;
 const schedulerPaused = new Set();
 let selectionPointerActive = false;
 let historyQuery = "";
@@ -743,7 +744,10 @@ function updateSpeeds(tasks) {
       const delta = Math.max(0, task.received - previous.bytes);
       if (delta > 0) {
         const instantaneous = delta / elapsed;
-        speed = previous.speed ? instantaneous * 0.65 + previous.speed * 0.35 : instantaneous;
+        const alpha = 1 - Math.exp(-elapsed / SPEED_EWMA_SECONDS);
+        speed = previous.speed
+          ? instantaneous * alpha + previous.speed * (1 - alpha)
+          : instantaneous;
       } else if (now - changedAt >= 1500) {
         speed = 0;
       }
@@ -1701,36 +1705,35 @@ document.querySelector("#clear-destinations").onclick = async () => {
 document
   .querySelectorAll("[data-clear-cancel]")
   .forEach((button) => (button.onclick = () => clearDialog.close()));
-document.querySelectorAll("[data-clear-mode]").forEach((button) => {
-  button.onclick = async () => {
-    button.disabled = true;
-    const ids = [...selectedIds];
-    downloadListState.beginRemoval(ids);
-    let removed = false;
-    try {
-      await invoke("remove_downloads", {
-        ids,
-        deleteFiles: button.dataset.clearMode === "files",
-      });
-      removed = true;
-      downloadListState.finishRemoval(ids, true);
-      downloads = downloadListState.visible(downloads);
-      for (const id of ids) selectedIds.delete(id);
-      renderDownloads(true);
-      clearDialog.close();
+async function removeSelectedDownloads(button, deleteFiles) {
+  button.disabled = true;
+  const ids = [...selectedIds];
+  downloadListState.beginRemoval(ids);
+  let removed = false;
+  try {
+    await invoke("remove_downloads", { ids, deleteFiles });
+    removed = true;
+    downloadListState.finishRemoval(ids, true);
+    downloads = downloadListState.visible(downloads);
+    for (const id of ids) selectedIds.delete(id);
+    renderDownloads(true);
+    clearDialog.close();
+    await refreshDownloads();
+  } catch (error) {
+    console.error(error);
+    window.alert(`${t("removeFailed")}: ${error}`);
+  } finally {
+    if (!removed) {
+      downloadListState.finishRemoval(ids, false);
       await refreshDownloads();
-    } catch (error) {
-      console.error(error);
-      window.alert(`${t("removeFailed")}: ${error}`);
-    } finally {
-      if (!removed) {
-        downloadListState.finishRemoval(ids, false);
-        await refreshDownloads();
-      }
-      button.disabled = false;
     }
-  };
-});
+    button.disabled = false;
+  }
+}
+document.querySelector("#clear-list-only").onclick = (event) =>
+  removeSelectedDownloads(event.currentTarget, false);
+document.querySelector("#clear-list-and-files").onclick = (event) =>
+  removeSelectedDownloads(event.currentTarget, true);
 function updateProxyControls() {
   const enabled = document.querySelector("#proxy-enabled").checked;
   for (const id of ["#proxy-url", "#proxy-username", "#proxy-password", "#proxy-clear-password"]) {

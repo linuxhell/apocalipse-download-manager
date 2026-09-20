@@ -577,6 +577,9 @@ impl Diagnostics {
                 || name.starts_with("http.resume_")
                 || name.starts_with("http.segment_")
                 || name.starts_with("http.performance_")
+                || name.starts_with("http.scheduler_")
+                || name.starts_with("http.connection_")
+                || name.starts_with("http.capacity_")
                 || name.starts_with("http.transfer_")
                 || name.starts_with("http.transport_")
                 || name.starts_with("http.range_")
@@ -605,15 +608,39 @@ impl Diagnostics {
             .iter()
             .filter(|record| record["event"] == "http.performance_sample")
             .collect::<Vec<_>>();
+        let scheduler_samples = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.scheduler_sample")
+            .collect::<Vec<_>>();
+        let admission_events = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.connection_admission")
+            .collect::<Vec<_>>();
+        let capacity_events = transfer_engine
+            .iter()
+            .filter(|record| record["event"] == "http.capacity_observed")
+            .collect::<Vec<_>>();
         let segment_samples = transfer_engine
             .iter()
             .filter(|record| record["event"] == "http.segment_completed")
             .collect::<Vec<_>>();
-        let peak_bytes_per_second = performance_samples
+        let mut performance_rates = performance_samples
             .iter()
             .filter_map(|record| record["detail"]["bytesPerSecond"].as_u64())
-            .max()
-            .unwrap_or(0);
+            .collect::<Vec<_>>();
+        performance_rates.sort_unstable();
+        let peak_bytes_per_second = performance_rates.iter().copied().max().unwrap_or(0);
+        let minimum_bytes_per_second = performance_rates.iter().copied().min().unwrap_or(0);
+        let average_performance_bytes_per_second = if performance_rates.is_empty() {
+            0
+        } else {
+            performance_rates.iter().sum::<u64>() / performance_rates.len() as u64
+        };
+        let median_performance_bytes_per_second = if performance_rates.is_empty() {
+            0
+        } else {
+            performance_rates[performance_rates.len() / 2]
+        };
         let average_segment_bytes_per_second = if segment_samples.is_empty() {
             0
         } else {
@@ -649,6 +676,48 @@ impl Diagnostics {
             .filter_map(|record| record["detail"]["sourceCount"].as_u64())
             .max()
             .unwrap_or(0);
+        let transition_gaps = segment_samples
+            .iter()
+            .filter_map(|record| record["detail"]["transitionGapMs"].as_u64())
+            .collect::<Vec<_>>();
+        let average_transition_gap_ms = if transition_gaps.is_empty() {
+            0
+        } else {
+            transition_gaps.iter().sum::<u64>() / transition_gaps.len() as u64
+        };
+        let max_transition_gap_ms = transition_gaps.iter().copied().max().unwrap_or(0);
+        let reprobes_after_capacity_drop = admission_events
+            .iter()
+            .filter(|record| {
+                matches!(
+                    record["detail"]["decision"].as_str(),
+                    Some("reprobe_after_capacity_drop")
+                        | Some("reprobe_after_sustained_capacity_drop")
+                )
+            })
+            .count();
+        let rejected_admission_levels = admission_events
+            .iter()
+            .filter(|record| record["detail"]["decision"] == "reject_marginal_level")
+            .count();
+        let suppressed_recent_reprobes = admission_events
+            .iter()
+            .filter(|record| {
+                record["detail"]["decision"] == "reprobe_suppressed_recent_rejection"
+            })
+            .count();
+        let worker_stall_snapshots = scheduler_samples
+            .iter()
+            .filter(|record| {
+                record["detail"]["workers"]
+                    .as_array()
+                    .is_some_and(|workers| {
+                        workers.iter().any(|worker| {
+                            worker["lastProgressAgeMs"].as_u64().unwrap_or(0) >= 1_500
+                        })
+                    })
+            })
+            .count();
         let mut transports = HashMap::<String, u64>::new();
         for record in &segment_samples {
             if let Some(transport) = record["detail"]["transport"].as_str() {
@@ -656,12 +725,24 @@ impl Diagnostics {
             }
         }
         let transfer_summary = json!({
-            "telemetryVersion": 1,
+            "telemetryVersion": 2,
             "events": transfer_engine.len(),
             "performanceSamples": performance_samples.len(),
+            "schedulerSamples": scheduler_samples.len(),
+            "connectionAdmissionEvents": admission_events.len(),
+            "capacityObservations": capacity_events.len(),
             "segmentsCompleted": segment_samples.len(),
+            "minimumPerformanceBytesPerSecond": minimum_bytes_per_second,
+            "averagePerformanceBytesPerSecond": average_performance_bytes_per_second,
+            "medianPerformanceBytesPerSecond": median_performance_bytes_per_second,
             "peakBytesPerSecond": peak_bytes_per_second,
             "averageSegmentBytesPerSecond": average_segment_bytes_per_second,
+            "averageTransitionGapMs": average_transition_gap_ms,
+            "maxTransitionGapMs": max_transition_gap_ms,
+            "reprobesAfterCapacityDrop": reprobes_after_capacity_drop,
+            "rejectedAdmissionLevels": rejected_admission_levels,
+            "suppressedRecentReprobes": suppressed_recent_reprobes,
+            "workerStallSnapshots": worker_stall_snapshots,
             "mirrorFallbackSegments": mirror_fallback_segments,
             "rangeSteals": range_steals,
             "stolenBytes": stolen_bytes,
@@ -729,6 +810,24 @@ impl Diagnostics {
             (
                 "performance/transfer-engine.jsonl".into(),
                 jsonl(&transfer_engine),
+            ),
+            (
+                "performance/scheduler-samples.jsonl".into(),
+                jsonl(
+                    &scheduler_samples
+                        .iter()
+                        .map(|record| (*record).clone())
+                        .collect::<Vec<_>>(),
+                ),
+            ),
+            (
+                "performance/admission.jsonl".into(),
+                jsonl(
+                    &admission_events
+                        .iter()
+                        .map(|record| (*record).clone())
+                        .collect::<Vec<_>>(),
+                ),
             ),
             (
                 "performance/summary.json".into(),
@@ -892,11 +991,32 @@ mod tests {
             json!({"bytesPerSecond":125000000u64,"activeConnections":16}),
         );
         diag.record(
+            "http.scheduler_sample",
+            "INFO",
+            None,
+            Some(&task),
+            json!({"bytesPerSecond":250000000u64,"admittedConnections":2,"workers":[]}),
+        );
+        diag.record(
+            "http.connection_admission",
+            "INFO",
+            None,
+            Some(&task),
+            json!({"decision":"reject_marginal_level","admittedConnections":2}),
+        );
+        diag.record(
+            "http.capacity_observed",
+            "INFO",
+            None,
+            Some(&task),
+            json!({"sustainedBytesPerSecond":130000000u64}),
+        );
+        diag.record(
             "http.segment_completed",
             "INFO",
             None,
             Some(&task),
-            json!({"bytesPerSecond":120000000u64,"attempts":2,"sourceCount":3,"transport":"HTTP/2"}),
+            json!({"bytesPerSecond":120000000u64,"attempts":2,"sourceCount":3,"transport":"HTTP/2","transitionGapMs":42}),
         );
         let exports = diag.export();
         let summary = exports
@@ -904,12 +1024,23 @@ mod tests {
             .find(|(name, _)| name == "performance/summary.json")
             .map(|(_, bytes)| serde_json::from_slice::<Value>(bytes).unwrap())
             .unwrap();
+        assert_eq!(summary["telemetryVersion"], 2);
         assert_eq!(summary["peakBytesPerSecond"], 125000000u64);
+        assert_eq!(summary["schedulerSamples"], 1);
+        assert_eq!(summary["connectionAdmissionEvents"], 1);
+        assert_eq!(summary["capacityObservations"], 1);
+        assert_eq!(summary["maxTransitionGapMs"], 42);
         assert_eq!(summary["mirrorFallbackSegments"], 1);
         assert_eq!(summary["maxSourceCount"], 3);
         assert!(exports
             .iter()
             .any(|(name, _)| name == "performance/transfer-engine.jsonl"));
+        assert!(exports
+            .iter()
+            .any(|(name, _)| name == "performance/scheduler-samples.jsonl"));
+        assert!(exports
+            .iter()
+            .any(|(name, _)| name == "performance/admission.jsonl"));
         let _ = fs::remove_dir_all(path);
     }
 

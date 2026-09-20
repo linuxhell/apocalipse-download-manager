@@ -43,14 +43,36 @@ const ADMISSION_SAMPLE_INTERVAL_MS: u64 = 800;
 const ADMISSION_MIN_PROPORTIONAL_GAIN: f64 = 0.15;
 const ADMISSION_INITIAL_WORKERS: usize = 2;
 const ADMISSION_RECOVERY_FRACTION: f64 = 0.82;
-const ADMISSION_RECOVERY_SAMPLES: u8 = 2;
+const ADMISSION_RECOVERY_EWMA_ALPHA: f64 = 0.25;
+const ADMISSION_RECOVERY_MIN_BELOW_MS: u64 = 3_200;
 const ADMISSION_REPROBE_COOLDOWN_MS: u64 = 4_000;
+const ADMISSION_REJECT_BACKOFF_MS: u64 = 20_000;
 
 #[derive(Debug, Clone, Copy)]
 struct SegmentWork {
     parent_index: usize,
     start: u64,
     end: u64,
+}
+
+struct AbortOnDropTask {
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl AbortOnDropTask {
+    fn new(handle: tokio::task::JoinHandle<()>) -> Self {
+        Self { handle }
+    }
+
+    fn abort(&self) {
+        self.handle.abort();
+    }
+}
+
+impl Drop for AbortOnDropTask {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
 }
 
 struct AdaptiveWorkerState {
@@ -1033,15 +1055,18 @@ impl DownloadEngine {
             let adaptive_admission = request.adaptive_connections;
             let network_capacity_hint = request.network_capacity_hint_bps.unwrap_or(0) as f64;
             let host_capacity_hint = request.host_capacity_hint_bps.unwrap_or(0) as f64;
-            tokio::spawn(async move {
+            AbortOnDropTask::new(tokio::spawn(async move {
                 let mut ewma_rates = vec![0_f64; states.len()];
                 let mut admission_baseline: Option<(usize, f64)> = None;
                 let mut admission_settled =
                     !adaptive_admission || initial_active_workers >= states.len();
                 let mut admission_held_rate: Option<f64> = None;
                 let mut admission_skip_sample = adaptive_admission && !admission_settled;
-                let mut recovery_low_samples = 0_u8;
+                let mut recovery_ewma_rate: Option<f64> = None;
+                let mut recovery_below_target_ms = 0_u64;
+                let mut last_rejected_level: Option<(usize, u64)> = None;
                 let mut last_reprobe_ms = 0_u64;
+                let mut last_scheduler_diagnostic_ms = 0_u64;
                 let mut stable_capacity = host_capacity_hint;
                 let mut previous_interval_rate: Option<f64> = None;
                 let mut last_admission_ms = 0_u64;
@@ -1059,6 +1084,8 @@ impl DownloadEngine {
                     let now_ms = transfer_started.elapsed().as_millis() as u64;
                     let admitted_workers = active_limit.load(Ordering::Acquire).min(states.len());
                     let mut aggregate_window_bytes = 0_u64;
+                    let mut active_workers = 0_usize;
+                    let mut worker_samples = Vec::new();
                     for (index, state) in states.iter().take(admitted_workers).enumerate() {
                         let bytes = state.window_bytes.swap(0, Ordering::AcqRel);
                         aggregate_window_bytes = aggregate_window_bytes.saturating_add(bytes);
@@ -1070,17 +1097,51 @@ impl DownloadEngine {
                                 rate
                             };
                         }
+                        if state.active.load(Ordering::Acquire) {
+                            active_workers += 1;
+                            let current = state.current.load(Ordering::Acquire);
+                            let end = state.desired_end.load(Ordering::Acquire);
+                            worker_samples.push(serde_json::json!({
+                                "workerIndex": index,
+                                "parentChunk": state.parent_index.load(Ordering::Acquire),
+                                "currentOffset": current,
+                                "rangeEnd": end,
+                                "remainingBytes": end.saturating_sub(current).saturating_add(1),
+                                "windowBytes": bytes,
+                                "windowBytesPerSecond": rate as u64,
+                                "ewmaBytesPerSecond": ewma_rates[index] as u64,
+                                "lastProgressAgeMs": now_ms.saturating_sub(
+                                    state.last_progress_ms.load(Ordering::Acquire)
+                                )
+                            }));
+                        }
                     }
                     let aggregate_rate = aggregate_window_bytes.saturating_mul(1000)
                         / RANGE_STEAL_INTERVAL_MS.max(1);
-                    let _ = sender.try_send(DownloadEvent::Diagnostic {
-                        event: "http.performance_sample",
-                        detail: serde_json::json!({
-                            "bytesPerSecond": aggregate_rate,
-                            "admittedConnections": active_limit.load(Ordering::Acquire),
-                            "maxConnections": states.len()
-                        }),
-                    });
+                    if now_ms.saturating_sub(last_scheduler_diagnostic_ms)
+                        >= ADMISSION_SAMPLE_INTERVAL_MS
+                    {
+                        last_scheduler_diagnostic_ms = now_ms;
+                        let queue_depth = queue.lock().await.len();
+                        let _ = sender.try_send(DownloadEvent::Diagnostic {
+                            event: "http.scheduler_sample",
+                            detail: serde_json::json!({
+                                "bytesPerSecond": aggregate_rate,
+                                "sampleWindowMs": RANGE_STEAL_INTERVAL_MS,
+                                "windowBytes": aggregate_window_bytes,
+                                "admittedConnections": admitted_workers,
+                                "activeWorkers": active_workers,
+                                "idleWorkers": admitted_workers.saturating_sub(active_workers),
+                                "maxConnections": states.len(),
+                                "queueDepth": queue_depth,
+                                "outstandingRanges": outstanding.load(Ordering::Acquire),
+                                "progressBytes": shared_progress.load(Ordering::Acquire),
+                                "stableCapacityBytesPerSecond": stable_capacity as u64,
+                                "admissionSettled": admission_settled,
+                                "workers": worker_samples
+                            }),
+                        });
+                    }
 
                     if adaptive_admission
                         && now_ms.saturating_sub(last_admission_ms) >= ADMISSION_SAMPLE_INTERVAL_MS
@@ -1111,43 +1172,86 @@ impl DownloadEngine {
                         let current_limit = active_limit.load(Ordering::Acquire).max(1);
                         if admission_settled {
                             let recovery_target = stable_capacity.max(host_capacity_hint);
+                            let recovery_rate = recovery_ewma_rate
+                                .map(|previous| {
+                                    ADMISSION_RECOVERY_EWMA_ALPHA * interval_rate
+                                        + (1.0 - ADMISSION_RECOVERY_EWMA_ALPHA) * previous
+                                })
+                                .unwrap_or(interval_rate);
+                            recovery_ewma_rate = Some(recovery_rate);
+
                             if current_limit < states.len()
                                 && recovery_target > 0.0
-                                && interval_rate < recovery_target * ADMISSION_RECOVERY_FRACTION
+                                && recovery_rate < recovery_target * ADMISSION_RECOVERY_FRACTION
                             {
-                                recovery_low_samples = recovery_low_samples.saturating_add(1);
+                                recovery_below_target_ms =
+                                    recovery_below_target_ms.saturating_add(elapsed_ms);
                             } else if recovery_target == 0.0
-                                || interval_rate >= recovery_target * 0.90
+                                || recovery_rate >= recovery_target * 0.90
                             {
-                                recovery_low_samples = 0;
+                                recovery_below_target_ms = 0;
+                            } else {
+                                recovery_below_target_ms =
+                                    recovery_below_target_ms.saturating_sub(elapsed_ms / 2);
                             }
 
-                            if recovery_low_samples >= ADMISSION_RECOVERY_SAMPLES
+                            if recovery_below_target_ms >= ADMISSION_RECOVERY_MIN_BELOW_MS
                                 && current_limit < states.len()
                                 && now_ms.saturating_sub(last_reprobe_ms)
                                     >= ADMISSION_REPROBE_COOLDOWN_MS
                             {
                                 let next = next_admission_level(current_limit, states.len());
-                                admission_baseline = Some((current_limit, interval_rate));
-                                admission_settled = false;
-                                admission_held_rate = None;
-                                admission_skip_sample = true;
-                                recovery_low_samples = 0;
+                                let below_target_ms = recovery_below_target_ms;
+                                let recent_rejection = last_rejected_level.is_some_and(
+                                    |(level, rejected_at_ms)| {
+                                        level == next
+                                            && now_ms.saturating_sub(rejected_at_ms)
+                                                < ADMISSION_REJECT_BACKOFF_MS
+                                    },
+                                );
+                                recovery_below_target_ms = 0;
                                 last_reprobe_ms = now_ms;
-                                active_limit.store(next, Ordering::Release);
-                                notify.notify_waiters();
-                                let _ = sender.try_send(DownloadEvent::Diagnostic {
-                                    event: "http.connection_admission",
-                                    detail: serde_json::json!({
-                                        "decision": "reprobe_after_capacity_drop",
-                                        "previousConnections": current_limit,
-                                        "admittedConnections": next,
-                                        "baselineBytesPerSecond": interval_rate as u64,
-                                        "targetBytesPerSecond": recovery_target as u64,
-                                        "recoveryFraction": ADMISSION_RECOVERY_FRACTION,
-                                        "settled": false
-                                    }),
-                                });
+
+                                if recent_rejection {
+                                    let rejected_at_ms =
+                                        last_rejected_level.map(|(_, at)| at).unwrap_or_default();
+                                    let _ = sender.try_send(DownloadEvent::Diagnostic {
+                                        event: "http.connection_admission",
+                                        detail: serde_json::json!({
+                                            "decision": "reprobe_suppressed_recent_rejection",
+                                            "previousConnections": current_limit,
+                                            "candidateConnections": next,
+                                            "recoveryEwmaBytesPerSecond": recovery_rate as u64,
+                                            "targetBytesPerSecond": recovery_target as u64,
+                                            "belowTargetMs": below_target_ms,
+                                            "remainingBackoffMs": ADMISSION_REJECT_BACKOFF_MS
+                                                .saturating_sub(now_ms.saturating_sub(rejected_at_ms)),
+                                            "settled": true
+                                        }),
+                                    });
+                                } else {
+                                    admission_baseline = Some((current_limit, recovery_rate));
+                                    admission_settled = false;
+                                    admission_held_rate = None;
+                                    admission_skip_sample = true;
+                                    recovery_ewma_rate = None;
+                                    active_limit.store(next, Ordering::Release);
+                                    notify.notify_waiters();
+                                    let _ = sender.try_send(DownloadEvent::Diagnostic {
+                                        event: "http.connection_admission",
+                                        detail: serde_json::json!({
+                                            "decision": "reprobe_after_sustained_capacity_drop",
+                                            "previousConnections": current_limit,
+                                            "admittedConnections": next,
+                                            "baselineBytesPerSecond": recovery_rate as u64,
+                                            "intervalBytesPerSecond": interval_rate as u64,
+                                            "targetBytesPerSecond": recovery_target as u64,
+                                            "recoveryFraction": ADMISSION_RECOVERY_FRACTION,
+                                            "belowTargetMs": below_target_ms,
+                                            "settled": false
+                                        }),
+                                    });
+                                }
                             }
                         } else if admission_skip_sample {
                             // Hydra-style warm-up: do not judge a newly admitted
@@ -1167,6 +1271,7 @@ impl DownloadEngine {
                                     interval_rate,
                                 );
                                 if gain_frac >= ADMISSION_MIN_PROPORTIONAL_GAIN {
+                                    last_rejected_level = None;
                                     admission_baseline = Some((current_limit, interval_rate));
                                     stable_capacity = stable_capacity.max(interval_rate);
                                     if current_limit < states.len() {
@@ -1205,7 +1310,9 @@ impl DownloadEngine {
                                     active_limit.store(baseline_limit, Ordering::Release);
                                     notify.notify_waiters();
                                     admission_settled = true;
-                                    recovery_low_samples = 0;
+                                    recovery_ewma_rate = None;
+                                    recovery_below_target_ms = 0;
+                                    last_rejected_level = Some((current_limit, now_ms));
                                     let _ = sender.try_send(DownloadEvent::Diagnostic {
                                         event: "http.connection_admission",
                                         detail: serde_json::json!({
@@ -1383,7 +1490,7 @@ impl DownloadEngine {
                         }),
                     });
                 }
-            })
+            }))
         };
 
         let mut jobs = FuturesUnordered::new();
@@ -1499,6 +1606,23 @@ impl DownloadEngine {
                         }
 
                         let protocol = format!("{:?}", response.version());
+                        let response_header_ms = attempt_started.elapsed().as_millis() as u64;
+                        let _ = sender.try_send(DownloadEvent::Diagnostic {
+                            event: "http.segment_started",
+                            detail: serde_json::json!({
+                                "workerIndex": worker_index,
+                                "chunkIndex": work.parent_index,
+                                "rangeStart": work.start,
+                                "rangeEnd": work.end,
+                                "sourceIndex": source_index,
+                                "sourceCount": sources.len(),
+                                "transportAttempts": transport_attempts,
+                                "http3Preferred": prefer_http3,
+                                "http3Used": used_http3,
+                                "responseHeaderMs": response_header_ms,
+                                "transport": protocol
+                            }),
+                        });
                         let mut file = fs::OpenOptions::new()
                             .write(true)
                             .open(&partial)
@@ -1509,6 +1633,7 @@ impl DownloadEngine {
                         let mut absolute = work.start;
                         let mut attempt_error = None;
                         let mut transition_gap_ms = None;
+                        let mut first_byte_wait_ms = None;
 
                         while let Some(chunk) = stream.next().await {
                             match chunk {
@@ -1526,6 +1651,8 @@ impl DownloadEngine {
                                     if downloaded == 0 {
                                         transition_gap_ms = previous_segment_completed
                                             .map(|completed| completed.elapsed().as_millis() as u64);
+                                        first_byte_wait_ms =
+                                            Some(attempt_started.elapsed().as_millis() as u64);
                                     }
                                     apply_bandwidth_limits(&limiters, allowed).await;
                                     if let Err(error) = file.write_all(&chunk[..allowed]).await {
@@ -1601,6 +1728,7 @@ impl DownloadEngine {
                         let _ = sender.try_send(DownloadEvent::Diagnostic {
                             event: "http.segment_completed",
                             detail: serde_json::json!({
+                                "workerIndex": worker_index,
                                 "chunkIndex": work.parent_index,
                                 "chunkCount": chunk_count,
                                 "rangeStart": work.start,
@@ -1614,6 +1742,8 @@ impl DownloadEngine {
                                 "http3Preferred": prefer_http3,
                                 "http3Used": used_http3,
                                 "elapsedMs": elapsed_ms,
+                                "responseHeaderMs": response_header_ms,
+                                "firstByteWaitMs": first_byte_wait_ms,
                                 "transitionGapMs": transition_gap_ms,
                                 "bytesPerSecond": if elapsed_ms > 0 {
                                     completed_bytes.saturating_mul(1000) / elapsed_ms
@@ -2119,15 +2249,48 @@ fn legacy_chunk_path(destination: &Path, index: usize) -> PathBuf {
     PathBuf::from(format!("{}.part.chunk.{index:06}", destination.display()))
 }
 
+async fn remove_dir_all_with_retry(path: &Path) -> Result<()> {
+    let mut last_error = None;
+    for attempt in 0..6_u64 {
+        match fs::remove_dir_all(path).await {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+        tokio::time::sleep(Duration::from_millis(50 * (attempt + 1))).await;
+    }
+    Err(last_error
+        .unwrap_or_else(|| std::io::Error::other("directory cleanup failed"))
+        .into())
+}
+
+async fn remove_empty_dir_with_retry(path: &Path) -> Result<()> {
+    let mut last_error = None;
+    for attempt in 0..6_u64 {
+        match fs::remove_dir(path).await {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                ) =>
+            {
+                return Ok(());
+            }
+            Err(error) => last_error = Some(error),
+        }
+        tokio::time::sleep(Duration::from_millis(50 * (attempt + 1))).await;
+    }
+    Err(last_error
+        .unwrap_or_else(|| std::io::Error::other("empty directory cleanup failed"))
+        .into())
+}
+
 pub async fn cleanup_chunk_artifacts(destination: &Path) -> Result<()> {
     let directory = chunk_directory(destination);
-    match fs::remove_dir_all(&directory).await {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
-    }
+    remove_dir_all_with_retry(&directory).await?;
     if let Some(root) = directory.parent() {
-        let _ = fs::remove_dir(root).await;
+        remove_empty_dir_with_retry(root).await?;
     }
 
     let Some(parent) = destination.parent() else {
@@ -2437,6 +2600,22 @@ mod tests {
         assert!(filtered
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("user-agent")));
+    }
+
+    #[tokio::test]
+    async fn cleanup_removes_exact_chunk_directory_and_empty_root() {
+        let root =
+            std::env::temp_dir().join(format!("apocalipse-chunk-root-{}", uuid::Uuid::new_v4()));
+        let destination = root.join("image.iso");
+        let directory = chunk_directory(&destination);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("segments-a.json"), b"{}").unwrap();
+
+        cleanup_chunk_artifacts(&destination).await.unwrap();
+
+        assert!(!directory.exists());
+        assert!(!root.join(".apocalipse-parts").exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
