@@ -4574,7 +4574,7 @@ async fn run_gopeed_download(
             return;
         }
     };
-    let (context, connections) = gopeed_request_context(&state, &task);
+    let (context, requested_connections) = gopeed_request_context(&state, &task);
     let existing_task = task.gopeed_task_id.clone().or_else(|| {
         state
             .gopeed_tasks
@@ -4605,6 +4605,11 @@ async fn run_gopeed_download(
                 .filter_map(|index| index.checked_sub(1))
                 .collect::<Vec<_>>();
             let is_http = matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp);
+            let applied_connections = if is_http {
+                gopeed::applied_http_connections(requested_connections)
+            } else {
+                requested_connections
+            };
             let resolved_id = if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
                 // A BitTorrent fetcher binds its anacrolix storage during Resolve.
                 // Always resolve against the user's actual destination immediately
@@ -4638,7 +4643,7 @@ async fn run_gopeed_download(
                 .create_task(
                     &task.source,
                     &task.destination,
-                    connections,
+                    requested_connections,
                     &selected_files,
                     &context,
                     resolved_id.as_deref(),
@@ -4675,7 +4680,9 @@ async fn run_gopeed_download(
         &state,
         "INFO",
         "gopeed.task_started",
-        &format!("task={id} gopeed_task={gopeed_id} engine={kind:?} connections={connections}"),
+        &format!(
+            "task={id} gopeed_task={gopeed_id} engine={kind:?} requested_connections={requested_connections} applied_connections={applied_connections}"
+        ),
     );
     state.diagnostics.record(
         "http.engine_selected",
@@ -4684,7 +4691,8 @@ async fn run_gopeed_download(
         Some(&id.to_string()),
         serde_json::json!({
             "engine": "gopeed",
-            "connections": connections,
+            "requestedConnections": requested_connections,
+            "appliedConnections": applied_connections,
             "kind": format!("{kind:?}")
         }),
     );
@@ -4746,6 +4754,8 @@ async fn run_gopeed_download(
                     Some(&id.to_string()),
                     serde_json::json!({
                         "engine": "gopeed",
+                        "requestedConnections": requested_connections,
+                        "appliedConnections": applied_connections,
                         "bytesPerSecond": raw_speed,
                         "reportedBytesPerSecond": status.speed,
                         "receivedBytes": status.downloaded,
