@@ -1249,7 +1249,8 @@ impl DownloadEngine {
                                     admission_skip_sample = true;
                                     recovery_ewma_rate = None;
                                     let newly_enabled = enable_workers_to(&states, next);
-                                    active_limit.store(count_enabled_workers(&states), Ordering::Release);
+                                    active_limit
+                                        .store(count_enabled_workers(&states), Ordering::Release);
                                     notify.notify_waiters();
                                     let _ = sender.try_send(DownloadEvent::Diagnostic {
                                         event: "http.connection_admission",
@@ -1293,7 +1294,10 @@ impl DownloadEngine {
                                         let next =
                                             next_admission_level(current_limit, states.len());
                                         let newly_enabled = enable_workers_to(&states, next);
-                                        active_limit.store(count_enabled_workers(&states), Ordering::Release);
+                                        active_limit.store(
+                                            count_enabled_workers(&states),
+                                            Ordering::Release,
+                                        );
                                         notify.notify_waiters();
                                         admission_skip_sample = true;
                                         let _ = sender.try_send(DownloadEvent::Diagnostic {
@@ -1325,7 +1329,11 @@ impl DownloadEngine {
                                     }
                                 } else {
                                     let (retained_workers, disabled_workers) =
-                                        retain_fastest_workers(&states, &ewma_rates, baseline_limit);
+                                        retain_fastest_workers(
+                                            &states,
+                                            &ewma_rates,
+                                            baseline_limit,
+                                        );
                                     active_limit.store(retained_workers.len(), Ordering::Release);
                                     let mut drained_workers = Vec::new();
                                     for worker_index in disabled_workers.iter().copied() {
@@ -1339,8 +1347,9 @@ impl DownloadEngine {
                                             continue;
                                         }
                                         let remaining = old_end - current + 1;
-                                        if remaining <= DOWNSCALE_DRAIN_BYTES
-                                            .saturating_add(MIN_STEAL_TAIL_BYTES)
+                                        if remaining
+                                            <= DOWNSCALE_DRAIN_BYTES
+                                                .saturating_add(MIN_STEAL_TAIL_BYTES)
                                         {
                                             continue;
                                         }
@@ -1409,7 +1418,8 @@ impl DownloadEngine {
                             if current_limit < states.len() {
                                 let next = next_admission_level(current_limit, states.len());
                                 let newly_enabled = enable_workers_to(&states, next);
-                                active_limit.store(count_enabled_workers(&states), Ordering::Release);
+                                active_limit
+                                    .store(count_enabled_workers(&states), Ordering::Release);
                                 notify.notify_waiters();
                                 admission_skip_sample = true;
                                 let _ = sender.try_send(DownloadEvent::Diagnostic {
@@ -1908,9 +1918,7 @@ fn retain_fastest_workers(
     let mut enabled = states
         .iter()
         .enumerate()
-        .filter_map(|(index, state)| {
-            state.enabled.load(Ordering::Acquire).then_some(index)
-        })
+        .filter_map(|(index, state)| state.enabled.load(Ordering::Acquire).then_some(index))
         .collect::<Vec<_>>();
     enabled.sort_by(|left, right| {
         ewma_rates[*right]
