@@ -7860,15 +7860,25 @@ fn start_download(
         ));
         return Ok(());
     }
-    let native_http_compatibility =
-        kind == DownloadKind::Http && requires_native_http_compatibility(&task.source);
+    let special_http_request = kind == DownloadKind::Http
+        && state
+            .request_identities
+            .lock()
+            .ok()
+            .and_then(|items| items.get(&task.id).cloned())
+            .is_some_and(|identity| {
+                !identity.request_method.eq_ignore_ascii_case("GET")
+                    || identity.request_body.as_deref().is_some_and(|body| !body.is_empty())
+            });
+    let native_http_compatibility = kind == DownloadKind::Http
+        && (requires_native_http_compatibility(&task.source) || special_http_request);
     if native_http_compatibility {
         diagnostic_log(
             state,
             "INFO",
             "http.native_compatibility_route",
             &format!(
-                "task={} reason=gopeed_http_compatibility host={}",
+                "task={} reason=aria2_rpc_compatibility host={}",
                 task.id,
                 host_from_url(&task.source).unwrap_or_default()
             ),
@@ -7887,10 +7897,10 @@ fn start_download(
         diagnostic_log(
             state,
             "INFO",
-            "gopeed.dispatched",
+            "aria2.dispatched",
             &format!("task={} engine={kind:?}", task.id),
         );
-        tauri::async_runtime::spawn(run_gopeed_download(
+        tauri::async_runtime::spawn(run_aria2_download(
             app.clone(),
             task.id,
             task,
