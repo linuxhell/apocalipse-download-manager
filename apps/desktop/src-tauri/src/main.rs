@@ -2459,9 +2459,23 @@ async fn check_app_update() -> Result<AppUpdateStatus, String> {
         .and_then(valid_apocalipse_release_url)
         .unwrap_or("https://github.com/linuxhell/apocalipse-download-manager/releases")
         .to_owned();
-    let release_name = payload["name"].as_str().unwrap_or_default().trim().to_owned();
-    let release_notes = payload["body"].as_str().unwrap_or_default().trim().chars().take(6000).collect();
-    let published_at = payload["published_at"].as_str().unwrap_or_default().trim().to_owned();
+    let release_name = payload["name"]
+        .as_str()
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    let release_notes = payload["body"]
+        .as_str()
+        .unwrap_or_default()
+        .trim()
+        .chars()
+        .take(6000)
+        .collect();
+    let published_at = payload["published_at"]
+        .as_str()
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
     Ok(AppUpdateStatus {
         update_available: version_numbers(&latest) > version_numbers(&current),
         current_version: current,
