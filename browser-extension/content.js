@@ -1263,24 +1263,9 @@
         trace("overlay_download_clicked", "download", { tag: element.tagName, facebook: isFacebookVideo, tiktokPage: isTikTokPage, tiktokPermalink: isTikTokVideo, overlays: activeOverlays.size });
         const visibleFacebookUrl = isFacebookVideo && isFacebookMediaUrl(location.href) ? location.href : null;
         const immediateFacebookUrl = isFacebookVideo ? facebookUrlFor(element) : null;
-        // Non-sponsored Facebook stream players without a stable permalink can
-        // still fall back to recording from Download. Sponsored posts never
-        // expose Download at all; they show only the Record control.
-        if (isFacebookVideo && canRecord && recordButton
-          && element.srcObject && !immediateFacebookUrl
-          && !facebookSponsoredEvidence(element)) {
-          trace("overlay_download_recording_redirect", "download", {
-            reason: "facebook_stream_without_permalink",
-            sponsored: false,
-            hasSrcObject: true,
-            permalinkFound: false,
-          });
-          button.textContent = "●";
-          button.title = recordingLabels().record;
-          recordButton.click();
-          setTimeout(() => { restoreDownloadLabel(); button.title = "Apocalipse Download Manager"; }, 1800);
-          return;
-        }
+        // Normal Facebook Reels must attempt permalink/extractor resolution
+        // even when the visible player is backed by srcObject. Sponsored posts
+        // never reach this handler because their Download button is hidden.
         const resolved = visibleFacebookUrl || immediateFacebookUrl
           || (isFacebookVideo ? await revealFacebookUrl(element) : tikTokUrlFor(element) || await resolveDownloadUrl(element));
         // The Reel/post permalink represents the complete video. A recent CDN
