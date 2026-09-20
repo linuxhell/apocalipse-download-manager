@@ -259,6 +259,14 @@ test("Link transfer progress supports localized pause, continue and cancel", () 
   assert.match(linkJs, /linkCancel: "Cancelar"/);
   assert.match(linkJs, /linkTransferCancelled: "传输已取消"/);
   assert.match(linkJs, /listen\?\.\("link-transfer-progress"/);
+  assert.match(linkJs, /startLinkTransferProgressPolling/);
+  assert.match(linkJs, /get_link_transfer_progress/);
+  assert.match(linkJs, /setInterval\(poll, 250\)/);
+  assert.match(linkJs, /performance\.now\(\) - linkLastProgressEventAt < 450/);
+  assert.match(linkJs, /stopLinkTransferProgressPolling\(\)/);
+  assert.match(rust, /fn get_link_transfer_progress/);
+  assert.match(rust, /bytes_per_second/);
+  assert.match(linkJs, /formatBytes\(speed\)\/s/);
   assert.match(linkJs, /invoke\("pause_link_transfer"/);
   assert.match(linkJs, /invoke\("cancel_link_transfer"/);
   assert.match(rust, /fn pause_link_transfer/);
