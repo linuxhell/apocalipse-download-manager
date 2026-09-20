@@ -528,6 +528,95 @@ struct LinkFileEntry {
     directory: bool,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkTransferProgress {
+    transfer_id: String,
+    direction: String,
+    transferred: u64,
+    total: u64,
+    percent: f64,
+    bytes_per_second: u64,
+}
+
+struct LinkTransferReporter {
+    app: tauri::AppHandle,
+    transfer_id: String,
+    direction: String,
+    total: u64,
+    transferred: u64,
+    started: Instant,
+    last_emit: Instant,
+}
+
+impl LinkTransferReporter {
+    fn new(
+        app: tauri::AppHandle,
+        transfer_id: String,
+        direction: &str,
+        total: u64,
+    ) -> Self {
+        let now = Instant::now();
+        let mut reporter = Self {
+            app,
+            transfer_id,
+            direction: direction.to_owned(),
+            total,
+            transferred: 0,
+            started: now,
+            last_emit: now.checked_sub(Duration::from_secs(1)).unwrap_or(now),
+        };
+        reporter.emit(true);
+        reporter
+    }
+
+    fn set_total(&mut self, total: u64) {
+        if self.total == 0 {
+            self.total = total;
+            self.emit(true);
+        }
+    }
+
+    fn advance(&mut self, bytes: u64) {
+        self.transferred = self.transferred.saturating_add(bytes);
+        self.emit(self.total > 0 && self.transferred >= self.total);
+    }
+
+    fn finish(&mut self) {
+        if self.total > 0 {
+            self.transferred = self.total.max(self.transferred);
+        }
+        self.emit(true);
+    }
+
+    fn emit(&mut self, force: bool) {
+        if !force && self.last_emit.elapsed() < Duration::from_millis(125) {
+            return;
+        }
+        self.last_emit = Instant::now();
+        let elapsed_ms = self.started.elapsed().as_millis().max(1) as u64;
+        let bytes_per_second = self.transferred.saturating_mul(1000) / elapsed_ms;
+        let percent = if self.total > 0 {
+            (self.transferred as f64 * 100.0 / self.total as f64).clamp(0.0, 100.0)
+        } else if force && self.transferred > 0 {
+            100.0
+        } else {
+            0.0
+        };
+        let _ = self.app.emit(
+            "link-transfer-progress",
+            LinkTransferProgress {
+                transfer_id: self.transfer_id.clone(),
+                direction: self.direction.clone(),
+                transferred: self.transferred,
+                total: self.total,
+                percent,
+                bytes_per_second,
+            },
+        );
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LinkShare {
@@ -1658,12 +1747,47 @@ fn read_link_download_head<S: Read>(stream: &mut S) -> Result<(u16, usize, Vec<u
     Ok((status, length, buffer[header_end + 4..].to_vec()))
 }
 
+fn copy_link_stream_with_progress<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    remaining: Option<u64>,
+    reporter: &mut LinkTransferReporter,
+) -> Result<u64, String> {
+    let mut copied = 0_u64;
+    let mut buffer = [0_u8; 128 * 1024];
+    loop {
+        let limit = remaining
+            .map(|total| total.saturating_sub(copied))
+            .unwrap_or(buffer.len() as u64);
+        if limit == 0 {
+            break;
+        }
+        let read_size = buffer.len().min(limit as usize);
+        let count = reader
+            .read(&mut buffer[..read_size])
+            .map_err(|error| error.to_string())?;
+        if count == 0 {
+            break;
+        }
+        writer
+            .write_all(&buffer[..count])
+            .map_err(|error| error.to_string())?;
+        copied = copied.saturating_add(count as u64);
+        reporter.advance(count as u64);
+    }
+    if remaining.is_some_and(|expected| copied != expected) {
+        return Err("incomplete_link_transfer".to_owned());
+    }
+    Ok(copied)
+}
+
 fn download_link_file_to(
     state: &AppState,
     id: &str,
     password: &str,
     remote_path: &str,
     destination: &Path,
+    reporter: &mut LinkTransferReporter,
 ) -> Result<(), String> {
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -1681,16 +1805,15 @@ fn download_link_file_to(
     if status != 200 {
         return Err(format!("remote_http_status:{status}"));
     }
+    reporter.set_total(length as u64);
     let mut file = fs::File::create(destination).map_err(|error| error.to_string())?;
     let initial_len = initial.len().min(length);
     file.write_all(&initial[..initial_len])
         .map_err(|error| error.to_string())?;
-    let remaining = length.saturating_sub(initial_len);
-    std::io::copy(
-        &mut std::io::Read::by_ref(&mut stream).take(remaining as u64),
-        &mut file,
-    )
-    .map_err(|error| error.to_string())?;
+    reporter.advance(initial_len as u64);
+    let remaining = length.saturating_sub(initial_len) as u64;
+    copy_link_stream_with_progress(&mut stream, &mut file, Some(remaining), reporter)?;
+    file.flush().map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -1719,6 +1842,7 @@ fn send_link_file(
     password: &str,
     source: &Path,
     remote_path: &str,
+    reporter: &mut LinkTransferReporter,
 ) -> Result<(), String> {
     let encoded = url::form_urlencoded::byte_serialize(remote_path.as_bytes()).collect::<String>();
     let (mut stream, _, _, authority) = connect_link_tls(state, id)?;
@@ -1730,10 +1854,54 @@ fn send_link_file(
     stream
         .write_all(headers.as_bytes())
         .map_err(|error| error.to_string())?;
-    std::io::copy(&mut file, &mut stream).map_err(|error| error.to_string())?;
+    copy_link_stream_with_progress(&mut file, &mut stream, Some(size), reporter)?;
     stream.flush().map_err(|error| error.to_string())?;
     let response = read_link_http_response(&mut stream)?;
     ensure_link_http_success(&response)
+}
+
+fn link_path_total_size(path: &Path) -> Result<u64, String> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() {
+        return Ok(0);
+    }
+    if metadata.is_file() {
+        return Ok(metadata.len());
+    }
+    let mut total = 0_u64;
+    let mut pending = vec![path.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let file_type = entry.file_type().map_err(|error| error.to_string())?;
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                pending.push(entry.path());
+            } else if file_type.is_file() {
+                total = total.saturating_add(
+                    entry.metadata().map_err(|error| error.to_string())?.len(),
+                );
+            }
+        }
+    }
+    Ok(total)
+}
+
+fn copy_local_link_file(
+    source: &Path,
+    destination: &Path,
+    reporter: &mut LinkTransferReporter,
+) -> Result<(), String> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let mut input = fs::File::open(source).map_err(|error| error.to_string())?;
+    let mut output = fs::File::create(destination).map_err(|error| error.to_string())?;
+    let size = input.metadata().map_err(|error| error.to_string())?.len();
+    copy_link_stream_with_progress(&mut input, &mut output, Some(size), reporter)?;
+    output.flush().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1821,7 +1989,11 @@ fn delete_local_shared_link_item(state: State<'_, AppState>, path: String) -> Re
     remove_link_path(&target.to_string_lossy())
 }
 
-fn copy_local_link_directory(source: &Path, destination: &Path) -> Result<(), String> {
+fn copy_local_link_directory(
+    source: &Path,
+    destination: &Path,
+    reporter: &mut LinkTransferReporter,
+) -> Result<(), String> {
     if destination.starts_with(source) {
         return Err("destination_inside_source".to_owned());
     }
@@ -1839,7 +2011,7 @@ fn copy_local_link_directory(source: &Path, destination: &Path) -> Result<(), St
             if file_type.is_dir() {
                 pending.push((entry.path(), target));
             } else if file_type.is_file() {
-                fs::copy(entry.path(), target).map_err(|error| error.to_string())?;
+                copy_local_link_file(&entry.path(), &target, reporter)?;
             }
         }
     }
@@ -1848,12 +2020,14 @@ fn copy_local_link_directory(source: &Path, destination: &Path) -> Result<(), St
 
 #[tauri::command]
 async fn download_local_shared_link_item(
-    state: State<'_, AppState>,
+    app: tauri::AppHandle,
     path: String,
     directory: bool,
     file_name: Option<String>,
+    transfer_id: String,
 ) -> Result<String, String> {
     let source = {
+        let state = app.state::<AppState>();
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
         resolve_link_share(&settings, &path)?.0
     };
@@ -1873,8 +2047,18 @@ async fn download_local_shared_link_item(
         let destination = parent.join(name);
         let source_for_copy = source.clone();
         let destination_for_copy = destination.clone();
+        let progress_app = app.clone();
         tokio::task::spawn_blocking(move || {
-            copy_local_link_directory(&source_for_copy, &destination_for_copy)
+            let total = link_path_total_size(&source_for_copy)?;
+            let mut reporter =
+                LinkTransferReporter::new(progress_app, transfer_id, "download", total);
+            copy_local_link_directory(
+                &source_for_copy,
+                &destination_for_copy,
+                &mut reporter,
+            )?;
+            reporter.finish();
+            Ok::<(), String>(())
         })
         .await
         .map_err(|error| error.to_string())??;
@@ -1888,19 +2072,29 @@ async fn download_local_shared_link_item(
     let Some(destination) = rfd::FileDialog::new().set_file_name(name).save_file() else {
         return Err("cancelled".to_owned());
     };
-    tokio::fs::copy(&source, &destination)
-        .await
-        .map_err(|error| error.to_string())?;
+    let source_for_copy = source.clone();
+    let destination_for_copy = destination.clone();
+    tokio::task::spawn_blocking(move || {
+        let total = link_path_total_size(&source_for_copy)?;
+        let mut reporter = LinkTransferReporter::new(app, transfer_id, "download", total);
+        copy_local_link_file(&source_for_copy, &destination_for_copy, &mut reporter)?;
+        reporter.finish();
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
     Ok(destination.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
 async fn upload_local_shared_link_item(
-    state: State<'_, AppState>,
+    app: tauri::AppHandle,
     remote_directory: String,
     local_path: String,
+    transfer_id: String,
 ) -> Result<String, String> {
     let (source, destination_root) = {
+        let state = app.state::<AppState>();
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
         let source = resolve_link_share(&settings, &local_path)?.0;
         let (destination_root, allow_write) = resolve_link_share(&settings, &remote_directory)?;
@@ -1925,19 +2119,25 @@ async fn upload_local_shared_link_item(
     if metadata.file_type().is_symlink() {
         return Err("symlink_not_allowed".to_owned());
     }
-    if metadata.is_dir() {
-        let source_for_copy = source.clone();
-        let destination_for_copy = destination.clone();
-        tokio::task::spawn_blocking(move || {
-            copy_local_link_directory(&source_for_copy, &destination_for_copy)
-        })
-        .await
-        .map_err(|error| error.to_string())??;
-    } else {
-        tokio::fs::copy(&source, &destination)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
+    let source_for_copy = source.clone();
+    let destination_for_copy = destination.clone();
+    tokio::task::spawn_blocking(move || {
+        let total = link_path_total_size(&source_for_copy)?;
+        let mut reporter = LinkTransferReporter::new(app, transfer_id, "upload", total);
+        if source_for_copy.is_dir() {
+            copy_local_link_directory(
+                &source_for_copy,
+                &destination_for_copy,
+                &mut reporter,
+            )?;
+        } else {
+            copy_local_link_file(&source_for_copy, &destination_for_copy, &mut reporter)?;
+        }
+        reporter.finish();
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
     Ok(remote_link_join(&remote_directory, &name))
 }
 
@@ -1978,6 +2178,30 @@ async fn authenticate_remote_link_account(
     .map_err(|error| error.to_string())?
 }
 
+fn list_remote_link_directory_sync(
+    state: &AppState,
+    id: &str,
+    password: &str,
+    path: String,
+) -> Result<Vec<LinkFileEntry>, String> {
+    let body = serde_json::to_vec(&LinkListRequest {
+        password: password.to_owned(),
+        path,
+    })
+    .map_err(|error| error.to_string())?;
+    let (response, _, _) = link_http_request(
+        state,
+        id,
+        "POST",
+        "/v1/link/list",
+        None,
+        &body,
+        Some("application/json"),
+    )?;
+    ensure_link_http_success(&response)?;
+    serde_json::from_slice(&response.body).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 async fn list_remote_link_files(
     app: tauri::AppHandle,
@@ -1987,19 +2211,7 @@ async fn list_remote_link_files(
 ) -> Result<Vec<LinkFileEntry>, String> {
     tokio::task::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        let body = serde_json::to_vec(&LinkListRequest { password, path })
-            .map_err(|error| error.to_string())?;
-        let (response, _, _) = link_http_request(
-            &state,
-            &id,
-            "POST",
-            "/v1/link/list",
-            None,
-            &body,
-            Some("application/json"),
-        )?;
-        ensure_link_http_success(&response)?;
-        serde_json::from_slice(&response.body).map_err(|error| error.to_string())
+        list_remote_link_directory_sync(&state, &id, &password, path)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -2013,6 +2225,7 @@ async fn download_remote_link_file(
     path: String,
     directory: bool,
     file_name: Option<String>,
+    transfer_id: String,
 ) -> Result<String, String> {
     let fallback_name = Path::new(&path)
         .file_name()
@@ -2032,34 +2245,35 @@ async fn download_remote_link_file(
             let state = app.state::<AppState>();
             fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
             let mut pending = vec![(path, destination.clone())];
+            let mut files = Vec::<(String, PathBuf, u64)>::new();
+            let mut total = 0_u64;
             while let Some((remote_directory, local_directory)) = pending.pop() {
                 fs::create_dir_all(&local_directory).map_err(|error| error.to_string())?;
-                let body = serde_json::to_vec(&LinkListRequest {
-                    password: password.clone(),
-                    path: remote_directory,
-                })
-                .map_err(|error| error.to_string())?;
-                let (response, _, _) = link_http_request(
-                    &state,
-                    &id,
-                    "POST",
-                    "/v1/link/list",
-                    None,
-                    &body,
-                    Some("application/json"),
-                )?;
-                ensure_link_http_success(&response)?;
-                let entries: Vec<LinkFileEntry> =
-                    serde_json::from_slice(&response.body).map_err(|error| error.to_string())?;
-                for entry in entries {
+                for entry in
+                    list_remote_link_directory_sync(&state, &id, &password, remote_directory)?
+                {
                     let local_path = local_directory.join(&entry.name);
                     if entry.directory {
                         pending.push((entry.path, local_path));
                     } else {
-                        download_link_file_to(&state, &id, &password, &entry.path, &local_path)?;
+                        total = total.saturating_add(entry.size);
+                        files.push((entry.path, local_path, entry.size));
                     }
                 }
             }
+            let mut reporter =
+                LinkTransferReporter::new(app.clone(), transfer_id, "download", total);
+            for (remote_path, local_path, _size) in files {
+                download_link_file_to(
+                    &state,
+                    &id,
+                    &password,
+                    &remote_path,
+                    &local_path,
+                    &mut reporter,
+                )?;
+            }
+            reporter.finish();
             Ok(destination.to_string_lossy().into_owned())
         })
         .await
@@ -2070,7 +2284,16 @@ async fn download_remote_link_file(
     };
     tokio::task::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        download_link_file_to(&state, &id, &password, &path, &destination)?;
+        let mut reporter = LinkTransferReporter::new(app.clone(), transfer_id, "download", 0);
+        download_link_file_to(
+            &state,
+            &id,
+            &password,
+            &path,
+            &destination,
+            &mut reporter,
+        )?;
+        reporter.finish();
         Ok(destination.to_string_lossy().into_owned())
     })
     .await
@@ -2098,6 +2321,7 @@ async fn upload_remote_link_file(
     password: String,
     remote_directory: String,
     local_path: String,
+    transfer_id: String,
 ) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
         let state = app.state::<AppState>();
@@ -2116,8 +2340,19 @@ async fn upload_remote_link_file(
             .and_then(|value| value.to_str())
             .ok_or_else(|| "invalid_file_name".to_owned())?;
         let remote_path = remote_link_join(&remote_directory, name);
+        let total = link_path_total_size(&source)?;
+        let mut reporter =
+            LinkTransferReporter::new(app.clone(), transfer_id, "upload", total);
         if source.is_file() {
-            send_link_file(&state, &id, &password, &source, &remote_path)?;
+            send_link_file(
+                &state,
+                &id,
+                &password,
+                &source,
+                &remote_path,
+                &mut reporter,
+            )?;
+            reporter.finish();
             return Ok(remote_path);
         }
         send_link_directory(&state, &id, &password, &remote_path)?;
@@ -2135,10 +2370,18 @@ async fn upload_remote_link_file(
                     send_link_directory(&state, &id, &password, &target_path)?;
                     pending.push((entry.path(), target_path));
                 } else if file_type.is_file() {
-                    send_link_file(&state, &id, &password, &entry.path(), &target_path)?;
+                    send_link_file(
+                        &state,
+                        &id,
+                        &password,
+                        &entry.path(),
+                        &target_path,
+                        &mut reporter,
+                    )?;
                 }
             }
         }
+        reporter.finish();
         Ok(remote_path)
     })
     .await
