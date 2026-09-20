@@ -77,7 +77,8 @@ const catalogs = {
     linkRemoteId: "Remote IP / host",
     linkRemoteAddressExamples: "Use the same connection flow for this PC (127.0.0.1), a local-network IP or a public Internet IP/host.",
     linkAccessNotice: "Only explicitly shared files, folders and drives are exposed. Each share keeps its read-only or read/write permission.",
-    linkConnect: "Connect",
+    linkConnect: "Connect", linkDisconnect: "Disconnect", linkDisconnected: "Disconnected.",
+    convertWithFfmpeg: "Convert using FFmpeg after download to:",
     linkSend: "Send →",
     linkRemoteComputer: "Remote computer",
     linkDownload: "← Download",
@@ -285,7 +286,8 @@ const catalogs = {
     linkRemoteId: "IP / host remoto",
     linkRemoteAddressExamples: "Use o mesmo fluxo para este PC (127.0.0.1), um IP da rede local ou um IP/host público da Internet.",
     linkAccessNotice: "Somente arquivos, pastas e unidades compartilhados explicitamente ficam expostos. Cada compartilhamento mantém sua permissão de Somente leitura ou Leitura e gravação.",
-    linkConnect: "Conectar",
+    linkConnect: "Conectar", linkDisconnect: "Desconectar", linkDisconnected: "Desconectado.",
+    convertWithFfmpeg: "Converter usando FFmpeg ao final do download para:",
     linkSend: "Enviar →",
     linkRemoteComputer: "Computador remoto",
     linkDownload: "← Baixar",
@@ -492,7 +494,8 @@ const catalogs = {
     linkRemoteId: "远程 IP / 主机",
     linkRemoteAddressExamples: "本机 (127.0.0.1)、局域网 IP 或公网 IP/主机都使用同一个连接流程。",
     linkAccessNotice: "只会公开明确共享的文件、文件夹和驱动器。每个共享项都保留只读或读写权限。",
-    linkConnect: "连接",
+    linkConnect: "连接", linkDisconnect: "断开连接", linkDisconnected: "已断开连接。",
+    convertWithFfmpeg: "下载完成后使用 FFmpeg 转换为：",
     linkSend: "发送 →",
     linkRemoteComputer: "远程电脑",
     linkDownload: "← 下载",
@@ -1269,6 +1272,16 @@ function updateLinkTransferButtons() {
   document.querySelector("#link-upload-local").disabled = !linkSelectedLocal || !linkRemoteId || !linkRemotePath || !linkRemoteAllowWrite;
   document.querySelector("#link-download-remote").disabled = !linkSelectedRemote;
   document.querySelector("#link-delete-remote").disabled = !linkSelectedRemote || !linkRemoteAllowWrite;
+  document.querySelector("#link-disconnect").disabled = !linkRemoteId;
+}
+function disconnectLink() {
+  linkRemoteId = ""; linkRemoteTransportToken = ""; linkLocalAccountSession = false;
+  linkRemotePath = ""; linkSelectedRemote = null; linkRemoteAllowWrite = false;
+  document.querySelector("#link-remote-password").value = "";
+  document.querySelector("#link-remote-path").textContent = "/";
+  document.querySelector("#link-remote-files").replaceChildren();
+  document.querySelector("#link-status").textContent = t("linkDisconnected");
+  updateLinkTransferButtons();
 }
 function renderLinkFiles(target, entries, open, select) {
   const root = document.querySelector(target);
@@ -1410,6 +1423,7 @@ document.querySelector("#link-connect").onclick = async () => {
   }
 };
 document.querySelector("#link-local-up").onclick = () => openLocalLink(linkParent(linkLocalPath)).catch(console.error);
+document.querySelector("#link-disconnect").onclick = disconnectLink;
 document.querySelector("#link-remote-up").onclick = () => openRemoteLink(linkParent(linkRemotePath)).catch(console.error);
 document.querySelector("#link-delete-remote").onclick = async () => {
   if (!linkSelectedRemote || !window.confirm(t("linkDeleteConfirm").replace("{name}", linkSelectedRemote.name))) return;
@@ -1563,6 +1577,9 @@ function resetMediaInspection() {
   document.querySelector("#media-title").textContent = "";
   document.querySelector("#media-duration").textContent = "";
   document.querySelector("#media-format").replaceChildren();
+  document.querySelector("#media-format").hidden = false;
+  document.querySelector("#hls-audio-conversion").hidden = true;
+  document.querySelector("#hls-convert-audio").checked = false;
   document.querySelector("#media-format-control").hidden = false;
   document.querySelector("#torrent-inspection").hidden = true;
   document.querySelector("#torrent-files").replaceChildren();
@@ -2177,6 +2194,8 @@ async function showMediaInspection(url) {
   const panel = document.querySelector("#media-inspection");
   const select = document.querySelector("#media-format");
   select.replaceChildren();
+  select.hidden = false;
+  document.querySelector("#hls-audio-conversion").hidden = true;
   option(select, "bestvideo+bestaudio/best", t("bestQuality"));
   document.querySelector("#media-format-control").hidden = false;
   for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
@@ -2216,13 +2235,24 @@ async function showMediaInspection(url) {
     });
   }
 }
-document.querySelector("#media-format").onchange = (event) => {
-  const audio = event.target.value.match(/^audio:(.+)$/);
+function applyAudioFormatSelection(value) {
+  const audio = value.match(/^audio:(.+)$/);
   if (!audio) return;
   const input = document.querySelector("#file-name");
   const base = input.value.replace(/\.[^.]+$/, "");
   input.value = `${base}.${audio[1]}`;
-};
+}
+document.querySelector("#media-format").onchange = (event) => applyAudioFormatSelection(event.target.value);
+function updateHlsAudioConversion() {
+  const enabled = document.querySelector("#hls-convert-audio").checked;
+  const format = document.querySelector("#hls-audio-format").value;
+  const selection = enabled ? `audio:${format}` : "original";
+  document.querySelector("#media-format").value = selection;
+  document.querySelector("#hls-audio-format").disabled = !enabled;
+  if (enabled) applyAudioFormatSelection(selection);
+}
+document.querySelector("#hls-convert-audio").onchange = updateHlsAudioConversion;
+document.querySelector("#hls-audio-format").onchange = updateHlsAudioConversion;
 document.querySelector("#task-connections").oninput = (event) => {
   taskConnectionsManuallyChanged = true;
   document.querySelector("#task-connections-value").value = event.target.value;
@@ -2270,6 +2300,11 @@ document.querySelector("#analyze").onclick = async () => {
       option(select, "original", pendingMediaKind === "audio" ? "Original (MP4/M4A)" : t("bestQuality"));
       for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
         option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
+      const audioHls = pendingMediaKind === "audio";
+      select.hidden = audioHls;
+      document.querySelector("#hls-audio-conversion").hidden = !audioHls;
+      document.querySelector("#hls-convert-audio").checked = false;
+      updateHlsAudioConversion();
       showCapturedPreview({ title: pendingTitle || "HLS", thumbnail: pendingThumbnail, kind: "M3U8 / HLS", duration: pendingDuration, size: pendingExpectedSize, showFormats: true });
     } else if (pendingMediaKind === "image" || /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)(?:$|[?#])/i.test(url.value)) {
       showCapturedPreview({ title: pendingTitle || fileName.value, thumbnail: pendingThumbnail || url.value, kind: pendingMediaKind || "image", duration: null, size: pendingExpectedSize });

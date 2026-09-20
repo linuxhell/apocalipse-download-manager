@@ -28,7 +28,7 @@ const catalogs = {
     linkReadOnly: "Read only",
     linkReadWrite: "Read and write",
     linkStopSharing: "Stop sharing",
-    linkConnect: "Connect",
+    linkConnect: "Connect", linkDisconnect: "Disconnect", linkDisconnected: "Disconnected.",
     linkDelete: "Delete",
     linkDownload: "← Download",
     linkSend: "Send →",
@@ -69,7 +69,7 @@ const catalogs = {
     linkReadOnly: "Somente leitura",
     linkReadWrite: "Leitura e gravação",
     linkStopSharing: "Parar de compartilhar",
-    linkConnect: "Conectar",
+    linkConnect: "Conectar", linkDisconnect: "Desconectar", linkDisconnected: "Desconectado.",
     linkDelete: "Apagar",
     linkDownload: "← Baixar",
     linkSend: "Enviar →",
@@ -110,7 +110,7 @@ const catalogs = {
     linkReadOnly: "只读",
     linkReadWrite: "读写",
     linkStopSharing: "停止共享",
-    linkConnect: "连接",
+    linkConnect: "连接", linkDisconnect: "断开连接", linkDisconnected: "已断开连接。",
     linkDelete: "删除",
     linkDownload: "← 下载",
     linkSend: "发送 →",
@@ -207,6 +207,16 @@ function updateLinkTransferButtons() {
   document.querySelector("#link-upload-local").disabled = !linkSelectedLocal || !linkRemoteId || !linkRemotePath || !linkRemoteAllowWrite;
   document.querySelector("#link-download-remote").disabled = !linkSelectedRemote;
   document.querySelector("#link-delete-remote").disabled = !linkSelectedRemote || !linkRemoteAllowWrite;
+  document.querySelector("#link-disconnect").disabled = !linkRemoteId;
+}
+function disconnectLink() {
+  linkRemoteId = ""; linkRemoteTransportToken = ""; linkLocalAccountSession = false;
+  linkRemotePath = ""; linkSelectedRemote = null; linkRemoteAllowWrite = false;
+  document.querySelector("#link-remote-password").value = "";
+  document.querySelector("#link-remote-path").textContent = "/";
+  document.querySelector("#link-remote-files").replaceChildren();
+  document.querySelector("#link-status").textContent = t("linkDisconnected");
+  updateLinkTransferButtons();
 }
 
 function renderLinkFiles(target, entries, open, select) {
@@ -384,6 +394,7 @@ document.querySelector("#link-connect").onclick = async () => {
   }
 };
 document.querySelector("#link-local-up").onclick = () => openLocalLink(linkParent(linkLocalPath)).catch(console.error);
+document.querySelector("#link-disconnect").onclick = disconnectLink;
 document.querySelector("#link-remote-up").onclick = () => openRemoteLink(linkParent(linkRemotePath)).catch(console.error);
 
 document.querySelector("#link-delete-remote").onclick = async () => {
