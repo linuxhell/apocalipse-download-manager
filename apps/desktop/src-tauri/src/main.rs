@@ -6041,7 +6041,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         "proxyEnabled": settings.proxy_enabled,
         "proxyConfigured": settings.proxy_url.is_some(),
         "customDnsEnabled": settings.dns_enabled,
-        "dnsServers": settings.dns_servers,
+        "dnsServerCount": settings.dns_servers.len(),
         "associations": settings.associations,
         "tools": {
             "ffmpeg": settings.ffmpeg_path.as_ref().is_some_and(|path| path.is_file()),
@@ -6081,14 +6081,16 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         .is_some_and(|seen| seen.elapsed() < Duration::from_secs(90));
     let manifest = serde_json::json!({
         "format": "apocalipse-diagnostic-bundle",
-        "formatVersion": 3,
+        "formatVersion": 4,
         "createdAt": now.to_rfc3339(),
         "applicationVersion": env!("CARGO_PKG_VERSION"),
         "os": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
         "bridgePort": BRIDGE_PORT,
         "bridgeConnected": bridge_connected,
-        "privacy": "Secrets, credentials, cookies, authorization headers and URL parameter values are excluded or redacted."
+        "privacy": "Secrets, credentials, cookies, authorization headers, typed page content and URL parameter values are excluded or redacted.",
+        "timelineOrdering": "local timestamp plus monotonic server sequence",
+        "debugger": "Apocalipse Forensic Debugger V4"
     });
 
     let mut entries = vec![
@@ -6141,12 +6143,22 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "interface"
         } else if event.starts_with("bridge.") {
             "bridge"
+        } else if event.starts_with("link.") || event.contains("link_transfer") {
+            "link"
+        } else if event.starts_with("aria2.") {
+            "aria2"
         } else if event.starts_with("http.") {
             "http"
+        } else if event.starts_with("thumbnail.") {
+            "thumbnails"
+        } else if event.starts_with("tool.") {
+            "tools"
+        } else if event.starts_with("media.preview") || event.starts_with("preview.") {
+            "preview"
         } else if event.starts_with("blob.") || event.contains("recording") {
             "recordings"
         } else if event.starts_with("external.") || event.starts_with("yt_dlp.") {
-            "media-torrent-hls"
+            "external-media-engines"
         } else {
             "application"
         };
@@ -6160,6 +6172,76 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             contents.into_bytes(),
         ));
     }
+    let important_events = all_events
+        .lines()
+        .filter(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|value| value["level"].as_str().map(str::to_owned))
+                .is_some_and(|level| matches!(level.as_str(), "WARN" | "ERROR"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !important_events.is_empty() {
+        entries.push((
+            "logs/warnings-errors.jsonl".to_owned(),
+            format!("{important_events}\n").into_bytes(),
+        ));
+    }
+
+    let runtime_root = state
+        .queue_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let engines_dir = runtime_root.join("logs").join("engines");
+    if let Ok(files) = fs::read_dir(&engines_dir) {
+        let mut files = files.filter_map(Result::ok).collect::<Vec<_>>();
+        files.sort_by_key(|entry| entry.metadata().and_then(|meta| meta.modified()).ok());
+        for entry in files.into_iter().rev().take(40) {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            if let Some(bytes) = read_sanitized_log_tail(&path, 512 * 1024) {
+                if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                    entries.push((format!("engines/{name}"), bytes));
+                }
+            }
+        }
+    }
+    let aria2_log = runtime_root.join("aria2-rpc").join("aria2.log");
+    if let Some(bytes) = read_sanitized_log_tail(&aria2_log, 1024 * 1024) {
+        entries.push(("engines/aria2-runtime.log".to_owned(), bytes));
+    }
+    let debugger_index = serde_json::json!({
+        "format": "Apocalipse Forensic Debugger V4",
+        "startHere": [
+            "RELATORIO_PARA_IA.txt",
+            "summary.json",
+            "timeline/events-local.jsonl",
+            "correlation/index.json",
+            "incidents/problem-windows.jsonl"
+        ],
+        "domains": {
+            "interface": "logs/by-component/interface.jsonl",
+            "browserExtension": "logs/by-component/extension-shortcuts-overlays.jsonl",
+            "socialMedia": "social/player-debugger.jsonl",
+            "link": "logs/by-component/link.jsonl",
+            "aria2": ["logs/by-component/aria2.jsonl", "engines/aria2-runtime.log"],
+            "http": "logs/by-component/http.jsonl",
+            "externalMediaEngines": ["logs/by-component/external-media-engines.jsonl", "engines/"],
+            "preview": "logs/by-component/preview.jsonl",
+            "thumbnails": "logs/by-component/thumbnails.jsonl",
+            "recordings": "logs/by-component/recordings.jsonl",
+            "warningsAndErrors": "logs/warnings-errors.jsonl"
+        },
+        "ordering": "Use local time first; serverSequence breaks ties and is authoritative within the desktop collector.",
+        "privacy": "No passwords, cookies, authorization headers, tokens, typed page text or raw page HTML are intentionally retained."
+    });
+    entries.push((
+        "debugger-index.json".to_owned(),
+        serde_json::to_vec_pretty(&debugger_index).map_err(|e| e.to_string())?,
+    ));
     let summary = serde_json::json!({
         "totalEvents": levels.values().sum::<usize>(),
         "levels": levels,
@@ -6170,7 +6252,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         "summary.json".to_owned(),
         serde_json::to_vec_pretty(&summary).map_err(|e| e.to_string())?,
     ));
-    let guide = b"Apocalipse diagnostic bundle v3\nStart with RELATORIO_PARA_IA.txt, traces/replay-de-midia.jsonl and health/collectors.json. Legacy v2 files are preserved. A missing event is not proof of no activity. Review legacy logs before sharing.\n";
+    let guide = b"Apocalipse Forensic Debugger V4\nStart with debugger-index.json, RELATORIO_PARA_IA.txt, timeline/events-local.jsonl, correlation/index.json and incidents/problem-windows.jsonl. Engine logs are sanitized and stored under engines/. A missing event is not proof of no activity.\n";
     entries.push(("README.txt".to_owned(), guide.to_vec()));
 
     entries.extend(state.diagnostics.export());
