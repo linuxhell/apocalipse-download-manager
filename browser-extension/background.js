@@ -307,9 +307,171 @@ function ensureHeartbeat() {
   chrome.alarms.create(HEARTBEAT_ALARM, { delayInMinutes: 0.1, periodInMinutes: 0.5 });
 }
 
+const recoveryFiles = [
+  "diagnostics-core.js",
+  "diagnostics.js",
+  "diagnostics-media-replay.js",
+  "tiktok-identity.js",
+  "content.js",
+];
+const captureLayerHealth = new Map();
+const captureLayerHealthyLogAt = new Map();
+const CAPTURE_LAYER_HEALTH_TTL_MS = 120_000;
+const CAPTURE_LAYER_HEALTH_LOG_MS = 300_000;
+const markCaptureLayerHealth = (tabId, patch) => {
+  if (!Number.isInteger(tabId)) return null;
+  const next = { ...(captureLayerHealth.get(tabId) || {}), ...patch };
+  captureLayerHealth.set(tabId, next);
+  return next;
+};
+const waitForMainHookReady = async (tabId, timeoutMs = 240) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const health = captureLayerHealth.get(tabId);
+    if (health?.hookReadyAt && Date.now() - health.hookReadyAt < CAPTURE_LAYER_HEALTH_TTL_MS) return health;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  return captureLayerHealth.get(tabId) || null;
+};
+const logCaptureLayerHealthy = (tab, state, reason, health) => {
+  const now = Date.now();
+  const previous = captureLayerHealthyLogAt.get(tab.id) || 0;
+  if (reason === "heartbeat" && now - previous < CAPTURE_LAYER_HEALTH_LOG_MS) return;
+  captureLayerHealthyLogAt.set(tab.id, now);
+  void diagnostic("capture.layer_healthy", state, {
+    detail: `reason=${reason} tab=${tab.id} version=${health?.version || "unknown"} hook_ready=${Boolean(health?.hookReadyAt)}`,
+  });
+};
+
+const tabSupportsCapture = (tab) => Number.isInteger(tab?.id) && /^https?:/i.test(tab?.url || "");
+const tabNeedsMainHook = (tab) => {
+  try {
+    const host = new URL(tab?.url || "").hostname.toLowerCase();
+    return host === "chatgpt.com" || host === "rapidgator.net" || host.endsWith(".rapidgator.net");
+  } catch {
+    return false;
+  }
+};
+
+async function captureLayerPing(tabId) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, { type: "APOCALIPSE_CONTENT_PING" }, { frameId: 0 });
+  } catch {
+    return null;
+  }
+}
+
+async function repairCaptureLayer(tab, reason = "probe") {
+  if (!tabSupportsCapture(tab)) return false;
+  const state = { traceId: crypto.randomUUID(), pageUrl: tab.url || null, startedAt: Date.now() };
+  const needsMainHook = tabNeedsMainHook(tab);
+  const known = captureLayerHealth.get(tab.id);
+  if (known?.contentReadyAt && Date.now() - known.contentReadyAt < CAPTURE_LAYER_HEALTH_TTL_MS
+      && (!needsMainHook || (known.hookReadyAt && Date.now() - known.hookReadyAt < CAPTURE_LAYER_HEALTH_TTL_MS))) {
+    logCaptureLayerHealthy(tab, state, reason, known);
+    return true;
+  }
+
+  const existing = await captureLayerPing(tab.id);
+  if (existing?.ok) {
+    const health = markCaptureLayerHealth(tab.id, {
+      contentReadyAt: Date.now(),
+      version: existing.version || known?.version || "unknown",
+      ...(existing.hookReady ? { hookReadyAt: Date.now() } : {}),
+    });
+    if (!needsMainHook || existing.hookReady) {
+      logCaptureLayerHealthy(tab, state, reason, health);
+      return true;
+    }
+
+    await chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_REQUEST_HOOK_PING" }, { frameId: 0 }).catch(() => null);
+    const pinged = await waitForMainHookReady(tab.id);
+    if (pinged?.hookReadyAt) {
+      logCaptureLayerHealthy(tab, state, reason, pinged);
+      return true;
+    }
+
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, frameIds: [0] },
+        world: "MAIN",
+        files: ["page-hook.js"],
+      });
+      await chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_REQUEST_HOOK_PING" }, { frameId: 0 }).catch(() => null);
+      const verified = await waitForMainHookReady(tab.id);
+      if (verified?.hookReadyAt) {
+        void diagnostic("capture.layer_main_hook_repaired", state, {
+          detail: `reason=${reason} tab=${tab.id} content_version=${existing.version || "unknown"} verified=true`,
+        });
+        return true;
+      }
+      void diagnostic("capture.layer_main_hook_repair_unverified", state, {
+        level: "WARN",
+        detail: `reason=${reason} tab=${tab.id} content_version=${existing.version || "unknown"}`,
+      });
+      return false;
+    } catch (error) {
+      void diagnostic("capture.layer_main_hook_repair_failed", state, {
+        level: "WARN", error: String(error), detail: `reason=${reason} tab=${tab.id}`,
+      });
+      return false;
+    }
+  }
+
+  void diagnostic("capture.layer_missing", state, {
+    level: "WARN", detail: `reason=${reason} tab=${tab.id}`,
+  });
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, files: recoveryFiles });
+    if (needsMainHook) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, frameIds: [0] },
+        world: "MAIN",
+        files: ["page-hook.js"],
+      });
+      await chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_REQUEST_HOOK_PING" }, { frameId: 0 }).catch(() => null);
+      await waitForMainHookReady(tab.id);
+    }
+    const repaired = await captureLayerPing(tab.id);
+    const health = captureLayerHealth.get(tab.id);
+    const verified = Boolean(repaired?.ok && (!needsMainHook || health?.hookReadyAt));
+    void diagnostic(verified ? "capture.layer_reinjected" : "capture.layer_reinject_unverified", state, {
+      level: verified ? "INFO" : "WARN",
+      detail: `reason=${reason} tab=${tab.id} version=${repaired?.version || health?.version || "unknown"} hook_ready=${Boolean(health?.hookReadyAt)}`,
+    });
+    return verified;
+  } catch (error) {
+    void diagnostic("capture.layer_reinject_failed", state, {
+      level: "ERROR", error: String(error), detail: `reason=${reason} tab=${tab.id}`,
+    });
+    return false;
+  }
+}
+
+async function repairOpenCaptureTabs(reason, activeOnly = false) {
+  const tabs = await chrome.tabs.query(activeOnly ? { active: true } : {});
+  await Promise.all(tabs.filter(tabSupportsCapture).map((tab) => repairCaptureLayer(tab, reason)));
+}
+
 ensureHeartbeat();
-chrome.runtime.onInstalled.addListener(ensureHeartbeat);
-chrome.runtime.onStartup.addListener(ensureHeartbeat);
+chrome.runtime.onInstalled.addListener((details) => {
+  ensureHeartbeat();
+  void repairOpenCaptureTabs(`installed:${details.reason || "unknown"}`);
+});
+chrome.runtime.onStartup.addListener(() => {
+  ensureHeartbeat();
+  void repairOpenCaptureTabs("startup");
+});
+chrome.tabs?.onActivated?.addListener(({ tabId }) => {
+  chrome.tabs.get(tabId).then((tab) => repairCaptureLayer(tab, "activated")).catch(() => {});
+});
+chrome.tabs?.onUpdated?.addListener((_tabId, changeInfo, tab) => {
+  if (changeInfo.status === "complete") void repairCaptureLayer(tab, "navigation_complete");
+});
+chrome.tabs?.onRemoved?.addListener((tabId) => {
+  captureLayerHealth.delete(tabId);
+  captureLayerHealthyLogAt.delete(tabId);
+});
 void bridgeRequest("/v1/health").catch(() => {});
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === HEARTBEAT_ALARM) {
@@ -317,6 +479,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       .then(() => flushDiagnosticOutbox())
       .then(() => flushAssistedDownloads())
       .then(() => flushDirectDownloads())
+      .then(() => repairOpenCaptureTabs("heartbeat", true))
       .catch(() => {});
   }
 });
@@ -386,6 +549,57 @@ async function sourcePageUrl(sender) {
 }
 
 const fileNameFromPath = (path) => String(path || "").split(/[\\/]/).pop() || null;
+const compactDownloadTitle = (value) => String(value || "").replace(/\s+/g, " ").trim();
+const normalizedDownloadTitle = (value) => compactDownloadTitle(value)
+  .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const genericDownloadStem = (value) => {
+  const stem = normalizedDownloadTitle(value)
+    .replace(/\.[a-z0-9]{1,10}$/i, "")
+    .replace(/\s*\(\d+\)\s*$/g, "")
+    .replace(/[._-]+/g, " ").trim();
+  return /^(?:video|audio|media|midia|download|file|arquivo|videoplayback)$/i.test(stem);
+};
+const safeDownloadStem = (value) => {
+  let stem = compactDownloadTitle(value)
+    .replace(/[\x00-\x1f\x7f<>:"/\\|?*]/g, "_")
+    .replace(/[ .]+$/g, "");
+  stem = [...stem].slice(0, 100).join("");
+  if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(stem)) stem = "_" + stem;
+  return stem;
+};
+const pageTitleStem = (title, pageUrl) => {
+  let value = compactDownloadTitle(title);
+  try {
+    const parsed = new URL(pageUrl || "");
+    const host = parsed.hostname.toLowerCase();
+    if (host === "soundcloud.com" || host.endsWith(".soundcloud.com")) {
+      value = value
+        .replace(/\s*[|–—]\s*(?:listen|stream).*?soundcloud.*$/i, "")
+        .replace(/\s*[|–—-]\s*soundcloud.*$/i, "")
+        .trim();
+      if (!value || normalizedDownloadTitle(value) === "soundcloud" || genericDownloadStem(value)) {
+        value = compactDownloadTitle(decodeURIComponent(parsed.pathname.split("/").filter(Boolean).at(-1) || "").replace(/[-_]+/g, " "));
+      }
+    }
+  } catch {}
+  return genericDownloadStem(value) ? "" : safeDownloadStem(value);
+};
+async function resolveBrowserDownloadFileName(item) {
+  const original = fileNameFromPath(item?.filename) || "";
+  if (!original || !genericDownloadStem(original)) {
+    return { fileName: original || null, changed: false, source: original ? "browser" : "none" };
+  }
+  const extension = original.match(/\.([a-z0-9]{1,10})$/i)?.[1]?.toLowerCase() || "";
+  let tab = null;
+  if (Number.isInteger(item?.tabId)) tab = await chrome.tabs.get(item.tabId).catch(() => null);
+  const pageUrl = tab?.url || item?.referrer || "";
+  const stem = pageTitleStem(tab?.title || "", pageUrl);
+  if (!stem || !extension) {
+    return { fileName: original, changed: false, source: "generic_fallback" };
+  }
+  return { fileName: stem + "." + extension, changed: true,
+    source: /^https?:\/\/(?:[^/]+\.)?soundcloud\.com\//i.test(pageUrl) ? "soundcloud_page" : "browser_title" };
+}
 
 // Derive a usable media name without changing the signed source URL.
 // Uniqueness belongs to the desktop queue, not to timing or random client names.
@@ -524,8 +738,25 @@ function isDisposableDownloadUrl(value) {
   }
 }
 
-async function takeBrowserDownload(item, eraseFromHistory = false) {
+async function takeBrowserDownload(item, eraseFromHistory = false, resolvedFileName = null) {
   let url = item.finalUrl || item.url;
+  const fileNameDecision = resolvedFileName || await resolveBrowserDownloadFileName(item);
+  const effectiveFileName = fileNameDecision.fileName || fileNameFromPath(item.filename);
+  if (fileNameDecision.changed) {
+    void diagnostic("browser_download.filename_resolved", {
+      traceId: crypto.randomUUID(),
+      url,
+      pageUrl: item.referrer || null,
+      startedAt: Date.now(),
+    }, { detail: `source=${fileNameDecision.source} ext=${String(effectiveFileName || "").split(".").pop() || "unknown"} generic_original=true` });
+  } else if (fileNameDecision.source === "generic_fallback") {
+    void diagnostic("browser_download.filename_fallback", {
+      traceId: crypto.randomUUID(),
+      url,
+      pageUrl: item.referrer || null,
+      startedAt: Date.now(),
+    }, { level: "WARN", detail: "source=generic_fallback generic_original=true" });
+  }
   if (!item.id) return false;
   const modifierTabId = Number.isInteger(item.tabId) ? item.tabId : null;
   const state = { traceId: crypto.randomUUID(), url, pageUrl: item.referrer || null, startedAt: Date.now(), bytes: 0 };
@@ -569,12 +800,12 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
   }
   if (bypassIsActive(modifierTabId)) return false;
   if (!bridgeConnected) {
-    void diagnostic("browser_download.bridge_unavailable", state, { level: "WARN", detail: `disposable=${disposable} file=${fileNameFromPath(item.filename) || "unknown"}` });
+    void diagnostic("browser_download.bridge_unavailable", state, { level: "WARN", detail: `disposable=${disposable} file=${effectiveFileName || "unknown"} filename_source=${fileNameDecision.source}` });
     return false;
   }
   const forced = forceIsActive(modifierTabId);
   const browserAssisted = disposable && !forced;
-  void diagnostic("browser_download.detected", state, { detail: `disposable=${disposable} assisted=${browserAssisted} force=${forced} initial_url=${item.url === url} final_url=${Boolean(item.finalUrl)} tab=${modifierTabId ?? "none"} file=${fileNameFromPath(item.filename) || "unknown"}` });
+  void diagnostic("browser_download.detected", state, { detail: `disposable=${disposable} assisted=${browserAssisted} force=${forced} initial_url=${item.url === url} final_url=${Boolean(item.finalUrl)} tab=${modifierTabId ?? "none"} file=${effectiveFileName || "unknown"} filename_source=${fileNameDecision.source}` });
 
   // Disposable links are consumed by their first request. At this point Chrome
   // already owns that original response; repeating it on the desktop commonly
@@ -583,7 +814,7 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
   // file in Apocalipse through browser-download-complete. This applies to every
   // equivalent disposable-download pattern, not to a hard-coded host.
   if (browserAssisted) {
-    await markAssistedDownload(item, url);
+    await markAssistedDownload({ ...item, filename: effectiveFileName || item.filename }, url);
     void diagnostic("browser_download.assisted_original_response", state, {
       detail: `disposable=${disposable} force=${forceIsActive(modifierTabId)} download_id=${item.id}`,
     });
@@ -598,7 +829,7 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
       method: "POST",
       body: JSON.stringify({
         url,
-        fileName: fileNameFromPath(item.filename),
+        fileName: effectiveFileName,
         pageUrl,
         duration: null,
         cookieHeader: await cookieHeaderFor([url, item.url, pageUrl]),
@@ -632,7 +863,15 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
 
 if (chrome.downloads.onDeterminingFilename?.addListener) {
   chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-    void takeBrowserDownload(item).then(() => suggest()).catch(() => suggest());
+    void resolveBrowserDownloadFileName(item).then(async (decision) => {
+      const effective = decision.fileName ? { ...item, filename: decision.fileName } : item;
+      const handled = await takeBrowserDownload(effective, false, decision);
+      if (!handled && decision.changed && decision.fileName) {
+        suggest({ filename: decision.fileName, conflictAction: "uniquify" });
+      } else {
+        suggest();
+      }
+    }).catch(() => suggest());
     return true;
   });
 } else {
@@ -1269,6 +1508,33 @@ async function streamCapturedUrl(request) {
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   const shortcutTabId = Number.isInteger(sender.tab?.id) ? sender.tab.id : null;
+  if (message?.type === "APOCALIPSE_CONTENT_READY") {
+    markCaptureLayerHealth(shortcutTabId, {
+      contentReadyAt: Date.now(),
+      version: message.version || "unknown",
+    });
+    void diagnostic("capture.layer_content_ready", {
+      traceId: crypto.randomUUID(),
+      pageUrl: sender.tab?.url || null,
+      startedAt: Date.now(),
+    }, { detail: `tab=${shortcutTabId ?? "none"} frame=${sender.frameId ?? 0} version=${message.version || "unknown"} top=${Boolean(message.topFrame)}` });
+    reply({ ok: true });
+    return;
+  }
+  if (message?.type === "APOCALIPSE_MAIN_HOOK_READY") {
+    markCaptureLayerHealth(shortcutTabId, {
+      contentReadyAt: Date.now(),
+      hookReadyAt: Date.now(),
+      version: message.version || captureLayerHealth.get(shortcutTabId)?.version || "unknown",
+    });
+    void diagnostic("capture.layer_main_hook_ready", {
+      traceId: crypto.randomUUID(),
+      pageUrl: sender.tab?.url || null,
+      startedAt: Date.now(),
+    }, { detail: `tab=${shortcutTabId ?? "none"} frame=${sender.frameId ?? 0} version=${message.version || "unknown"} top=${Boolean(message.topFrame)}` });
+    reply({ ok: true });
+    return;
+  }
   if (message?.type === "APOCALIPSE_SHORTCUT_STATE") {
     bypassHeld = Boolean(message.bypassPressed);
     forceHeld = Boolean(message.forcePressed) && !bypassHeld;

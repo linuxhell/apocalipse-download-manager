@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.167",
+  "version": "0.3.169",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -144,5 +144,5 @@
       "48": "icons/alien-48.png"
     }
   },
-  "version_name": "0.3.167 - Apocalipse Forensic Debugger V4 - ChatGPT normal-click capture and aria2 release"
+  "version_name": "0.3.169 - Apocalipse Forensic Debugger V4 - media filename recovery and verified capture health"
 }

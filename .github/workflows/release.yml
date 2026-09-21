@@ -31,19 +31,19 @@ jobs:
             os: windows-latest
             artifact: apocalipse-download-manager-windows-x64-portable
             output: apocalipse-download-manager-windows-x64-portable.zip
-            aria2_asset: aria2c-windows-x86_64.exe
+            aria2_suffix: windows-x64.exe
             aria2_binary: aria2c.exe
           - name: Linux x64 portable
             os: ubuntu-latest
             artifact: apocalipse-download-manager-linux-x64-portable
             output: apocalipse-download-manager-linux-x64-portable.tar.gz
-            aria2_asset: aria2c-linux-x86_64
+            aria2_suffix: linux-x64
             aria2_binary: aria2c
-          - name: macOS portable
-            os: macos-latest
-            artifact: apocalipse-download-manager-macos-portable
-            output: apocalipse-download-manager-macos-portable.zip
-            aria2_asset: aria2c-macos-arm64
+          - name: macOS x64 portable
+            os: macos-15-intel
+            artifact: apocalipse-download-manager-macos-x64-portable
+            output: apocalipse-download-manager-macos-x64-portable.zip
+            aria2_suffix: macos-x64
             aria2_binary: aria2c
 
     runs-on: ${{ matrix.os }}
@@ -85,7 +85,7 @@ jobs:
       - name: Download aria2 backend
         shell: bash
         env:
-          ARIA2_ASSET: ${{ matrix.aria2_asset }}
+          ARIA2_SUFFIX: ${{ matrix.aria2_suffix }}
           ARIA2_BINARY: ${{ matrix.aria2_binary }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -94,21 +94,22 @@ jobs:
           curl --fail --location --retry 3 \
             --header "Authorization: Bearer $GITHUB_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/Kenshin9977/aria2/releases/latest" \
+            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/latest" \
             --output "$release_json"
-          asset_id=$(python3 - "$release_json" "$ARIA2_ASSET" <<'PY'
+          asset_id=$(python3 - "$release_json" "$ARIA2_SUFFIX" <<'PY'
           import json
           import sys
 
           with open(sys.argv[1], encoding="utf-8") as stream:
               release = json.load(stream)
-          expected = sys.argv[2]
+          suffix = sys.argv[2].lower()
           for asset in release.get("assets", []):
-              if asset.get("name") == expected:
+              name = str(asset.get("name", "")).lower()
+              if name.startswith("aria2c-") and name.endswith(suffix) and not name.endswith(".sha256"):
                   print(asset["id"])
                   break
           else:
-              raise SystemExit(f"aria2 asset not found: {expected}")
+              raise SystemExit(f"aria2 compatible asset not found for suffix: {suffix}")
           PY
           )
           mkdir -p dist/aria2-backend
@@ -116,7 +117,7 @@ jobs:
             --header "Authorization: Bearer $GITHUB_TOKEN" \
             --header "Accept: application/octet-stream" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/Kenshin9977/aria2/releases/assets/$asset_id" \
+            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/assets/$asset_id" \
             --output "dist/aria2-backend/$ARIA2_BINARY"
           chmod 755 "dist/aria2-backend/$ARIA2_BINARY"
 
@@ -225,7 +226,14 @@ jobs:
           cp "$GITHUB_WORKSPACE/dist/apocalipse-chrome-${version}.zip" "$GITHUB_WORKSPACE/dist/apocalipse-edge-${version}.zip"
 
           signed="packaging/firefox/apocalipse-firefox-${version}.xpi"
+          shopt -s nullglob
+          signed_parts=(packaging/firefox/apocalipse-firefox-${version}.xpi.b64.part*)
+          if [[ ! -f "$signed" && ${#signed_parts[@]} -gt 0 ]]; then
+            cat "${signed_parts[@]}" | base64 --decode > "$signed"
+            echo "d5727cf6629de6c8f9e24e4e20bd3645560172b67bc8b7fffb2019f83ed27752  $signed" | sha256sum -c -
+          fi
           if [[ -f "$signed" ]]; then
+            echo "d5727cf6629de6c8f9e24e4e20bd3645560172b67bc8b7fffb2019f83ed27752  $signed" | sha256sum -c -
             cp "$signed" "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
           else
             cp -R browser-extension "$stage/firefox"
@@ -307,12 +315,12 @@ jobs:
             if [[ "$version" == *-* ]]; then
               prerelease=(--prerelease)
             fi
-            gh release create "$tag" --verify-tag --generate-notes --draft "${prerelease[@]}"
+            gh release create "$tag" --verify-tag --notes-file "packaging/release-notes-v${version}.md" --draft "${prerelease[@]}"
           fi
 
           (cd dist && sha256sum apocalipse-*) > dist/SHA256SUMS.txt
           gh release upload "$tag" dist/* --clobber
-          gh release edit "$tag" --draft=false
+          gh release edit "$tag" --notes-file "packaging/release-notes-v${version}.md" --draft=false
 
           # Remove the explicitly superseded public release only after the new
           # release has been fully uploaded and published.

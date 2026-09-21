@@ -8,6 +8,9 @@
   const extensionContextActive = () => {
     try { return Boolean(chrome?.runtime?.id); } catch { return false; }
   };
+  const extensionVersion = () => {
+    try { return chrome?.runtime?.getManifest?.()?.version || "unknown"; } catch { return "unknown"; }
+  };
   const sendRuntimeMessageQuietly = (message) => {
     try {
       if (!extensionContextActive()) return Promise.resolve(null);
@@ -35,10 +38,40 @@
       refreshOverlayLanguages();
     }
   });
-  chrome.runtime.onMessage.addListener((message) => {
+  let mainHookReady = false;
+  const pingMainHook = () => {
+    try {
+      window.postMessage({
+        source: "apocalipse-extension",
+        type: "hook-ping",
+        version: extensionVersion(),
+        nonce: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      }, "*");
+    } catch {}
+  };
+  chrome.runtime.onMessage.addListener((message, _sender, reply) => {
+    if (message?.type === "APOCALIPSE_CONTENT_PING") {
+      reply({
+        ok: true,
+        version: extensionVersion(),
+        hookReady: mainHookReady,
+        topFrame: window === window.top,
+      });
+      return;
+    }
+    if (message?.type === "APOCALIPSE_REQUEST_HOOK_PING") {
+      pingMainHook();
+      reply({ ok: true });
+      return;
+    }
     if (message?.type !== "APOCALIPSE_LANGUAGE_CHANGED") return;
     interfaceLanguage = message.language || "en";
     refreshOverlayLanguages();
+  });
+  void sendRuntimeMessageQuietly({
+    type: "APOCALIPSE_CONTENT_READY",
+    version: extensionVersion(),
+    topFrame: window === window.top,
   });
   const modifierPressed = (event, key) => ({ Alt: event.altKey, Shift: event.shiftKey, Control: event.ctrlKey }[key] || false);
   const updateHeldShortcutKey = (event) => {
@@ -48,6 +81,7 @@
     else if (event.type === "keyup") heldShortcutKeys.delete(key);
   };
   const shortcutPressed = (event, key) => modifierPressed(event, key) || heldShortcutKeys.has(key);
+  const forcePressed = (event) => shortcutPressed(event, shortcutKeys.force) || shortcutPressed(event, "Insert");
   const chatgptDownloadGesture = (event) => {
     if (location.hostname.toLowerCase() !== "chatgpt.com") return false;
     const target = event.target instanceof Element ? event.target : null;
@@ -64,14 +98,14 @@
     return sendRuntimeMessageQuietly({
       type: "APOCALIPSE_SHORTCUT_STATE",
       bypassPressed: shortcutPressed(event, shortcutKeys.bypass),
-      forcePressed: shortcutPressed(event, shortcutKeys.force),
+      forcePressed: forcePressed(event),
     }).catch(() => {});
   };
   document.addEventListener("keydown", sendShortcutState, true);
   document.addEventListener("keyup", sendShortcutState, true);
   document.addEventListener("pointerdown", (event) => {
     const bypass = shortcutPressed(event, shortcutKeys.bypass);
-    const force = shortcutPressed(event, shortcutKeys.force);
+    const force = forcePressed(event);
     if (bypass) {
       void sendRuntimeMessageQuietly({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 });
     } else if (force) {
@@ -244,7 +278,60 @@
       if (result?.error) throw new Error(result.error);
     }
   };
-  const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
+  const compactMediaTitle = (value) => String(value || "").replace(/\s+/g, " ").trim();
+  const normalizedMediaTitle = (value) => compactMediaTitle(value)
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const genericMediaTitle = (value) => {
+    const title = normalizedMediaTitle(value).replace(/[._-]+/g, " ").trim();
+    return !title || /^(?:video|audio|music|musica|media|midia|player|video player|audio player|media player|reprodutor(?: de)? video|reprodutor(?: de)? audio)(?: \(\d+\))?$/i.test(title);
+  };
+  const soundCloudSlugTitle = () => {
+    try {
+      const host = location.hostname.toLowerCase();
+      if (!(host === "soundcloud.com" || host.endsWith(".soundcloud.com"))) return "";
+      const slug = decodeURIComponent(location.pathname.split("/").filter(Boolean).at(-1) || "");
+      return compactMediaTitle(slug.replace(/[-_]+/g, " "));
+    } catch { return ""; }
+  };
+  const pageMediaTitle = () => {
+    const candidates = [
+      document.querySelector('meta[property="og:title"]')?.content,
+      document.querySelector('meta[name="twitter:title"]')?.content,
+      document.querySelector('meta[name="title"]')?.content,
+      document.querySelector("h1")?.textContent,
+      document.title,
+      soundCloudSlugTitle(),
+    ];
+    for (let candidate of candidates) {
+      candidate = compactMediaTitle(candidate);
+      if (!candidate) continue;
+      try {
+        const host = location.hostname.toLowerCase();
+        if (host === "soundcloud.com" || host.endsWith(".soundcloud.com")) {
+          candidate = candidate
+            .replace(/\s*[|–—]\s*(?:listen|stream).*?soundcloud.*$/i, "")
+            .replace(/\s*[|–—-]\s*soundcloud.*$/i, "")
+            .trim();
+        }
+      } catch {}
+      if (!genericMediaTitle(candidate) && normalizedMediaTitle(candidate) !== "soundcloud") return candidate;
+    }
+    return "";
+  };
+  const titleInfoFor = (element) => {
+    const labels = [
+      element?.getAttribute?.("aria-label"),
+      element?.title,
+      element?.alt,
+    ].map(compactMediaTitle).filter(Boolean);
+    const elementTitle = labels.find((value) => !genericMediaTitle(value));
+    if (elementTitle) return { title: elementTitle, source: "element" };
+    const pageTitle = pageMediaTitle();
+    if (pageTitle) return { title: pageTitle, source: soundCloudSlugTitle() === pageTitle ? "soundcloud_slug" : "page_title" };
+    const fallback = labels[0] || (element?.tagName === "AUDIO" ? "audio" : "video");
+    return { title: fallback, source: "generic_element" };
+  };
+  const titleFor = (element) => titleInfoFor(element).title;
   const facebookSponsoredEvidence = (element) => {
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
     // Sponsored filtering belongs to popup inventory, not Home overlay
@@ -709,11 +796,13 @@
       const resource = performance.getEntriesByName(url).at(-1);
       const measuredSize = Number(resource?.encodedBodySize || resource?.transferSize || 0);
       const duration = Number(element?.duration);
+      const titleInfo = titleInfoFor(element);
       items.set(`${kind}:${url}`, {
         url,
         kind,
         thumbnail: thumbnail ?? thumbnailFor(element, kind),
-        title: titleFor(element),
+        title: titleInfo.title,
+        titleSource: titleInfo.source,
         size: measuredSize > 0 && !/\.m3u8(?:$|[?#])/i.test(url) ? measuredSize : null,
         duration: Number.isFinite(duration) && duration > 0 ? duration : null,
         ...extra,
@@ -1875,6 +1964,15 @@
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     const data = event.data;
+    if (data?.source === "apocalipse-page-hook" && data.type === "hook-pong") {
+      mainHookReady = true;
+      void sendRuntimeMessageQuietly({
+        type: "APOCALIPSE_MAIN_HOOK_READY",
+        version: data.version || extensionVersion(),
+        topFrame: window === window.top,
+      });
+      return;
+    }
     if (data?.source === "apocalipse-page-hook" && data.type === "capture-trace") {
       void sendRuntimeMessageQuietly({ type: "APOCALIPSE_CAPTURE_TRACE", eventName: data.eventName, mode: data.mode, detail: data.detail || {}, traceId: data.traceId, pageUrl: location.href, at: data.at || Date.now() });
       return;
@@ -1906,5 +2004,6 @@
       }, "*");
     });
   });
+  pingMainHook();
 
 })();
