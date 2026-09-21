@@ -119,19 +119,19 @@ jobs:
             os: windows-latest
             artifact: apocalipse-windows-x64-candidate
             output: apocalipse-download-manager-windows-x64-portable.zip
-            aria2_asset: aria2c-windows-x86_64.exe
+            aria2_suffix: windows-x64.exe
             aria2_binary: aria2c.exe
           - name: Linux x64 portable
             os: ubuntu-22.04
             artifact: apocalipse-linux-x64-candidate
             output: apocalipse-download-manager-linux-x64-portable.tar.gz
-            aria2_asset: aria2c-linux-x86_64
+            aria2_suffix: linux-x64
             aria2_binary: aria2c
-          - name: macOS portable
-            os: macos-latest
-            artifact: apocalipse-macos-candidate
-            output: apocalipse-download-manager-macos-portable.zip
-            aria2_asset: aria2c-macos-arm64
+          - name: macOS x64 portable
+            os: macos-15-intel
+            artifact: apocalipse-macos-x64-candidate
+            output: apocalipse-download-manager-macos-x64-portable.zip
+            aria2_suffix: macos-x64
             aria2_binary: aria2c
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
@@ -170,7 +170,7 @@ jobs:
       - name: Download aria2 backend
         shell: bash
         env:
-          ARIA2_ASSET: ${{ matrix.aria2_asset }}
+          ARIA2_SUFFIX: ${{ matrix.aria2_suffix }}
           ARIA2_BINARY: ${{ matrix.aria2_binary }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -179,21 +179,22 @@ jobs:
           curl --fail --location --retry 3 \
             --header "Authorization: Bearer $GITHUB_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/Kenshin9977/aria2/releases/latest" \
+            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/latest" \
             --output "$release_json"
-          asset_id=$(python3 - "$release_json" "$ARIA2_ASSET" <<'PY'
+          asset_id=$(python3 - "$release_json" "$ARIA2_SUFFIX" <<'PY'
           import json
           import sys
 
           with open(sys.argv[1], encoding="utf-8") as stream:
               release = json.load(stream)
-          expected = sys.argv[2]
+          suffix = sys.argv[2].lower()
           for asset in release.get("assets", []):
-              if asset.get("name") == expected:
+              name = str(asset.get("name", "")).lower()
+              if name.startswith("aria2c-") and name.endswith(suffix) and not name.endswith(".sha256"):
                   print(asset["id"])
                   break
           else:
-              raise SystemExit(f"aria2 asset not found: {expected}")
+              raise SystemExit(f"aria2 compatible asset not found for suffix: {suffix}")
           PY
           )
           mkdir -p dist/aria2-backend
