@@ -2914,6 +2914,14 @@ fn open_media_preview(
         player.clone()
     };
     let mut command = Command::new(&effective_player);
+    #[cfg(target_os = "linux")]
+    if effective_player
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("AppImage"))
+    {
+        command.env("APPIMAGE_EXTRACT_AND_RUN", "1");
+    }
     let player_name = effective_player
         .file_name()
         .and_then(|value| value.to_str())
@@ -3425,6 +3433,14 @@ fn http_origin(url: &str) -> Option<&str> {
 fn version_line(executable: &Path, args: &[&str]) -> Option<String> {
     let mut command = Command::new(executable);
     command.args(args);
+    #[cfg(target_os = "linux")]
+    if executable
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("AppImage"))
+    {
+        command.env("APPIMAGE_EXTRACT_AND_RUN", "1");
+    }
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -8201,6 +8217,14 @@ fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
         ),
     );
     let mut command = Command::new(&player);
+    #[cfg(target_os = "linux")]
+    if player
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("AppImage"))
+    {
+        command.env("APPIMAGE_EXTRACT_AND_RUN", "1");
+    }
     command.arg(&video);
     #[cfg(target_os = "windows")]
     {
