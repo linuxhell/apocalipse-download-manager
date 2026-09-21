@@ -720,20 +720,20 @@ dialog input:focus {
 #tool-list label > div { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 #tool-list button, #check-tools { border: 1px solid #29424f; border-radius: 8px; background: #111d25; color: #bcd1d9; padding: 7px 13px; cursor: pointer; }
 #check-tools { justify-self: end; }
-#settings-dialog { width: min(1360px, calc(100vw - 20px)); max-width: none; overflow: hidden; }
+#settings-dialog { width: min(1480px, calc(100vw - 16px)); max-width: none; overflow: hidden; }
 #tools-dialog { width: min(1080px, calc(100vw - 40px)); overflow: hidden; }
 #settings-dialog form, #tools-dialog form {
   display: grid;
   box-sizing: border-box;
-  height: min(920px, calc(100vh - 24px));
+  height: min(960px, calc(100vh - 16px));
   max-height: none;
   overflow-y: auto;
 }
 #settings-dialog form { grid-template-rows: auto minmax(0, 1fr) auto; }
 #tools-dialog form { grid-template-rows: auto auto minmax(0, 1fr) auto; }
-.settings-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; min-height: 0; }
+.settings-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; min-height: 0; }
 .settings-columns > div { min-width: 0; height: 100%; max-height: none; overflow-y: auto; padding-right: 7px; }
-.settings-columns > div + div { padding-left: 18px; border-left: 1px solid var(--line); }
+.settings-columns > div + div { padding-left: 24px; border-left: 1px solid var(--line); }
 #settings-dialog .website-credential-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 #settings-dialog .website-credential-form > button { width: 100%; }
 #settings-dialog .dialog-actions, #tools-dialog .dialog-actions {
@@ -912,7 +912,20 @@ footer .bridge-connected i {
 .link-files header > span { display:flex; gap:6px; flex-shrink:0; }
 .link-files header button[id*="delete"] { border-color:#713443; color:#ff9aaa; }
 .link-files > small { color:var(--muted); overflow-wrap:anywhere; }
-.link-files > div { display:grid; gap:4px; height:clamp(300px,42vh,460px); overflow-y:auto; overflow-x:hidden; scrollbar-gutter:stable; padding:5px; border:1px solid var(--line); border-radius:9px; background:var(--surface); isolation:isolate; }
+.link-files > div { display:grid; gap:4px; height:clamp(300px,42vh,460px); overflow-y:scroll; overflow-x:hidden; scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:var(--accent) var(--surface-2); padding:5px; border:1px solid var(--line); border-radius:9px; background:var(--surface); isolation:isolate; }
+.link-files > div::-webkit-scrollbar { width:10px; }
+.link-files > div::-webkit-scrollbar-track { background:var(--surface-2); border-radius:9px; }
+.link-files > div::-webkit-scrollbar-thumb { background:color-mix(in srgb,var(--accent) 72%,var(--muted)); border:2px solid var(--surface-2); border-radius:9px; }
+.link-transfer-panel { grid-column:1 / -1; gap:8px!important; min-width:0; }
+.link-transfer-panel[hidden] { display:none!important; }
+.link-transfer-panel header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.link-transfer-panel header strong { color:var(--accent); font-variant-numeric:tabular-nums; }
+.link-transfer-track { width:100%; height:12px; overflow:hidden; border:1px solid var(--line); border-radius:99px; background:var(--surface-2); }
+.link-transfer-track > span { display:block; width:0%; height:100%; border-radius:inherit; background:linear-gradient(90deg,var(--accent),var(--accent-2)); transition:width .12s linear; }
+.link-transfer-panel > small { color:var(--muted); font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.link-transfer-actions { display:flex; justify-content:flex-end; gap:8px; height:auto!important; overflow:visible!important; padding:0!important; border:0!important; background:transparent!important; }
+#link-transfer-pause { min-width:110px; }
+#link-transfer-cancel { min-width:110px; border-color:#713443; color:#ff9aaa; }
 .link-file { display:grid; grid-template-columns:24px minmax(0,1fr) auto; gap:8px; align-items:center; width:100%; min-width:0; min-height:40px; padding:9px; border:0; border-radius:7px; overflow:hidden; text-align:left; color:var(--text); background:transparent; }
 .link-file > span:nth-child(2) { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .link-file:hover { background:var(--surface-2); }
@@ -937,6 +950,20 @@ footer .bridge-connected i {
 }
 .download-row:last-child {
   border-bottom: 0;
+}
+.download-row.reorderable {
+  cursor: grab;
+}
+.download-row.reorderable:active {
+  cursor: grabbing;
+}
+.download-row.dragging {
+  opacity: 0.5;
+}
+.download-row.drag-over {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
 }
 .download-icon {
   width: 32px;
@@ -1278,51 +1305,125 @@ nav { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .about-page {
   flex: 1;
   min-height: 0;
-  display: grid;
-  place-items: start center;
-  padding: 8px 0 22px;
-  overflow: auto;
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  border-radius: calc(var(--corner-radius) + 4px);
+  background: #07120d;
 }
 .about-page[hidden] { display: none; }
 .about-card {
-  width: min(680px, 100%);
+  width: 100%;
+  min-height: 100%;
+  height: 100%;
   display: grid;
-  justify-items: center;
-  gap: 18px;
-  padding: 24px;
-  border: 1px solid var(--line);
-  border-radius: calc(var(--corner-radius) + 4px);
-  background: var(--surface);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: #07120d;
+  overflow: hidden;
+}
+.about-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: clamp(14px, 2vw, 24px);
+  min-height: 92px;
+  padding: 10px 14px 10px 18px;
+  background: rgba(7, 12, 14, .98);
+  border-bottom: 1px solid var(--line);
+}
+.about-creator {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-width: 0;
 }
 .about-creator-photo {
-  width: min(360px, 70vw);
+  width: clamp(72px, 6.4vw, 92px);
+  flex: 0 0 auto;
   aspect-ratio: 1;
   object-fit: cover;
-  border-radius: calc(var(--corner-radius) + 6px);
-  border: 1px solid var(--line);
+  border-radius: calc(var(--corner-radius) + 3px);
+  border: 2px solid rgba(255, 255, 255, .78);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .38);
 }
 .about-creator-line {
+  max-width: 250px;
   margin: 0;
-  text-align: center;
-  color: var(--text);
-  font-size: 20px;
+  text-align: right;
+  color: #fff;
+  font-size: clamp(12px, 1vw, 15px);
   font-weight: 700;
-  line-height: 1.4;
+  line-height: 1.28;
+  text-shadow: 0 2px 8px #000, 0 0 18px rgba(0, 0, 0, .9);
 }
 #about-audio {
   display: none;
 }
 .about-audio-controls {
-  width: min(520px, 100%);
+  width: clamp(250px, 29vw, 330px);
   display: grid;
-  grid-template-columns: auto auto auto minmax(120px, 1fr);
+  grid-template-columns: auto auto auto minmax(78px, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   accent-color: var(--accent);
+  padding: 7px 9px;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: calc(var(--corner-radius) + 2px);
+  background: rgba(0, 0, 0, .68);
 }
-.about-audio-controls button { min-height: 42px; padding: 9px 18px; }
-.about-audio-controls label { font-weight: 700; }
+.about-audio-controls button { min-height: 30px; padding: 5px 8px; font-size: 12px; }
+.about-audio-controls label { font-size: 12px; font-weight: 700; }
 .about-audio-controls input { width: 100%; }
+.about-scene {
+  position: relative;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  background-color: #07120d;
+  background-image: var(--about-background);
+  background-position: center;
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+/* The source artwork originally contained a baked-in music card in its upper-right
+   corner. Replace only that rectangle with another architectural crop from the
+   same artwork so the scene remains unobstructed beneath the real ADM controls. */
+.about-scene::after {
+  content: "";
+  position: absolute;
+  top: 2.5%;
+  right: 1.6%;
+  width: 26.1%;
+  height: 19.3%;
+  pointer-events: none;
+  background-image: var(--about-background);
+  background-repeat: no-repeat;
+  background-size: 384% 523%;
+  background-position: 89% 29%;
+  box-shadow: inset 0 0 18px rgba(0, 0, 0, .12);
+}
+
+@media (max-width: 760px) {
+  .about-toolbar {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+  .about-creator {
+    justify-content: space-between;
+  }
+  .about-creator-line {
+    text-align: left;
+  }
+  .about-audio-controls {
+    width: 100%;
+  }
+}
 
 /* Dedicated Apocalipse Link window: maximized native window, same selected theme. */
 body.link-window {
@@ -1355,24 +1456,56 @@ body.link-window .link-window-header h1 {
 body.link-window .link-panel {
   height: calc(100vh - 116px);
   grid-template-columns: minmax(320px, .85fr) minmax(420px, 1.15fr);
-  grid-template-rows: auto minmax(0, 1fr);
+  /* Keep a dedicated row for transfer controls so it never steals the file-list row. */
+  grid-template-rows: auto minmax(300px, 1fr) auto;
   align-items: stretch;
   margin: 0;
 }
 body.link-window .link-panel > div {
   min-height: 0;
 }
+/* The connection area is intentionally denser in the dedicated Link window.
+   This reserves most of the maximized window for browsing local/remote files. */
+body.link-window .link-identity,
+body.link-window .link-connect {
+  gap: 7px;
+  padding: 13px 16px;
+}
+body.link-window .link-identity input,
+body.link-window .link-connect input {
+  padding: 8px 10px;
+}
+body.link-window .link-identity label,
+body.link-window .link-connect label {
+  gap: 4px;
+}
+body.link-window .link-share-actions,
+body.link-window .link-connection-actions {
+  gap: 6px;
+}
 body.link-window .link-files {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  min-height: 0;
+  min-height: 300px;
+  padding: 14px 16px;
 }
 body.link-window .link-files > div {
   height: auto;
   min-height: 0;
 }
+body.link-window .link-transfer-panel {
+  padding: 11px 16px;
+  gap: 5px!important;
+}
+body.link-window .link-transfer-track {
+  height: 10px;
+}
+body.link-window .link-transfer-actions button {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
 body.link-window #link-share-list {
-  max-height: 180px;
+  max-height: 120px;
 }
 @media (max-width: 980px) {
   body.link-window .link-panel {
@@ -1384,5 +1517,7 @@ body.link-window #link-share-list {
 }
 
 @media (max-width: 620px) {
-  .about-audio-controls { grid-template-columns: 1fr 1fr; }
+  .about-card { align-items: stretch; }
+  .about-creator { width: 100%; }
+  .about-audio-controls { width: 100%; grid-template-columns: 1fr 1fr; }
 }

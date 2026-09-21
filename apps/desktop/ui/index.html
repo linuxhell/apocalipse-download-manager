@@ -142,15 +142,20 @@
       </section>
       <section id="about-panel" class="about-page" hidden>
         <article class="about-card">
-          <img id="about-creator-photo" class="about-creator-photo" alt="Juliano" />
-          <p class="about-creator-line" data-i18n="aboutCreator">Creator: Juliano - Brazil - Sátia Mortadela</p>
           <audio id="about-audio" preload="auto"></audio>
-          <div class="about-audio-controls">
-            <button id="about-play-pause" type="button" data-i18n="aboutPause">Pause</button>
-            <button id="about-stop" type="button" data-i18n="aboutStop">Stop</button>
-            <label for="about-volume" data-i18n="aboutVolume">Volume</label>
-            <input id="about-volume" type="range" min="0" max="1" step="0.05" value="0.7" />
+          <div class="about-toolbar">
+            <div class="about-audio-controls">
+              <button id="about-play-pause" type="button" data-i18n="aboutPause">Pause</button>
+              <button id="about-stop" type="button" data-i18n="aboutStop">Stop</button>
+              <label for="about-volume" data-i18n="aboutVolume">Volume</label>
+              <input id="about-volume" type="range" min="0" max="1" step="0.05" value="0.7" />
+            </div>
+            <div class="about-creator">
+              <p class="about-creator-line" data-i18n="aboutCreator">Creator: Juliano - Brazil - Sátia Mortadela</p>
+              <img id="about-creator-photo" class="about-creator-photo" alt="Juliano" />
+            </div>
           </div>
+          <div class="about-scene" aria-hidden="true"></div>
         </article>
       </section>
       <section id="language-panel" class="appearance-page language-page" hidden>
@@ -235,6 +240,10 @@
           autofocus
         />
         <div id="analysis" class="analysis" hidden></div>
+        <label id="auto-extract-option" class="setting-toggle compact-toggle" hidden>
+          <input id="auto-extract" type="checkbox" />
+          <span><b data-i18n="autoExtract">Extract automatically after download</b><small data-i18n="autoExtractHint">Shown only for archive files. Loose root files are kept inside a folder named after the archive.</small></span>
+        </label>
         <section id="media-inspection" class="media-inspection" hidden>
           <img id="media-thumbnail" alt="" hidden />
           <div>
@@ -286,7 +295,7 @@
         </details>
         <section class="task-connections">
           <label for="task-connections"><span><b data-i18n="taskConnections">Threads for this download</b><small data-i18n="taskConnectionsHint">Only changes this task. Use 1 on sites that reject segmented downloads.</small></span><output id="task-connections-value">Automatic</output></label>
-          <input id="task-connections" type="range" min="1" max="32" value="8" />
+          <input id="task-connections" type="range" min="1" max="32" value="16" />
           <div class="range-scale"><span>1</span><span>8</span><span>16</span><span>32</span></div>
         </section>
         </section>
@@ -464,7 +473,25 @@
           </select>
           <label for="dns-servers" data-i18n="dnsServers">DNS servers</label>
           <input id="dns-servers" type="text" maxlength="400" placeholder="1.1.1.1, 1.0.0.1" />
-          <small data-i18n="dnsScopeHint">Applied to the native HTTP engine. Gopeed uses its own network stack; SOCKS5H continues resolving through the proxy.</small>
+          <small data-i18n="dnsScopeHint">Applied to the native HTTP engine. aria2 uses the system resolver; SOCKS5H continues resolving through the proxy.</small>
+        </section>
+        <section class="pairing-settings">
+          <b data-i18n="aria2RpcTitle">aria2 RPC</b>
+          <label class="setting-toggle compact-toggle">
+            <input id="aria2-rpc-enabled" type="checkbox" checked />
+            <span><b data-i18n="aria2RpcEnabled">Use aria2 RPC</b><small data-i18n="aria2RpcEnabledHint">Control accelerated HTTP/HTTPS, FTP, torrent and magnet transfers through the local aria2 engine.</small></span>
+          </label>
+          <label class="setting-toggle compact-toggle">
+            <input id="aria2-rpc-auto-start" type="checkbox" checked />
+            <span><b data-i18n="aria2RpcAutoStart">Start aria2 automatically when needed</b><small data-i18n="aria2RpcAutoStartHint">Keeps one local aria2 backend for the current Apocalipse session.</small></span>
+          </label>
+          <label for="aria2-rpc-port" data-i18n="aria2RpcPort">RPC port</label>
+          <input id="aria2-rpc-port" type="number" min="1024" max="65535" step="1" data-i18n-placeholder="aria2RpcPortHint" placeholder="Automatic" />
+          <div class="bandwidth-current"><span data-i18n="aria2RpcStatus">RPC status</span><strong id="aria2-rpc-status">Disconnected</strong></div>
+          <div class="diagnostic-actions">
+            <button id="aria2-rpc-test" type="button" data-i18n="aria2RpcTest">Test RPC connection</button>
+            <button id="aria2-rpc-regenerate-token" type="button" data-i18n="aria2RpcRegenerateToken">Regenerate RPC token</button>
+          </div>
         </section>
         <div class="transfer-settings">
           <label>
@@ -472,8 +499,8 @@
             <input id="max-tasks" type="range" min="1" max="20" value="3" />
           </label>
           <label>
-            <span><b data-i18n="connections">Connections per download</b><output id="connections-value">8</output></span>
-            <input id="connections" type="range" min="1" max="32" value="8" />
+            <span><b data-i18n="connections">Connections per download</b><output id="connections-value">16</output></span>
+            <input id="connections" type="range" min="1" max="32" value="16" />
           </label>
           <button id="default-limits" type="button" data-i18n="defaults">Default</button>
         </div>
@@ -539,7 +566,8 @@
             <label data-tool="yt-dlp"><span>yt-dlp <small></small></span><div><input id="tool-yt-dlp" type="text" /><button type="button" data-tool-pick="yt-dlp" data-i18n="browse">Browse…</button><button type="button" data-tool-update="yt-dlp" data-i18n="update">Update</button></div></label>
             <label data-tool="qjs"><span>QuickJS (qjs) <small></small></span><div><input id="tool-qjs" type="text" /><button type="button" data-tool-pick="qjs" data-i18n="browse">Browse…</button><button type="button" data-tool-update="qjs" data-i18n="update">Update</button></div></label>
             <label data-tool="n-m3u8dl-re"><span>N_m3u8DL-RE <small></small></span><div><input id="tool-n-m3u8dl-re" type="text" /><button type="button" data-tool-pick="n-m3u8dl-re" data-i18n="browse">Browse…</button><button type="button" data-tool-update="n-m3u8dl-re" data-i18n="update">Update</button></div></label>
-            <label data-tool="gopeed"><span><span data-i18n="gopeedBackend">Gopeed (backend engine)</span> <small></small></span><div><input id="tool-gopeed" type="text" /><button type="button" data-tool-pick="gopeed" data-i18n="browse">Browse…</button><button type="button" data-tool-update="gopeed" data-i18n="update">Update</button></div></label>
+            <label data-tool="aria2"><span><span data-i18n="aria2Backend">aria2 (HTTP/HTTPS, FTP, torrent and magnet)</span> <small></small></span><div><input id="tool-aria2" type="text" /><button type="button" data-tool-pick="aria2" data-i18n="browse">Browse…</button><button type="button" data-tool-update="aria2" data-i18n="update">Update</button></div></label>
+            <label data-tool="extractor"><span><span data-i18n="archiveExtractor">Archive extractor</span> <small></small></span><div><input id="tool-extractor" type="text" /><button type="button" data-tool-pick="extractor" data-i18n="browse">Browse…</button></div></label>
           </div>
           <label for="media-player" data-i18n="mediaPlayer">VLC / mpv / player</label>
           <div class="path-picker"><input id="media-player" type="text" /><button id="pick-media-player" type="button" data-i18n="browse">Browse…</button></div>

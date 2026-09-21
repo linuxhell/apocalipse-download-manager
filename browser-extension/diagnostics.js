@@ -5,6 +5,7 @@
   const component = /^(chrome|moz)-extension:$/.test(location.protocol) ? 'popup' : 'content';
   let config = null, sequence = 0, outbox = [], dropped = 0, sendErrors = 0, busy = false, timer = null;
   let rateAt = 0, rateCount = 0, chain = Promise.resolve(), lastPlayers = '', snapshotTimer = null;
+  let mutationTimer = null, mutationStats = { batches:0, addedNodes:0, removedNodes:0, addedVideos:0, removedVideos:0, sourceChanges:0 };
   const scripts = new Set(), players = new WeakMap(), resourceSeen = new Set();
   const send = message => new Promise((resolve,reject) => {
     let finished = false;
@@ -22,7 +23,7 @@
     if (!active()) return Promise.resolve();
     const now = Date.now();
     if (now - rateAt >= 1000) { rateAt = now; rateCount = 0; }
-    if (++rateCount > 40) { dropped++; return Promise.resolve(); }
+    if (++rateCount > 120) { dropped++; return Promise.resolve(); }
     const capturedConfig = config;
     const input = { id: crypto.randomUUID(), contextId, sequence: ++sequence, traceId, event, level, component,
       version: chrome.runtime.getManifest().version, clientTimestamp: now, monoMs: Math.round(performance.now()), detail };
@@ -59,15 +60,23 @@
     return { playerId: entry.playerId, revision: entry.revision, url: source,
       sourceScheme: source.startsWith('blob:') ? 'blob' : source.startsWith('http') ? 'http' : source ? 'other' : 'empty',
       duration: Number.isFinite(video?.duration) ? video.duration : null,
+      currentTime: Number.isFinite(video?.currentTime) ? video.currentTime : null,
       videoWidth: video?.videoWidth || 0, videoHeight: video?.videoHeight || 0,
       readyState: String(video?.readyState ?? 'unknown'), networkState: video?.networkState,
-      connected: Boolean(video?.isConnected), paused: Boolean(video?.paused),
+      connected: Boolean(video?.isConnected), paused: Boolean(video?.paused), ended: Boolean(video?.ended),
+      seeking: Boolean(video?.seeking), muted: Boolean(video?.muted), loop: Boolean(video?.loop),
+      autoplay: Boolean(video?.autoplay), controls: Boolean(video?.controls),
+      playbackRate: Number.isFinite(video?.playbackRate) ? video.playbackRate : null,
+      volume: Number.isFinite(video?.volume) ? video.volume : null,
+      sourceChildren: video?.querySelectorAll?.('source')?.length || 0,
       visible: rect?.width > 40 && rect?.height > 20 && rect?.bottom > 0 && rect?.top < innerHeight,
+      rect: { left: Math.round(rect?.left || 0), top: Math.round(rect?.top || 0),
+        width: Math.round(rect?.width || 0), height: Math.round(rect?.height || 0) },
       hasSrcObject: Boolean(video?.srcObject), errorCode: video?.error?.code || null };
   }
   async function snapshot() {
     if (!active()) { clearInterval(snapshotTimer); snapshotTimer = null; return; }
-    const videos = [...document.querySelectorAll('video')].slice(0, 12);
+    const videos = [...document.querySelectorAll('video')].slice(0, 40);
     const snapshot = videos.map(player);
     const signature = JSON.stringify(snapshot);
     if (signature !== lastPlayers) {
@@ -88,6 +97,38 @@
         startMs: resource.startTime, bindingProven: false });
     }
   }
+  const countVideoNodes = node => {
+    if (!node || node.nodeType !== 1) return 0;
+    return (node.tagName === 'VIDEO' ? 1 : 0) + (node.querySelectorAll?.('video')?.length || 0);
+  };
+  const flushMutations = () => {
+    mutationTimer = null;
+    if (!active()) return;
+    const stats = mutationStats;
+    mutationStats = { batches:0, addedNodes:0, removedNodes:0, addedVideos:0, removedVideos:0, sourceChanges:0 };
+    if (stats.batches) void emit('dom.media_mutation_batch', stats);
+  };
+  const mutationObserver = new MutationObserver(records => {
+    if (!active()) return;
+    mutationStats.batches += 1;
+    for (const record of records) {
+      if (record.type === 'attributes') {
+        if (record.target?.tagName === 'VIDEO' || record.target?.tagName === 'SOURCE') mutationStats.sourceChanges += 1;
+        continue;
+      }
+      mutationStats.addedNodes += record.addedNodes?.length || 0;
+      mutationStats.removedNodes += record.removedNodes?.length || 0;
+      for (const node of record.addedNodes || []) mutationStats.addedVideos += countVideoNodes(node);
+      for (const node of record.removedNodes || []) mutationStats.removedVideos += countVideoNodes(node);
+    }
+    if (!mutationTimer) mutationTimer = setTimeout(flushMutations, 350);
+  });
+  try {
+    mutationObserver.observe(document.documentElement, {
+      subtree:true, childList:true, attributes:true, attributeFilter:['src','poster','class','style']
+    });
+  } catch {}
+
   async function refresh() {
     try {
       const next = await send({ type: 'ADM_DIAG_CONFIG' });
@@ -129,11 +170,19 @@
   addEventListener('unhandledrejection', event => {
     void emit('collector.unhandled_rejection', { errorName: event.reason?.name || 'Error', errorRef: String(event.reason) }, null, 'ERROR');
   });
-  for (const type of ['loadedmetadata','emptied','play','stalled','abort','error']) {
+  for (const type of ['loadstart','loadedmetadata','loadeddata','canplay','play','playing','pause','waiting','stalled','suspend','ended','emptied','durationchange','seeking','seeked','ratechange','volumechange','resize','abort','error']) {
     document.addEventListener(type, event => {
       if (event.target?.tagName === 'VIDEO') void emit('player.lifecycle', { eventType: type, ...player(event.target) }, null, type === 'error' ? 'ERROR' : 'INFO');
     }, true);
   }
+  addEventListener('online', () => { if (active()) void emit('collector.network_state', { status:'online' }); });
+  addEventListener('offline', () => { if (active()) void emit('collector.network_state', { status:'offline' }, null, 'WARN'); });
+  document.addEventListener('visibilitychange', () => {
+    if (active()) void emit('collector.visibility', { state: document.visibilityState || 'unknown', hidden:Boolean(document.hidden) });
+  });
+  addEventListener('pageshow', event => {
+    if (active()) void emit('collector.pageshow', { persisted:Boolean(event.persisted), readyState:document.readyState });
+  });
   void refresh();
   // Covers opening the page before/after the session and expiry without keeping a worker alive.
   setInterval(() => { if (active()) void emit('collector.health', { dropped, sendErrors, queued: outbox.length }); }, 5000);

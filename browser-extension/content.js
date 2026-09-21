@@ -1,6 +1,7 @@
 (() => {
   globalThis.ADM_DIAG?.register("content.js");
   let shortcutKeys = { force: "Shift", bypass: "Alt" };
+  const heldShortcutKeys = new Set();
   let interfaceLanguage = "en";
   let interfaceTheme = "void";
   let refreshOverlayLanguages = () => {};
@@ -40,27 +41,57 @@
     refreshOverlayLanguages();
   });
   const modifierPressed = (event, key) => ({ Alt: event.altKey, Shift: event.shiftKey, Control: event.ctrlKey }[key] || false);
-  const sendShortcutState = (event) => sendRuntimeMessageQuietly({
-    type: "APOCALIPSE_SHORTCUT_STATE",
-    bypassPressed: modifierPressed(event, shortcutKeys.bypass),
-    forcePressed: modifierPressed(event, shortcutKeys.force),
-  }).catch(() => {});
+  const updateHeldShortcutKey = (event) => {
+    const key = event.key === "Ctrl" ? "Control" : event.key;
+    if (!["Alt", "Shift", "Control", "Insert"].includes(key)) return;
+    if (event.type === "keydown") heldShortcutKeys.add(key);
+    else if (event.type === "keyup") heldShortcutKeys.delete(key);
+  };
+  const shortcutPressed = (event, key) => modifierPressed(event, key) || heldShortcutKeys.has(key);
+  const chatgptDownloadGesture = (event) => {
+    if (location.hostname.toLowerCase() !== "chatgpt.com") return false;
+    const target = event.target instanceof Element ? event.target : null;
+    const clickable = target?.closest?.("a[href],button,[role=button],[role=menuitem]");
+    if (!clickable) return false;
+    const label = String(clickable.getAttribute?.("aria-label") || clickable.innerText || clickable.textContent || "").trim();
+    const href = String(clickable.getAttribute?.("href") || clickable.href || "");
+    return /(?:\bdownload\b|\bbaixar\b|下载)/i.test(label)
+      || /^sandbox:/i.test(href)
+      || /\/backend-api\/estuary\/content(?:\?|$)/i.test(href);
+  };
+  const sendShortcutState = (event) => {
+    updateHeldShortcutKey(event);
+    return sendRuntimeMessageQuietly({
+      type: "APOCALIPSE_SHORTCUT_STATE",
+      bypassPressed: shortcutPressed(event, shortcutKeys.bypass),
+      forcePressed: shortcutPressed(event, shortcutKeys.force),
+    }).catch(() => {});
+  };
   document.addEventListener("keydown", sendShortcutState, true);
   document.addEventListener("keyup", sendShortcutState, true);
   document.addEventListener("pointerdown", (event) => {
-    const bypass = modifierPressed(event, shortcutKeys.bypass);
-    const force = modifierPressed(event, shortcutKeys.force);
+    const bypass = shortcutPressed(event, shortcutKeys.bypass);
+    const force = shortcutPressed(event, shortcutKeys.force);
     if (bypass) {
       void sendRuntimeMessageQuietly({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 });
     } else if (force) {
       void sendRuntimeMessageQuietly({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 });
+    } else if (chatgptDownloadGesture(event)) {
+      // ChatGPT can render generated-file controls without exposing the final
+      // estuary URL in the clicked node. Treat that normal click as a short,
+      // scoped force transaction so the MAIN-world hook can capture the final
+      // authenticated file response before it becomes a navigation/download.
+      void sendRuntimeMessageQuietly({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 8000 });
     }
   }, true);
-  window.addEventListener("blur", () => sendRuntimeMessageQuietly({
-    type: "APOCALIPSE_SHORTCUT_STATE",
-    bypassPressed: false,
-    forcePressed: false,
-  }).catch(() => {}));
+  window.addEventListener("blur", () => {
+    heldShortcutKeys.clear();
+    return sendRuntimeMessageQuietly({
+      type: "APOCALIPSE_SHORTCUT_STATE",
+      bypassPressed: false,
+      forcePressed: false,
+    }).catch(() => {});
+  });
   const absolute = (value) => {
     // Missing src/poster values are not relative links: new URL("", base)
     // resolves to the page and would invent both a media URL and a thumbnail.
@@ -114,7 +145,7 @@
     // Bypass must keep the browser's native download untouched. The generic
     // pointerdown listener above also arms the worker lease for the ensuing
     // chrome.downloads event, which may not carry a tabId.
-    if (modifierPressed(event, shortcutKeys.bypass)) return;
+    if (shortcutPressed(event, shortcutKeys.bypass)) return;
     const found = chatgptLibraryLinkForEvent(event);
     if (!found) return;
     event.preventDefault();
@@ -214,56 +245,57 @@
     }
   };
   const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
-  const isSponsoredFacebookPlayer = (element) => {
-    if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return false;
-    // A MediaStream/srcObject is used by both ads and ordinary Reels. Only an
-    // explicit ad marker in this exact card is safe grounds for hiding it. Some
-    // Facebook ad layouts do not expose role=article, so walk upward only while
-    // the container still belongs to this one player/card.
-    const markerSelector = [
-      '[aria-label*="Sponsored" i]', '[aria-label*="Patrocinado" i]',
-      '[aria-label*="Publicidad" i]', '[aria-label*="Gesponsert" i]',
-      '[data-ad-preview]', '[data-testid*="sponsored" i]',
-      'a[href*="ad_id="]', 'a[href*="/ads/"]', 'a[href*="ads/about"]',
-    ].join(',');
-    const label = /(?:^|[\s·•|])(?:Sponsored|Patrocinado|Patrocinada|Publicidad|Gesponsert|Sponsorisé|Sponsorizzato|赞助内容|贊助內容)(?:$|[\s·•|])/iu;
-    const closeToPlayer = marker => {
-      const playerRect = element?.getBoundingClientRect?.(), markerRect = marker?.getBoundingClientRect?.();
-      if (!playerRect || !markerRect) return false;
-      const markerY = markerRect.top + markerRect.height / 2;
-      return markerRect.right >= playerRect.left - 80 && markerRect.left <= playerRect.right + 80
-        && markerY >= playerRect.top - 320 && markerY <= playerRect.top + 120;
+  const facebookSponsoredEvidence = (element) => {
+    if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
+    // Sponsored filtering belongs to popup inventory, not Home overlay
+    // eligibility. Facebook virtualizes/recycles feed DOM, so only trust an
+    // explicit label in the same article header as the media.
+    const sponsoredLabel = /^(?:Sponsored|Patrocinado|Patrocinada|Publicidad|Gesponsert|Sponsorisé|Sponsorizzato|赞助内容|贊助內容)$/iu;
+    const visibleMarker = marker => {
+      const rect = marker?.getBoundingClientRect?.();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+      if (marker?.getAttribute?.("aria-hidden") === "true" || marker?.hidden) return false;
+      const style = globalThis.getComputedStyle?.(marker);
+      return !style || (style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) > 0);
     };
-    let exactPost = element.closest?.('[role="article"],article');
-    if (!exactPost) {
-      const playerRect = element?.getBoundingClientRect?.();
-      for (let node = element?.parentElement, depth = 0; node && depth < 18; node = node.parentElement, depth += 1) {
-        if (node === document.body || node === document.documentElement) break;
-        const rect = node.getBoundingClientRect?.();
-        const videos = [...(node.querySelectorAll?.('video') || [])];
-        if (videos.some(video => video !== element)) break;
-        const verticallyTight = rect && playerRect && rect.top >= playerRect.top - 420 && rect.bottom <= playerRect.bottom + 520;
-        if (verticallyTight && node.querySelector?.(markerSelector)) { exactPost = node; break; }
+    const compactLabel = value => String(value || "")
+      .replace(/\s+/g, " ").trim()
+      .replace(/\s*[·•|].*$/u, "").trim();
+    const markerReason = marker => {
+      if (!visibleMarker(marker)) return null;
+      if (marker?.matches?.('[data-ad-preview],[data-testid*="sponsored" i]')) {
+        return "explicit_attribute_same_article";
       }
+      const aria = compactLabel(marker?.getAttribute?.("aria-label"));
+      const text = compactLabel(marker?.innerText || marker?.textContent);
+      return sponsoredLabel.test(aria) || sponsoredLabel.test(text)
+        ? "exact_header_label_same_article" : null;
+    };
+    const article = element?.closest?.('article,[role="article"]');
+    if (!article) return null;
+    const player = element?.tagName === "VIDEO"
+      ? element
+      : article.querySelector?.("video");
+    const playerRect = player?.getBoundingClientRect?.() || element?.getBoundingClientRect?.();
+    if (!playerRect) return null;
+    const markers = [
+      ...(article.matches?.('[data-ad-preview],[data-testid*="sponsored" i],[aria-label]') ? [article] : []),
+      ...(article.querySelectorAll?.('[data-ad-preview],[data-testid*="sponsored" i],[aria-label],span,a') || []),
+    ];
+    for (const marker of markers) {
+      const reason = markerReason(marker);
+      if (!reason) continue;
+      const rect = marker.getBoundingClientRect?.();
+      if (!rect) continue;
+      const horizontallyAligned = rect.right >= playerRect.left - 32
+        && rect.left <= playerRect.right + 32;
+      const inPostHeader = rect.bottom <= playerRect.top + 18
+        && rect.top >= playerRect.top - 280;
+      if (horizontallyAligned && inPostHeader) return { sponsored: true, reason };
     }
-    if (!exactPost) return false;
-    for (let node = element, depth = 0; node && depth < 24; node = node.parentElement, depth += 1) {
-      if (node === document.body || node === document.documentElement) break;
-      const videos = [...(node.querySelectorAll?.('video') || [])];
-      if (String(element?.tagName || '').toUpperCase() === 'VIDEO'
-        ? videos.some(video => video !== element) : videos.length > 1) break;
-      const explicit = [...(node.querySelectorAll?.(markerSelector) || [])].find(closeToPlayer);
-      if (explicit) return true;
-      const textual = [...(node.querySelectorAll?.('span,a,[role="button"],[aria-label]') || [])]
-        .find(candidate => {
-          const text = String(candidate.innerText || candidate.textContent || candidate.getAttribute?.('aria-label') || '').replace(/\s+/g, ' ').trim();
-          return text.length <= 80 && label.test(text) && closeToPlayer(candidate);
-        });
-      if (textual) return true;
-      if (node === exactPost) break;
-    }
-    return false;
+    return null;
   };
+  const isSponsoredFacebookPlayer = (element) => Boolean(facebookSponsoredEvidence(element));
   // Scoped to this document: closing the popup does not destroy the catalog.
   // A new document (including another site) creates a fresh isolated catalog.
   const mediaCatalog = new Map();
@@ -528,6 +560,8 @@
   const facebookUrlFor = (element) => {
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
     if (isFacebookMediaUrl(location.href)) return location.href;
+    const v3 = globalThis.ADM_SOCIAL_HOME_FEED_V3?.facebookDom?.(element);
+    if (v3?.url && isFacebookMediaUrl(v3.url)) return v3.url;
     const selector = [
       'a[href*="/reel/"]',
       'a[href*="/reels/"]',
@@ -692,7 +726,15 @@
       if (youtubeUrl) return;
       // Reject an explicitly sponsored Facebook card before any URL, Blob or
       // MediaStream path can turn it into a popup row.
-      if (isSponsoredFacebookPlayer(element)) return;
+      if (isSponsoredFacebookPlayer(element)) {
+        const sponsoredUrl = facebookUrlFor(element);
+        if (sponsoredUrl) mediaCatalog.delete(`video:${absolute(sponsoredUrl)}`);
+        void globalThis.ADM_DIAG?.emit?.("facebook.popup_sponsored_filtered", {
+          reason: facebookSponsoredEvidence(element)?.reason || "sponsored",
+          retainedPurged: Boolean(sponsoredUrl),
+        });
+        return;
+      }
       const candidateFacebookUrl = facebookUrlFor(element);
       const facebookUrl = isFacebookMediaUrl(candidateFacebookUrl) ? candidateFacebookUrl : null;
       const tikTokUrl = tikTokUrlFor(element);
@@ -738,7 +780,11 @@
     // create a <video>. Treat that card as a video candidate so its thumbnail
     // is available without starting playback.
     document.querySelectorAll("a[href]").forEach((anchor) => {
-      if (isSponsoredFacebookPlayer(anchor)) return;
+      if (isSponsoredFacebookPlayer(anchor)) {
+        const sponsoredUrl = socialCardUrl(anchor.href);
+        if (sponsoredUrl) mediaCatalog.delete(`video:${absolute(sponsoredUrl)}`);
+        return;
+      }
       const url = socialCardUrl(anchor.href);
       if (!url || items.has(`video:${url}`)) return;
       const thumbnail = cardThumbnailFor(anchor);
@@ -898,8 +944,8 @@
   };
   document.addEventListener("click", (event) => {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey) return;
-    const bypass = modifierPressed(event, shortcutKeys.bypass);
-    const force = modifierPressed(event, shortcutKeys.force);
+    const bypass = shortcutPressed(event, shortcutKeys.bypass);
+    const force = shortcutPressed(event, shortcutKeys.force);
     if (bypass) {
       chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 }).catch(() => {});
       return;
@@ -986,13 +1032,102 @@
   };
   let overlayTimer;
   const activeOverlays = new Map();
+
+  // Universal social-player diagnostics. Decisions are emitted only while the
+  // existing opt-in diagnostics session is active. A per-player signature
+  // suppresses identical repeats so long feeds remain readable.
+  const socialDecisionCache = new WeakMap();
+  let socialScanId = 0;
+  const socialPlatform = () => {
+    const host = String(location.hostname || "").toLowerCase();
+    if (/(^|\.)facebook\.com$/.test(host)) return "facebook";
+    if (/(^|\.)instagram\.com$/.test(host)) return "instagram";
+    if (/(^|\.)tiktok\.com$/.test(host)) return "tiktok";
+    if (/(^|\.)(?:x|twitter)\.com$/.test(host)) return "x";
+    return "generic";
+  };
+  const socialPlayerVisible = element => {
+    const rect = element?.getBoundingClientRect?.();
+    return Boolean(rect && rect.width >= 100 && rect.height >= 55
+      && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight
+      && rect.left < (Number(globalThis.innerWidth) || document.documentElement?.clientWidth || rect.right));
+  };
+  const socialSourceType = element => {
+    const source = String(element?.currentSrc || element?.src || "");
+    if (element?.srcObject) return "srcObject";
+    if (/^blob:/i.test(source)) return "blob";
+    if (/^https?:/i.test(source)) return "http";
+    return source ? "other" : "empty";
+  };
+  const emitSocialDecision = (element, decision, detail = {}, force = false) => {
+    if (!element || element.tagName !== "VIDEO" || !globalThis.ADM_DIAG?.active?.()) return;
+    const platform = socialPlatform();
+    if (platform === "generic") return;
+    const player = globalThis.ADM_DIAG?.player?.(element) || {};
+    const rect = element.getBoundingClientRect?.() || {};
+    const payload = {
+      platform,
+      scanId: socialScanId,
+      decision,
+      playerId: player.playerId || playerIdentity(element),
+      revision: player.revision ?? null,
+      visible: socialPlayerVisible(element),
+      sourceType: socialSourceType(element),
+      duration: Number.isFinite(element.duration) ? Number(element.duration.toFixed(3)) : null,
+      readyState: element.readyState ?? null,
+      paused: Boolean(element.paused),
+      muted: Boolean(element.muted),
+      volume: Number.isFinite(element.volume) ? element.volume : null,
+      hasSrcObject: Boolean(element.srcObject),
+      rect: {
+        left: Math.round(rect.left || 0), top: Math.round(rect.top || 0),
+        width: Math.round(rect.width || 0), height: Math.round(rect.height || 0),
+      },
+      datasetButton: Boolean(element.dataset?.apocalipseButton),
+      overlayActive: activeOverlays.has(element),
+      ...detail,
+    };
+    const signature = JSON.stringify({ ...payload, scanId: 0 });
+    if (!force && socialDecisionCache.get(element) === signature) return;
+    socialDecisionCache.set(element, signature);
+    void globalThis.ADM_DIAG.emit("social.player_decision", payload, null,
+      decision === "missing" ? "WARN" : "INFO");
+    if (decision === "missing") {
+      void globalThis.ADM_DIAG.emit("social.overlay_missing", payload, null, "WARN");
+    }
+  };
+  const emitSocialSummary = summary => {
+    if (!globalThis.ADM_DIAG?.active?.() || socialPlatform() === "generic") return;
+    void globalThis.ADM_DIAG.emit("social.scan_summary", {
+      platform: socialPlatform(), scanId: socialScanId, ...summary,
+    });
+  };
+
   const installOverlays = () => {
     if (/(^|\.)chatgpt\.com$/.test(location.hostname)) return;
+    socialScanId += 1;
+    const socialSummary = { players: 0, visible: 0, eligible: 0, overlays: 0, missing: 0,
+      sponsored: 0, audioOnly: 0, inactive: 0, noAction: 0, kept: 0, installed: 0 };
     if (youtubeExtractorUrl()) {
       document.querySelectorAll(".apocalipse-media-record").forEach((button) => button.remove());
     }
-    for (const overlay of activeOverlays.values()) {
-      if (!overlay.element.isConnected || overlay.pageUrl !== location.href) overlay.cleanup();
+    for (const overlay of [...activeOverlays.values()]) {
+      if (!overlay.element.isConnected || overlay.pageUrl !== location.href) {
+        overlay.cleanup();
+        continue;
+      }
+      const facebookOverlay = overlay.element?.tagName === "VIDEO"
+        && /(^|\.)facebook\.com$/i.test(location.hostname);
+      if (!facebookOverlay) continue;
+      const currentBindingId = playerIdentity(overlay.element);
+      if (overlay.bindingId && overlay.bindingId !== currentBindingId) {
+        trace("facebook.video_reused", "overlay", {
+          previousBindingId: overlay.bindingId,
+          currentBindingId,
+          source: String(overlay.element.currentSrc || overlay.element.src || ""),
+        });
+        overlay.cleanup();
+      }
     }
     const isFacebookReelsPage = /(^|\.)facebook\.com$/i.test(location.hostname)
       && /(?:^|\/)reels?(?:\/|$)/i.test(location.pathname);
@@ -1043,16 +1178,60 @@
     }
 
     document.querySelectorAll("video,audio").forEach((element) => {
-      if (element.dataset.apocalipseButton) return;
+      const facebookPage = /(^|\.)facebook\.com$/i.test(location.hostname);
+      const isSocialVideo = element.tagName === "VIDEO" && socialPlatform() !== "generic";
+      if (isSocialVideo) {
+        socialSummary.players += 1;
+        if (socialPlayerVisible(element)) socialSummary.visible += 1;
+      }
+      if (facebookPage && element.tagName === "AUDIO") {
+        socialSummary.audioOnly += 1;
+        trace("facebook.overlay_skipped_audio_only", "overlay", { reason: "audio_element" });
+        return;
+      }
+      const isFacebookVideo = element.tagName === "VIDEO" && facebookPage;
+      if (isFacebookVideo && isSponsoredFacebookPlayer(element)) {
+        socialSummary.sponsored += 1;
+        const evidence = facebookSponsoredEvidence(element);
+        emitSocialDecision(element, "allow_sponsored_home", {
+          reason: evidence?.reason || "sponsored_home_allowed",
+          sponsored: true,
+          permalinkFound: Boolean(facebookUrlFor(element)),
+        });
+        trace("facebook.sponsored_home_allowed", "overlay", {
+          reason: evidence?.reason || "sponsored_home_allowed",
+        });
+      }
+      if (element.dataset.apocalipseButton && !activeOverlays.has(element)) {
+        delete element.dataset.apocalipseButton;
+      }
+      if (element.dataset.apocalipseButton) {
+        if (isSocialVideo) {
+          socialSummary.eligible += 1; socialSummary.overlays += 1; socialSummary.kept += 1;
+          emitSocialDecision(element, "keep", { reason: "overlay_already_active", sponsored: false });
+        }
+        return;
+      }
       const youtubeUrl = element.tagName === "VIDEO" ? youtubeExtractorUrl() : null;
       const isYouTubeVideo = Boolean(youtubeUrl);
       // Extractor-first pages already have a complete, higher-quality download
       // route. Recording would only duplicate yt-dlp with a less reliable path.
       const usesExtractorOnlyDownload = isYouTubeVideo;
-      const isFacebookVideo = element.tagName === "VIDEO" && /(^|\.)facebook\.com$/i.test(location.hostname);
-      if (isFacebookReelsPage && isFacebookVideo && element !== activeFacebookReel) return;
-      if (isInstagramReelsPage && element.tagName === "VIDEO" && element !== activeInstagramReel) return;
-      if (isTikTokPage && element.tagName === "VIDEO" && element !== activeTikTokVideo) return;
+      if (isFacebookReelsPage && isFacebookVideo && element !== activeFacebookReel) {
+        socialSummary.inactive += 1;
+        emitSocialDecision(element, "skip_inactive_player", { reason: "not_active_facebook_reel", sponsored: false });
+        return;
+      }
+      if (isInstagramReelsPage && element.tagName === "VIDEO" && element !== activeInstagramReel) {
+        socialSummary.inactive += 1;
+        emitSocialDecision(element, "skip_inactive_player", { reason: "not_active_instagram_reel" });
+        return;
+      }
+      if (isTikTokPage && element.tagName === "VIDEO" && element !== activeTikTokVideo) {
+        socialSummary.inactive += 1;
+        emitSocialDecision(element, "skip_inactive_player", { reason: "not_active_tiktok_player" });
+        return;
+      }
       const tikTokUrl = element.tagName === "VIDEO" ? tikTokUrlFor(element) : null;
       const isTikTokVideo = Boolean(tikTokUrl);
       const url = isFacebookVideo ? facebookUrlFor(element) || location.href : tikTokUrl || downloadUrlFor(element);
@@ -1064,9 +1243,34 @@
       // A direct HTTP media URL belongs in the download path. Cross-origin
       // players commonly reject captureStream(), so displaying Record there
       // offers an action that cannot succeed (and duplicates Download).
-      const canRecord = !isYouTubeVideo && !hasDirectHttpMedia && element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
-        && Boolean(element.captureStream || element.webkitCaptureStream);
-      if (!canDownload && !canRecord) return;
+      // Facebook Home frequently exposes a direct HTTP video track even when
+      // audio is separate or the durable post identity is still unresolved.
+      // Keep Record available there and let Download fall back to recording
+      // when no complete Facebook resource can be proven.
+      const canRecord = !isYouTubeVideo && element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
+        && Boolean(element.captureStream || element.webkitCaptureStream)
+        && (!hasDirectHttpMedia || isFacebookVideo);
+      if (!canDownload && !canRecord) {
+        if (isSocialVideo) {
+          socialSummary.noAction += 1;
+          if (socialPlayerVisible(element)) {
+            socialSummary.missing += 1;
+            emitSocialDecision(element, "missing", {
+              reason: "no_supported_action", sponsored: false,
+              canDownload, canRecord, hasDirectHttpMedia,
+              permalinkFound: Boolean(isFacebookVideo ? facebookUrlFor(element) : tikTokUrl),
+              downloadCandidate: Boolean(url),
+            }, true);
+          } else {
+            emitSocialDecision(element, "skip_no_action", {
+              reason: "no_supported_action_offscreen", sponsored: false,
+              canDownload, canRecord, hasDirectHttpMedia,
+            });
+          }
+        }
+        return;
+      }
+      if (isSocialVideo) socialSummary.eligible += 1;
       element.dataset.apocalipseButton = "1";
       const button = document.createElement("button");
       globalThis.ApocalipseTikTokIdentity?.bind(button, element);
@@ -1074,7 +1278,7 @@
       button.className = "apocalipse-media-download";
       button.textContent = `⇩ ${downloadLabel()}`;
       button.title = "Apocalipse Download Manager";
-      button.hidden = !canDownload;
+      button.hidden = !canDownload || Boolean(isFacebookVideo && facebookSponsoredEvidence(element));
       let recordButton = null;
       let refreshRecordLabels = () => {};
       button.addEventListener("click", async (event) => {
@@ -1089,7 +1293,12 @@
         button.textContent = "…";
         trace("overlay_download_clicked", "download", { tag: element.tagName, facebook: isFacebookVideo, tiktokPage: isTikTokPage, tiktokPermalink: isTikTokVideo, overlays: activeOverlays.size });
         const visibleFacebookUrl = isFacebookVideo && isFacebookMediaUrl(location.href) ? location.href : null;
-        const resolved = visibleFacebookUrl || (isFacebookVideo ? await revealFacebookUrl(element) : tikTokUrlFor(element) || await resolveDownloadUrl(element));
+        const immediateFacebookUrl = isFacebookVideo ? facebookUrlFor(element) : null;
+        // Normal Facebook Reels must attempt permalink/extractor resolution
+        // even when the visible player is backed by srcObject. Sponsored posts
+        // never reach this handler because their Download button is hidden.
+        const resolved = visibleFacebookUrl || immediateFacebookUrl
+          || (isFacebookVideo ? await revealFacebookUrl(element) : tikTokUrlFor(element) || await resolveDownloadUrl(element));
         // The Reel/post permalink represents the complete video. A recent CDN
         // response can be only one DASH track (even when labelled video/mp4).
         // Use the same page-extractor route as the popup, before blobs or CDN URLs.
@@ -1192,13 +1401,15 @@
             && !/\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp)(?:[?#]|$)/i.test(currentUrl))
         );
         if (!currentUrl || (isFacebookVideo && !facebookPlayableUrl)) {
-          // Sponsored Facebook players can expose only a MediaStream through
-          // srcObject while their network traffic consists of short, separate
-          // fragments. Capture the exact combined stream instead of guessing a
-          // fragment or a neighbouring post.
-          if (isFacebookVideo && element.srcObject && canRecord && recordButton) {
-            trace("overlay_download_stream_capture", "download", { reason: "facebook_srcobject_without_complete_resource",
-              duration: Number.isFinite(element.duration) ? element.duration : null });
+          // Facebook Home players may expose only a MediaStream/blob or an
+          // incomplete DASH track. Preserve the historical behavior: clicking
+          // Download automatically starts recording when no complete resource
+          // can be proven for this exact player.
+          if (isFacebookVideo && canRecord && recordButton) {
+            trace("overlay_download_stream_capture", "download", {
+              reason: element.srcObject ? "facebook_srcobject_without_complete_resource" : "facebook_unresolved_recording_fallback",
+              duration: Number.isFinite(element.duration) ? element.duration : null,
+            });
             button.textContent = "●";
             button.title = recordingLabels().record;
             recordButton.click();
@@ -1433,9 +1644,10 @@
         button.style.left = `${left}px`;
         button.style.top = `${Math.max(6, top)}px`;
         const liveCanDownload = canDownload || downloadReady();
-        button.hidden = !liveCanDownload || rect.width < 100 || rect.height < 55;
+        const sponsoredHomeVideo = Boolean(isFacebookVideo && facebookSponsoredEvidence(element));
+        button.hidden = sponsoredHomeVideo || !liveCanDownload || rect.width < 100 || rect.height < 55;
         if (recordButton) {
-          const recordLeft = liveCanDownload && !button.hidden
+          const recordLeft = !sponsoredHomeVideo && liveCanDownload && !button.hidden
             ? left + button.offsetWidth + 8
             : left;
           recordButton.style.left = `${recordLeft}px`;
@@ -1460,14 +1672,49 @@
         if (recordButton) refreshRecordLabels();
         recordButton?.style.setProperty("--apocalipse-accent", overlayThemeColors());
       };
-      activeOverlays.set(element, { element, pageUrl: location.href, cleanup: cleanupOverlay, refreshLabels: refreshOverlayLanguage });
+      activeOverlays.set(element, {
+        element,
+        pageUrl: location.href,
+        bindingId: isFacebookVideo ? playerIdentity(element) : null,
+        cleanup: cleanupOverlay,
+        refreshLabels: refreshOverlayLanguage,
+      });
       const duplicateButtons = document.querySelectorAll(".apocalipse-media-download").length - activeOverlays.size * 2;
-      trace("overlay_installed", "overlay", { tag: element.tagName, canDownload, canRecord, active: activeOverlays.size, duplicateDelta: duplicateButtons });
+      trace("overlay_installed", "overlay", { tag: element.tagName, canDownload, canRecord, sponsoredRecordOnly: Boolean(isFacebookVideo && facebookSponsoredEvidence(element)), active: activeOverlays.size, duplicateDelta: duplicateButtons });
+      if (isSocialVideo) {
+        socialSummary.overlays += 1;
+        socialSummary.installed += 1;
+        emitSocialDecision(element, "install", {
+          reason: "eligible_overlay_installed", sponsored: false,
+          canDownload, canRecord, hasDirectHttpMedia,
+          permalinkFound: Boolean(isFacebookVideo ? facebookUrlFor(element) : tikTokUrl),
+          downloadCandidate: Boolean(url),
+        }, true);
+      }
       position();
       addEventListener("scroll", position, { passive: true });
       addEventListener("resize", position, { passive: true });
       if (isYouTubeVideo) positionTimer = setInterval(position, 1000);
     });
+
+    // Final reconciliation catches the exact class of bug where a visible
+    // social player passed through scanning but still ended the cycle without
+    // a live overlay. This is the highest-value event for post-mortem analysis.
+    for (const video of document.querySelectorAll("video")) {
+      if (socialPlatform() === "generic" || !socialPlayerVisible(video)) continue;
+      const active = activeOverlays.has(video);
+      const cached = socialDecisionCache.get(video) || "";
+      if (!active && !/"decision":"skip_inactive_player"/.test(cached)
+        && !/"decision":"missing"/.test(cached)) {
+        socialSummary.missing += 1;
+        emitSocialDecision(video, "missing", {
+          reason: "visible_player_without_overlay_after_reconcile",
+          sponsored: socialPlatform() === "facebook" ? isSponsoredFacebookPlayer(video) : false,
+          datasetButton: Boolean(video.dataset?.apocalipseButton),
+        }, true);
+      }
+    }
+    emitSocialSummary(socialSummary);
   };
   refreshOverlayLanguages = () => {
     for (const overlay of activeOverlays.values()) overlay.refreshLabels?.();
@@ -1492,8 +1739,13 @@
     }, 250);
     scheduleCatalog();
   };
-  addEventListener("scroll", scheduleCatalog, { passive: true, capture: true });
-  for (const event of ["loadedmetadata", "load", "emptied"]) document.addEventListener(event, scheduleCatalog, true);
+  // Facebook virtualizes the Home feed and can reuse an existing <video>
+  // without inserting a fresh node. Re-run overlay validation while scrolling
+  // and on player lifecycle changes so a recycled player cannot keep stale state.
+  addEventListener("scroll", scheduleOverlays, { passive: true, capture: true });
+  for (const event of ["loadedmetadata", "loadstart", "load", "emptied"]) {
+    document.addEventListener(event, scheduleOverlays, true);
+  }
   const style = document.createElement("style");
   style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:2px solid var(--apocalipse-accent,#25d9ef)!important;border-radius:8px!important;padding:8px 11px!important;background:#111a20f2!important;color:#fff!important;font:700 13px system-ui!important;box-shadow:0 3px 12px #0008!important;backdrop-filter:blur(5px)!important;cursor:pointer!important;overflow:hidden!important;isolation:isolate!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download::after{content:\"\"!important;position:absolute!important;inset:50%!important;border-radius:999px!important;background:color-mix(in srgb,var(--apocalipse-accent,#25d9ef) 42%,transparent)!important;opacity:0!important;pointer-events:none!important;transform:translate(-50%,-50%) scale(0)!important}.apocalipse-media-download.apocalipse-click-feedback{animation:apocalipse-overlay-press .34s cubic-bezier(.2,.8,.2,1)!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:apocalipse-overlay-wave .34s ease-out!important}@keyframes apocalipse-overlay-press{0%{transform:scale(1)}42%{transform:scale(.92);filter:brightness(1.3)}100%{transform:scale(1)}}@keyframes apocalipse-overlay-wave{0%{opacity:.85;transform:translate(-50%,-50%) scale(0)}100%{opacity:0;transform:translate(-50%,-50%) scale(5)}}.apocalipse-media-download:hover{background:#15262ef8!important;box-shadow:0 3px 14px var(--apocalipse-accent,#25d9ef)!important}.apocalipse-media-download:disabled{cursor:wait!important;opacity:.85!important}.apocalipse-media-record{color:#fff!important;background:#35151cf2!important}.apocalipse-media-record:hover{background:#4a1922f8!important}@media (prefers-reduced-motion:reduce){.apocalipse-media-download.apocalipse-click-feedback{animation-duration:.12s!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:none!important}}";
   document.documentElement.append(style);

@@ -33,6 +33,15 @@ const catalogs = {
     linkDownload: "← Download",
     linkSend: "Send →",
     linkDrives: "Shares",
+    linkTransfer: "Transfer",
+    linkTransferDownload: "Receiving",
+    linkTransferUpload: "Sending",
+    linkTransferPreparing: "Preparing transfer…",
+    linkPause: "Pause",
+    linkContinue: "Continue",
+    linkCancel: "Cancel",
+    linkPaused: "Paused",
+    linkTransferCancelled: "Transfer cancelled",
     linkTransferring: "Transferring…",
     linkSending: "Sending…",
     linkCompleted: "Completed",
@@ -74,6 +83,15 @@ const catalogs = {
     linkDownload: "← Baixar",
     linkSend: "Enviar →",
     linkDrives: "Compartilhamentos",
+    linkTransfer: "Transferência",
+    linkTransferDownload: "Recebendo",
+    linkTransferUpload: "Enviando",
+    linkTransferPreparing: "Preparando transferência…",
+    linkPause: "Pausar",
+    linkContinue: "Continuar",
+    linkCancel: "Cancelar",
+    linkPaused: "Pausado",
+    linkTransferCancelled: "Transferência cancelada",
     linkTransferring: "Transferindo…",
     linkSending: "Enviando…",
     linkCompleted: "Concluído",
@@ -115,6 +133,15 @@ const catalogs = {
     linkDownload: "← 下载",
     linkSend: "发送 →",
     linkDrives: "共享",
+    linkTransfer: "传输",
+    linkTransferDownload: "正在接收",
+    linkTransferUpload: "正在发送",
+    linkTransferPreparing: "正在准备传输…",
+    linkPause: "暂停",
+    linkContinue: "继续",
+    linkCancel: "取消",
+    linkPaused: "已暂停",
+    linkTransferCancelled: "传输已取消",
     linkTransferring: "正在传输…",
     linkSending: "正在发送…",
     linkCompleted: "已完成",
@@ -147,19 +174,68 @@ function syncPresentation() {
   document.documentElement.style.setProperty("--corner-radius", appearance.roundedEnabled ? `${radius}px` : "0px");
   document.querySelectorAll("[data-i18n]").forEach((node) => { node.textContent = t(node.dataset.i18n); });
   document.querySelector("#link-window-description").textContent = t("linkDescription");
+  syncLinkTransferLanguage();
 }
 
 const rawInvoke = window.__TAURI__?.core?.invoke;
+let lastLinkInteractionTrace = null;
+const freshLinkTrace = () => {
+  const now = performance.now();
+  if (lastLinkInteractionTrace && now - lastLinkInteractionTrace.at < 2000) return lastLinkInteractionTrace.id;
+  return crypto.randomUUID();
+};
+const recordLinkUi = (event, detail = {}) =>
+  rawInvoke?.("record_diagnostics_ui", { event, detail }).catch(() => {});
+document.addEventListener("click", (event) => {
+  const control = event.target?.closest?.("button,[role='button'],a,input[type='button'],input[type='submit']");
+  if (!control || !rawInvoke) return;
+  const traceId = crypto.randomUUID();
+  lastLinkInteractionTrace = { id: traceId, at: performance.now() };
+  recordLinkUi("control_clicked", {
+    traceId,
+    level: "INFO",
+    window: "link",
+    controlTag: control.tagName?.toLowerCase() || "unknown",
+    controlType: control.getAttribute?.("type") || control.getAttribute?.("role") || "default",
+    controlId: control.id || null,
+    action: control.dataset?.action || null,
+  });
+}, true);
 const invoke = async (command, args = {}) => {
   if (!rawInvoke) throw new Error("Desktop bridge unavailable");
   const started = performance.now();
-  if (command !== "record_ui_diagnostic") rawInvoke("record_ui_diagnostic", { level: "DEBUG", event: "command_started", detail: `command=${command} window=link` }).catch(() => {});
+  const traceId = freshLinkTrace();
+  const taskId = typeof args?.id === "string" ? args.id : null;
+  const detailBase = {
+    traceId,
+    taskId,
+    window: "link",
+    command,
+    argKeys: Object.keys(args || {}).sort(),
+  };
+  if (command !== "record_ui_diagnostic" && command !== "record_diagnostics_ui") {
+    recordLinkUi("command_started", { ...detailBase, level: "DEBUG" });
+  }
   try {
     const result = await rawInvoke(command, args);
-    if (command !== "record_ui_diagnostic") rawInvoke("record_ui_diagnostic", { level: "DEBUG", event: "command_completed", detail: `command=${command} window=link duration_ms=${Math.round(performance.now() - started)}` }).catch(() => {});
+    if (command !== "record_ui_diagnostic" && command !== "record_diagnostics_ui") {
+      recordLinkUi("command_completed", {
+        ...detailBase,
+        level: "DEBUG",
+        durationMs: Math.round(performance.now() - started),
+        resultType: result == null ? "null" : Array.isArray(result) ? "array" : typeof result,
+      });
+    }
     return result;
   } catch (error) {
-    if (command !== "record_ui_diagnostic") rawInvoke("record_ui_diagnostic", { level: "ERROR", event: "command_failed", detail: `command=${command} window=link duration_ms=${Math.round(performance.now() - started)} error=${String(error)}` }).catch(() => {});
+    if (command !== "record_ui_diagnostic" && command !== "record_diagnostics_ui") {
+      recordLinkUi("command_failed", {
+        ...detailBase,
+        level: "ERROR",
+        durationMs: Math.round(performance.now() - started),
+        errorName: String(error?.name || "command_error"),
+      });
+    }
     throw error;
   }
 };
@@ -180,6 +256,46 @@ let linkLocalAccountSession = false;
 let linkSelectedLocal = null;
 let linkSelectedRemote = null;
 let linkRemoteAllowWrite = false;
+let linkTransferActive = false;
+let linkTransferPaused = false;
+let linkTransferCancelRequested = false;
+let linkActiveTransferId = "";
+let linkActiveTransferDirection = "";
+let linkActiveTransferName = "";
+let linkTransferPollTimer = null;
+let linkLastProgressEventAt = 0;
+
+function stopLinkTransferProgressPolling() {
+  if (linkTransferPollTimer !== null) {
+    clearInterval(linkTransferPollTimer);
+    linkTransferPollTimer = null;
+  }
+}
+
+function startLinkTransferProgressPolling(transferId) {
+  stopLinkTransferProgressPolling();
+  const poll = async () => {
+    if (!linkTransferActive || !transferId || transferId !== linkActiveTransferId || !rawInvoke) {
+      if (!linkTransferActive || transferId !== linkActiveTransferId) stopLinkTransferProgressPolling();
+      return;
+    }
+    // Tauri events remain the primary path. Poll only when no fresh event was
+    // observed recently, which keeps this as a fallback without duplicating work.
+    if (performance.now() - linkLastProgressEventAt < 450) return;
+    try {
+      const progress = await rawInvoke("get_link_transfer_progress", { transferId });
+      if (progress && linkTransferActive && transferId === linkActiveTransferId) {
+        renderLinkTransferProgress(progress);
+      }
+    } catch (error) {
+      if (String(error) !== "link_transfer_not_found") {
+        console.debug("Apocalipse Link progress poll", error);
+      }
+    }
+  };
+  void poll();
+  linkTransferPollTimer = setInterval(poll, 250);
+}
 
 const linkParent = (path) => /^[A-Za-z]:[\\/]?$/.test(path) || /^\/shares\/[^/]+\/?$/.test(path)
   ? ""
@@ -204,10 +320,90 @@ async function isLocalLinkTarget(value) {
 }
 
 function updateLinkTransferButtons() {
-  document.querySelector("#link-upload-local").disabled = !linkSelectedLocal || !linkRemoteId || !linkRemotePath || !linkRemoteAllowWrite;
-  document.querySelector("#link-download-remote").disabled = !linkSelectedRemote;
-  document.querySelector("#link-delete-remote").disabled = !linkSelectedRemote || !linkRemoteAllowWrite;
-  document.querySelector("#link-disconnect").disabled = !linkRemoteId;
+  document.querySelector("#link-upload-local").disabled = linkTransferActive || !linkSelectedLocal || !linkRemoteId || !linkRemotePath || !linkRemoteAllowWrite;
+  document.querySelector("#link-download-remote").disabled = linkTransferActive || !linkSelectedRemote;
+  document.querySelector("#link-delete-remote").disabled = linkTransferActive || !linkSelectedRemote || !linkRemoteAllowWrite;
+  document.querySelector("#link-disconnect").disabled = linkTransferActive || !linkRemoteId;
+  const pause = document.querySelector("#link-transfer-pause");
+  const cancel = document.querySelector("#link-transfer-cancel");
+  if (pause) {
+    pause.disabled = !linkTransferActive || linkTransferCancelRequested;
+    pause.textContent = linkTransferPaused ? t("linkContinue") : t("linkPause");
+  }
+  if (cancel) cancel.disabled = !linkTransferActive || linkTransferCancelRequested;
+}
+
+function createLinkTransferId() {
+  return globalThis.crypto?.randomUUID?.() || `link-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function syncLinkTransferLanguage() {
+  const title = document.querySelector("#link-transfer-title");
+  if (title && linkTransferActive) {
+    const label = linkActiveTransferDirection === "upload" ? t("linkTransferUpload") : t("linkTransferDownload");
+    title.textContent = linkActiveTransferName ? `${label} · ${linkActiveTransferName}` : label;
+  }
+  updateLinkTransferButtons();
+}
+
+function beginLinkTransfer(direction, name = "") {
+  linkTransferActive = true;
+  linkTransferPaused = false;
+  linkTransferCancelRequested = false;
+  linkActiveTransferId = createLinkTransferId();
+  linkActiveTransferDirection = direction;
+  linkActiveTransferName = name;
+  const panel = document.querySelector("#link-transfer-panel");
+  const percent = document.querySelector("#link-transfer-percent");
+  const detail = document.querySelector("#link-transfer-detail");
+  const track = panel.querySelector(".link-transfer-track");
+  panel.hidden = false;
+  document.querySelector("#link-transfer-fill").style.width = "0%";
+  percent.textContent = "0%";
+  detail.textContent = t("linkTransferPreparing");
+  track.setAttribute("aria-valuenow", "0");
+  syncLinkTransferLanguage();
+  linkLastProgressEventAt = 0;
+  startLinkTransferProgressPolling(linkActiveTransferId);
+  return linkActiveTransferId;
+}
+
+function renderLinkTransferProgress(progress) {
+  if (!linkTransferActive || progress?.transferId !== linkActiveTransferId) return;
+  const transferred = Math.max(0, Number(progress.transferred) || 0);
+  const total = Math.max(0, Number(progress.total) || 0);
+  const speed = Math.max(0, Number(progress.bytesPerSecond) || 0);
+  const value = total > 0
+    ? Math.max(0, Math.min(100, Number(progress.percent) || (transferred * 100 / total)))
+    : 0;
+  document.querySelector("#link-transfer-fill").style.width = `${value}%`;
+  document.querySelector("#link-transfer-percent").textContent =
+    total > 0 ? `${value.toFixed(value >= 10 ? 0 : 1)}%` : "…";
+  document.querySelector("#link-transfer-detail").textContent = linkTransferPaused
+    ? t("linkPaused")
+    : total > 0
+      ? `${formatBytes(transferred)} / ${formatBytes(total)} · ${formatBytes(speed)}/s`
+      : `${formatBytes(transferred)} · ${formatBytes(speed)}/s`;
+  document.querySelector("#link-transfer-panel .link-transfer-track").setAttribute("aria-valuenow", String(value));
+}
+
+function finishLinkTransfer({ success = false, cancelled = false } = {}) {
+  stopLinkTransferProgressPolling();
+  if (success) {
+    document.querySelector("#link-transfer-fill").style.width = "100%";
+    document.querySelector("#link-transfer-percent").textContent = "100%";
+    document.querySelector("#link-transfer-panel .link-transfer-track").setAttribute("aria-valuenow", "100");
+    document.querySelector("#link-transfer-detail").textContent = t("linkCompleted");
+  } else if (cancelled) {
+    document.querySelector("#link-transfer-detail").textContent = t("linkTransferCancelled");
+  }
+  linkTransferActive = false;
+  linkTransferPaused = false;
+  linkTransferCancelRequested = false;
+  linkActiveTransferId = "";
+  linkActiveTransferDirection = "";
+  linkActiveTransferName = "";
+  updateLinkTransferButtons();
 }
 function disconnectLink() {
   linkRemoteId = ""; linkRemoteTransportToken = ""; linkLocalAccountSession = false;
@@ -408,37 +604,107 @@ document.querySelector("#link-delete-remote").onclick = async () => {
 };
 
 document.querySelector("#link-download-remote").onclick = async () => {
-  if (!linkSelectedRemote) return;
+  if (!linkSelectedRemote || linkTransferActive) return;
   const status = document.querySelector("#link-status");
+  const selected = linkSelectedRemote;
+  const transferId = beginLinkTransfer("download", selected.name);
   status.textContent = t("linkTransferring");
   try {
     const destination = linkLocalAccountSession
-      ? await invoke("download_local_shared_link_item", { path: linkSelectedRemote.path, directory: linkSelectedRemote.directory, fileName: linkSelectedRemote.name })
-      : await invoke("download_remote_link_file", { id: linkRemoteId, password: linkRemoteTransportToken, path: linkSelectedRemote.path, directory: linkSelectedRemote.directory, fileName: linkSelectedRemote.name });
+      ? await invoke("download_local_shared_link_item", {
+          path: selected.path,
+          directory: selected.directory,
+          fileName: selected.name,
+          transferId,
+        })
+      : await invoke("download_remote_link_file", {
+          id: linkRemoteId,
+          password: linkRemoteTransportToken,
+          path: selected.path,
+          directory: selected.directory,
+          fileName: selected.name,
+          transferId,
+        });
+    finishLinkTransfer({ success: true });
     status.textContent = `${t("linkCompleted")}: ${destination}`;
   } catch (error) {
-    if (String(error) !== "cancelled") status.textContent = `${t("linkTransferFailed")}: ${error}`;
+    const cancelled = linkTransferCancelRequested || String(error) === "cancelled";
+    finishLinkTransfer({ cancelled });
+    if (cancelled) {
+      status.textContent = t("linkTransferCancelled");
+    } else if (String(error) !== "cancelled") {
+      document.querySelector("#link-transfer-detail").textContent = `${t("linkTransferFailed")}: ${error}`;
+      status.textContent = `${t("linkTransferFailed")}: ${error}`;
+    }
   }
 };
 
 document.querySelector("#link-upload-local").onclick = async () => {
-  if (!linkSelectedLocal || !linkRemoteId || !linkRemotePath) return;
+  if (!linkSelectedLocal || !linkRemoteId || !linkRemotePath || linkTransferActive) return;
   const status = document.querySelector("#link-status");
-  const button = document.querySelector("#link-upload-local");
+  const selected = linkSelectedLocal;
+  const transferId = beginLinkTransfer("upload", selected.name);
   status.textContent = t("linkSending");
-  button.disabled = true;
   try {
     const remotePath = linkLocalAccountSession
-      ? await invoke("upload_local_shared_link_item", { remoteDirectory: linkRemotePath, localPath: linkSelectedLocal.path })
-      : await invoke("upload_remote_link_file", { id: linkRemoteId, password: linkRemoteTransportToken, remoteDirectory: linkRemotePath, localPath: linkSelectedLocal.path });
+      ? await invoke("upload_local_shared_link_item", {
+          remoteDirectory: linkRemotePath,
+          localPath: selected.path,
+          transferId,
+        })
+      : await invoke("upload_remote_link_file", {
+          id: linkRemoteId,
+          password: linkRemoteTransportToken,
+          remoteDirectory: linkRemotePath,
+          localPath: selected.path,
+          transferId,
+        });
+    finishLinkTransfer({ success: true });
     status.textContent = `${t("linkCompleted")}: ${remotePath}`;
     await openRemoteLink(linkRemotePath);
   } catch (error) {
-    status.textContent = `${t("linkUploadFailed")}: ${error}`;
-  } finally {
-    updateLinkTransferButtons();
+    const cancelled = linkTransferCancelRequested || String(error) === "cancelled";
+    finishLinkTransfer({ cancelled });
+    if (cancelled) {
+      status.textContent = t("linkTransferCancelled");
+    } else {
+      document.querySelector("#link-transfer-detail").textContent = `${t("linkUploadFailed")}: ${error}`;
+      status.textContent = `${t("linkUploadFailed")}: ${error}`;
+    }
   }
 };
+
+document.querySelector("#link-transfer-pause").onclick = async () => {
+  if (!linkTransferActive || !linkActiveTransferId || linkTransferCancelRequested) return;
+  const nextPaused = !linkTransferPaused;
+  try {
+    await invoke("pause_link_transfer", { transferId: linkActiveTransferId, paused: nextPaused });
+    linkTransferPaused = nextPaused;
+    document.querySelector("#link-transfer-detail").textContent =
+      linkTransferPaused ? t("linkPaused") : t("linkTransferring");
+    updateLinkTransferButtons();
+  } catch (error) {
+    if (String(error) !== "link_transfer_not_found") console.error(error);
+  }
+};
+
+document.querySelector("#link-transfer-cancel").onclick = async () => {
+  if (!linkTransferActive || !linkActiveTransferId || linkTransferCancelRequested) return;
+  linkTransferCancelRequested = true;
+  linkTransferPaused = false;
+  document.querySelector("#link-transfer-detail").textContent = t("linkTransferCancelled");
+  updateLinkTransferButtons();
+  try {
+    await invoke("cancel_link_transfer", { transferId: linkActiveTransferId });
+  } catch (error) {
+    if (String(error) !== "link_transfer_not_found") console.error(error);
+  }
+};
+
+window.__TAURI__?.event?.listen?.("link-transfer-progress", (event) => {
+  linkLastProgressEventAt = performance.now();
+  renderLinkTransferProgress(event.payload || {});
+}).catch(console.error);
 
 syncPresentation();
 window.addEventListener("storage", syncPresentation);

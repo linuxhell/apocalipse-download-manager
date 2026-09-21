@@ -1,5 +1,11 @@
 const catalogs = {
   en: {
+    archiveExtractor: "Archive extractor (7-Zip / RAR / UnRAR / unar / bsdtar / tar)",
+    autoExtract: "Extract automatically after download",
+    autoExtractHint: "Shown only for archive files. Loose root files are kept inside a folder named after the archive.",
+    browserAssistedArchiveReady: "Archive received from the browser. Choose where to save it and whether to extract it automatically.",
+    networkWaiting: "Waiting for network",
+    networkWaitingHint: "The connection changed or went offline. This task will resume automatically when a network interface is available.",
     downloads: "Downloads",
     media: "Media",
     recordings: "Recordings",
@@ -26,9 +32,9 @@ const catalogs = {
     aiStatusProposed: "Awaiting approval", aiStatusTesting: "Testing", aiStatusSaved: "Saved", aiStatusConfirmed: "Confirmed", aiStatusRejected: "Did not work",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
-    toolbox: "TOOLBOX", update: "Update", gopeedBackend: "Gopeed (backend engine)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "VLC / mpv / media player",
+    toolbox: "TOOLBOX", update: "Update", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "VLC / mpv / media player",
     donatePaypal: "Donate via PayPal",
-    about: "About", aboutDescription: "About the creator of Apocalipse Download Manager.", aboutCreator: "Creator: Juliano - Brazil - Sátia Mortadela", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume",
+    about: "About", aboutDescription: "About the creator of Apocalipse Download Manager.", aboutCreator: "Creator: Juliano - Brazil - Sátia Mortadela", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume", facebookRecordingFallback: "Facebook could not provide this Reel for direct download. Use Record on the video while it is playing.",
     overview: "OVERVIEW",
     engineReady: "Engine ready",
     addDownload: "Add download",
@@ -163,7 +169,21 @@ const catalogs = {
     dnsProvider: "Provider",
     dnsCustom: "Custom",
     dnsServers: "DNS servers",
-    dnsScopeHint: "Applied to the native HTTP engine. Gopeed uses its own network stack; SOCKS5H continues resolving through the proxy.",
+    dnsScopeHint: "Applied to the native HTTP engine. aria2 uses the system resolver; SOCKS5H continues resolving through the proxy.",
+    aria2RpcTitle: "aria2 RPC",
+    aria2RpcEnabled: "Use aria2 RPC",
+    aria2RpcEnabledHint: "Control accelerated HTTP/HTTPS, FTP, torrent and magnet transfers through the local aria2 engine.",
+    aria2RpcAutoStart: "Start aria2 automatically when needed",
+    aria2RpcAutoStartHint: "Keeps one local aria2 backend for the current Apocalipse session.",
+    aria2RpcPort: "RPC port",
+    aria2RpcPortHint: "Automatic",
+    aria2RpcStatus: "RPC status",
+    aria2RpcConnected: "Connected",
+    aria2RpcDisconnected: "Disconnected",
+    aria2RpcTesting: "Testing…",
+    aria2RpcTest: "Test RPC connection",
+    aria2RpcRegenerateToken: "Regenerate RPC token",
+    aria2RpcTokenRegenerated: "RPC token regenerated",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
     automatic: "Automatic",
@@ -209,6 +229,12 @@ const catalogs = {
     searchHistory: "Search downloads…", importList: "Import list", advancedOptions: "Advanced options", mirrorUrls: "Mirror URLs (one per line)", priority: "Priority", priorityHigh: "High", priorityNormal: "Normal", priorityLow: "Low", verifyIntegrity: "Verify SHA-256", integrityPrompt: "Optional expected SHA-256 (leave blank to calculate only):", integrityOk: "SHA-256 verified",
   },
   "pt-BR": {
+    archiveExtractor: "Extrator de arquivos (7-Zip / RAR / UnRAR / unar / bsdtar / tar)",
+    autoExtract: "Extrair automaticamente após o download",
+    autoExtractHint: "Aparece somente para arquivos compactados. Arquivos soltos ficam dentro de uma pasta com o nome do arquivo compactado.",
+    browserAssistedArchiveReady: "Arquivo compactado recebido do navegador. Escolha onde salvar e se deseja extrair automaticamente.",
+    networkWaiting: "Aguardando rede",
+    networkWaitingHint: "A conexão mudou ou ficou offline. Esta tarefa será retomada automaticamente quando uma interface de rede estiver disponível.",
     downloads: "Downloads",
     media: "Mídia",
     recordings: "Gravações",
@@ -235,9 +261,9 @@ const catalogs = {
     aiStatusProposed: "Aguardando aprovação", aiStatusTesting: "Em teste", aiStatusSaved: "Guardada", aiStatusConfirmed: "Confirmada", aiStatusRejected: "Não funcionou",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
-    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", gopeedBackend: "Gopeed (motor em segundo plano)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "VLC / mpv / reprodutor de mídia",
+    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "VLC / mpv / reprodutor de mídia",
     donatePaypal: "Faça uma doação pelo PayPal",
-    about: "Sobre", aboutDescription: "Sobre o criador do Apocalipse Download Manager.", aboutCreator: "Criador: Juliano - Brasil - Sátia Mortadela", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume",
+    about: "Sobre", aboutDescription: "Sobre o criador do Apocalipse Download Manager.", aboutCreator: "Criador: Juliano - Brasil - Sátia Mortadela", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume", facebookRecordingFallback: "O Facebook não disponibilizou este Reel para download direto. Use Gravar no vídeo enquanto ele estiver em reprodução.",
     overview: "VISÃO GERAL",
     engineReady: "Motor pronto",
     addDownload: "Adicionar download",
@@ -372,7 +398,21 @@ const catalogs = {
     dnsProvider: "Provedor",
     dnsCustom: "Personalizado",
     dnsServers: "Servidores DNS",
-    dnsScopeHint: "Aplicado ao motor HTTP nativo. O Gopeed usa sua própria pilha de rede; o SOCKS5H continua resolvendo pelo proxy.",
+    dnsScopeHint: "Aplicado ao motor HTTP nativo. O aria2 usa a resolução do sistema; o SOCKS5H continua resolvendo pelo proxy.",
+    aria2RpcTitle: "aria2 RPC",
+    aria2RpcEnabled: "Usar aria2 RPC",
+    aria2RpcEnabledHint: "Controla HTTP/HTTPS acelerado, FTP, torrent e magnet pelo motor aria2 local.",
+    aria2RpcAutoStart: "Iniciar o aria2 automaticamente quando necessário",
+    aria2RpcAutoStartHint: "Mantém um único backend aria2 local durante a sessão atual do Apocalipse.",
+    aria2RpcPort: "Porta RPC",
+    aria2RpcPortHint: "Automática",
+    aria2RpcStatus: "Status RPC",
+    aria2RpcConnected: "Conectado",
+    aria2RpcDisconnected: "Desconectado",
+    aria2RpcTesting: "Testando…",
+    aria2RpcTest: "Testar conexão RPC",
+    aria2RpcRegenerateToken: "Regenerar token RPC",
+    aria2RpcTokenRegenerated: "Token RPC regenerado",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
     automatic: "Automático",
@@ -418,6 +458,12 @@ const catalogs = {
     searchHistory: "Pesquisar downloads…", importList: "Importar lista", advancedOptions: "Opções avançadas", mirrorUrls: "URLs espelho (uma por linha)", priority: "Prioridade", priorityHigh: "Alta", priorityNormal: "Normal", priorityLow: "Baixa", verifyIntegrity: "Verificar SHA-256", integrityPrompt: "SHA-256 esperado opcional (deixe vazio apenas para calcular):", integrityOk: "SHA-256 verificado",
   },
   "zh-CN": {
+    archiveExtractor: "压缩文件解压工具（7-Zip / RAR / UnRAR / unar / bsdtar / tar）",
+    autoExtract: "下载完成后自动解压",
+    autoExtractHint: "仅在压缩文件时显示。根目录中的零散文件会解压到以压缩文件命名的文件夹中。",
+    browserAssistedArchiveReady: "已从浏览器接收压缩文件。请选择保存位置以及是否自动解压。",
+    networkWaiting: "等待网络",
+    networkWaitingHint: "网络连接已更改或断开。可用网络接口恢复后，此任务会自动继续。",
     downloads: "下载",
     media: "媒体",
     recordings: "录制",
@@ -444,9 +490,9 @@ const catalogs = {
     aiStatusProposed: "等待批准", aiStatusTesting: "测试中", aiStatusSaved: "已保存", aiStatusConfirmed: "已确认", aiStatusRejected: "未解决",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
-    toolbox: "工具箱", update: "更新", gopeedBackend: "Gopeed（后台引擎）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "VLC / mpv / 媒体播放器",
+    toolbox: "工具箱", update: "更新", aria2Backend: "aria2（HTTP/HTTPS、FTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "VLC / mpv / 媒体播放器",
     donatePaypal: "通过 PayPal 捐赠",
-    about: "关于", aboutDescription: "关于 Apocalipse Download Manager 的创作者。", aboutCreator: "创作者：Juliano - 巴西 - Sátia Mortadela", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量",
+    about: "关于", aboutDescription: "关于 Apocalipse Download Manager 的创作者。", aboutCreator: "创作者：Juliano - 巴西 - Sátia Mortadela", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量", facebookRecordingFallback: "Facebook 无法提供此 Reel 的直接下载。请在视频播放时使用“录制”。",
     overview: "概览",
     engineReady: "引擎已就绪",
     addDownload: "添加下载",
@@ -580,7 +626,21 @@ const catalogs = {
     dnsProvider: "提供商",
     dnsCustom: "自定义",
     dnsServers: "DNS 服务器",
-    dnsScopeHint: "应用于原生 HTTP 引擎。Gopeed 使用自己的网络栈；SOCKS5H 仍通过代理解析。",
+    dnsScopeHint: "应用于原生 HTTP 引擎。aria2 使用系统解析器；SOCKS5H 仍通过代理解析。",
+    aria2RpcTitle: "aria2 RPC",
+    aria2RpcEnabled: "使用 aria2 RPC",
+    aria2RpcEnabledHint: "通过本地 aria2 引擎控制加速 HTTP/HTTPS、FTP、种子和磁力链接传输。",
+    aria2RpcAutoStart: "需要时自动启动 aria2",
+    aria2RpcAutoStartHint: "当前 Apocalipse 会话只保留一个本地 aria2 后端。",
+    aria2RpcPort: "RPC 端口",
+    aria2RpcPortHint: "自动",
+    aria2RpcStatus: "RPC 状态",
+    aria2RpcConnected: "已连接",
+    aria2RpcDisconnected: "未连接",
+    aria2RpcTesting: "测试中…",
+    aria2RpcTest: "测试 RPC 连接",
+    aria2RpcRegenerateToken: "重新生成 RPC 令牌",
+    aria2RpcTokenRegenerated: "RPC 令牌已重新生成",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
     automatic: "自动",
@@ -663,6 +723,7 @@ let pendingUserAgent = null;
 let pendingRequestMethod = null;
 let pendingRequestBody = null;
 let pendingRequestContentType = null;
+let pendingBrowserAssistedPath = null;
 let taskConnectionsManuallyChanged = false;
 let downloads = [];
 const downloadListState = createTaskListState();
@@ -682,17 +743,69 @@ let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
 const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", ai: "aiDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", about: "aboutDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
+let lastUiInteractionTrace = null;
+const freshUiTrace = () => {
+  const now = performance.now();
+  if (lastUiInteractionTrace && now - lastUiInteractionTrace.at < 2000) return lastUiInteractionTrace.id;
+  return crypto.randomUUID();
+};
+const recordStructuredUi = (bridge, event, detail = {}) =>
+  bridge("record_diagnostics_ui", { event, detail }).catch(() => {});
+document.addEventListener("click", (event) => {
+  const control = event.target?.closest?.("button,[role='button'],a,input[type='button'],input[type='submit']");
+  if (!control) return;
+  const bridge = window.__TAURI__?.core?.invoke;
+  if (!bridge) return;
+  const traceId = crypto.randomUUID();
+  lastUiInteractionTrace = { id: traceId, at: performance.now() };
+  const activePage = document.querySelector(".nav-item.active")?.dataset?.page || null;
+  recordStructuredUi(bridge, "control_clicked", {
+    traceId,
+    level: "INFO",
+    window: "main",
+    page: activePage,
+    controlTag: control.tagName?.toLowerCase() || "unknown",
+    controlType: control.getAttribute?.("type") || control.getAttribute?.("role") || "default",
+    controlId: control.id || null,
+    action: control.dataset?.action || control.dataset?.toolUpdate || control.dataset?.page || null,
+  });
+}, true);
 const invoke = (command, args = {}) => {
   const bridge = window.__TAURI__?.core?.invoke;
   if (!bridge) throw new Error("Desktop bridge unavailable in preview");
   const started = performance.now();
   const quiet = new Set(["list_downloads", "read_general_log", "get_bridge_pairing", "read_clipboard_link", "take_bridge_download", "diagnostics_status"]);
-  if (!quiet.has(command) && command !== "record_ui_diagnostic") bridge("record_ui_diagnostic", { level: "DEBUG", event: "command_started", detail: `command=${command}` }).catch(() => {});
+  const traceId = freshUiTrace();
+  const taskId = typeof args?.id === "string" ? args.id : null;
+  const detailBase = {
+    traceId,
+    taskId,
+    window: "main",
+    command,
+    argKeys: Object.keys(args || {}).sort(),
+  };
+  if (!quiet.has(command) && command !== "record_ui_diagnostic" && command !== "record_diagnostics_ui") {
+    recordStructuredUi(bridge, "command_started", { ...detailBase, level: "DEBUG" });
+  }
   return bridge(command, args).then((result) => {
-    if (!quiet.has(command) && command !== "record_ui_diagnostic") bridge("record_ui_diagnostic", { level: "DEBUG", event: "command_completed", detail: `command=${command} duration_ms=${Math.round(performance.now() - started)}` }).catch(() => {});
+    if (!quiet.has(command) && command !== "record_ui_diagnostic" && command !== "record_diagnostics_ui") {
+      recordStructuredUi(bridge, "command_completed", {
+        ...detailBase,
+        level: "DEBUG",
+        durationMs: Math.round(performance.now() - started),
+        resultType: result == null ? "null" : Array.isArray(result) ? "array" : typeof result,
+      });
+    }
     return result;
   }).catch((error) => {
-    if (!quiet.has(command) && command !== "record_ui_diagnostic") bridge("record_ui_diagnostic", { level: "ERROR", event: "command_failed", detail: `command=${command} duration_ms=${Math.round(performance.now() - started)} error=${String(error)}` }).catch(() => {});
+    if (!quiet.has(command) && command !== "record_ui_diagnostic" && command !== "record_diagnostics_ui") {
+      recordStructuredUi(bridge, "command_failed", {
+        ...detailBase,
+        level: "ERROR",
+        durationMs: Math.round(performance.now() - started),
+        errorName: String(error?.name || "command_error"),
+      });
+    }
     throw error;
   });
 };
@@ -849,6 +962,64 @@ function renderDownloads(force = false) {
   for (const task of visible) {
     const row = document.createElement("article");
     row.className = "download-row";
+    row.dataset.taskId = task.id;
+    const reorderable = ["queued", "paused"].includes(stateKey(task.state))
+      && activeFilter === "all"
+      && !historyQuery;
+    row.draggable = reorderable;
+    row.classList.toggle("reorderable", reorderable);
+    row.addEventListener("dragstart", (event) => {
+      if (!reorderable || event.target.closest("button,input,select,a")) {
+        event.preventDefault();
+        return;
+      }
+      selectionPointerActive = true;
+      row.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", task.id);
+    });
+    row.addEventListener("dragend", () => {
+      row.classList.remove("dragging");
+      document.querySelectorAll(".download-row.drag-over").forEach((item) => item.classList.remove("drag-over"));
+      selectionPointerActive = false;
+    });
+    row.addEventListener("dragover", (event) => {
+      if (!reorderable) return;
+      const sourceId = event.dataTransfer.getData("text/plain");
+      if (!sourceId || sourceId === task.id) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      row.classList.add("drag-over");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("drag-over"));
+    row.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      row.classList.remove("drag-over");
+      const sourceId = event.dataTransfer.getData("text/plain");
+      if (!sourceId || sourceId === task.id) return;
+      const movable = downloads.filter((item) => ["queued", "paused"].includes(stateKey(item.state)));
+      const ids = movable.map((item) => item.id);
+      const from = ids.indexOf(sourceId);
+      const target = ids.indexOf(task.id);
+      if (from < 0 || target < 0) return;
+      const [moved] = ids.splice(from, 1);
+      ids.splice(target, 0, moved);
+      const byId = new Map(downloads.map((item) => [item.id, item]));
+      const reordered = ids.map((id) => byId.get(id)).filter(Boolean);
+      let cursor = 0;
+      downloads = downloads.map((item) => ["queued", "paused"].includes(stateKey(item.state)) ? reordered[cursor++] : item);
+      renderDownloads(true);
+      try {
+        await invoke("reorder_downloads", { ids });
+        downloadListState.invalidate();
+        await refreshDownloads();
+      } catch (error) {
+        console.error(error);
+        await refreshDownloads();
+      } finally {
+        selectionPointerActive = false;
+      }
+    });
     const select = document.createElement("input");
     select.type = "checkbox";
     select.className = "task-select";
@@ -933,12 +1104,22 @@ function renderDownloads(force = false) {
     resumeCapability.textContent = `${t("resumeCapability")} ${resumeValue}`;
     resumeCapability.dataset.supported = task.resume_supported === true ? "true" : task.resume_supported === false ? "false" : "unknown";
     info.append(resumeCapability);
+    const failureMessage = typeof task.state === "object" ? task.state.failed?.message || "" : "";
     const state = Object.assign(document.createElement("span"), {
       className: "download-state",
-      textContent: /\.recording\.webm$/i.test(task.destination) && stateKey(task.state) === "downloading" ? t("recordingActive") : stateName(task.state),
+      textContent: failureMessage === "network_waiting_for_reconnect"
+        ? t("networkWaiting")
+        : /\.recording\.webm$/i.test(task.destination) && stateKey(task.state) === "downloading"
+          ? t("recordingActive")
+          : stateName(task.state),
     });
-    if (typeof task.state === "object")
-      state.title = task.state.failed?.message || "";
+    if (typeof task.state === "object") {
+      state.title = failureMessage === "facebook_direct_download_unavailable_use_recording"
+        ? t("facebookRecordingFallback")
+        : failureMessage === "network_waiting_for_reconnect"
+          ? t("networkWaitingHint")
+          : failureMessage;
+    }
     const actions = document.createElement("div");
     actions.className = "task-actions";
     const addAction = (label, command) => {
@@ -1085,6 +1266,7 @@ function translate() {
   }
 }
 
+const warnedFacebookRecordingFallbacks = new Set();
 async function refreshDownloads() {
   try {
     const ticket = downloadListState.beginRead();
@@ -1093,6 +1275,13 @@ async function refreshDownloads() {
     const accepted = downloadListState.acceptRead(ticket, refreshed);
     if (!accepted) return;
     downloads = accepted;
+    for (const task of downloads) {
+      const failure = typeof task.state === "object" ? task.state.failed?.message : null;
+      if (failure !== "facebook_direct_download_unavailable_use_recording"
+          || warnedFacebookRecordingFallbacks.has(task.id)) continue;
+      warnedFacebookRecordingFallbacks.add(task.id);
+      window.alert(t("facebookRecordingFallback"));
+    }
     const ids = new Set(downloads.map((task) => task.id));
     for (const id of selectedIds) if (!ids.has(id)) selectedIds.delete(id);
     updateSpeeds(downloads);
@@ -1135,8 +1324,10 @@ document.querySelector("#import-list").onclick = async (event) => {
   finally { button.disabled = false; }
 };
 async function applyAboutMedia(media) {
+  const panel = document.querySelector("#about-panel");
   const photo = document.querySelector("#about-creator-photo");
   const audio = document.querySelector("#about-audio");
+  if (media?.backgroundDataUrl) panel.style.setProperty("--about-background", `url("${media.backgroundDataUrl}")`);
   if (media?.photoDataUrl) photo.src = media.photoDataUrl;
   if (media?.audioDataUrl && audio.src !== media.audioDataUrl) {
     audio.src = media.audioDataUrl;
@@ -1619,7 +1810,7 @@ async function showTorrentInspection(source) {
 }
 function resetTaskConnections() {
   taskConnectionsManuallyChanged = false;
-  document.querySelector("#task-connections").value = "8";
+  document.querySelector("#task-connections").value = "16";
   document.querySelector("#task-connections-value").value = t("automatic");
 }
 document.querySelectorAll("#add").forEach(
@@ -1840,9 +2031,24 @@ document.querySelector("#save-host-rule").onclick = async (event) => {
   }
 };
 
+function renderAria2RpcStatus(status = {}) {
+  const target = document.querySelector("#aria2-rpc-status");
+  if (!target) return;
+  if (!status.connected) {
+    target.textContent = t("aria2RpcDisconnected");
+    return;
+  }
+  const details = [
+    t("aria2RpcConnected"),
+    status.activePort ? `127.0.0.1:${status.activePort}` : "",
+    status.version ? `aria2 ${status.version}` : "",
+  ].filter(Boolean);
+  target.textContent = details.join(" · ");
+}
+
 const openSettings = async (target = "general") => {
   try {
-    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, associations, hostRules] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, rpc, associations, hostRules] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
@@ -1852,6 +2058,7 @@ const openSettings = async (target = "general") => {
       invoke("get_log_editor"),
       invoke("get_proxy_setting"),
       invoke("get_dns_setting"),
+      invoke("get_aria2_rpc_settings"),
       invoke("get_associations"),
       invoke("list_host_rules"),
     ]);
@@ -1893,6 +2100,10 @@ const openSettings = async (target = "general") => {
       ? dnsValue
       : "custom";
     updateDnsControls();
+    document.querySelector("#aria2-rpc-enabled").checked = rpc.enabled;
+    document.querySelector("#aria2-rpc-auto-start").checked = rpc.autoStart;
+    document.querySelector("#aria2-rpc-port").value = rpc.configuredPort || "";
+    renderAria2RpcStatus(rpc);
     renderHostRules(hostRules);
     updateLogEditorControls();
     settingsDialog.showModal();
@@ -1920,6 +2131,39 @@ document
     applyTheme(localStorage.getItem("apocalipse.theme") || "void");
     settingsDialog.close();
   }));
+document.querySelector("#aria2-rpc-test").onclick = async () => {
+  const status = document.querySelector("#aria2-rpc-status");
+  const button = document.querySelector("#aria2-rpc-test");
+  button.disabled = true;
+  status.textContent = t("aria2RpcTesting");
+  try {
+    const rpcPortValue = Number(document.querySelector("#aria2-rpc-port").value) || 0;
+    await invoke("set_aria2_rpc_settings", {
+      enabled: document.querySelector("#aria2-rpc-enabled").checked,
+      autoStart: document.querySelector("#aria2-rpc-auto-start").checked,
+      port: rpcPortValue > 0 ? rpcPortValue : null,
+    });
+    renderAria2RpcStatus(await invoke("test_aria2_rpc"));
+  } catch (error) {
+    status.textContent = `${t("aria2RpcDisconnected")} · ${error}`;
+  } finally {
+    button.disabled = false;
+  }
+};
+document.querySelector("#aria2-rpc-regenerate-token").onclick = async () => {
+  const button = document.querySelector("#aria2-rpc-regenerate-token");
+  button.disabled = true;
+  try {
+    await invoke("regenerate_aria2_rpc_token");
+    document.querySelector("#aria2-rpc-status").textContent = t("aria2RpcTokenRegenerated");
+  } catch (error) {
+    console.error(error);
+    window.alert(String(error));
+  } finally {
+    button.disabled = false;
+  }
+};
+
 document.querySelector("#theme").onchange = (event) => {
   localStorage.setItem("apocalipse.theme", event.target.value);
   applyTheme(event.target.value);
@@ -1998,6 +2242,12 @@ document.querySelector("#save-settings").onclick = async () => {
         .map((server) => server.trim())
         .filter(Boolean),
     });
+    const rpcPortValue = Number(document.querySelector("#aria2-rpc-port").value) || 0;
+    await invoke("set_aria2_rpc_settings", {
+      enabled: document.querySelector("#aria2-rpc-enabled").checked,
+      autoStart: document.querySelector("#aria2-rpc-auto-start").checked,
+      port: rpcPortValue > 0 ? rpcPortValue : null,
+    });
     for (const input of document.querySelectorAll("[data-association]")) {
       if (!input.disabled && input.dataset.initial !== String(input.checked)) await invoke("set_association", {
         id: input.dataset.association,
@@ -2047,7 +2297,8 @@ document.querySelector("#save-tools").onclick = async (event) => {
       ytDlp: document.querySelector("#tool-yt-dlp").value,
       qjs: document.querySelector("#tool-qjs").value,
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
-      gopeed: document.querySelector("#tool-gopeed").value,
+      aria2: document.querySelector("#tool-aria2").value,
+      extractor: document.querySelector("#tool-extractor").value,
     });
     await invoke("set_media_player", { path: document.querySelector("#media-player").value });
     toolsDialog.close();
@@ -2165,7 +2416,7 @@ document.querySelector("#max-tasks").oninput = updateLimitLabels;
 document.querySelector("#connections").oninput = updateLimitLabels;
 document.querySelector("#default-limits").onclick = () => {
   document.querySelector("#max-tasks").value = 3;
-  document.querySelector("#connections").value = 8;
+  document.querySelector("#connections").value = 16;
   updateLimitLabels();
 };
 document.querySelector("#copy-pairing").onclick = () => invoke("copy_bridge_token").catch(console.error);
@@ -2177,10 +2428,22 @@ document.querySelector("#regenerate-pairing").onclick = async () => {
     console.error(error);
   }
 };
+function isArchiveFileName(name) {
+  return /\.(zip|7z|rar|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz|tar\.zst|gz|bz2|xz|zst|cab|arj|lha|lzh)$/i.test(String(name || ""));
+}
+function refreshAutoExtractOption() {
+  const option = document.querySelector("#auto-extract-option");
+  const archive = isArchiveFileName(document.querySelector("#file-name").value);
+  option.hidden = !archive;
+  if (!archive) document.querySelector("#auto-extract").checked = false;
+}
+document.querySelector("#file-name").addEventListener("input", refreshAutoExtractOption);
 document.querySelector("#url").oninput = () => {
   document.querySelector("#analysis").hidden = true;
   document.querySelector("#enqueue").hidden = true;
   document.querySelector("#analyze").hidden = false;
+  document.querySelector("#auto-extract").checked = false;
+  document.querySelector("#auto-extract-option").hidden = true;
   resetMediaInspection();
 };
 
@@ -2225,6 +2488,7 @@ async function showMediaInspection(url) {
     else thumbnail.removeAttribute("src");
     for (const format of media.formats) option(select, format.selection, format.label);
     document.querySelector("#file-name").value = media.suggestedFileName;
+    refreshAutoExtractOption();
     panel.hidden = false;
   } catch (error) {
     console.warn(error);
@@ -2274,6 +2538,22 @@ document.querySelector("#analyze").onclick = async () => {
   box.textContent = "…";
   let metadataTimer = null;
   try {
+    if (pendingBrowserAssistedPath) {
+      const fileName = document.querySelector("#file-name");
+      box.textContent = t("browserAssistedArchiveReady");
+      refreshAutoExtractOption();
+      document.querySelector("#analyze").hidden = true;
+      document.querySelector("#enqueue").hidden = false;
+      return;
+    }
+    try {
+      const hostResolution = await invoke("resolve_file_host_url", { url: url.value });
+      if (hostResolution?.adapted && hostResolution.url) {
+        url.value = hostResolution.url;
+      }
+    } catch (error) {
+      console.warn("file-host-adapter", error);
+    }
     const plan = await invoke("inspect_url", { url: url.value });
     const fileName = document.querySelector("#file-name");
     const suggestedFileName = await invoke(
@@ -2287,7 +2567,7 @@ document.querySelector("#analyze").onclick = async () => {
     }
     box.textContent = `${plan.primary} · ${plan.reason}`;
     if (plan.primary === "YtDlp") await showMediaInspection(url.value);
-    else if (plan.primary === "Gopeed" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) {
+    else if (plan.primary === "Aria2Rpc" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) {
       const startedAt = Date.now();
       const updateMetadataStatus = () => {
         const seconds = Math.floor((Date.now() - startedAt) / 1000);
@@ -2315,6 +2595,7 @@ document.querySelector("#analyze").onclick = async () => {
     } else if (pendingMediaKind === "image" || /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)(?:$|[?#])/i.test(url.value)) {
       showCapturedPreview({ title: pendingTitle || fileName.value, thumbnail: pendingThumbnail || url.value, kind: pendingMediaKind || "image", duration: null, size: pendingExpectedSize });
     }
+    refreshAutoExtractOption();
     document.querySelector("#analyze").hidden = true;
     document.querySelector("#enqueue").hidden = false;
   } catch (error) {
@@ -2332,8 +2613,16 @@ document.querySelector("#enqueue").onclick = async () => {
     const torrentSelection = document.querySelector("#torrent-inspection").hidden
       ? null : [...document.querySelectorAll("[data-torrent-index]:checked")].map((input) => Number(input.dataset.torrentIndex));
     if (torrentSelection && !torrentSelection.length) throw new Error("Selecione pelo menos um arquivo do torrent.");
-    acceptEnqueuedTask(
-      await invoke("enqueue_download", {
+    const autoExtract = document.querySelector("#auto-extract-option").hidden ? false : document.querySelector("#auto-extract").checked;
+    const acceptedTask = pendingBrowserAssistedPath
+      ? await invoke("import_browser_assisted_download", {
+          localPath: pendingBrowserAssistedPath,
+          url: url.value,
+          destinationDirectory: document.querySelector("#destination").value,
+          fileName: document.querySelector("#file-name").value,
+          autoExtract,
+        })
+      : await invoke("enqueue_download", {
         url: url.value,
         destinationDirectory: document.querySelector("#destination").value,
         fileName: document.querySelector("#file-name").value,
@@ -2343,8 +2632,9 @@ document.querySelector("#enqueue").onclick = async () => {
         priority: Number(document.querySelector("#priority").value),
         bandwidthLimit: Math.round((Number(document.querySelector("#download-bandwidth-limit").value) || 0) * 1024 * 1024) || null,
         connectionsOverride: taskConnectionsManuallyChanged
-          ? Number(document.querySelector("#task-connections").value) || 8
+          ? Number(document.querySelector("#task-connections").value) || 16
           : null,
+        autoExtract,
         context: {
           traceId: pendingDiagnosticTrace,
           referer: pendingReferer,
@@ -2360,20 +2650,23 @@ document.querySelector("#enqueue").onclick = async () => {
           requestBody: pendingRequestBody,
           requestContentType: pendingRequestContentType,
         },
-      }),
-    );
+      });
+    acceptEnqueuedTask(acceptedTask);
     renderDownloads();
     dialog.close();
     url.value = "";
     document.querySelector("#mirrors").value = "";
     document.querySelector("#priority").value = "0";
     document.querySelector("#download-bandwidth-limit").value = "0";
+    document.querySelector("#auto-extract").checked = false;
+    document.querySelector("#auto-extract-option").hidden = true;
     resetTaskConnections();
     pendingTitle = null;
     pendingThumbnail = null;
     pendingAudioUrl = null;
     pendingMediaKind = null;
     pendingExpectedSize = null;
+    pendingBrowserAssistedPath = null;
     resetMediaInspection();
   } catch (error) {
     const box = document.querySelector("#analysis");
@@ -2447,6 +2740,51 @@ setInterval(async () => {
     console.error(error);
   }
 }, 750);
+let consumingBrowserAssistedDownload = false;
+async function consumeBrowserAssistedDownload() {
+  if (consumingBrowserAssistedDownload || dialog.open) return;
+  consumingBrowserAssistedDownload = true;
+  try {
+    const request = await invoke("take_browser_assisted_download");
+    if (!request) return;
+    pendingBrowserAssistedPath = request.fileName || null;
+    pendingDiagnosticTrace = null;
+    pendingReferer = null;
+    pendingDuration = null;
+    pendingIsLive = false;
+    pendingTitle = null;
+    pendingThumbnail = null;
+    pendingAudioUrl = null;
+    pendingMediaKind = null;
+    pendingExpectedSize = Number.isFinite(request.total) ? request.total : null;
+    pendingCookieHeader = null;
+    pendingUserAgent = null;
+    pendingRequestMethod = null;
+    pendingRequestBody = null;
+    pendingRequestContentType = null;
+    resetTaskConnections();
+    document.querySelector("#url").value = request.url;
+    const sourceName = String(request.fileName || "").split(/[\\/]/).pop() || "download.zip";
+    document.querySelector("#file-name").value = sourceName;
+    document.querySelector("#analysis").hidden = true;
+    document.querySelector("#enqueue").hidden = true;
+    document.querySelector("#analyze").hidden = false;
+    document.querySelector("#destination").value = await invoke("default_download_directory");
+    resetMediaInspection();
+    refreshAutoExtractOption();
+    await refreshDestinationHistory();
+    await invoke("activate_main_window");
+    if (!dialog.open) dialog.showModal();
+    document.querySelector("#url").focus();
+  } catch (error) {
+    console.error(error);
+  } finally {
+    consumingBrowserAssistedDownload = false;
+  }
+}
+setInterval(consumeBrowserAssistedDownload, 400);
+window.__TAURI__?.event?.listen?.("browser-assisted-ready", consumeBrowserAssistedDownload).catch(console.error);
+
 let consumingBridgeDownload = false;
 async function consumeBridgeDownload() {
   if (consumingBridgeDownload) return;

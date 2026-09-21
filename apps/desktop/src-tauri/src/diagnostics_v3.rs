@@ -11,14 +11,17 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-const MAX_FILE: u64 = 4 * 1024 * 1024;
+const MAX_FILE: u64 = 16 * 1024 * 1024;
 const MAX_BATCH: usize = 40;
-const MAX_EVENTS: usize = 20_000;
-const SESSION_MS: u64 = 10 * 60 * 1000;
+const MAX_EVENTS: usize = 50_000;
+const SESSION_MS: u64 = 30 * 60 * 1000;
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as u64)
+}
+fn local_timestamp() -> String {
+    chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 fn uuid(value: &str) -> bool {
     uuid::Uuid::parse_str(value).is_ok()
@@ -271,6 +274,7 @@ impl Diagnostics {
         store.server_sequence += 1;
         event["serverSequence"] = json!(store.server_sequence);
         event["receivedAt"] = json!(now());
+        event["receivedAtLocal"] = json!(local_timestamp());
         let mut options = OpenOptions::new();
         options.create(true).append(true);
         #[cfg(unix)]
@@ -309,7 +313,7 @@ impl Diagnostics {
         let record = json!({"schemaVersion":3,"id":uuid::Uuid::new_v4().to_string(),"sessionId":store.config["sessionId"],
             "traceId":trace,"taskId":task.filter(|v| uuid(v)),"event":event,"level":level,"component":"desktop",
             "version":env!("CARGO_PKG_VERSION"),"build":option_env!("ADM_BUILD_SHA").unwrap_or("unknown"),
-            "clientTimestamp":now(),"detail":safe_detail(&detail,salt,"",0)});
+            "clientTimestamp":now(),"clientTimestampLocal":local_timestamp(),"detail":safe_detail(&detail,salt,"",0)});
         self.append(store, record);
     }
     pub(super) fn record(
@@ -534,16 +538,17 @@ impl Diagnostics {
         let (records, parse_errors) = self.records_locked(&store.config["sessionId"]);
         let health = json!({"formatVersion":3,"sessionId":store.config["sessionId"],"active":Self::active(&store),
             "startedAt":store.config["startedAt"],"expiresAt":store.config["expiresAt"],"endedAt":store.config["endedAt"],
-            "exportedAt":now(),"eventsInSnapshot":records.len(),"receivedThisProcess":store.received,"rejected":store.rejected,
+            "exportedAt":now(),"exportedAtLocal":local_timestamp(),"eventsInSnapshot":records.len(),"receivedThisProcess":store.received,"rejected":store.rejected,
             "duplicates":store.duplicates,"rotationsThisProcess":store.rotated,"writeErrors":store.write_errors,"parseErrors":parse_errors,
             "clientHealth":store.client_health,"maxBytesPerFile":MAX_FILE,"filesRetained":2,
             "limitations":["webRequest_does_not_observe_memory_cache","cross_world_probe_is_not_trusted_page_evidence",
             "closed_page_may_lose_unflushed_events","player_started_does_not_prove_picture_or_sound","only_selected_tab_is_observed",
-            "no_page_text_cookies_credentials_or_media_bytes_collected","timestamps_from_different_contexts_are_not_causal_order"]});
+            "no_page_text_cookies_credentials_or_media_bytes_collected","client_clocks_are_not_used_for_causal_order_server_sequence_is_authoritative"]});
         let mut actions = HashMap::<String, Vec<&Value>>::new();
         let mut players = HashMap::<String, Value>::new();
         let mut decisions = Vec::new();
         let mut media_replay = Vec::new();
+        let mut social_debugger = Vec::new();
         let mut transfer_engine = Vec::new();
         let mut contexts = HashSet::new();
         let mut warnings = Vec::new();
@@ -572,6 +577,14 @@ impl Diagnostics {
             if name == "players.snapshot" || name == "popup.render" || name == "popup.row_state" {
                 let key = format!("{}:{}", record["contextId"], name);
                 players.insert(key, record.clone());
+            }
+            if name.starts_with("social.")
+                || name.starts_with("dom.media_")
+                || name == "player.lifecycle"
+                || name.starts_with("collector.visibility")
+                || name.starts_with("collector.network_state")
+            {
+                social_debugger.push(record.clone());
             }
             if name.starts_with("http.engine_")
                 || name.starts_with("http.resume_")
@@ -603,6 +616,157 @@ impl Diagnostics {
             "firstSequence":items.first().map(|v| &v["serverSequence"]),
             "lastStage":items.last().map(|v| &v["event"]),"interpretation":"last_observed_stage_not_proven_root_cause"})).collect::<Vec<_>>();
         action_rows.sort_by_key(|v| v["firstSequence"].as_u64().unwrap_or(0));
+
+        let mut social_platforms = HashMap::<String, Value>::new();
+        for record in &social_debugger {
+            if record["event"] != "social.scan_summary" {
+                continue;
+            }
+            let detail = &record["detail"];
+            let platform = detail["platform"].as_str().unwrap_or("unknown").to_owned();
+            social_platforms.insert(platform, detail.clone());
+        }
+        let social_missing = social_debugger
+            .iter()
+            .filter(|record| record["event"] == "social.overlay_missing")
+            .count();
+        let social_decisions = social_debugger
+            .iter()
+            .filter(|record| record["event"] == "social.player_decision")
+            .count();
+        let social_summary = json!({
+            "telemetryVersion": 1,
+            "events": social_debugger.len(),
+            "playerDecisions": social_decisions,
+            "overlayMissing": social_missing,
+            "latestPlatformScans": social_platforms,
+            "interpretation": "structured_observations_not_guesses"
+        });
+
+        let mut timeline = records.clone();
+        timeline.sort_by_key(|record| {
+            (
+                record["receivedAt"].as_u64().unwrap_or(0),
+                record["serverSequence"].as_u64().unwrap_or(0),
+            )
+        });
+        let timeline_rows = timeline
+            .iter()
+            .map(|record| {
+                json!({
+                    "localTime": record["receivedAtLocal"],
+                    "utcEpochMs": record["receivedAt"],
+                    "sequence": record["serverSequence"],
+                    "level": record["level"],
+                    "event": record["event"],
+                    "component": record["component"],
+                    "traceId": record["traceId"],
+                    "taskId": record["taskId"],
+                    "detail": record["detail"]
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let mut tasks = HashMap::<String, Vec<&Value>>::new();
+        for record in &timeline {
+            if let Some(task) = record["taskId"].as_str() {
+                tasks.entry(task.to_owned()).or_default().push(record);
+            }
+        }
+        let summarize_group = |id: &str, items: &[&Value]| {
+            let first = items.first().copied();
+            let last = items.last().copied();
+            let warning_events = items
+                .iter()
+                .filter(|record| matches!(record["level"].as_str(), Some("WARN" | "ERROR")))
+                .map(|record| {
+                    json!({
+                        "sequence": record["serverSequence"],
+                        "localTime": record["receivedAtLocal"],
+                        "level": record["level"],
+                        "event": record["event"],
+                        "detail": record["detail"]
+                    })
+                })
+                .collect::<Vec<_>>();
+            json!({
+                "id": id,
+                "firstSequence": first.map(|record| record["serverSequence"].clone()),
+                "lastSequence": last.map(|record| record["serverSequence"].clone()),
+                "firstLocalTime": first.map(|record| record["receivedAtLocal"].clone()),
+                "lastLocalTime": last.map(|record| record["receivedAtLocal"].clone()),
+                "firstEvent": first.map(|record| record["event"].clone()),
+                "lastEvent": last.map(|record| record["event"].clone()),
+                "eventCount": items.len(),
+                "warningOrErrorCount": warning_events.len(),
+                "warningsAndErrors": warning_events,
+                "interpretation": "ordered_observations_not_proven_root_cause"
+            })
+        };
+        let mut trace_index = actions
+            .iter()
+            .map(|(trace, items)| summarize_group(trace, items))
+            .collect::<Vec<_>>();
+        trace_index.sort_by_key(|item| item["firstSequence"].as_u64().unwrap_or(0));
+        let mut task_index = tasks
+            .iter()
+            .map(|(task, items)| summarize_group(task, items))
+            .collect::<Vec<_>>();
+        task_index.sort_by_key(|item| item["firstSequence"].as_u64().unwrap_or(0));
+
+        let marker_records = timeline
+            .iter()
+            .filter(|record| record["event"] == "session.problem_marked")
+            .collect::<Vec<_>>();
+        let mut incident_windows = Vec::new();
+        for marker in marker_records {
+            let marker_ms = marker["receivedAt"].as_u64().unwrap_or(0);
+            let marker_sequence = marker["serverSequence"].as_u64().unwrap_or(0);
+            let start_ms = marker_ms.saturating_sub(90_000);
+            let end_ms = marker_ms.saturating_add(45_000);
+            let events = timeline
+                .iter()
+                .filter(|record| {
+                    let observed = record["receivedAt"].as_u64().unwrap_or(0);
+                    observed >= start_ms && observed <= end_ms
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let errors = events
+                .iter()
+                .filter(|record| record["level"] == "ERROR")
+                .count();
+            let warnings_count = events
+                .iter()
+                .filter(|record| record["level"] == "WARN")
+                .count();
+            incident_windows.push(json!({
+                "markerSequence": marker_sequence,
+                "markerLocalTime": marker["receivedAtLocal"],
+                "windowBeforeMs": 90000,
+                "windowAfterMs": 45000,
+                "eventCount": events.len(),
+                "errors": errors,
+                "warnings": warnings_count,
+                "events": events,
+                "interpretation": "events_near_user_mark_not_automatic_root_cause"
+            }));
+        }
+        let causal_index = json!({
+            "version": 1,
+            "ordering": "receivedAt_then_serverSequence",
+            "localTimezoneEmbedded": true,
+            "traces": trace_index,
+            "tasks": task_index,
+            "problemMarkers": incident_windows.iter().map(|window| json!({
+                "markerSequence": window["markerSequence"],
+                "markerLocalTime": window["markerLocalTime"],
+                "eventCount": window["eventCount"],
+                "errors": window["errors"],
+                "warnings": window["warnings"]
+            })).collect::<Vec<_>>(),
+            "interpretation": "correlation_graph_not_proven_causation"
+        });
 
         let performance_samples = transfer_engine
             .iter()
@@ -765,14 +929,30 @@ impl Diagnostics {
                 record["detail"]
             ));
         }
+        report.push_str("\nINCIDENTES MARCADOS / MARKED INCIDENTS\n");
+        if incident_windows.is_empty() {
+            report.push_str("Nenhum marcador manual nesta sessao. / No manual problem marker in this session.\n");
+        } else {
+            for incident in &incident_windows {
+                report.push_str(&format!(
+                    "marker #{} local={} events={} WARN={} ERROR={}\n",
+                    incident["markerSequence"],
+                    incident["markerLocalTime"],
+                    incident["eventCount"],
+                    incident["warnings"],
+                    incident["errors"]
+                ));
+            }
+        }
         report.push_str("\nLINHA DO TEMPO POR TENTATIVA / ACTION TIMELINES (last 30)\n");
         for action in action_rows.iter().rev().take(30).rev() {
             report.push_str(&format!("\nTrace {}\n", action["traceId"]));
             if let Some(events) = action["events"].as_array() {
                 for record in events.iter().take(60) {
                     report.push_str(&format!(
-                        "  #{} {} {} task={}\n",
+                        "  #{} {} {} {} task={}\n",
                         record["serverSequence"],
+                        record["receivedAtLocal"],
                         record["component"],
                         record["event"],
                         record["taskId"]
@@ -805,6 +985,23 @@ impl Diagnostics {
             ("traces/actions.jsonl".into(), jsonl(&action_rows)),
             ("traces/replay-de-midia.jsonl".into(), jsonl(&media_replay)),
             ("capture/media-decisions.jsonl".into(), jsonl(&decisions)),
+            ("timeline/events-local.jsonl".into(), jsonl(&timeline_rows)),
+            (
+                "correlation/index.json".into(),
+                serde_json::to_vec_pretty(&causal_index).unwrap_or_default(),
+            ),
+            (
+                "incidents/problem-windows.jsonl".into(),
+                jsonl(&incident_windows),
+            ),
+            (
+                "social/player-debugger.jsonl".into(),
+                jsonl(&social_debugger),
+            ),
+            (
+                "social/summary.json".into(),
+                serde_json::to_vec_pretty(&social_summary).unwrap_or_default(),
+            ),
             (
                 "performance/transfer-engine.jsonl".into(),
                 jsonl(&transfer_engine),

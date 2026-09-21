@@ -27,9 +27,14 @@
       sponsored: "The video was classified as sponsored content, so it was intentionally excluded from the extension list.",
       recordOnly: "The page did not expose a complete downloadable address. Recording may remain available because it captures the media while it plays.",
       missingButton: "I found the page activity, but not enough evidence to prove why the Download button was missing. Play the video, click the area where the button should appear and ask me to analyze the new records.",
+      socialMissing: "The structured social debugger found {count} visible player(s) without a live overlay on {site}. The latest confirmed reason is “{reason}” for player {player}. This conclusion comes from player-decision telemetry, not a guess.",
+      socialSummary: "Social debugger for {site}: {visible} visible player(s), {eligible} eligible, {overlays} overlay(s), {missing} missing, {sponsored} sponsored, {inactive} inactive and {noAction} without a supported action.",
       genericFailure: "The latest related failure was: {detail}",
+      domainEvidence: "Forensic Debugger V4 found observed evidence for {domain}. Latest relevant event: {event}. Detail: {detail}. This is recorded telemetry, not a guessed cause.",
       historyEmpty: "There are no saved corrections.",
       historyCount: "There are {count} saved correction(s). Open Correction history to view, apply or remove them.",
+      knownCorrection: "I already have a locally confirmed correction for {site}: “{name}”. It worked {count} time(s), most recently with Apocalipse {version}. You can apply it again for testing if the problem returned.",
+      correctionLearned: "I saved “{name}” as a new local correction candidate for {site}. It will only become confirmed knowledge after a successful manual test.",
       noPending: "There is no correction waiting for your decision.",
       correctionTesting: "“{name}” is now marked for testing. Reproduce the problem and tell me whether it worked.",
       correctionRejected: "The correction did not solve the problem. I restored its previous state and will analyze the new records for another safe possibility.",
@@ -81,6 +86,8 @@
       updateNavTitle: "New Apocalipse version {latest} available",
       upToDate: "Apocalipse is up to date. This computer is running {current}.",
       updateUnavailable: "I couldn’t reach the official update service right now. The installed version is {current}.",
+      updateDetails: "Official notes for Apocalipse {latest}: {details}",
+      updateDetailsUnavailable: "I checked Apocalipse {latest}, but the official release does not include usable release notes. Open the official Releases page for the complete publication.",
       siteLogFound: "I found {count} diagnostic event(s) for {site}. The latest record is: {detail}",
       siteLogEmpty: "I found no diagnostic records for {site} in the current log.",
       offTopic: "I’m specialized in Apocalipse Download Manager. Ask me about its downloads, sites, extension, media, settings, tools or diagnostics.",
@@ -103,9 +110,14 @@
       sponsored: "O vídeo foi classificado como conteúdo patrocinado e, por isso, foi retirado intencionalmente da lista da extensão.",
       recordOnly: "A página não forneceu um endereço completo que pudesse ser baixado. A gravação pode continuar disponível porque captura a mídia enquanto ela é reproduzida.",
       missingButton: "Encontrei a atividade da página, mas ainda não há provas suficientes para confirmar por que o botão Baixar não apareceu. Reproduza o vídeo, clique na área onde o botão deveria estar e depois me peça para analisar os novos registros.",
+      socialMissing: "O debugger social estruturado encontrou {count} player(s) visível(is) sem overlay ativo no {site}. O motivo confirmado mais recente é “{reason}” no player {player}. Essa conclusão vem da telemetria de decisão do player, não de uma suposição.",
+      socialSummary: "Debugger social do {site}: {visible} player(s) visível(is), {eligible} elegível(is), {overlays} overlay(s), {missing} faltando, {sponsored} patrocinado(s), {inactive} inativo(s) e {noAction} sem ação suportada.",
       genericFailure: "A última falha relacionada foi: {detail}",
+      domainEvidence: "O Debugger Forense V4 encontrou evidência observada para {domain}. Último evento relevante: {event}. Detalhe: {detail}. Isso vem da telemetria registrada, não de uma causa presumida.",
       historyEmpty: "Não há correções guardadas.",
       historyCount: "Existem {count} correção(ões) guardada(s). Abra o Histórico de correções para visualizar, aplicar ou apagar.",
+      knownCorrection: "Já tenho uma correção confirmada localmente para {site}: “{name}”. Ela funcionou {count} vez(es), mais recentemente no Apocalipse {version}. Você pode aplicá-la novamente para teste se o problema voltou.",
+      correctionLearned: "Guardei “{name}” como uma nova candidata de correção local para {site}. Ela só vira conhecimento confirmado depois de um teste manual bem-sucedido.",
       noPending: "Não existe uma correção aguardando sua decisão.",
       correctionTesting: "“{name}” foi marcada para teste. Reproduza o problema e depois informe se funcionou.",
       correctionRejected: "A correção não resolveu o problema. Restaurei o estado anterior e vou analisar os novos registros procurando outra possibilidade segura.",
@@ -157,6 +169,8 @@
       updateNavTitle: "Nova versão do Apocalipse {latest} disponível",
       upToDate: "O Apocalipse está atualizado. Este computador está usando a versão {current}.",
       updateUnavailable: "Não consegui acessar o serviço oficial de atualização agora. A versão instalada é {current}.",
+      updateDetails: "Notas oficiais do Apocalipse {latest}: {details}",
+      updateDetailsUnavailable: "Conferi o Apocalipse {latest}, mas essa release não possui notas oficiais utilizáveis. Abra a página oficial de Releases para ver a publicação completa.",
       siteLogFound: "Encontrei {count} registro(s) de diagnóstico sobre {site}. O registro mais recente é: {detail}",
       siteLogEmpty: "Não encontrei registros de diagnóstico sobre {site} no log atual.",
       offTopic: "Sou especializada no Apocalipse Download Manager. Pergunte sobre downloads, sites, extensão, mídia, configurações, ferramentas ou diagnósticos.",
@@ -179,9 +193,13 @@
       sponsored: "该视频被识别为赞助内容，因此已从扩展列表中有意排除。",
       recordOnly: "页面没有提供完整的可下载地址。录制仍可能可用，因为它会在媒体播放时进行捕获。",
       missingButton: "我找到了页面活动，但证据不足以确认下载按钮未出现的原因。请播放视频，点击按钮本应出现的区域，然后让我分析新的记录。",
+      socialMissing: "结构化社交媒体调试器在 {site} 上发现 {count} 个可见播放器没有活动覆盖按钮。最近确认的原因是播放器 {player} 的“{reason}”。这个结论直接来自播放器决策遥测，而不是猜测。",
+      socialSummary: "{site} 社交调试摘要：{visible} 个可见播放器，{eligible} 个可处理，{overlays} 个覆盖按钮，{missing} 个缺失，{sponsored} 个赞助内容，{inactive} 个非活动播放器，{noAction} 个没有受支持操作。",
       genericFailure: "最近一次相关故障是：{detail}",
       historyEmpty: "没有保存的修正。",
       historyCount: "已保存 {count} 个修正。打开“修正历史”可以查看、应用或删除。",
+      knownCorrection: "我已经有一个针对 {site} 的本地已确认修正：“{name}”。它已成功 {count} 次，最近一次是在 Apocalipse {version}。如果问题再次出现，可以重新应用它进行测试。",
+      correctionLearned: "我已将“{name}”保存为 {site} 的新本地修正候选。只有在手动测试成功后，它才会成为已确认知识。",
       noPending: "没有等待你决定的修正。",
       correctionTesting: "“{name}”已标记为测试。请重现问题，然后告诉我是否有效。",
       correctionRejected: "此修正没有解决问题。我已恢复之前的状态，并会分析新记录以寻找另一种安全方案。",
@@ -233,6 +251,8 @@
       updateNavTitle: "Apocalipse 新版本 {latest} 可用",
       upToDate: "Apocalipse 已是最新版本。这台电脑当前使用 {current}。",
       updateUnavailable: "目前无法连接官方更新服务。已安装版本为 {current}。",
+      updateDetails: "Apocalipse {latest} 的官方更新说明：{details}",
+      updateDetailsUnavailable: "我已检查 Apocalipse {latest}，但该版本没有可用的官方更新说明。请打开官方 Releases 页面查看完整发布内容。",
       siteLogFound: "我找到了 {count} 条关于 {site} 的诊断记录。最新记录是：{detail}",
       siteLogEmpty: "当前日志中没有找到关于 {site} 的诊断记录。",
       offTopic: "我专用于 Apocalipse Download Manager。你可以询问下载、网站、扩展、媒体、设置、工具或诊断。",
@@ -255,8 +275,9 @@
     .replace(/\b(?:obg|brigado|brigada)\b/g, "obrigado")
     .replace(/\b(?:vlw|valeu demais)\b/g, "valeu")
     .replace(/\s+/g, " ").trim();
-  const safeDetail = value => String(value || "").replace(/([?&](?:token|sig|key|auth|password|cookie)=[^\s&]+)/gi, " [protected]").slice(0, 360);
-  const eventText = event => fold(`${event?.event || ""} ${event?.detail || event?.raw || ""} ${event?.source || ""}`);
+  const safeDetail = value => detailText(value).replace(/([?&](?:token|sig|key|auth|password|cookie)=[^\s&]+)/gi, " [protected]").slice(0, 360);
+  const detailText = value => typeof value === "string" ? value : value && typeof value === "object" ? JSON.stringify(value) : String(value || "");
+  const eventText = event => fold(`${event?.event || ""} ${detailText(event?.detail)} ${event?.raw || ""} ${event?.source || ""}`);
 
   function parseCredentialCommand(input) {
     const raw = String(input || "").trim();
@@ -393,12 +414,79 @@
     });
   }
 
+  function socialDiagnosis(events, site, locale, question = "") {
+    const all = parseEvents(events).filter(event => String(event?.event || "").startsWith("social."));
+    if (!all.length) return null;
+    const filtered = site
+      ? all.filter(event => fold(event?.detail?.platform || "").includes(fold(site)) || eventText(event).includes(fold(site)))
+      : all;
+    if (!filtered.length) return null;
+    const missing = filtered.filter(event => event.event === "social.overlay_missing");
+    const latestSummary = [...filtered].reverse().find(event => event.event === "social.scan_summary")?.detail || null;
+    const q = normalizeQuestion(question);
+    if (missing.length && /(botao|button|overlay|video|extensao|extension|falh|erro|problem|missing|按钮|视频|扩展)/.test(q)) {
+      const latest = missing.at(-1)?.detail || {};
+      return say(locale, "socialMissing", {
+        site: latest.platform || site || "social",
+        count: missing.length,
+        reason: latest.reason || latest.decision || "unknown",
+        player: latest.playerId || "unknown",
+      });
+    }
+    if (latestSummary && /(diagnost|debug|resumo|summary|estado|status|log|registro|诊断|调试|摘要|状态)/.test(q)) {
+      return say(locale, "socialSummary", {
+        site: latestSummary.platform || site || "social",
+        visible: latestSummary.visible ?? 0,
+        eligible: latestSummary.eligible ?? 0,
+        overlays: latestSummary.overlays ?? 0,
+        missing: latestSummary.missing ?? 0,
+        sponsored: latestSummary.sponsored ?? 0,
+        inactive: latestSummary.inactive ?? 0,
+        noAction: latestSummary.noAction ?? 0,
+      });
+    }
+    return null;
+  }
+
+  function debuggerDomainDiagnosis(question, context, locale) {
+    const q = normalizeQuestion(question);
+    const domains = [
+      { name: "aria2", test: /aria2|torrent|magnet/, event: /^(?:aria2\.|http\.engine_selected)/ },
+      { name: "FFmpeg/FFprobe", test: /ffmpeg|ffprobe/, event: /ffmpeg|ffprobe|media\.preview|preview\./i },
+      { name: "HLS/N_m3u8DL-RE", test: /hls|m3u8|n_m3u8dl|m3u8dl/, event: /hls|m3u8|external\./i },
+      { name: "yt-dlp", test: /yt-dlp|yt_dlp/, event: /yt_dlp|external\./i },
+      { name: "Apocalipse Link", test: /apocalipse link|\blink\b|computador remoto|remote computer|远程/, event: /^(?:link\.|ui\..*link)|link_transfer/i },
+      { name: "thumbnail", test: /thumbnail|miniatura|缩略图/, event: /^thumbnail\./ },
+      { name: "recording", test: /gravar|gravacao|recording|record|录制/, event: /recording|blob\./i },
+      { name: "browser extension", test: /extensao|extension|扩展/, event: /^(?:extension\.|social\.|capture\.|overlay\.)/ },
+    ];
+    const domain = domains.find(item => item.test.test(q));
+    if (!domain) return null;
+    const events = [...parseEvents(context.events), ...parseEvents(context.engineEvents || [])]
+      .filter(event => domain.event.test(String(event?.event || "")) || domain.event.test(eventText(event)));
+    if (!events.length) return null;
+    const latestFailure = [...events].reverse().find(event =>
+      ["ERROR", "WARN"].includes(String(event?.level || "").toUpperCase())
+      || /failed|error|missing|rejected|unavailable/i.test(String(event?.event || ""))
+    );
+    const latest = latestFailure || events.at(-1);
+    return say(locale, "domainEvidence", {
+      domain: domain.name,
+      event: latest?.event || "unknown",
+      detail: safeDetail(latest?.detail || latest?.raw || latest?.event || "unknown"),
+    });
+  }
+
   function diagnose(question, context, locale) {
     const q = contextualQuestion(question, context.messages);
     const site = siteFrom(q);
     const scoped = relatedEvents(context.events, site);
     const text = scoped.map(eventText).join("\n");
     const failures = scoped.filter(event => String(event.level || "").toUpperCase() === "ERROR" || /failed|error=/.test(eventText(event)));
+    const social = socialDiagnosis([...parseEvents(context.events), ...parseEvents(context.engineEvents || [])], site, locale, q);
+    if (social) return social;
+    const domainEvidence = debuggerDomainDiagnosis(q, context, locale);
+    if (domainEvidence) return domainEvidence;
 
     if (site && /(?:log|registro|diagnost|record|日志|诊断)/.test(q)) {
       const latest = scoped.at(-1);
@@ -460,12 +548,78 @@
     return [...(corrections || [])].reverse().find(item => q.includes(fold(item.name))) || null;
   }
 
+  function parseCorrectionTeachCommand(input) {
+    const value = String(input || "").trim();
+    const patterns = [
+      /^(?:aprenda|aprender|guarde|guardar|salve|salvar|nova)\s+(?:esta\s+)?(?:corre[cç][aã]o|solu[cç][aã]o)(?:\s+(?:para|do|de)\s+([a-z0-9.-]+))?\s*[:\-]\s*(.{4,})$/iu,
+      /^(?:learn|remember|save|new)\s+(?:this\s+)?(?:fix|correction)(?:\s+for\s+([a-z0-9.-]+))?\s*[:\-]\s*(.{4,})$/iu,
+      /^(?:保存|记住|学习)(?:这个)?(?:修正|解决方案)(?:\s*([a-z0-9.-]+))?\s*[:：\-]\s*(.{2,})$/u,
+    ];
+    for (const pattern of patterns) {
+      const match = value.match(pattern);
+      if (!match) continue;
+      const name = String(match[2] || "").trim().replace(/\s+/g, " ").slice(0, 160);
+      if (!name) return null;
+      const site = String(match[1] || siteFrom(name) || "Apocalipse").trim().toLowerCase().slice(0, 120);
+      return { name, site };
+    }
+    return null;
+  }
+
+  function findRelevantConfirmedCorrection(input, corrections) {
+    const q = normalizeQuestion(input);
+    const site = siteFrom(q);
+    const confirmed = [...(corrections || [])].reverse().filter(item => item?.status === "confirmed");
+    if (!confirmed.length) return null;
+    if (site) {
+      const foldedSite = fold(site);
+      const match = confirmed.find(item => {
+        const savedSite = fold(item?.site || "");
+        const name = fold(item?.name || "");
+        return savedSite === foldedSite || savedSite.endsWith(`.${foldedSite}`) || name.includes(foldedSite);
+      });
+      if (match) return match;
+    }
+    if (!/(corre|fix|soluc|falh|erro|error|problem|修正|解决|失败|错误)/.test(q)) return null;
+    return confirmed.find(item => {
+      const name = fold(item?.name || "");
+      return name.length >= 8 && q.includes(name);
+    }) || null;
+  }
+
   function respond(input, context = {}) {
     const locale = localeOf(context.locale);
     const q = normalizeQuestion(input);
     const corrections = context.corrections || [];
     const pending = [...corrections].reverse().find(item => ["proposed", "testing"].includes(item.status));
     if (!q) return { text: say(locale, "unknown"), intent: "unknown" };
+
+    const taughtCorrection = parseCorrectionTeachCommand(input);
+    if (taughtCorrection) {
+      return {
+        text: say(locale, "correctionLearned", taughtCorrection),
+        intent: "correction_learned",
+        learnCorrection: { ...taughtCorrection, status: "saved" },
+      };
+    }
+
+    const asksUpdateDetails = /(o que mudou|o que tem de novo|novidad|corre[cç][oõ]es?.*(?:atualiz|vers)|changelog|release notes?|what changed|what(?:'s| is) new|new fixes|fixes?.*(?:update|version)|更新内容|更新了什么|新修正|修复内容)/.test(q);
+    if (asksUpdateDetails) {
+      const update = context.updateState || {};
+      const details = String(update.notesSummary || "").trim();
+      if (details) {
+        return {
+          text: say(locale, "updateDetails", { latest: update.latest || context.appVersion || "—", details }),
+          intent: "update_details",
+        };
+      }
+      return {
+        text: say(locale, "updateChecking"),
+        intent: "update_details",
+        action: { type: "check_app_update", wantDetails: true },
+      };
+    }
+
     if (/(?:^|\b)(?:limpe|limpar|apague|apagar|clear|erase|delete)(?:\s+(?:essa|esta|a|the))?\s+(?:tela\s+do\s+)?(?:chat|conversa|conversation)(?:\b|$)|清除(?:聊天|对话)/.test(q)) {
       return { text: say(locale, "chatCleared"), intent: "chat_clear", action: { type: "clear_chat" } };
     }
@@ -519,6 +673,20 @@
       return { text: say(locale, "correctionRemoved", { name: found.name }), intent: "correction_removed", correctionId: found.id, remove: true };
     }
 
+    const knownCorrection = findRelevantConfirmedCorrection(input, corrections);
+    if (knownCorrection) {
+      return {
+        text: say(locale, "knownCorrection", {
+          site: knownCorrection.site || siteFrom(knownCorrection.name) || "Apocalipse",
+          name: knownCorrection.name,
+          count: Math.max(1, Number(knownCorrection.successCount || 1)),
+          version: knownCorrection.lastVerifiedVersion || context.appVersion || "—",
+        }),
+        intent: "known_correction",
+        correctionId: knownCorrection.id,
+      };
+    }
+
     if (/(botao|button|按钮)/.test(q) && !/(video|download|baix|gravar|record|visuali|preview|视频|下载|录制|预览)/.test(q)) {
       return { text: say(locale, "clarifyButton"), intent: "clarification", confidence: 0.45 };
     }
@@ -531,5 +699,5 @@
       : { text: say(locale, "offTopic"), intent: "unknown" };
   }
 
-  return { contextualQuestion, copy, diagnose, fold, formatRate, localeOf, normalizeQuestion, parseCredentialCommand, parseEvents, performanceDiagnosis, previousSubject, redactCredentialCommand, respond, say, siteFrom };
+  return { contextualQuestion, copy, debuggerDomainDiagnosis, diagnose, findRelevantConfirmedCorrection, fold, formatRate, localeOf, normalizeQuestion, parseCorrectionTeachCommand, parseCredentialCommand, parseEvents, performanceDiagnosis, previousSubject, redactCredentialCommand, respond, say, siteFrom, socialDiagnosis };
 });

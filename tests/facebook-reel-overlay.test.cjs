@@ -6,10 +6,24 @@ const { test } = require('node:test');
 const vm = require('node:vm');
 const script = readFileSync(process.env.ADM_CONTENT_SCRIPT || join(__dirname, '../browser-extension/content.js'), 'utf8');
 
-test('Facebook srcObject download falls back to the exact combined player stream', () => {
+test('Facebook unresolved download falls back to the exact player recording path', () => {
   assert.match(script, /overlay_download_stream_capture/);
-  assert.match(script, /isFacebookVideo && element\.srcObject && canRecord && recordButton/);
+  assert.match(script, /if \(isFacebookVideo && canRecord && recordButton\)/);
+  assert.match(script, /facebook_srcobject_without_complete_resource/);
+  assert.match(script, /facebook_unresolved_recording_fallback/);
   assert.match(script, /recordButton\.click\(\)/);
+});
+
+test('Facebook extractor parse failures expose a localized recording fallback', () => {
+  const rust = readFileSync(join(__dirname, '../apps/desktop/src-tauri/src/main.rs'), 'utf8');
+  const app = readFileSync(join(__dirname, '../apps/desktop/ui/app.js'), 'utf8');
+  assert.match(rust, /cannot parse data/);
+  assert.match(rust, /facebook_direct_download_unavailable_use_recording/);
+  assert.match(app, /Facebook could not provide this Reel/);
+  assert.match(app, /O Facebook não disponibilizou este Reel/);
+  assert.match(app, /Facebook 无法提供此 Reel/);
+  assert.match(app, /t\("facebookRecordingFallback"\)/);
+  assert.match(app, /warnedFacebookRecordingFallbacks/);
 });
 
 // Execute the real content script and its installed click handler. Only browser
@@ -220,23 +234,19 @@ test('Facebook srcObject alone never classifies an ordinary Reel as recording-on
   assert.doesNotMatch(script, /recordingOnly:\s*Boolean\(element\.srcObject && \/\(\^\|\\\.\)facebook/);
 });
 
-test('direct HTTP players expose Download without an unusable cross-origin Record action', () => {
+test('ordinary direct HTTP players avoid Record while Facebook keeps its recording fallback', () => {
   assert.match(script, /const hasDirectHttpMedia = \/\^https\?:\/i\.test\(liveMediaUrl\)/);
-  assert.match(script, /const canRecord = !isYouTubeVideo && !hasDirectHttpMedia/);
+  assert.match(script, /\(!hasDirectHttpMedia \|\| isFacebookVideo\)/);
 });
 
-test('Facebook sponsored-player detection is scoped to the exact post and explicit ad markers', () => {
-  assert.match(script, /const isSponsoredFacebookPlayer = \(element\) =>/);
-  assert.match(script, /depth < 24/);
-  assert.match(script, /videos\.some\(video => video !== element\)/);
-  assert.match(script, /data-ad-preview/);
-  assert.match(script, /Patrocinado/);
-  assert.match(script, /const closeToPlayer = marker =>/);
-  assert.match(script, /let exactPost = element\.closest/);
-  assert.match(script, /if \(!exactPost\) return false/);
-  assert.match(script, /markerY >= playerRect\.top - 320/);
-  assert.match(script, /if \(isSponsoredFacebookPlayer\(element\)\) return;/);
-  assert.match(script, /if \(isSponsoredFacebookPlayer\(anchor\)\) return;/);
+test('Facebook sponsored detection is strict and only filters popup inventory', () => {
+  assert.match(script, /const facebookSponsoredEvidence = \(element\) =>/);
+  assert.match(script, /exact_header_label_same_article/);
+  assert.match(script, /explicit_attribute_same_article/);
+  assert.match(script, /rect\.bottom <= playerRect\.top \+ 18/);
+  assert.match(script, /facebook\.popup_sponsored_filtered/);
+  assert.match(script, /facebook\.sponsored_home_allowed/);
+  assert.doesNotMatch(script, /facebook\.overlay_skipped_sponsored/);
 });
 
 test('recording follows player pauses without writing dead timeline gaps', () => {
@@ -269,4 +279,21 @@ test('recording seals each segment and resumes only after real media progress', 
   assert.match(script, /pausedAtMediaTime = Number\(element\.currentTime\)/);
   assert.match(script, /recorder\.state !== "paused" \|\| element\.paused/);
   assert.match(script, /recorder\.resume\(\)/);
+});
+
+
+test('Facebook sponsored videos show Record only and hide Download', () => {
+  assert.match(script, /button\.hidden = !canDownload \|\| Boolean\(isFacebookVideo && facebookSponsoredEvidence\(element\)\)/);
+  assert.match(script, /const sponsoredHomeVideo = Boolean\(isFacebookVideo && facebookSponsoredEvidence\(element\)\)/);
+  assert.match(script, /button\.hidden = sponsoredHomeVideo \|\| !liveCanDownload/);
+  assert.match(script, /sponsoredRecordOnly:/);
+});
+
+test('normal Facebook srcObject Reels resolve Download before any recording fallback', () => {
+  assert.doesNotMatch(script, /facebook_stream_without_permalink/);
+  const immediate = script.indexOf('const immediateFacebookUrl = isFacebookVideo ? facebookUrlFor(element) : null;');
+  const reveal = script.indexOf('await revealFacebookUrl(element)');
+  const fallback = script.indexOf('facebook_unresolved_recording_fallback');
+  assert.ok(immediate >= 0 && reveal > immediate, 'normal Facebook stream must attempt permalink discovery');
+  assert.ok(fallback > reveal, 'recording fallback must happen only after permalink resolution fails');
 });

@@ -10,8 +10,8 @@ const native = readFileSync(join(root, 'apps/desktop/src-tauri/src/diagnostics_v
 const popup = readFileSync(join(root, 'browser-extension/popup.js'), 'utf8');
 const desktop = readFileSync(join(root, 'apps/desktop/src-tauri/src/main.rs'), 'utf8');
 
-test('0.3.158 loads the opt-in replay before media handlers in every isolated content chain', () => {
-  assert.equal(manifest.version, '0.3.158');
+test('0.3.167 loads the opt-in replay before media handlers in every isolated content chain', () => {
+  assert.equal(manifest.version, '0.3.167');
   for (const entry of manifest.content_scripts.filter(item => item.js.includes('content.js'))) {
     assert.ok(entry.js.includes('diagnostics-media-replay.js'));
     assert.ok(entry.js.indexOf('diagnostics.js') < entry.js.indexOf('diagnostics-media-replay.js'));
@@ -50,9 +50,45 @@ test('desktop ZIP exports the dedicated chronological media replay file', () => 
   assert.match(native, /traces\/replay-de-midia\.jsonl/);
   assert.match(native, /name\.starts_with\("media_replay\."\)/);
   assert.match(native, /name\.starts_with\("handoff\."\)/);
-  assert.match(desktop, /Start with RELATORIO_PARA_IA\.txt, traces\/replay-de-midia\.jsonl/);
+  assert.match(desktop, /Apocalipse Forensic Debugger V4/);
+  assert.match(desktop, /timeline\/events-local\.jsonl/);
+  assert.match(desktop, /correlation\/index\.json/);
+  assert.match(desktop, /incidents\/problem-windows\.jsonl/);
 });
 
 test('an already-open tab receives the replay collector during extension recovery', () => {
   assert.match(popup, /"diagnostics\.js", "diagnostics-media-replay\.js", "tiktok-identity\.js"/);
+});
+
+
+test('desktop ZIP exports dedicated universal social debugger files', () => {
+  assert.match(native, /social\/player-debugger\.jsonl/);
+  assert.match(native, /social\/summary\.json/);
+  assert.match(native, /social\.overlay_missing/);
+  assert.match(native, /structured_observations_not_guesses/);
+});
+
+
+test('Debugger V4 exports sanitized engine logs and subsystem index', () => {
+  assert.match(desktop, /engines\/aria2-runtime\.log/);
+  assert.match(desktop, /join\("logs"\)\.join\("engines"\)/);
+  assert.match(desktop, /debugger-index\.json/);
+  assert.match(desktop, /warnings-errors\.jsonl/);
+  assert.match(desktop, /"formatVersion": 4/);
+  assert.match(desktop, /redacted-sensitive-line/);
+});
+
+test('forensic timeline preserves local time and authoritative server sequence', () => {
+  assert.match(native, /receivedAtLocal/);
+  assert.match(native, /clientTimestampLocal/);
+  assert.match(native, /timeline\/events-local\.jsonl/);
+  assert.match(native, /serverSequence/);
+  assert.match(native, /receivedAt_then_serverSequence/);
+});
+
+test('marked incidents preserve before-and-after windows instead of stopping capture', () => {
+  assert.match(native, /session\.problem_marked/);
+  assert.match(native, /saturating_sub\(90_000\)/);
+  assert.match(native, /saturating_add\(45_000\)/);
+  assert.match(native, /events_near_user_mark_not_automatic_root_cause/);
 });

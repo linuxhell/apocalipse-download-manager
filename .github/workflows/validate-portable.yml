@@ -119,14 +119,20 @@ jobs:
             os: windows-latest
             artifact: apocalipse-windows-x64-candidate
             output: apocalipse-download-manager-windows-x64-portable.zip
+            aria2_asset: aria2c-windows-x86_64.exe
+            aria2_binary: aria2c.exe
           - name: Linux x64 portable
             os: ubuntu-22.04
             artifact: apocalipse-linux-x64-candidate
             output: apocalipse-download-manager-linux-x64-portable.tar.gz
+            aria2_asset: aria2c-linux-x86_64
+            aria2_binary: aria2c
           - name: macOS portable
             os: macos-latest
             artifact: apocalipse-macos-candidate
             output: apocalipse-download-manager-macos-portable.zip
+            aria2_asset: aria2c-macos-arm64
+            aria2_binary: aria2c
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
@@ -161,6 +167,44 @@ jobs:
         run: |
           cd apps/desktop
           npx --yes @tauri-apps/cli@2 build --bundles appimage
+      - name: Download aria2 backend
+        shell: bash
+        env:
+          ARIA2_ASSET: ${{ matrix.aria2_asset }}
+          ARIA2_BINARY: ${{ matrix.aria2_binary }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_json="$RUNNER_TEMP/aria2-release.json"
+          curl --fail --location --retry 3 \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/Kenshin9977/aria2/releases/latest" \
+            --output "$release_json"
+          asset_id=$(python3 - "$release_json" "$ARIA2_ASSET" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              release = json.load(stream)
+          expected = sys.argv[2]
+          for asset in release.get("assets", []):
+              if asset.get("name") == expected:
+                  print(asset["id"])
+                  break
+          else:
+              raise SystemExit(f"aria2 asset not found: {expected}")
+          PY
+          )
+          mkdir -p dist/aria2-backend
+          curl --fail --location --retry 3 \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/Kenshin9977/aria2/releases/assets/$asset_id" \
+            --output "dist/aria2-backend/$ARIA2_BINARY"
+          chmod 755 "dist/aria2-backend/$ARIA2_BINARY"
+
       - name: Stage Windows portable
         if: runner.os == 'Windows'
         shell: pwsh
@@ -168,6 +212,8 @@ jobs:
           $package = 'dist/Apocalipse Download Manager'
           New-Item -ItemType Directory -Force $package | Out-Null
           Copy-Item 'target/release/apocalipse-desktop.exe' "$package/Apocalipse Download Manager.exe"
+          New-Item -ItemType Directory -Force "$package/data/tools/aria2" | Out-Null
+          Copy-Item 'dist/aria2-backend/aria2c.exe' "$package/data/tools/aria2/aria2c.exe"
           Copy-Item 'README.md','LICENSE' $package
           Compress-Archive -Path $package -DestinationPath 'dist/${{ matrix.output }}' -Force
       - name: Stage Linux portable
@@ -175,8 +221,9 @@ jobs:
         shell: bash
         run: |
           package='dist/Apocalipse Download Manager'
-          mkdir -p "$package"
+          mkdir -p "$package/data/tools/aria2"
           install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
+          install -m 755 dist/aria2-backend/aria2c "$package/data/tools/aria2/aria2c"
           cp README.md LICENSE "$package/"
           appimage="$(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
           test -n "$appimage"
@@ -187,9 +234,10 @@ jobs:
         shell: bash
         run: |
           app='dist/Apocalipse Download Manager.app'
-          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          mkdir -p "$app/Contents/MacOS/data/tools/aria2" "$app/Contents/Resources"
           cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
           chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
+          install -m 755 dist/aria2-backend/aria2c "$app/Contents/MacOS/data/tools/aria2/aria2c"
           cp packaging/macos/Info.plist "$app/Contents/Info.plist"
           cp README.md LICENSE "$app/Contents/Resources/"
           ditto -c -k --sequesterRsrc --keepParent "$app" 'dist/${{ matrix.output }}'

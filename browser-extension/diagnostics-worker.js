@@ -6,7 +6,7 @@
   let state = { config: null, outbox: [], dropped: 0, storageErrors: 0, transportErrors: 0, accepted: 0 };
   let serial = Promise.resolve(), sequence = 0, flushing = false, configChecked = 0;
   let rateAt = 0, rateCount = 0;
-  const MAX_OUTBOX_BYTES = 2 * 1024 * 1024;
+  const MAX_OUTBOX_BYTES = 8 * 1024 * 1024;
   const load = chrome.storage.local.get({ [KEY]: null }).then(saved => {
     const value = saved[KEY];
     if (value && typeof value === 'object') state = { ...state, ...value, outbox: Array.isArray(value.outbox) ? value.outbox.slice(-core.MAX_EVENTS) : [] };

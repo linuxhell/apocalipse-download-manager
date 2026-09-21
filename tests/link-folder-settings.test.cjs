@@ -61,8 +61,13 @@ test("Linux Samba shares are discovered from smb.conf and usershares", () => {
 });
 
 test("Link lists remain readable and settings use the available window", () => {
-  assert.match(css, /#settings-dialog \{ width: min\(1360px, calc\(100vw - 20px\)\)/);
+  assert.match(css, /#settings-dialog \{ width: min\(1480px, calc\(100vw - 16px\)\)/);
+  assert.match(css, /height: min\(960px, calc\(100vh - 16px\)\)/);
   assert.match(css, /height:clamp\(300px,42vh,460px\)/);
+  assert.match(css, /body\.link-window \.link-panel \{[\s\S]*grid-template-rows: auto minmax\(300px, 1fr\) auto/);
+  assert.match(css, /body\.link-window \.link-files \{[\s\S]*min-height: 300px/);
+  assert.match(css, /body\.link-window \.link-transfer-panel \{[\s\S]*padding: 11px 16px/);
+  assert.match(css, /body\.link-window #link-share-list \{[\s\S]*max-height: 120px/);
   assert.match(css, /text-overflow:ellipsis/);
 });
 
@@ -196,6 +201,31 @@ test("Loopback Link file operations bypass the legacy remote transport", () => {
 });
 
 
+test("Archive extraction is cross-platform, localized and only offered for archives", () => {
+  assert.match(html, /data-tool="extractor"/);
+  assert.match(html, /id="tool-extractor"/);
+  assert.doesNotMatch(html, /data-tool-update="extractor"/);
+  assert.match(html, /id="auto-extract-option"[^>]*hidden/);
+  assert.match(html, /id="analysis"[^>]*><\/div>\s*<label id="auto-extract-option"/);
+  assert.match(html, /id="auto-extract"/);
+  assert.match(app, /archiveExtractor: "Archive extractor/);
+  assert.match(app, /archiveExtractor: "Extrator de arquivos/);
+  assert.match(app, /archiveExtractor: "压缩文件解压工具/);
+  assert.match(app, /function isArchiveFileName/);
+  assert.match(app, /const autoExtract = document\.querySelector\("#auto-extract-option"\)\.hidden \? false : document\.querySelector\("#auto-extract"\)\.checked/);
+  assert.match(rust, /extractor_path: Option<PathBuf>/);
+  assert.match(rust, /enum ExtractorKind \{[\s\S]*SevenZip,[\s\S]*Rar,[\s\S]*Unrar,[\s\S]*Unar,[\s\S]*Bsdtar,[\s\S]*Tar,/);
+  assert.match(rust, /archive_member_is_safe/);
+  assert.match(rust, /\.apocalipse-extract-/);
+  assert.match(rust, /maybe_auto_extract_completed/);
+  assert.match(rust, /prompt_for_destination: bool/);
+  assert.match(rust, /browser-captures/);
+  assert.match(rust, /blob\.destination_prompt_pending/);
+  assert.match(rust, /app\.emit\("browser-assisted-ready"/);
+  assert.match(rust, /run_network_change_monitor/);
+  assert.match(rust, /resolve_file_host_url/);
+});
+
 test("About page is localized, sits immediately below PayPal and keeps the main window size", () => {
   assert.match(html, /id="donate-paypal"[\s\S]*data-page="about"/);
   assert.match(html, /id="about-panel"/);
@@ -214,9 +244,15 @@ test("About page is localized, sits immediately below PayPal and keeps the main 
   assert.doesNotMatch(app, /invoke\("select_about_audio"\)/);
   assert.match(rust, /fn about_media_snapshot/);
   assert.match(rust, /include_bytes!\("\.\.\/assets\/about-creator\.jpg"\)/);
+  assert.match(rust, /include_bytes!\("\.\.\/assets\/about-background\.jpg"\)/);
   assert.match(rust, /include_bytes!\("\.\.\/assets\/about-theme\.mp4"\)/);
+  assert.match(app, /backgroundDataUrl/);
+  assert.match(css, /var\(--about-background\)/);
   assert.match(app, /document\.querySelector\("#add"\)\.hidden = activePage === "about"/);
-  assert.match(css, /\.about-creator-line[\s\S]*font-size: 20px/);
+  assert.match(html, /class="about-toolbar"[\s\S]*about-audio-controls[\s\S]*about-creator-line[\s\S]*about-creator-photo/);
+  assert.match(html, /class="about-scene"/);
+  assert.match(css, /\.about-creator-line[\s\S]*font-size: clamp\(12px, 1vw, 15px\)/);
+  assert.match(css, /\.about-scene[\s\S]*background-size: contain/);
   assert.match(app, /option\(select, "original", pendingMediaKind === "audio"/);
   assert.match(css, /\.media-inspection:has\(> img\[hidden\]\)[^}]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(app, /\["mp3", "m4a", "opus", "flac", "wav"\]/);
@@ -242,9 +278,36 @@ test("Link lists scroll independently, disconnect explicitly and tray opens with
   assert.match(linkHtml, /id="link-disconnect"/);
   assert.match(app, /function disconnectLink\(\)/);
   assert.match(linkJs, /function disconnectLink\(\)/);
-  assert.match(css, /\.link-files > div[^}]*overflow-y:auto[^}]*scrollbar-gutter:stable/);
+  assert.match(css, /\.link-files > div[^}]*overflow-y:scroll[^}]*scrollbar-gutter:stable/);
   assert.match(rust, /TrayIconEvent::Click[\s\S]*button: MouseButton::Left/);
   assert.doesNotMatch(rust, /TrayIconEvent::DoubleClick/);
+});
+
+test("Link transfer progress supports localized pause, continue and cancel", () => {
+  assert.match(linkHtml, /id="link-transfer-panel"/);
+  assert.match(linkHtml, /id="link-transfer-pause"/);
+  assert.match(linkHtml, /id="link-transfer-cancel"/);
+  assert.match(linkJs, /linkPause: "Pause"/);
+  assert.match(linkJs, /linkPause: "Pausar"/);
+  assert.match(linkJs, /linkPause: "暂停"/);
+  assert.match(linkJs, /linkContinue: "Continuar"/);
+  assert.match(linkJs, /linkCancel: "Cancelar"/);
+  assert.match(linkJs, /linkTransferCancelled: "传输已取消"/);
+  assert.match(linkJs, /listen\?\.\("link-transfer-progress"/);
+  assert.match(linkJs, /startLinkTransferProgressPolling/);
+  assert.match(linkJs, /get_link_transfer_progress/);
+  assert.match(linkJs, /setInterval\(poll, 250\)/);
+  assert.match(linkJs, /performance\.now\(\) - linkLastProgressEventAt < 450/);
+  assert.match(linkJs, /stopLinkTransferProgressPolling\(\)/);
+  assert.match(rust, /fn get_link_transfer_progress/);
+  assert.match(rust, /bytes_per_second/);
+  assert.match(linkJs, /formatBytes\(speed\)\}\/s/);
+  assert.match(linkJs, /invoke\("pause_link_transfer"/);
+  assert.match(linkJs, /invoke\("cancel_link_transfer"/);
+  assert.match(rust, /fn pause_link_transfer/);
+  assert.match(rust, /fn cancel_link_transfer/);
+  assert.match(rust, /"link-transfer-progress"/);
+  assert.match(rust, /reporter\.checkpoint\(\)\?/);
 });
 
 test("audio HLS analysis offers an optional localized FFmpeg conversion", () => {

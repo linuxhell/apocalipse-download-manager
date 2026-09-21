@@ -9,6 +9,10 @@ const desktop = fs.readFileSync(
   path.join(root, "apps/desktop/src-tauri/src/main.rs"),
   "utf8",
 );
+const aria2 = fs.readFileSync(
+  path.join(root, "apps/desktop/src-tauri/src/aria2.rs"),
+  "utf8",
+);
 const cargo = fs.readFileSync(path.join(root, "Cargo.toml"), "utf8");
 const tauri = JSON.parse(
   fs.readFileSync(path.join(root, "apps/desktop/src-tauri/tauri.conf.json"), "utf8"),
@@ -79,11 +83,11 @@ test("removing a media task terminates yt-dlp and every child process", () => {
   assert.match(desktop, /child\.wait\(\)\.await/);
 });
 
-test("Facebook composite links are canonicalized without an aria2 dependency", () => {
+test("Facebook composite links stay canonicalized before transfer-engine dispatch", () => {
   assert.match(desktop, /fn canonical_facebook_video_url/);
   assert.match(desktop, /Some\(format!\("https:\/\/www\.facebook\.com\/watch\/\?v=\{video_id\}"\)\)/);
-  assert.doesNotMatch(desktop, /aria2c|parse_aria2_progress|Aria2Rpc/);
-  assert.match(desktop, /run_gopeed_download/);
+  assert.match(desktop, /run_aria2_download/);
+  assert.match(desktop, /requires_native_http_compatibility/);
 });
 
 test("streamed browser recordings publish a global core speed", () => {
@@ -96,10 +100,8 @@ test("streamed browser recordings publish a global core speed", () => {
 });
 
 test("quiet clipboard polling does not flood diagnostics", () => {
-  assert.match(
-    ui,
-    /if \(!quiet\.has\(command\) && command !== "record_ui_diagnostic"\)/,
-  );
+  assert.match(ui, /const quiet = new Set\(\["list_downloads", "read_general_log", "get_bridge_pairing", "read_clipboard_link"/);
+  assert.match(ui, /if \(!quiet\.has\(command\) && command !== "record_ui_diagnostic" && command !== "record_diagnostics_ui"\)/);
   assert.match(
     desktop,
     /let Ok\(value\) = app\.clipboard\(\)\.read_text\(\) else \{\s*return Ok\(None\);/,
@@ -269,4 +271,20 @@ test("automatic mirrors are server-advertised, identity-checked and latency-rank
   assert.match(core, /same_download_identity/);
   assert.match(core, /verified\.sort_by_key\(\|\(_, elapsed\)\| \*elapsed\)/);
   assert.match(desktop, /engine\.verified_sources\(&request, &mirrors\)\.await/);
+});
+
+
+test("magnet metadata completion follows the real torrent content GID", () => {
+  assert.match(aria2, /"followedBy"/);
+  assert.match(aria2, /pub followed_by: Vec<String>/);
+  assert.match(desktop, /aria2\.torrent_followed_by/);
+  assert.match(desktop, /std::mem::replace\(&mut gid, next_gid\.clone\(\)\)/);
+  assert.match(desktop, /items\.insert\(id, next_gid\)/);
+  assert.match(desktop, /item\.progress_percent = Some\(0\.0\)/);
+});
+
+test("torrent preview prioritizes the beginning and end of selected files", () => {
+  assert.match(aria2, /"bt-prioritize-piece"/);
+  assert.match(aria2, /"head=32M,tail=32M"/);
+  assert.match(desktop, /torrentPreviewPriority/);
 });

@@ -76,10 +76,9 @@ pub struct DownloadTask {
     pub sha256: Option<String>,
     #[serde(default)]
     pub integrity_verified: bool,
-    /// Backend task identifier used by the experimental Gopeed engine. It is
-    /// persisted so pause/resume/removal still work after an ADM restart.
+    /// Extract a completed archive with the user-configured external extractor.
     #[serde(default)]
-    pub gopeed_task_id: Option<String>,
+    pub auto_extract: bool,
     #[serde(default)]
     pub created_at: u64,
     #[serde(default)]
@@ -117,7 +116,7 @@ impl DownloadTask {
             expected_size: None,
             sha256: None,
             integrity_verified: false,
-            gopeed_task_id: None,
+            auto_extract: false,
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |value| value.as_secs()),
