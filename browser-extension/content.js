@@ -48,6 +48,17 @@
     else if (event.type === "keyup") heldShortcutKeys.delete(key);
   };
   const shortcutPressed = (event, key) => modifierPressed(event, key) || heldShortcutKeys.has(key);
+  const chatgptDownloadGesture = (event) => {
+    if (location.hostname.toLowerCase() !== "chatgpt.com") return false;
+    const target = event.target instanceof Element ? event.target : null;
+    const clickable = target?.closest?.("a[href],button,[role=button],[role=menuitem]");
+    if (!clickable) return false;
+    const label = String(clickable.getAttribute?.("aria-label") || clickable.innerText || clickable.textContent || "").trim();
+    const href = String(clickable.getAttribute?.("href") || clickable.href || "");
+    return /(?:\bdownload\b|\bbaixar\b|下载)/i.test(label)
+      || /^sandbox:/i.test(href)
+      || /\/backend-api\/estuary\/content(?:\?|$)/i.test(href);
+  };
   const sendShortcutState = (event) => {
     updateHeldShortcutKey(event);
     return sendRuntimeMessageQuietly({
@@ -65,6 +76,12 @@
       void sendRuntimeMessageQuietly({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 });
     } else if (force) {
       void sendRuntimeMessageQuietly({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 });
+    } else if (chatgptDownloadGesture(event)) {
+      // ChatGPT can render generated-file controls without exposing the final
+      // estuary URL in the clicked node. Treat that normal click as a short,
+      // scoped force transaction so the MAIN-world hook can capture the final
+      // authenticated file response before it becomes a navigation/download.
+      void sendRuntimeMessageQuietly({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 8000 });
     }
   }, true);
   window.addEventListener("blur", () => {
