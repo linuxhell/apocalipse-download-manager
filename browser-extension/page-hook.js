@@ -37,7 +37,7 @@
       window.postMessage({
         source: "apocalipse-page-hook",
         type: "hook-pong",
-        version: "0.3.168",
+        version: "0.3.169",
         nonce: event.data.nonce || "",
       }, "*");
     }
