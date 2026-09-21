@@ -411,10 +411,10 @@ chrome.runtime.onStartup.addListener(() => {
   ensureHeartbeat();
   void repairOpenCaptureTabs("startup");
 });
-chrome.tabs.onActivated.addListener(({ tabId }) => {
+chrome.tabs?.onActivated?.addListener(({ tabId }) => {
   chrome.tabs.get(tabId).then((tab) => repairCaptureLayer(tab, "activated")).catch(() => {});
 });
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+chrome.tabs?.onUpdated?.addListener((_tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete") void repairCaptureLayer(tab, "navigation_complete");
 });
 void bridgeRequest("/v1/health").catch(() => {});
