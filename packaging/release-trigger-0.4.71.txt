@@ -1,0 +1,1 @@
+Rebuild complete v0.4.71 release assets: Windows, Linux portable, Linux AppImage, macOS, Chrome, Edge, signed Firefox XPI, SHA256.
