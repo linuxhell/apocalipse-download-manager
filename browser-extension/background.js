@@ -738,9 +738,9 @@ function isDisposableDownloadUrl(value) {
   }
 }
 
-async function takeBrowserDownload(item, eraseFromHistory = false) {
+async function takeBrowserDownload(item, eraseFromHistory = false, resolvedFileName = null) {
   let url = item.finalUrl || item.url;
-  const fileNameDecision = await resolveBrowserDownloadFileName(item);
+  const fileNameDecision = resolvedFileName || await resolveBrowserDownloadFileName(item);
   const effectiveFileName = fileNameDecision.fileName || fileNameFromPath(item.filename);
   if (fileNameDecision.changed) {
     void diagnostic("browser_download.filename_resolved", {
@@ -865,7 +865,7 @@ if (chrome.downloads.onDeterminingFilename?.addListener) {
   chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
     void resolveBrowserDownloadFileName(item).then(async (decision) => {
       const effective = decision.fileName ? { ...item, filename: decision.fileName } : item;
-      const handled = await takeBrowserDownload(effective);
+      const handled = await takeBrowserDownload(effective, false, decision);
       if (!handled && decision.changed && decision.fileName) {
         suggest({ filename: decision.fileName, conflictAction: "uniquify" });
       } else {
