@@ -28,12 +28,13 @@ test('ChatGPT Library Bypass returns before preventing the native browser click'
 });
 
 
-test('Insert is supported as a configurable force or bypass shortcut', () => {
+test('Insert is always available as a force shortcut in addition to the configurable shortcut', () => {
   assert.match(content, /heldShortcutKeys/);
   assert.match(content, /\["Alt", "Shift", "Control", "Insert"\]/);
-  assert.match(content, /shortcutPressed\(event, shortcutKeys\.force\)/);
+  assert.match(content, /const forcePressed = \(event\) => shortcutPressed\(event, shortcutKeys\.force\) \|\| shortcutPressed\(event, "Insert"\)/);
   assert.match(content, /shortcutPressed\(event, shortcutKeys\.bypass\)/);
   assert.match(pageHook, /event\.key === "Insert"/);
+  assert.match(pageHook, /held\.has\(shortcuts\.force \|\| "Shift"\) \|\| held\.has\("Insert"\)/);
   assert.equal((popup.match(/<option>Insert<\/option>/g) || []).length, 2);
 });
 
