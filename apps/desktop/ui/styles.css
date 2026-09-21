@@ -717,11 +717,14 @@ dialog input:focus {
 #tool-list label { margin: 0; display: grid; gap: 4px; }
 #tool-list label > span { display: flex; justify-content: space-between; font-weight: 700; }
 #tool-list label > span small { color: var(--muted); font-weight: 400; }
-#tool-list label > div { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+#tool-list label > div { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 8px; align-items: center; }
 #tool-list button, #check-tools { border: 1px solid #29424f; border-radius: 8px; background: #111d25; color: #bcd1d9; padding: 7px 13px; cursor: pointer; }
 #check-tools { justify-self: end; }
 #settings-dialog { width: min(1480px, calc(100vw - 16px)); max-width: none; overflow: hidden; }
-#tools-dialog { width: min(1080px, calc(100vw - 40px)); overflow: hidden; }
+#tools-dialog { width: min(1460px, calc(100vw - 20px)); max-width: none; overflow: hidden; }
+#tools-dialog form { min-height: min(760px, calc(100vh - 36px)); max-height: calc(100vh - 24px); }
+#tools-dialog .tool-settings { min-height: 0; overflow: auto; }
+#tools-dialog #tool-list input { min-width: 0; }
 #settings-dialog form, #tools-dialog form {
   display: grid;
   box-sizing: border-box;
@@ -1279,6 +1282,10 @@ body:has(#ai-panel:not([hidden])) main { height:100vh; overflow:hidden; }
   .settings-columns > div { max-height: none; overflow: visible; padding-right: 0; }
   .settings-columns > div + div { padding-left: 0; border-left: 0; }
   #tools-dialog #tool-list { grid-template-columns: 1fr; }
+  #tools-dialog { width: calc(100vw - 12px); }
+  #tool-list label > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #tool-list label > div input { grid-column: 1 / -1; width: 100%; }
+  #tool-list label > div button { width: 100%; }
 }
 
 /* Persistent Save-form rail, independent of platform auto-hidden scrollbars. */
