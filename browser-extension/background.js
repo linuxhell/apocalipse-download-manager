@@ -468,6 +468,10 @@ chrome.tabs?.onActivated?.addListener(({ tabId }) => {
 chrome.tabs?.onUpdated?.addListener((_tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete") void repairCaptureLayer(tab, "navigation_complete");
 });
+chrome.tabs?.onRemoved?.addListener((tabId) => {
+  captureLayerHealth.delete(tabId);
+  captureLayerHealthyLogAt.delete(tabId);
+});
 void bridgeRequest("/v1/health").catch(() => {});
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === HEARTBEAT_ALARM) {
@@ -1480,6 +1484,10 @@ async function streamCapturedUrl(request) {
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   const shortcutTabId = Number.isInteger(sender.tab?.id) ? sender.tab.id : null;
   if (message?.type === "APOCALIPSE_CONTENT_READY") {
+    markCaptureLayerHealth(shortcutTabId, {
+      contentReadyAt: Date.now(),
+      version: message.version || "unknown",
+    });
     void diagnostic("capture.layer_content_ready", {
       traceId: crypto.randomUUID(),
       pageUrl: sender.tab?.url || null,
@@ -1489,6 +1497,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return;
   }
   if (message?.type === "APOCALIPSE_MAIN_HOOK_READY") {
+    markCaptureLayerHealth(shortcutTabId, {
+      contentReadyAt: Date.now(),
+      hookReadyAt: Date.now(),
+      version: message.version || captureLayerHealth.get(shortcutTabId)?.version || "unknown",
+    });
     void diagnostic("capture.layer_main_hook_ready", {
       traceId: crypto.randomUUID(),
       pageUrl: sender.tab?.url || null,
