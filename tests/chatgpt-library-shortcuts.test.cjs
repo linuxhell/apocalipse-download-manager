@@ -36,3 +36,14 @@ test('Insert is supported as a configurable force or bypass shortcut', () => {
   assert.match(pageHook, /event\.key === "Insert"/);
   assert.equal((popup.match(/<option>Insert<\/option>/g) || []).length, 2);
 });
+
+
+test('ChatGPT generated-file normal clicks arm a short automatic force transaction', () => {
+  assert.match(content, /chatgptDownloadGesture/);
+  assert.match(content, /APOCALIPSE_FORCE_NEXT", ttlMs: 8000/);
+  assert.match(pageHook, /chatgptDownloadControl/);
+  assert.match(pageHook, /CHATGPT_AUTO_FORCE_ARMED/);
+  assert.match(pageHook, /chatgptAutoForceUntil = Date\.now\(\) \+ 8000/);
+  assert.match(pageHook, /forceActive\(\) \|\| chatgptAutoForceActive\(\)/);
+  assert.match(pageHook, /\^sandbox:/);
+});
