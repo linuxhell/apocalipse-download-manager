@@ -8,6 +8,7 @@
   let forceGestureUntil = 0;
   let bypassGestureUntil = 0;
   let activeTraceId = "";
+  let chatgptAutoForceUntil = 0;
   const pendingNavigationFallbacks = new Map();
 
   const canonicalKey = (event) => {
@@ -37,11 +38,20 @@
   const bypassActive = () => bypassPressed() || Date.now() < bypassGestureUntil;
   const forcePressed = () => held.has(shortcuts.force || "Shift");
   const forceActive = () => !bypassActive() && (forcePressed() || Date.now() < forceGestureUntil);
+  const chatgptDownloadControl = (clickable) => {
+    if (location.hostname.toLowerCase() !== "chatgpt.com" || !clickable) return false;
+    const label = String(clickable.getAttribute?.("aria-label") || clickable.innerText || clickable.textContent || "").trim();
+    const href = String(clickable.getAttribute?.("href") || clickable.href || "");
+    return /(?:\bdownload\b|\bbaixar\b|下载)/i.test(label)
+      || /^sandbox:/i.test(href)
+      || /\/backend-api\/estuary\/content(?:\?|$)/i.test(href);
+  };
+  const chatgptAutoForceActive = () => !bypassActive() && Date.now() < chatgptAutoForceUntil;
   const safeUrl = (value) => { try { const u = new URL(String(value || ""), location.href); u.search = ""; u.hash = ""; return u.href; } catch { return ""; } };
   const trace = (eventName, detail = {}) => window.postMessage({ source: "apocalipse-page-hook", type: "capture-trace", eventName, mode: bypassActive() ? "bypass" : (forceActive() ? "force" : "normal"), detail, traceId: activeTraceId, at: Date.now() }, "*");
-  const forceClassify = (value) => { if (!forceActive() || bypassPressed()) return null; try { const u = new URL(String(value || ""), location.href); return /^(https?):$/i.test(u.protocol) ? { url: u.href, kind: "forced" } : null; } catch { return null; } };
+  const forceClassify = (value) => { if (!(forceActive() || chatgptAutoForceActive()) || bypassPressed()) return null; try { const u = new URL(String(value || ""), location.href); return /^(https?):$/i.test(u.protocol) ? { url: u.href, kind: "forced" } : null; } catch { return null; } };
   const forceDirectAnchorClassify = (anchor) => {
-    if (!forceActive() || bypassActive() || !anchor?.href) return null;
+    if (!(forceActive() || chatgptAutoForceActive()) || bypassActive() || !anchor?.href) return null;
     try {
       const u = new URL(anchor.href, location.href);
       if (!/^(https?):$/i.test(u.protocol)) return null;
@@ -122,7 +132,9 @@
     else if (forcePressed()) forceGestureUntil = Date.now() + 20000;
     const target = event.target instanceof Element ? event.target : null;
     const clickable = target?.closest?.("a[href],button,[role=button],[role=menuitem]");
-    trace(forcePressed() ? "FORCE_ARMED" : (bypassActive() ? "BYPASS_ARMED" : "AUTO_GESTURE"), { tag: clickable?.tagName || target?.tagName || "", role: clickable?.getAttribute?.("role") || "", text: String(clickable?.innerText || clickable?.textContent || "").trim().slice(0,120), href: safeUrl(clickable?.href || "") });
+    const chatgptAutoForce = !bypassActive() && !forcePressed() && chatgptDownloadControl(clickable);
+    if (chatgptAutoForce) chatgptAutoForceUntil = Date.now() + 8000;
+    trace(forcePressed() ? "FORCE_ARMED" : (bypassActive() ? "BYPASS_ARMED" : (chatgptAutoForce ? "CHATGPT_AUTO_FORCE_ARMED" : "AUTO_GESTURE")), { tag: clickable?.tagName || target?.tagName || "", role: clickable?.getAttribute?.("role") || "", text: String(clickable?.innerText || clickable?.textContent || "").trim().slice(0,120), href: safeUrl(clickable?.href || "") });
     if (forcePressed() && clickable && !classify(clickable.href || "")) {
       const forcedAction = forceDirectAnchorClassify(clickable);
       trace(forcedAction ? "FORCE_ACTION_CLASSIFIED" : "FORCE_PASSTHROUGH", {
@@ -164,7 +176,7 @@
     } else if (emit(candidate, "window.fetch")) {
       return Promise.resolve(new Response("", { status: 204, statusText: "Handled by Apocalipse" }));
     }
-    const forcedAtCall = forceActive() && !bypassActive();
+    const forcedAtCall = (forceActive() || chatgptAutoForceActive()) && !bypassActive();
     return originalFetch.call(this, input, init).then((response) => {
       if (forcedAtCall) {
         const disposition = response.headers?.get?.("content-disposition") || "";
