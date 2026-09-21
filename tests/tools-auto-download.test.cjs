@@ -45,3 +45,13 @@ test('Tools dialog expands instead of squeezing four controls into the old width
   assert.match(css, /grid-template-columns: minmax\(0, 1fr\) auto auto auto/);
   assert.match(css, /#tools-dialog \.tool-settings \{ min-height: 0; overflow: auto; \}/);
 });
+
+
+test('Opening Tools never launches an already configured media player', () => {
+  const playerStatusStart = rust.indexOf('let player = settings.media_player_path.clone().unwrap_or_default();');
+  const playerStatusEnd = rust.indexOf('Ok(statuses)', playerStatusStart);
+  const playerStatus = rust.slice(playerStatusStart, playerStatusEnd);
+  assert.ok(playerStatusStart >= 0 && playerStatusEnd > playerStatusStart);
+  assert.doesNotMatch(playerStatus, /version_line\(&player/);
+  assert.match(playerStatus, /version:\s*None/);
+});
