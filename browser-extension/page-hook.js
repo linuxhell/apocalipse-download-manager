@@ -31,12 +31,21 @@
         bypass: event.data.bypass || "Alt",
         force: event.data.force || "Shift",
       };
+      return;
+    }
+    if (event.data.type === "hook-ping") {
+      window.postMessage({
+        source: "apocalipse-page-hook",
+        type: "hook-pong",
+        version: "0.3.168",
+        nonce: event.data.nonce || "",
+      }, "*");
     }
   });
 
   const bypassPressed = () => held.has(shortcuts.bypass || "Alt");
   const bypassActive = () => bypassPressed() || Date.now() < bypassGestureUntil;
-  const forcePressed = () => held.has(shortcuts.force || "Shift");
+  const forcePressed = () => held.has(shortcuts.force || "Shift") || held.has("Insert");
   const forceActive = () => !bypassActive() && (forcePressed() || Date.now() < forceGestureUntil);
   const chatgptDownloadControl = (clickable) => {
     if (location.hostname.toLowerCase() !== "chatgpt.com" || !clickable) return false;
