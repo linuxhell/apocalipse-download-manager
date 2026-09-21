@@ -4,6 +4,8 @@ const { join } = require('node:path');
 const { test } = require('node:test');
 
 const content = readFileSync(join(__dirname, '../browser-extension/content.js'), 'utf8');
+const pageHook = readFileSync(join(__dirname, '../browser-extension/page-hook.js'), 'utf8');
+const popup = readFileSync(join(__dirname, '../browser-extension/popup.html'), 'utf8');
 
 test('ChatGPT Library normal and Force clicks use the real ADM download channel', () => {
   const start = content.indexOf('const interceptChatgptLibrary');
@@ -19,8 +21,18 @@ test('ChatGPT Library Bypass returns before preventing the native browser click'
   const start = content.indexOf('const interceptChatgptLibrary');
   const end = content.indexOf('document.addEventListener("pointerdown", interceptChatgptLibrary', start);
   const handler = content.slice(start, end);
-  const bypass = handler.indexOf('modifierPressed(event, shortcutKeys.bypass)');
+  const bypass = handler.indexOf('shortcutPressed(event, shortcutKeys.bypass)');
   const prevented = handler.indexOf('event.preventDefault()');
   assert.ok(bypass >= 0 && prevented > bypass);
   assert.doesNotMatch(content, /APOCALIPSE_CHATGPT_LIBRARY_ARM_DENY/);
+});
+
+
+test('Insert is supported as a configurable force or bypass shortcut', () => {
+  assert.match(content, /heldShortcutKeys/);
+  assert.match(content, /\["Alt", "Shift", "Control", "Insert"\]/);
+  assert.match(content, /shortcutPressed\(event, shortcutKeys\.force\)/);
+  assert.match(content, /shortcutPressed\(event, shortcutKeys\.bypass\)/);
+  assert.match(pageHook, /event\.key === "Insert"/);
+  assert.equal((popup.match(/<option>Insert<\/option>/g) || []).length, 2);
 });
