@@ -363,63 +363,86 @@ async function captureLayerPing(tabId) {
 
 async function repairCaptureLayer(tab, reason = "probe") {
   if (!tabSupportsCapture(tab)) return false;
-  const state = {
-    traceId: crypto.randomUUID(),
-    pageUrl: tab.url || null,
-    startedAt: Date.now(),
-  };
-  const existing = await captureLayerPing(tab.id);
-  if (existing?.ok) {
-    if (tabNeedsMainHook(tab) && !existing.hookReady) {
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id, frameIds: [0] },
-          world: "MAIN",
-          files: ["page-hook.js"],
-        });
-        await chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_REQUEST_HOOK_PING" }, { frameId: 0 }).catch(() => null);
-        void diagnostic("capture.layer_main_hook_repaired", state, {
-          detail: `reason=${reason} tab=${tab.id} content_version=${existing.version || "unknown"}`,
-        });
-      } catch (error) {
-        void diagnostic("capture.layer_main_hook_repair_failed", state, {
-          level: "WARN",
-          error: String(error),
-          detail: `reason=${reason} tab=${tab.id}`,
-        });
-      }
-    }
+  const state = { traceId: crypto.randomUUID(), pageUrl: tab.url || null, startedAt: Date.now() };
+  const needsMainHook = tabNeedsMainHook(tab);
+  const known = captureLayerHealth.get(tab.id);
+  if (known?.contentReadyAt && Date.now() - known.contentReadyAt < CAPTURE_LAYER_HEALTH_TTL_MS
+      && (!needsMainHook || (known.hookReadyAt && Date.now() - known.hookReadyAt < CAPTURE_LAYER_HEALTH_TTL_MS))) {
+    logCaptureLayerHealthy(tab, state, reason, known);
     return true;
   }
 
-  void diagnostic("capture.layer_missing", state, {
-    level: "WARN",
-    detail: `reason=${reason} tab=${tab.id}`,
-  });
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id, frameIds: [0] },
-      files: recoveryFiles,
+  const existing = await captureLayerPing(tab.id);
+  if (existing?.ok) {
+    const health = markCaptureLayerHealth(tab.id, {
+      contentReadyAt: Date.now(),
+      version: existing.version || known?.version || "unknown",
+      ...(existing.hookReady ? { hookReadyAt: Date.now() } : {}),
     });
-    if (tabNeedsMainHook(tab)) {
+    if (!needsMainHook || existing.hookReady) {
+      logCaptureLayerHealthy(tab, state, reason, health);
+      return true;
+    }
+
+    await chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_REQUEST_HOOK_PING" }, { frameId: 0 }).catch(() => null);
+    const pinged = await waitForMainHookReady(tab.id);
+    if (pinged?.hookReadyAt) {
+      logCaptureLayerHealthy(tab, state, reason, pinged);
+      return true;
+    }
+
+    try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id, frameIds: [0] },
         world: "MAIN",
         files: ["page-hook.js"],
       });
       await chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_REQUEST_HOOK_PING" }, { frameId: 0 }).catch(() => null);
+      const verified = await waitForMainHookReady(tab.id);
+      if (verified?.hookReadyAt) {
+        void diagnostic("capture.layer_main_hook_repaired", state, {
+          detail: `reason=${reason} tab=${tab.id} content_version=${existing.version || "unknown"} verified=true`,
+        });
+        return true;
+      }
+      void diagnostic("capture.layer_main_hook_repair_unverified", state, {
+        level: "WARN",
+        detail: `reason=${reason} tab=${tab.id} content_version=${existing.version || "unknown"}`,
+      });
+      return false;
+    } catch (error) {
+      void diagnostic("capture.layer_main_hook_repair_failed", state, {
+        level: "WARN", error: String(error), detail: `reason=${reason} tab=${tab.id}`,
+      });
+      return false;
+    }
+  }
+
+  void diagnostic("capture.layer_missing", state, {
+    level: "WARN", detail: `reason=${reason} tab=${tab.id}`,
+  });
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, files: recoveryFiles });
+    if (needsMainHook) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, frameIds: [0] },
+        world: "MAIN",
+        files: ["page-hook.js"],
+      });
+      await chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_REQUEST_HOOK_PING" }, { frameId: 0 }).catch(() => null);
+      await waitForMainHookReady(tab.id);
     }
     const repaired = await captureLayerPing(tab.id);
-    void diagnostic(repaired?.ok ? "capture.layer_reinjected" : "capture.layer_reinject_unverified", state, {
-      level: repaired?.ok ? "INFO" : "WARN",
-      detail: `reason=${reason} tab=${tab.id} version=${repaired?.version || "unknown"} hook_ready=${Boolean(repaired?.hookReady)}`,
+    const health = captureLayerHealth.get(tab.id);
+    const verified = Boolean(repaired?.ok && (!needsMainHook || health?.hookReadyAt));
+    void diagnostic(verified ? "capture.layer_reinjected" : "capture.layer_reinject_unverified", state, {
+      level: verified ? "INFO" : "WARN",
+      detail: `reason=${reason} tab=${tab.id} version=${repaired?.version || health?.version || "unknown"} hook_ready=${Boolean(health?.hookReadyAt)}`,
     });
-    return Boolean(repaired?.ok);
+    return verified;
   } catch (error) {
     void diagnostic("capture.layer_reinject_failed", state, {
-      level: "ERROR",
-      error: String(error),
-      detail: `reason=${reason} tab=${tab.id}`,
+      level: "ERROR", error: String(error), detail: `reason=${reason} tab=${tab.id}`,
     });
     return false;
   }
