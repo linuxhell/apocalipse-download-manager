@@ -1,6 +1,7 @@
 (() => {
   globalThis.ADM_DIAG?.register("content.js");
   let shortcutKeys = { force: "Shift", bypass: "Alt" };
+  const heldShortcutKeys = new Set();
   let interfaceLanguage = "en";
   let interfaceTheme = "void";
   let refreshOverlayLanguages = () => {};
@@ -40,27 +41,40 @@
     refreshOverlayLanguages();
   });
   const modifierPressed = (event, key) => ({ Alt: event.altKey, Shift: event.shiftKey, Control: event.ctrlKey }[key] || false);
-  const sendShortcutState = (event) => sendRuntimeMessageQuietly({
-    type: "APOCALIPSE_SHORTCUT_STATE",
-    bypassPressed: modifierPressed(event, shortcutKeys.bypass),
-    forcePressed: modifierPressed(event, shortcutKeys.force),
-  }).catch(() => {});
+  const updateHeldShortcutKey = (event) => {
+    const key = event.key === "Ctrl" ? "Control" : event.key;
+    if (!["Alt", "Shift", "Control", "Insert"].includes(key)) return;
+    if (event.type === "keydown") heldShortcutKeys.add(key);
+    else if (event.type === "keyup") heldShortcutKeys.delete(key);
+  };
+  const shortcutPressed = (event, key) => modifierPressed(event, key) || heldShortcutKeys.has(key);
+  const sendShortcutState = (event) => {
+    updateHeldShortcutKey(event);
+    return sendRuntimeMessageQuietly({
+      type: "APOCALIPSE_SHORTCUT_STATE",
+      bypassPressed: shortcutPressed(event, shortcutKeys.bypass),
+      forcePressed: shortcutPressed(event, shortcutKeys.force),
+    }).catch(() => {});
+  };
   document.addEventListener("keydown", sendShortcutState, true);
   document.addEventListener("keyup", sendShortcutState, true);
   document.addEventListener("pointerdown", (event) => {
-    const bypass = modifierPressed(event, shortcutKeys.bypass);
-    const force = modifierPressed(event, shortcutKeys.force);
+    const bypass = shortcutPressed(event, shortcutKeys.bypass);
+    const force = shortcutPressed(event, shortcutKeys.force);
     if (bypass) {
       void sendRuntimeMessageQuietly({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 });
     } else if (force) {
       void sendRuntimeMessageQuietly({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 });
     }
   }, true);
-  window.addEventListener("blur", () => sendRuntimeMessageQuietly({
-    type: "APOCALIPSE_SHORTCUT_STATE",
-    bypassPressed: false,
-    forcePressed: false,
-  }).catch(() => {}));
+  window.addEventListener("blur", () => {
+    heldShortcutKeys.clear();
+    return sendRuntimeMessageQuietly({
+      type: "APOCALIPSE_SHORTCUT_STATE",
+      bypassPressed: false,
+      forcePressed: false,
+    }).catch(() => {});
+  });
   const absolute = (value) => {
     // Missing src/poster values are not relative links: new URL("", base)
     // resolves to the page and would invent both a media URL and a thumbnail.
@@ -114,7 +128,7 @@
     // Bypass must keep the browser's native download untouched. The generic
     // pointerdown listener above also arms the worker lease for the ensuing
     // chrome.downloads event, which may not carry a tabId.
-    if (modifierPressed(event, shortcutKeys.bypass)) return;
+    if (shortcutPressed(event, shortcutKeys.bypass)) return;
     const found = chatgptLibraryLinkForEvent(event);
     if (!found) return;
     event.preventDefault();
@@ -913,8 +927,8 @@
   };
   document.addEventListener("click", (event) => {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey) return;
-    const bypass = modifierPressed(event, shortcutKeys.bypass);
-    const force = modifierPressed(event, shortcutKeys.force);
+    const bypass = shortcutPressed(event, shortcutKeys.bypass);
+    const force = shortcutPressed(event, shortcutKeys.force);
     if (bypass) {
       chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 }).catch(() => {});
       return;
