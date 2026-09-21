@@ -206,6 +206,7 @@ test("Archive extraction is cross-platform, localized and only offered for archi
   assert.match(html, /id="tool-extractor"/);
   assert.doesNotMatch(html, /data-tool-update="extractor"/);
   assert.match(html, /id="auto-extract-option"[^>]*hidden/);
+  assert.match(html, /id="analysis"[^>]*><\/div>\s*<label id="auto-extract-option"/);
   assert.match(html, /id="auto-extract"/);
   assert.match(app, /archiveExtractor: "Archive extractor/);
   assert.match(app, /archiveExtractor: "Extrator de arquivos/);
