@@ -18,8 +18,8 @@ test('0.3.168 repairs capture scripts in tabs that were already open during an e
   assert.match(background, /world:\s*"MAIN"[\s\S]*files:\s*\["page-hook\.js"\]/);
   assert.match(background, /runtime\.onInstalled\.addListener/);
   assert.match(background, /repairOpenCaptureTabs\(/);
-  assert.match(background, /tabs\.onActivated\.addListener/);
-  assert.match(background, /tabs\.onUpdated\.addListener/);
+  assert.match(background, /tabs\?\.onActivated\?\.addListener/);
+  assert.match(background, /tabs\?\.onUpdated\?\.addListener/);
 });
 
 test('capture-layer health is explicit in forensic logs', () => {
