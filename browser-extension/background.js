@@ -740,6 +740,23 @@ function isDisposableDownloadUrl(value) {
 
 async function takeBrowserDownload(item, eraseFromHistory = false) {
   let url = item.finalUrl || item.url;
+  const fileNameDecision = await resolveBrowserDownloadFileName(item);
+  const effectiveFileName = fileNameDecision.fileName || fileNameFromPath(item.filename);
+  if (fileNameDecision.changed) {
+    void diagnostic("browser_download.filename_resolved", {
+      traceId: crypto.randomUUID(),
+      url,
+      pageUrl: item.referrer || null,
+      startedAt: Date.now(),
+    }, { detail: `source=${fileNameDecision.source} ext=${String(effectiveFileName || "").split(".").pop() || "unknown"} generic_original=true` });
+  } else if (fileNameDecision.source === "generic_fallback") {
+    void diagnostic("browser_download.filename_fallback", {
+      traceId: crypto.randomUUID(),
+      url,
+      pageUrl: item.referrer || null,
+      startedAt: Date.now(),
+    }, { level: "WARN", detail: "source=generic_fallback generic_original=true" });
+  }
   if (!item.id) return false;
   const modifierTabId = Number.isInteger(item.tabId) ? item.tabId : null;
   const state = { traceId: crypto.randomUUID(), url, pageUrl: item.referrer || null, startedAt: Date.now(), bytes: 0 };
@@ -783,12 +800,12 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
   }
   if (bypassIsActive(modifierTabId)) return false;
   if (!bridgeConnected) {
-    void diagnostic("browser_download.bridge_unavailable", state, { level: "WARN", detail: `disposable=${disposable} file=${fileNameFromPath(item.filename) || "unknown"}` });
+    void diagnostic("browser_download.bridge_unavailable", state, { level: "WARN", detail: `disposable=${disposable} file=${effectiveFileName || "unknown"} filename_source=${fileNameDecision.source}` });
     return false;
   }
   const forced = forceIsActive(modifierTabId);
   const browserAssisted = disposable && !forced;
-  void diagnostic("browser_download.detected", state, { detail: `disposable=${disposable} assisted=${browserAssisted} force=${forced} initial_url=${item.url === url} final_url=${Boolean(item.finalUrl)} tab=${modifierTabId ?? "none"} file=${fileNameFromPath(item.filename) || "unknown"}` });
+  void diagnostic("browser_download.detected", state, { detail: `disposable=${disposable} assisted=${browserAssisted} force=${forced} initial_url=${item.url === url} final_url=${Boolean(item.finalUrl)} tab=${modifierTabId ?? "none"} file=${effectiveFileName || "unknown"} filename_source=${fileNameDecision.source}` });
 
   // Disposable links are consumed by their first request. At this point Chrome
   // already owns that original response; repeating it on the desktop commonly
@@ -797,7 +814,7 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
   // file in Apocalipse through browser-download-complete. This applies to every
   // equivalent disposable-download pattern, not to a hard-coded host.
   if (browserAssisted) {
-    await markAssistedDownload(item, url);
+    await markAssistedDownload({ ...item, filename: effectiveFileName || item.filename }, url);
     void diagnostic("browser_download.assisted_original_response", state, {
       detail: `disposable=${disposable} force=${forceIsActive(modifierTabId)} download_id=${item.id}`,
     });
@@ -812,7 +829,7 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
       method: "POST",
       body: JSON.stringify({
         url,
-        fileName: fileNameFromPath(item.filename),
+        fileName: effectiveFileName,
         pageUrl,
         duration: null,
         cookieHeader: await cookieHeaderFor([url, item.url, pageUrl]),
@@ -846,7 +863,15 @@ async function takeBrowserDownload(item, eraseFromHistory = false) {
 
 if (chrome.downloads.onDeterminingFilename?.addListener) {
   chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-    void takeBrowserDownload(item).then(() => suggest()).catch(() => suggest());
+    void resolveBrowserDownloadFileName(item).then(async (decision) => {
+      const effective = decision.fileName ? { ...item, filename: decision.fileName } : item;
+      const handled = await takeBrowserDownload(effective);
+      if (!handled && decision.changed && decision.fileName) {
+        suggest({ filename: decision.fileName, conflictAction: "uniquify" });
+      } else {
+        suggest();
+      }
+    }).catch(() => suggest());
     return true;
   });
 } else {
