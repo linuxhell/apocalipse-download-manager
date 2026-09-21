@@ -8264,10 +8264,7 @@ fn portable_tools_directory() -> Result<PathBuf, String> {
     Ok(root)
 }
 
-fn release_asset<F>(
-    release: &serde_json::Value,
-    predicate: F,
-) -> Result<(String, String), String>
+fn release_asset<F>(release: &serde_json::Value, predicate: F) -> Result<(String, String), String>
 where
     F: Fn(&str) -> bool,
 {
@@ -8306,10 +8303,7 @@ async fn github_latest_release(
         .map_err(|error| error.to_string())
 }
 
-async fn download_release_bytes(
-    client: &reqwest::Client,
-    url: &str,
-) -> Result<Vec<u8>, String> {
+async fn download_release_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
     Ok(client
         .get(url)
         .send()
@@ -8410,7 +8404,11 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             };
             let (_, url) = release_asset(&release, |name| name == expected.to_ascii_lowercase())?;
             let bytes = download_release_bytes(&client, &url).await?;
-            let target = tool_dir.join(if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" });
+            let target = tool_dir.join(if cfg!(windows) {
+                "yt-dlp.exe"
+            } else {
+                "yt-dlp"
+            });
             install_validated_executable(&bytes, &target, &["--version"])?;
             target
         }
@@ -8418,7 +8416,9 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             let release = github_latest_release(&client, "quickjs-ng/quickjs").await?;
             let expected = match (platform, architecture) {
                 ("windows", "x86_64") => "qjs-windows-x86_64.exe",
-                ("windows", "aarch64") => return Err("tool_download_platform_unsupported:qjs".to_owned()),
+                ("windows", "aarch64") => {
+                    return Err("tool_download_platform_unsupported:qjs".to_owned())
+                }
                 ("linux", "x86_64") => "qjs-linux-x86_64",
                 ("linux", "aarch64") => "qjs-linux-aarch64",
                 ("macos", "x86_64") => "qjs-darwin-x86_64",
@@ -8432,7 +8432,8 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             target
         }
         "aria2" => {
-            let release = github_latest_release(&client, "FerroDownload/aria2-static-builds").await?;
+            let release =
+                github_latest_release(&client, "FerroDownload/aria2-static-builds").await?;
             let suffix = match (platform, architecture) {
                 ("windows", "x86_64") => "windows-x64.exe",
                 ("windows", "aarch64") => "windows-arm64.exe",
@@ -8443,10 +8444,16 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                 _ => return Err("tool_download_platform_unsupported:aria2".to_owned()),
             };
             let (_, url) = release_asset(&release, |name| {
-                name.starts_with("aria2c-") && name.ends_with(suffix) && !name.ends_with(".sha256")
+                name.starts_with("aria2c-")
+                    && name.ends_with(suffix)
+                    && !name.ends_with(".sha256")
             })?;
             let bytes = download_release_bytes(&client, &url).await?;
-            let target = tool_dir.join(if cfg!(windows) { "aria2c.exe" } else { "aria2c" });
+            let target = tool_dir.join(if cfg!(windows) {
+                "aria2c.exe"
+            } else {
+                "aria2c"
+            });
             install_validated_executable(&bytes, &target, &["--version"])?;
             target
         }
@@ -8469,7 +8476,11 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             let bytes = download_release_bytes(&client, &url).await?;
             clean_directory(&tool_dir)?;
             extract_release_archive(&bytes, &asset_name, &tool_dir)?;
-            let executable_name = if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" };
+            let executable_name = if cfg!(windows) {
+                "N_m3u8DL-RE.exe"
+            } else {
+                "N_m3u8DL-RE"
+            };
             let target = find_named_file(&tool_dir, executable_name, 0)
                 .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
             #[cfg(unix)]
@@ -8485,15 +8496,24 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
         "ffmpeg" => {
             let (repository, release) = if platform == "macos" {
                 let repository = "eugeneware/ffmpeg-static";
-                (repository, github_latest_release(&client, repository).await?)
+                (
+                    repository,
+                    github_latest_release(&client, repository).await?,
+                )
             } else {
                 let repository = "BtbN/FFmpeg-Builds";
                 (repository, github_latest_release(&client, repository).await?)
             };
             if platform == "macos" {
-                let suffix = if architecture == "aarch64" { "arm64" } else { "x64" };
-                let (_, ffmpeg_url) = release_asset(&release, |name| name == format!("ffmpeg-darwin-{suffix}"))?;
-                let (_, ffprobe_url) = release_asset(&release, |name| name == format!("ffprobe-darwin-{suffix}"))?;
+                let suffix = if architecture == "aarch64" {
+                    "arm64"
+                } else {
+                    "x64"
+                };
+                let (_, ffmpeg_url) =
+                    release_asset(&release, |name| name == format!("ffmpeg-darwin-{suffix}"))?;
+                let (_, ffprobe_url) =
+                    release_asset(&release, |name| name == format!("ffprobe-darwin-{suffix}"))?;
                 let ffmpeg_bytes = download_release_bytes(&client, &ffmpeg_url).await?;
                 let ffprobe_bytes = download_release_bytes(&client, &ffprobe_url).await?;
                 let ffmpeg_target = tool_dir.join("ffmpeg");
@@ -8507,7 +8527,11 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                     ("windows", "aarch64") => "winarm64",
                     ("linux", "x86_64") => "linux64",
                     ("linux", "aarch64") => "linuxarm64",
-                    _ => return Err(format!("tool_download_platform_unsupported:ffmpeg:{repository}")),
+                    _ => {
+                        return Err(format!(
+                            "tool_download_platform_unsupported:ffmpeg:{repository}"
+                        ))
+                    }
                 };
                 let (asset_name, url) = release_asset(&release, |name| {
                     if platform == "windows" {
@@ -8522,8 +8546,16 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                 let extracted = temporary.join("extracted");
                 fs::create_dir_all(&extracted).map_err(|error| error.to_string())?;
                 extract_release_archive(&bytes, &asset_name, &extracted)?;
-                let ffmpeg_name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
-                let ffprobe_name = if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" };
+                let ffmpeg_name = if cfg!(windows) {
+                    "ffmpeg.exe"
+                } else {
+                    "ffmpeg"
+                };
+                let ffprobe_name = if cfg!(windows) {
+                    "ffprobe.exe"
+                } else {
+                    "ffprobe"
+                };
                 let ffmpeg_source = find_named_file(&extracted, ffmpeg_name, 0)
                     .ok_or_else(|| "ffmpeg_missing_from_release".to_owned())?;
                 let ffprobe_source = find_named_file(&extracted, ffprobe_name, 0)
@@ -8539,7 +8571,11 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
         "extractor" => {
             let release = github_latest_release(&client, "ip7z/7zip").await?;
             if platform == "windows" {
-                let marker = if architecture == "aarch64" { "-arm64.exe" } else { "-x64.exe" };
+                let marker = if architecture == "aarch64" {
+                    "-arm64.exe"
+                } else {
+                    "-x64.exe"
+                };
                 let (asset_name, url) = release_asset(&release, |name| {
                     name.starts_with("7z") && name.ends_with(marker)
                 })?;
@@ -8593,26 +8629,48 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
         }
         "player" => {
             if platform == "linux" {
-                let release = github_latest_release(&client, "pkgforge-dev/mpv-AppImage").await?;
-                let marker = if architecture == "aarch64" { "aarch64.appimage" } else { "x86_64.appimage" };
-                let (_, url) = release_asset(&release, |name| name.ends_with(marker) && !name.ends_with(".zsync"))?;
+                let release =
+                    github_latest_release(&client, "pkgforge-dev/mpv-AppImage").await?;
+                let marker = if architecture == "aarch64" {
+                    "aarch64.appimage"
+                } else {
+                    "x86_64.appimage"
+                };
+                let (_, url) = release_asset(&release, |name| {
+                    name.ends_with(marker) && !name.ends_with(".zsync")
+                })?;
                 let bytes = download_release_bytes(&client, &url).await?;
                 let target = tool_dir.join("mpv.AppImage");
                 install_validated_executable(&bytes, &target, &["--version"])?;
                 target
             } else {
                 let release = github_latest_release(&client, "mpv-player/mpv").await?;
-                let (asset_name, url) = release_asset(&release, |name| match (platform, architecture) {
-                    ("windows", "x86_64") => name.contains("x86_64-pc-windows-msvc") && name.ends_with(".zip"),
-                    ("windows", "aarch64") => name.contains("aarch64-pc-windows-msvc") && name.ends_with(".zip"),
-                    ("macos", "x86_64") => name.contains("macos") && name.contains("intel") && name.ends_with(".zip"),
-                    ("macos", "aarch64") => name.contains("macos-14-arm") && name.ends_with(".zip"),
-                    _ => false,
-                })?;
+                let (asset_name, url) =
+                    release_asset(&release, |name| match (platform, architecture) {
+                        ("windows", "x86_64") => {
+                            name.contains("x86_64-pc-windows-msvc") && name.ends_with(".zip")
+                        }
+                        ("windows", "aarch64") => {
+                            name.contains("aarch64-pc-windows-msvc") && name.ends_with(".zip")
+                        }
+                        ("macos", "x86_64") => {
+                            name.contains("macos")
+                                && name.contains("intel")
+                                && name.ends_with(".zip")
+                        }
+                        ("macos", "aarch64") => {
+                            name.contains("macos-14-arm") && name.ends_with(".zip")
+                        }
+                        _ => false,
+                    })?;
                 let bytes = download_release_bytes(&client, &url).await?;
                 clean_directory(&tool_dir)?;
                 extract_release_archive(&bytes, &asset_name, &tool_dir)?;
-                let executable_name = if platform == "windows" { "mpv.exe" } else { "mpv" };
+                let executable_name = if platform == "windows" {
+                    "mpv.exe"
+                } else {
+                    "mpv"
+                };
                 let target = find_named_file(&tool_dir, executable_name, 0)
                     .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
                 #[cfg(unix)]
