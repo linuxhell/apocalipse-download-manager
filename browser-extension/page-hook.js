@@ -14,6 +14,10 @@
     if (event.altKey) held.add("Alt"); else held.delete("Alt");
     if (event.shiftKey) held.add("Shift"); else held.delete("Shift");
     if (event.ctrlKey) held.add("Control"); else held.delete("Control");
+    if (event.key === "Insert") {
+      if (event.type === "keydown") held.add("Insert");
+      else if (event.type === "keyup") held.delete("Insert");
+    }
   };
   addEventListener("keydown", canonicalKey, true);
   addEventListener("keyup", canonicalKey, true);
