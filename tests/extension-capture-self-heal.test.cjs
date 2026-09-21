@@ -29,6 +29,8 @@ test('capture-layer health is explicit in forensic logs', () => {
     'capture.layer_reinject_failed',
     'capture.layer_content_ready',
     'capture.layer_main_hook_ready',
+    'capture.layer_healthy',
+    'capture.layer_main_hook_repair_unverified',
   ]) assert.match(background, new RegExp(marker.replaceAll('.', '\\.')));
   assert.match(contentScript, /APOCALIPSE_CONTENT_READY/);
   assert.match(contentScript, /APOCALIPSE_MAIN_HOOK_READY/);
@@ -39,4 +41,15 @@ test('capture-layer health is explicit in forensic logs', () => {
 test('Insert remains a direct force path even when the configured force key is different', () => {
   assert.match(contentScript, /shortcutPressed\(event, shortcutKeys\.force\) \|\| shortcutPressed\(event, "Insert"\)/);
   assert.match(pageHook, /held\.has\(shortcuts\.force \|\| "Shift"\) \|\| held\.has\("Insert"\)/);
+});
+
+
+test('heartbeat distinguishes healthy hooks from verified repairs', () => {
+  assert.match(background, /CAPTURE_LAYER_HEALTH_LOG_MS = 300_000/);
+  assert.match(background, /logCaptureLayerHealthy/);
+  assert.match(background, /capture\.layer_healthy/);
+  assert.match(background, /capture\.layer_main_hook_repaired[\s\S]*verified=true/);
+  assert.match(background, /capture\.layer_main_hook_repair_unverified/);
+  assert.match(background, /waitForMainHookReady/);
+  assert.match(background, /markCaptureLayerHealth/);
 });
