@@ -314,6 +314,34 @@ const recoveryFiles = [
   "tiktok-identity.js",
   "content.js",
 ];
+const captureLayerHealth = new Map();
+const captureLayerHealthyLogAt = new Map();
+const CAPTURE_LAYER_HEALTH_TTL_MS = 120_000;
+const CAPTURE_LAYER_HEALTH_LOG_MS = 300_000;
+const markCaptureLayerHealth = (tabId, patch) => {
+  if (!Number.isInteger(tabId)) return null;
+  const next = { ...(captureLayerHealth.get(tabId) || {}), ...patch };
+  captureLayerHealth.set(tabId, next);
+  return next;
+};
+const waitForMainHookReady = async (tabId, timeoutMs = 240) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const health = captureLayerHealth.get(tabId);
+    if (health?.hookReadyAt && Date.now() - health.hookReadyAt < CAPTURE_LAYER_HEALTH_TTL_MS) return health;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  return captureLayerHealth.get(tabId) || null;
+};
+const logCaptureLayerHealthy = (tab, state, reason, health) => {
+  const now = Date.now();
+  const previous = captureLayerHealthyLogAt.get(tab.id) || 0;
+  if (reason === "heartbeat" && now - previous < CAPTURE_LAYER_HEALTH_LOG_MS) return;
+  captureLayerHealthyLogAt.set(tab.id, now);
+  void diagnostic("capture.layer_healthy", state, {
+    detail: `reason=${reason} tab=${tab.id} version=${health?.version || "unknown"} hook_ready=${Boolean(health?.hookReadyAt)}`,
+  });
+};
 
 const tabSupportsCapture = (tab) => Number.isInteger(tab?.id) && /^https?:/i.test(tab?.url || "");
 const tabNeedsMainHook = (tab) => {
