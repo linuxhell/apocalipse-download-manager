@@ -307,9 +307,116 @@ function ensureHeartbeat() {
   chrome.alarms.create(HEARTBEAT_ALARM, { delayInMinutes: 0.1, periodInMinutes: 0.5 });
 }
 
+const recoveryFiles = [
+  "diagnostics-core.js",
+  "diagnostics.js",
+  "diagnostics-media-replay.js",
+  "tiktok-identity.js",
+  "content.js",
+];
+
+const tabSupportsCapture = (tab) => Number.isInteger(tab?.id) && /^https?:/i.test(tab?.url || "");
+const tabNeedsMainHook = (tab) => {
+  try {
+    const host = new URL(tab?.url || "").hostname.toLowerCase();
+    return host === "chatgpt.com" || host === "rapidgator.net" || host.endsWith(".rapidgator.net");
+  } catch {
+    return false;
+  }
+};
+
+async function captureLayerPing(tabId) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, { type: "APOCALIPSE_CONTENT_PING" }, { frameId: 0 });
+  } catch {
+    return null;
+  }
+}
+
+async function repairCaptureLayer(tab, reason = "probe") {
+  if (!tabSupportsCapture(tab)) return false;
+  const state = {
+    traceId: crypto.randomUUID(),
+    pageUrl: tab.url || null,
+    startedAt: Date.now(),
+  };
+  const existing = await captureLayerPing(tab.id);
+  if (existing?.ok) {
+    if (tabNeedsMainHook(tab) && !existing.hookReady) {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id, frameIds: [0] },
+          world: "MAIN",
+          files: ["page-hook.js"],
+        });
+        await chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_REQUEST_HOOK_PING" }, { frameId: 0 }).catch(() => null);
+        void diagnostic("capture.layer_main_hook_repaired", state, {
+          detail: `reason=${reason} tab=${tab.id} content_version=${existing.version || "unknown"}`,
+        });
+      } catch (error) {
+        void diagnostic("capture.layer_main_hook_repair_failed", state, {
+          level: "WARN",
+          error: String(error),
+          detail: `reason=${reason} tab=${tab.id}`,
+        });
+      }
+    }
+    return true;
+  }
+
+  void diagnostic("capture.layer_missing", state, {
+    level: "WARN",
+    detail: `reason=${reason} tab=${tab.id}`,
+  });
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id, frameIds: [0] },
+      files: recoveryFiles,
+    });
+    if (tabNeedsMainHook(tab)) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, frameIds: [0] },
+        world: "MAIN",
+        files: ["page-hook.js"],
+      });
+      await chrome.tabs.sendMessage(tab.id, { type: "APOCALIPSE_REQUEST_HOOK_PING" }, { frameId: 0 }).catch(() => null);
+    }
+    const repaired = await captureLayerPing(tab.id);
+    void diagnostic(repaired?.ok ? "capture.layer_reinjected" : "capture.layer_reinject_unverified", state, {
+      level: repaired?.ok ? "INFO" : "WARN",
+      detail: `reason=${reason} tab=${tab.id} version=${repaired?.version || "unknown"} hook_ready=${Boolean(repaired?.hookReady)}`,
+    });
+    return Boolean(repaired?.ok);
+  } catch (error) {
+    void diagnostic("capture.layer_reinject_failed", state, {
+      level: "ERROR",
+      error: String(error),
+      detail: `reason=${reason} tab=${tab.id}`,
+    });
+    return false;
+  }
+}
+
+async function repairOpenCaptureTabs(reason, activeOnly = false) {
+  const tabs = await chrome.tabs.query(activeOnly ? { active: true } : {});
+  await Promise.all(tabs.filter(tabSupportsCapture).map((tab) => repairCaptureLayer(tab, reason)));
+}
+
 ensureHeartbeat();
-chrome.runtime.onInstalled.addListener(ensureHeartbeat);
-chrome.runtime.onStartup.addListener(ensureHeartbeat);
+chrome.runtime.onInstalled.addListener((details) => {
+  ensureHeartbeat();
+  void repairOpenCaptureTabs(`installed:${details.reason || "unknown"}`);
+});
+chrome.runtime.onStartup.addListener(() => {
+  ensureHeartbeat();
+  void repairOpenCaptureTabs("startup");
+});
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  chrome.tabs.get(tabId).then((tab) => repairCaptureLayer(tab, "activated")).catch(() => {});
+});
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === "complete") void repairCaptureLayer(tab, "navigation_complete");
+});
 void bridgeRequest("/v1/health").catch(() => {});
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === HEARTBEAT_ALARM) {
@@ -317,6 +424,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       .then(() => flushDiagnosticOutbox())
       .then(() => flushAssistedDownloads())
       .then(() => flushDirectDownloads())
+      .then(() => repairOpenCaptureTabs("heartbeat", true))
       .catch(() => {});
   }
 });
@@ -1269,6 +1377,24 @@ async function streamCapturedUrl(request) {
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   const shortcutTabId = Number.isInteger(sender.tab?.id) ? sender.tab.id : null;
+  if (message?.type === "APOCALIPSE_CONTENT_READY") {
+    void diagnostic("capture.layer_content_ready", {
+      traceId: crypto.randomUUID(),
+      pageUrl: sender.tab?.url || null,
+      startedAt: Date.now(),
+    }, { detail: `tab=${shortcutTabId ?? "none"} frame=${sender.frameId ?? 0} version=${message.version || "unknown"} top=${Boolean(message.topFrame)}` });
+    reply({ ok: true });
+    return;
+  }
+  if (message?.type === "APOCALIPSE_MAIN_HOOK_READY") {
+    void diagnostic("capture.layer_main_hook_ready", {
+      traceId: crypto.randomUUID(),
+      pageUrl: sender.tab?.url || null,
+      startedAt: Date.now(),
+    }, { detail: `tab=${shortcutTabId ?? "none"} frame=${sender.frameId ?? 0} version=${message.version || "unknown"} top=${Boolean(message.topFrame)}` });
+    reply({ ok: true });
+    return;
+  }
   if (message?.type === "APOCALIPSE_SHORTCUT_STATE") {
     bypassHeld = Boolean(message.bypassPressed);
     forceHeld = Boolean(message.forcePressed) && !bypassHeld;
