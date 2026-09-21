@@ -32,7 +32,7 @@ const catalogs = {
     aiStatusProposed: "Awaiting approval", aiStatusTesting: "Testing", aiStatusSaved: "Saved", aiStatusConfirmed: "Confirmed", aiStatusRejected: "Did not work",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
-    toolbox: "TOOLBOX", update: "Update", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "VLC / mpv / media player",
+    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "mpv / media player",
     donatePaypal: "Donate via PayPal",
     about: "About", aboutDescription: "About the creator of Apocalipse Download Manager.", aboutCreator: "Creator: Juliano - Brazil - Sátia Mortadela", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume", facebookRecordingFallback: "Facebook could not provide this Reel for direct download. Use Record on the video while it is playing.",
     overview: "OVERVIEW",
@@ -208,7 +208,7 @@ const catalogs = {
     duration: "Duration",
     mediaUnavailable: "Media details are unavailable; the default format can still be used.",
     externalTools: "Required media and transfer tools",
-    toolsHint: "Configure each executable. Apocalipse uses these exact paths for downloads.",
+    toolsHint: "Browse for an existing executable or download the latest compatible version automatically into the portable tools folder. Downloaded paths are applied after you click Save.",
     installed: "Detected",
     missing: "Not found",
     checkTools: "Check versions",
@@ -261,7 +261,7 @@ const catalogs = {
     aiStatusProposed: "Aguardando aprovação", aiStatusTesting: "Em teste", aiStatusSaved: "Guardada", aiStatusConfirmed: "Confirmada", aiStatusRejected: "Não funcionou",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
-    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "VLC / mpv / reprodutor de mídia",
+    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "mpv / reprodutor de mídia",
     donatePaypal: "Faça uma doação pelo PayPal",
     about: "Sobre", aboutDescription: "Sobre o criador do Apocalipse Download Manager.", aboutCreator: "Criador: Juliano - Brasil - Sátia Mortadela", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume", facebookRecordingFallback: "O Facebook não disponibilizou este Reel para download direto. Use Gravar no vídeo enquanto ele estiver em reprodução.",
     overview: "VISÃO GERAL",
@@ -437,7 +437,7 @@ const catalogs = {
     duration: "Duração",
     mediaUnavailable: "Os detalhes da mídia não estão disponíveis; ainda é possível usar o formato padrão.",
     externalTools: "Ferramentas obrigatórias de mídia e transferência",
-    toolsHint: "Configure cada executável. O Apocalipse usa exatamente estes caminhos nos downloads.",
+    toolsHint: "Procure um executável existente ou baixe automaticamente a versão compatível mais recente para a pasta portátil tools. Os caminhos baixados passam a valer depois de clicar em Salvar.",
     installed: "Detectado",
     missing: "Não encontrado",
     checkTools: "Verificar versões",
@@ -490,7 +490,7 @@ const catalogs = {
     aiStatusProposed: "等待批准", aiStatusTesting: "测试中", aiStatusSaved: "已保存", aiStatusConfirmed: "已确认", aiStatusRejected: "未解决",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
-    toolbox: "工具箱", update: "更新", aria2Backend: "aria2（HTTP/HTTPS、FTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "VLC / mpv / 媒体播放器",
+    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", aria2Backend: "aria2（HTTP/HTTPS、FTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "mpv / 媒体播放器",
     donatePaypal: "通过 PayPal 捐赠",
     about: "关于", aboutDescription: "关于 Apocalipse Download Manager 的创作者。", aboutCreator: "创作者：Juliano - 巴西 - Sátia Mortadela", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量", facebookRecordingFallback: "Facebook 无法提供此 Reel 的直接下载。请在视频播放时使用“录制”。",
     overview: "概览",
@@ -665,7 +665,7 @@ const catalogs = {
     duration: "时长",
     mediaUnavailable: "媒体详情不可用；仍可使用默认格式。",
     externalTools: "必需的媒体和传输工具",
-    toolsHint: "配置每个可执行文件。Apocalipse 将在下载时使用这些确切路径。",
+    toolsHint: "可选择现有可执行文件，或自动将最新兼容版本下载到便携式 tools 文件夹。下载后的路径会在点击“保存”后生效。",
     installed: "已检测",
     missing: "未找到",
     checkTools: "检查版本",
@@ -2282,7 +2282,6 @@ document.querySelector("#save-bandwidth").onclick = async (event) => {
 };
 document.querySelector('[data-page="tools"]').onclick = async () => {
   try {
-    document.querySelector("#media-player").value = await invoke("get_media_player");
     await refreshToolStatuses();
     toolsDialog.showModal();
   } catch (error) { console.error(error); }
@@ -2300,11 +2299,34 @@ document.querySelector("#save-tools").onclick = async (event) => {
       aria2: document.querySelector("#tool-aria2").value,
       extractor: document.querySelector("#tool-extractor").value,
     });
-    await invoke("set_media_player", { path: document.querySelector("#media-player").value });
+    await invoke("set_media_player", { path: document.querySelector("#tool-player").value });
     toolsDialog.close();
   } catch (error) { console.error(error); }
   finally { button.disabled = false; }
 };
+document.querySelectorAll("[data-tool-download]").forEach((button) => {
+  button.onclick = async () => {
+    const id = button.dataset.toolDownload;
+    const input = document.querySelector(`#tool-${id}`);
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = t("downloadingTool");
+    try {
+      const path = String(await invoke("download_tool", { id }));
+      input.value = path;
+      const status = document.querySelector(`[data-tool="${id}"] > span small`);
+      if (status) {
+        status.textContent = t("toolDownloaded");
+        status.classList.add("tool-found");
+      }
+    } catch (error) {
+      alert(String(error));
+    } finally {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  };
+});
 document.querySelectorAll("[data-tool-update]").forEach((button) => {
   button.onclick = async () => {
     button.disabled = true;
@@ -2398,16 +2420,6 @@ document.querySelectorAll("[data-tool-pick]").forEach((button) => {
     finally { button.disabled = false; }
   };
 });
-document.querySelector("#pick-media-player").onclick = async (event) => {
-  const button = event.currentTarget;
-  button.disabled = true;
-  try {
-    const input = document.querySelector("#media-player");
-    const selected = await invoke("pick_executable", { initialPath: input.value });
-    if (selected) input.value = selected;
-  } catch (error) { console.error(error); }
-  finally { button.disabled = false; }
-};
 function updateLimitLabels() {
   document.querySelector("#max-tasks-value").value = document.querySelector("#max-tasks").value;
   document.querySelector("#connections-value").value = document.querySelector("#connections").value;
