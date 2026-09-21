@@ -46,6 +46,43 @@ const networkMediaKind = (item) => {
   if (/^audio\//i.test(item.contentType || "")) return "audio";
   return /^video\//i.test(item.contentType || "") || /(?:\/video\/tos\/|mime_type=video|\.mp4(?:$|[?#]))/i.test(item.url || "") ? "video" : "audio";
 };
+const compactMediaTitle = (value) => String(value || "").replace(/\s+/g, " ").trim();
+const normalizedMediaTitle = (value) => compactMediaTitle(value)
+  .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const genericMediaTitle = (value) => {
+  const title = normalizedMediaTitle(value).replace(/[._-]+/g, " ").trim();
+  return !title || /^(?:video|audio|music|musica|media|midia|player|captured media resource|recurso de midia capturado|已捕获的媒体资源)(?: \(\d+\))?$/i.test(title);
+};
+const soundCloudSlugTitle = (url) => {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (!(host === "soundcloud.com" || host.endsWith(".soundcloud.com"))) return "";
+    return compactMediaTitle(decodeURIComponent(parsed.pathname.split("/").filter(Boolean).at(-1) || "").replace(/[-_]+/g, " "));
+  } catch { return ""; }
+};
+const pageTitleHint = (tab) => {
+  let title = compactMediaTitle(tab?.title);
+  try {
+    const host = new URL(tab?.url || "").hostname.toLowerCase();
+    if (host === "soundcloud.com" || host.endsWith(".soundcloud.com")) {
+      title = title
+        .replace(/\s*[|–—]\s*(?:listen|stream).*?soundcloud.*$/i, "")
+        .replace(/\s*[|–—-]\s*soundcloud.*$/i, "")
+        .trim();
+    }
+  } catch {}
+  if (title && !genericMediaTitle(title) && normalizedMediaTitle(title) !== "soundcloud") {
+    return { title, source: "browser_title" };
+  }
+  const slug = soundCloudSlugTitle(tab?.url || "");
+  return slug && !genericMediaTitle(slug) ? { title: slug, source: "soundcloud_slug" } : null;
+};
+const repairMediaTitle = (item, tab) => {
+  if (!genericMediaTitle(item?.title)) return item;
+  const hint = pageTitleHint(tab);
+  return hint ? { ...item, title: hint.title, titleSource: hint.source } : item;
+};
 const mergeDetectedMedia = (scanned, network, pageUrl) => {
   const unique = new Map();
   // A visualOnly row is only the identity/geometry of a Blob or MediaStream
@@ -325,7 +362,9 @@ const render = () => {
     void globalThis.ADM_DIAG?.emit("popup.row_state", { url: item.url, kind: item.kind,
       thumbnail: Boolean(item.thumbnail), thumbnailSource: /^data:/i.test(item.thumbnail || "") ? "captured_data" : item.thumbnail ? "dom_url" : "none",
       previewEnabled: Boolean(previewRequest), downloadEnabled: !item.visualOnly,
-      reason: previewRequest ? (item.ambiguousSocialTrack ? "manual_selection_available" : "valid_selection") : "invalid_preview_source" });
+      reason: previewRequest ? (item.ambiguousSocialTrack ? "manual_selection_available" : "valid_selection") : "invalid_preview_source",
+      titleSource: item.titleSource || (genericMediaTitle(item.title) ? "generic" : "unknown"),
+      genericTitle: genericMediaTitle(item.title) });
     previewButton.title = previewRequest ? t("externalPreview") : t("incompleteTrack");
     previewButton.onclick = () => {
       if (!previewRequest) return;
@@ -353,7 +392,9 @@ const render = () => {
     button.textContent = t("download");
     button.disabled = Boolean(item.visualOnly);
     button.onclick = () => {
-      const traceId = globalThis.ADM_DIAG?.begin("popup.download_clicked", { url: item.url, kind: item.kind }) || crypto.randomUUID();
+      const traceId = globalThis.ADM_DIAG?.begin("popup.download_clicked", { url: item.url, kind: item.kind,
+        titleSource: item.titleSource || (genericMediaTitle(item.title) ? "generic" : "unknown"),
+        genericTitle: genericMediaTitle(item.title) }) || crypto.randomUUID();
       return chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { ...manualMediaSelection(item), traceId } }, (result) => {
       void globalThis.ADM_DIAG?.emit("popup.download_reply", { ok: Boolean(result?.ok), errorRef: result?.error || "" }, traceId, result?.ok ? "INFO" : "ERROR");
       if (result?.target === "error" || chrome.runtime.lastError) {
@@ -440,13 +481,15 @@ async function refreshMediaInventory(tab, initial = false) {
       const inspectedKind = trackInfo.get(item.url)?.kind;
       const video = inspectedKind === "video" || inspectedKind === "muxed"
         || (inspectedKind !== "audio" && networkMediaKind(item) === "video");
+      const titleHint = pageTitleHint(tab);
       return { url: item.url, contentType: item.contentType || null, kind: video ? "video" : "audio",
         size: item.contentLength || null, ext: video ? "mp4" : "audio",
-        title: (() => { try { return new URL(item.url).hostname.includes("tiktok") ? `TikTok — ${t("capturedResource")}` : t("capturedResource"); } catch { return t("capturedResource"); } })(),
+        title: titleHint?.title || (() => { try { return new URL(item.url).hostname.includes("tiktok") ? `TikTok — ${t("capturedResource")}` : t("capturedResource"); } catch { return t("capturedResource"); } })(),
+        titleSource: titleHint?.source || "captured_resource",
         capturedAt: item.capturedAt, frameId: item.frameId, muxed: inspectedKind === "muxed",
         duration: trackInfo.get(item.url)?.duration || null, networkCaptured: true };
     });
-    const nextMedia = mergeDetectedMedia(scanned, network, tab.url);
+    const nextMedia = mergeDetectedMedia(scanned, network, tab.url).map((item) => repairMediaTitle(item, tab));
     const visiblePlayers = nextMedia.filter((item) => item.kind === "video"
       && item.playerBound && item.recommended && !item.networkCaptured && !item.thumbnail && item.rect);
     for (const visibleVideo of visiblePlayers) {
