@@ -221,8 +221,8 @@ jobs:
           signed="packaging/firefox/apocalipse-firefox-${version}.xpi"
           if [[ -f "$signed" ]]; then
             cp "$signed" "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
-          elif compgen -G "packaging/firefox/apocalipse-firefox-${version}.xpi.b64.part*" >/dev/null; then
-            cat packaging/firefox/apocalipse-firefox-${version}.xpi.b64.part* | tr -d '\n' | base64 --decode > "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
+          elif compgen -G "${signed}.b64.part*" >/dev/null; then
+            cat "${signed}.b64.part"* | tr -d '\n' | base64 --decode > "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
             echo "3ec6c889cf8ae28f1d6afa4ddcc5cad9d367da28a15d092f4a98726e7d91978c  $GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi" | sha256sum -c -
           else
             cp -R browser-extension "$stage/firefox"
@@ -270,44 +270,13 @@ jobs:
             exit 1
           fi
 
-          # Reuse an existing version tag for packaging-only repairs. Product
-          # source changes still require a version bump.
+          # Reuse an existing version tag only for packaging-only repairs.
           if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
             git fetch --no-tags origin "refs/tags/$tag"
             tagged_commit=$(git rev-parse 'FETCH_HEAD^{commit}')
             if [[ "$tagged_commit" != "$GITHUB_SHA" ]]; then
               changed_paths=$(git diff --name-only "$tagged_commit..$GITHUB_SHA")
-              invalid_paths=$(printf '%s\n' "$changed_paths" | grep -Ev '^(.github/workflows/release.yml|packaging/firefox/apocalipse-firefox-[0-9.]+.xpi.b64.part[0-9]+)            status=$?
-            if [[ "$status" -ne 2 ]]; then
-              echo "::error::Could not check the remote release tag."
-              exit "$status"
-            fi
-            git tag "$tag" "$GITHUB_SHA"
-            git push origin "refs/tags/$tag"
-          fi
-
-          # Recreate or repair the release assets for this validated version.
-          if is_draft=$(gh release view "$tag" --json isDraft --jq '.isDraft'); then
-            echo "::notice::$tag already exists; assets will be replaced."
-          else
-            prerelease=()
-            if [[ "$version" == *-* ]]; then
-              prerelease=(--prerelease)
-            fi
-            gh release create "$tag" --verify-tag --generate-notes --draft "${prerelease[@]}"
-          fi
-          (cd dist && sha256sum apocalipse-*) > dist/SHA256SUMS.txt
-          gh release upload "$tag" dist/* --clobber
-          gh release edit "$tag" --draft=false
-
-          # Remove the explicitly superseded public release only after the new
-          # release has been fully uploaded and published.
-          old_tag="v0.4.32"
-          if [[ "$old_tag" != "$tag" ]] && gh release view "$old_tag" >/dev/null 2>&1; then
-            gh release delete "$old_tag" --cleanup-tag --yes
-          fi
-
- || true)
+              invalid_paths=$(printf '%s\n' "$changed_paths" | grep -Ev '^(\.github/workflows/release\.yml|packaging/firefox/apocalipse-firefox-[0-9.]+\.xpi\.b64\.part[0-9]+)$' || true)
               if [[ -n "$invalid_paths" ]]; then
                 echo "::error::$tag already belongs to another product commit. Bump the application version before publishing product changes."
                 printf '%s\n' "$invalid_paths"
@@ -324,19 +293,14 @@ jobs:
             git push origin "refs/tags/$tag"
           fi
 
-          # Retries may finish an unpublished draft, but never erase a live release.
-          if is_draft=$(gh release view "$tag" --json isDraft --jq '.isDraft'); then
-            if [[ "$is_draft" != true ]]; then
-              echo "::notice::$tag is already published for this commit; leaving its assets unchanged."
-              exit 0
-            fi
-          else
+          if ! gh release view "$tag" >/dev/null 2>&1; then
             prerelease=()
             if [[ "$version" == *-* ]]; then
               prerelease=(--prerelease)
             fi
             gh release create "$tag" --verify-tag --generate-notes --draft "${prerelease[@]}"
           fi
+
           (cd dist && sha256sum apocalipse-*) > dist/SHA256SUMS.txt
           gh release upload "$tag" dist/* --clobber
           gh release edit "$tag" --draft=false
