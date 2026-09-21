@@ -8253,7 +8253,6 @@ fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
     }
 }
 
-
 fn portable_tools_directory() -> Result<PathBuf, String> {
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let root = executable
@@ -8444,9 +8443,7 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                 _ => return Err("tool_download_platform_unsupported:aria2".to_owned()),
             };
             let (_, url) = release_asset(&release, |name| {
-                name.starts_with("aria2c-")
-                    && name.ends_with(suffix)
-                    && !name.ends_with(".sha256")
+                name.starts_with("aria2c-") && name.ends_with(suffix) && !name.ends_with(".sha256")
             })?;
             let bytes = download_release_bytes(&client, &url).await?;
             let target = tool_dir.join(if cfg!(windows) {
@@ -8502,7 +8499,10 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                 )
             } else {
                 let repository = "BtbN/FFmpeg-Builds";
-                (repository, github_latest_release(&client, repository).await?)
+                (
+                    repository,
+                    github_latest_release(&client, repository).await?,
+                )
             };
             if platform == "macos" {
                 let suffix = if architecture == "aarch64" {
@@ -8629,8 +8629,7 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
         }
         "player" => {
             if platform == "linux" {
-                let release =
-                    github_latest_release(&client, "pkgforge-dev/mpv-AppImage").await?;
+                let release = github_latest_release(&client, "pkgforge-dev/mpv-AppImage").await?;
                 let marker = if architecture == "aarch64" {
                     "aarch64.appimage"
                 } else {
