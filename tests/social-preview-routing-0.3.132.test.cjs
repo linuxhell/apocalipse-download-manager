@@ -21,9 +21,9 @@ function node({tag='DIV', r=rect(), parent=null, attrs={}, videos=[], click=null
   };
 }
 
-test('0.3.166 manifest version is exact', () => {
+test('0.3.167 manifest version is exact', () => {
   const manifest = JSON.parse(src('manifest.json'));
-  assert.equal(manifest.version, '0.3.166');
+  assert.equal(manifest.version, '0.3.167');
   assert.match(manifest.version_name, /Apocalipse Forensic Debugger V4/);
 });
 
