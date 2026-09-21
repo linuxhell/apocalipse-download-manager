@@ -7827,16 +7827,14 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
         version: version.or_else(|| kind.map(|value| format!("{value:?}"))),
     });
     let player = settings.media_player_path.clone().unwrap_or_default();
-    let player_version = if player.is_file() {
-        version_line(&player, &["--version"])
-    } else {
-        None
-    };
     statuses.push(ToolStatus {
         id: "player".to_owned(),
         path: player.to_string_lossy().into_owned(),
         found: player.is_file(),
-        version: player_version,
+        // Never execute an arbitrary configured player just to display its status.
+        // VLC on Windows can open an interactive help console for version/help probes.
+        // Downloaded mpv builds are validated during installation instead.
+        version: None,
     });
     Ok(statuses)
 }
