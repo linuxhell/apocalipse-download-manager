@@ -494,6 +494,57 @@ async function sourcePageUrl(sender) {
 }
 
 const fileNameFromPath = (path) => String(path || "").split(/[\\/]/).pop() || null;
+const compactDownloadTitle = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+const normalizedDownloadTitle = (value) => compactDownloadTitle(value)
+  .normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase();
+const genericDownloadStem = (value) => {
+  const stem = normalizedDownloadTitle(value)
+    .replace(/\\.[a-z0-9]{1,10}$/i, "")
+    .replace(/\\s*\\(\\d+\\)\\s*$/g, "")
+    .replace(/[._-]+/g, " ").trim();
+  return /^(?:video|audio|media|midia|download|file|arquivo|videoplayback)$/i.test(stem);
+};
+const safeDownloadStem = (value) => {
+  let stem = compactDownloadTitle(value)
+    .replace(/[\\x00-\\x1f\\x7f<>:"/\\\\|?*]/g, "_")
+    .replace(/[ .]+$/g, "");
+  stem = [...stem].slice(0, 100).join("");
+  if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\.|$)/i.test(stem)) stem = "_" + stem;
+  return stem;
+};
+const pageTitleStem = (title, pageUrl) => {
+  let value = compactDownloadTitle(title);
+  try {
+    const parsed = new URL(pageUrl || "");
+    const host = parsed.hostname.toLowerCase();
+    if (host === "soundcloud.com" || host.endsWith(".soundcloud.com")) {
+      value = value
+        .replace(/\\s*[|–—]\\s*(?:listen|stream).*?soundcloud.*$/i, "")
+        .replace(/\\s*[|–—-]\\s*soundcloud.*$/i, "")
+        .trim();
+      if (!value || normalizedDownloadTitle(value) === "soundcloud" || genericDownloadStem(value)) {
+        value = compactDownloadTitle(decodeURIComponent(parsed.pathname.split("/").filter(Boolean).at(-1) || "").replace(/[-_]+/g, " "));
+      }
+    }
+  } catch {}
+  return genericDownloadStem(value) ? "" : safeDownloadStem(value);
+};
+async function resolveBrowserDownloadFileName(item) {
+  const original = fileNameFromPath(item?.filename) || "";
+  if (!original || !genericDownloadStem(original)) {
+    return { fileName: original || null, changed: false, source: original ? "browser" : "none" };
+  }
+  const extension = original.match(/\\.([a-z0-9]{1,10})$/i)?.[1]?.toLowerCase() || "";
+  let tab = null;
+  if (Number.isInteger(item?.tabId)) tab = await chrome.tabs.get(item.tabId).catch(() => null);
+  const pageUrl = tab?.url || item?.referrer || "";
+  const stem = pageTitleStem(tab?.title || "", pageUrl);
+  if (!stem || !extension) {
+    return { fileName: original, changed: false, source: "generic_fallback" };
+  }
+  return { fileName: stem + "." + extension, changed: true,
+    source: /^https?:\\/\\/(?:[^/]+\\.)?soundcloud\\.com\\//i.test(pageUrl) ? "soundcloud_page" : "browser_title" };
+};
 
 // Derive a usable media name without changing the signed source URL.
 // Uniqueness belongs to the desktop queue, not to timing or random client names.
