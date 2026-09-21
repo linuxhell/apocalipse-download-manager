@@ -230,6 +230,7 @@ jobs:
           signed_parts=(packaging/firefox/apocalipse-firefox-${version}.xpi.b64.part*)
           if [[ ! -f "$signed" && ${#signed_parts[@]} -gt 0 ]]; then
             cat "${signed_parts[@]}" | base64 --decode > "$signed"
+            echo "d5727cf6629de6c8f9e24e4e20bd3645560172b67bc8b7fffb2019f83ed27752  $signed" | sha256sum -c -
           fi
           if [[ -f "$signed" ]]; then
             cp "$signed" "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
