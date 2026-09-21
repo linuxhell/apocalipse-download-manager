@@ -35,10 +35,40 @@
       refreshOverlayLanguages();
     }
   });
-  chrome.runtime.onMessage.addListener((message) => {
+  let mainHookReady = false;
+  const pingMainHook = () => {
+    try {
+      window.postMessage({
+        source: "apocalipse-extension",
+        type: "hook-ping",
+        version: chrome.runtime.getManifest().version,
+        nonce: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      }, "*");
+    } catch {}
+  };
+  chrome.runtime.onMessage.addListener((message, _sender, reply) => {
+    if (message?.type === "APOCALIPSE_CONTENT_PING") {
+      reply({
+        ok: true,
+        version: chrome.runtime.getManifest().version,
+        hookReady: mainHookReady,
+        topFrame: window === window.top,
+      });
+      return;
+    }
+    if (message?.type === "APOCALIPSE_REQUEST_HOOK_PING") {
+      pingMainHook();
+      reply({ ok: true });
+      return;
+    }
     if (message?.type !== "APOCALIPSE_LANGUAGE_CHANGED") return;
     interfaceLanguage = message.language || "en";
     refreshOverlayLanguages();
+  });
+  void sendRuntimeMessageQuietly({
+    type: "APOCALIPSE_CONTENT_READY",
+    version: chrome.runtime.getManifest().version,
+    topFrame: window === window.top,
   });
   const modifierPressed = (event, key) => ({ Alt: event.altKey, Shift: event.shiftKey, Control: event.ctrlKey }[key] || false);
   const updateHeldShortcutKey = (event) => {
@@ -48,6 +78,7 @@
     else if (event.type === "keyup") heldShortcutKeys.delete(key);
   };
   const shortcutPressed = (event, key) => modifierPressed(event, key) || heldShortcutKeys.has(key);
+  const forcePressed = (event) => shortcutPressed(event, shortcutKeys.force) || shortcutPressed(event, "Insert");
   const chatgptDownloadGesture = (event) => {
     if (location.hostname.toLowerCase() !== "chatgpt.com") return false;
     const target = event.target instanceof Element ? event.target : null;
@@ -64,14 +95,14 @@
     return sendRuntimeMessageQuietly({
       type: "APOCALIPSE_SHORTCUT_STATE",
       bypassPressed: shortcutPressed(event, shortcutKeys.bypass),
-      forcePressed: shortcutPressed(event, shortcutKeys.force),
+      forcePressed: forcePressed(event),
     }).catch(() => {});
   };
   document.addEventListener("keydown", sendShortcutState, true);
   document.addEventListener("keyup", sendShortcutState, true);
   document.addEventListener("pointerdown", (event) => {
     const bypass = shortcutPressed(event, shortcutKeys.bypass);
-    const force = shortcutPressed(event, shortcutKeys.force);
+    const force = forcePressed(event);
     if (bypass) {
       void sendRuntimeMessageQuietly({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 });
     } else if (force) {
@@ -1875,6 +1906,15 @@
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     const data = event.data;
+    if (data?.source === "apocalipse-page-hook" && data.type === "hook-pong") {
+      mainHookReady = true;
+      void sendRuntimeMessageQuietly({
+        type: "APOCALIPSE_MAIN_HOOK_READY",
+        version: data.version || chrome.runtime.getManifest().version,
+        topFrame: window === window.top,
+      });
+      return;
+    }
     if (data?.source === "apocalipse-page-hook" && data.type === "capture-trace") {
       void sendRuntimeMessageQuietly({ type: "APOCALIPSE_CAPTURE_TRACE", eventName: data.eventName, mode: data.mode, detail: data.detail || {}, traceId: data.traceId, pageUrl: location.href, at: data.at || Date.now() });
       return;
@@ -1906,5 +1946,6 @@
       }, "*");
     });
   });
+  pingMainHook();
 
 })();
