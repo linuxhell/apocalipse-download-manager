@@ -8,6 +8,9 @@
   const extensionContextActive = () => {
     try { return Boolean(chrome?.runtime?.id); } catch { return false; }
   };
+  const extensionVersion = () => {
+    try { return chrome?.runtime?.getManifest?.()?.version || "unknown"; } catch { return "unknown"; }
+  };
   const sendRuntimeMessageQuietly = (message) => {
     try {
       if (!extensionContextActive()) return Promise.resolve(null);
@@ -41,7 +44,7 @@
       window.postMessage({
         source: "apocalipse-extension",
         type: "hook-ping",
-        version: chrome.runtime.getManifest().version,
+        version: extensionVersion(),
         nonce: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       }, "*");
     } catch {}
@@ -50,7 +53,7 @@
     if (message?.type === "APOCALIPSE_CONTENT_PING") {
       reply({
         ok: true,
-        version: chrome.runtime.getManifest().version,
+        version: extensionVersion(),
         hookReady: mainHookReady,
         topFrame: window === window.top,
       });
@@ -67,7 +70,7 @@
   });
   void sendRuntimeMessageQuietly({
     type: "APOCALIPSE_CONTENT_READY",
-    version: chrome.runtime.getManifest().version,
+    version: extensionVersion(),
     topFrame: window === window.top,
   });
   const modifierPressed = (event, key) => ({ Alt: event.altKey, Shift: event.shiftKey, Control: event.ctrlKey }[key] || false);
@@ -1910,7 +1913,7 @@
       mainHookReady = true;
       void sendRuntimeMessageQuietly({
         type: "APOCALIPSE_MAIN_HOOK_READY",
-        version: data.version || chrome.runtime.getManifest().version,
+        version: data.version || extensionVersion(),
         topFrame: window === window.top,
       });
       return;
