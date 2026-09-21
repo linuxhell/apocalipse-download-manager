@@ -278,7 +278,60 @@
       if (result?.error) throw new Error(result.error);
     }
   };
-  const titleFor = (element) => element?.getAttribute?.("aria-label") || element?.title || element?.alt || document.title;
+  const compactMediaTitle = (value) => String(value || "").replace(/\s+/g, " ").trim();
+  const normalizedMediaTitle = (value) => compactMediaTitle(value)
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const genericMediaTitle = (value) => {
+    const title = normalizedMediaTitle(value).replace(/[._-]+/g, " ").trim();
+    return !title || /^(?:video|audio|music|musica|media|midia|player|video player|audio player|media player|reprodutor(?: de)? video|reprodutor(?: de)? audio)(?: \(\d+\))?$/i.test(title);
+  };
+  const soundCloudSlugTitle = () => {
+    try {
+      const host = location.hostname.toLowerCase();
+      if (!(host === "soundcloud.com" || host.endsWith(".soundcloud.com"))) return "";
+      const slug = decodeURIComponent(location.pathname.split("/").filter(Boolean).at(-1) || "");
+      return compactMediaTitle(slug.replace(/[-_]+/g, " "));
+    } catch { return ""; }
+  };
+  const pageMediaTitle = () => {
+    const candidates = [
+      document.querySelector('meta[property="og:title"]')?.content,
+      document.querySelector('meta[name="twitter:title"]')?.content,
+      document.querySelector('meta[name="title"]')?.content,
+      document.querySelector("h1")?.textContent,
+      document.title,
+      soundCloudSlugTitle(),
+    ];
+    for (let candidate of candidates) {
+      candidate = compactMediaTitle(candidate);
+      if (!candidate) continue;
+      try {
+        const host = location.hostname.toLowerCase();
+        if (host === "soundcloud.com" || host.endsWith(".soundcloud.com")) {
+          candidate = candidate
+            .replace(/\s*[|–—]\s*(?:listen|stream).*?soundcloud.*$/i, "")
+            .replace(/\s*[|–—-]\s*soundcloud.*$/i, "")
+            .trim();
+        }
+      } catch {}
+      if (!genericMediaTitle(candidate) && normalizedMediaTitle(candidate) !== "soundcloud") return candidate;
+    }
+    return "";
+  };
+  const titleInfoFor = (element) => {
+    const labels = [
+      element?.getAttribute?.("aria-label"),
+      element?.title,
+      element?.alt,
+    ].map(compactMediaTitle).filter(Boolean);
+    const elementTitle = labels.find((value) => !genericMediaTitle(value));
+    if (elementTitle) return { title: elementTitle, source: "element" };
+    const pageTitle = pageMediaTitle();
+    if (pageTitle) return { title: pageTitle, source: soundCloudSlugTitle() === pageTitle ? "soundcloud_slug" : "page_title" };
+    const fallback = labels[0] || (element?.tagName === "AUDIO" ? "audio" : "video");
+    return { title: fallback, source: "generic_element" };
+  };
+  const titleFor = (element) => titleInfoFor(element).title;
   const facebookSponsoredEvidence = (element) => {
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
     // Sponsored filtering belongs to popup inventory, not Home overlay
@@ -743,11 +796,13 @@
       const resource = performance.getEntriesByName(url).at(-1);
       const measuredSize = Number(resource?.encodedBodySize || resource?.transferSize || 0);
       const duration = Number(element?.duration);
+      const titleInfo = titleInfoFor(element);
       items.set(`${kind}:${url}`, {
         url,
         kind,
         thumbnail: thumbnail ?? thumbnailFor(element, kind),
-        title: titleFor(element),
+        title: titleInfo.title,
+        titleSource: titleInfo.source,
         size: measuredSize > 0 && !/\.m3u8(?:$|[?#])/i.test(url) ? measuredSize : null,
         duration: Number.isFinite(duration) && duration > 0 ? duration : null,
         ...extra,
