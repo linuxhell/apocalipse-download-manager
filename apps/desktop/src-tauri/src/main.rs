@@ -8408,15 +8408,19 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             target
         }
         "aria2" => {
-            let release = github_latest_release(&client, "Kenshin9977/aria2").await?;
-            let expected = match (platform, architecture) {
-                ("windows", "x86_64") => "aria2c-windows-x86_64.exe",
-                ("linux", "x86_64") => "aria2c-linux-x86_64",
-                ("linux", "aarch64") => "aria2c-linux-aarch64",
-                ("macos", "aarch64") => "aria2c-macos-arm64",
+            let release = github_latest_release(&client, "FerroDownload/aria2-static-builds").await?;
+            let suffix = match (platform, architecture) {
+                ("windows", "x86_64") => "windows-x64.exe",
+                ("windows", "aarch64") => "windows-arm64.exe",
+                ("linux", "x86_64") => "linux-x64",
+                ("linux", "aarch64") => "linux-arm64",
+                ("macos", "x86_64") => "macos-x64",
+                ("macos", "aarch64") => "macos-arm64",
                 _ => return Err("tool_download_platform_unsupported:aria2".to_owned()),
             };
-            let (_, url) = release_asset(&release, |name| name == expected)?;
+            let (_, url) = release_asset(&release, |name| {
+                name.starts_with("aria2c-") && name.ends_with(suffix) && !name.ends_with(".sha256")
+            })?;
             let bytes = download_release_bytes(&client, &url).await?;
             let target = tool_dir.join(if cfg!(windows) { "aria2c.exe" } else { "aria2c" });
             install_validated_executable(&bytes, &target, &["--version"])?;
