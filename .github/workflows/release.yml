@@ -57,6 +57,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: '22'
 
       - name: Validate
         shell: bash
@@ -70,6 +74,13 @@ jobs:
         run: cargo test -p apocalipse-desktop --locked paired_preview_uses_real_mux_and_probe -- --ignored
       - name: Build desktop
         run: cargo build --release --locked -p apocalipse-desktop
+
+      - name: Build Linux AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cd apps/desktop
+          npx --yes @tauri-apps/cli@2 build --bundles appimage
 
       - name: Download aria2 backend
         shell: bash
@@ -130,6 +141,9 @@ jobs:
           install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
           install -m 755 dist/aria2-backend/aria2c "$package/data/tools/aria2/aria2c"
           cp README.md LICENSE "$package/"
+          appimage="$(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "$appimage"
+          install -m 755 "$appimage" "dist/apocalipse-download-manager-linux-x64.AppImage"
           tar -C dist -czf "dist/${{ matrix.output }}" "Apocalipse Download Manager"
 
       - name: Stage macOS portable
@@ -164,7 +178,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.output }}
+          path: |
+            dist/${{ matrix.output }}
+            dist/apocalipse-download-manager-linux-x64.AppImage
           if-no-files-found: error
           retention-days: 14
 
@@ -205,6 +221,8 @@ jobs:
           signed="packaging/firefox/apocalipse-firefox-${version}.xpi"
           if [[ -f "$signed" ]]; then
             cp "$signed" "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
+          elif compgen -G "${signed}.b64.part*" >/dev/null; then
+            cat "${signed}.b64.part"* | base64 --decode > "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
           else
             cp -R browser-extension "$stage/firefox"
             python3 - "$stage/firefox/manifest.json" <<'PY'
@@ -251,13 +269,30 @@ jobs:
             exit 1
           fi
 
-          # Never move an existing version tag to a different commit.
+          # Never move an existing version tag. A narrow packaging-only repair is
+          # allowed when the product source itself did not change.
+          repair_release=false
           if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
             git fetch --no-tags origin "refs/tags/$tag"
             tagged_commit=$(git rev-parse 'FETCH_HEAD^{commit}')
             if [[ "$tagged_commit" != "$GITHUB_SHA" ]]; then
-              echo "::error::$tag already belongs to another commit. Bump the application version before publishing new changes."
-              exit 1
+              changed_paths=$(git diff --name-only "$tagged_commit..$GITHUB_SHA")
+              invalid_paths=$(printf '%s\n' "$changed_paths" | grep -Ev '^(\.github/workflows/release\.yml|packaging/firefox/apocalipse-firefox-[0-9.]+\.xpi\.b64\.part[0-9]+)
+          # Remove the explicitly superseded public release only after the new
+          # release has been fully uploaded and published.
+          old_tag="v0.4.32"
+          if [[ "$old_tag" != "$tag" ]] && gh release view "$old_tag" >/dev/null 2>&1; then
+            gh release delete "$old_tag" --cleanup-tag --yes
+          fi
+
+ || true)
+              if [[ -n "$invalid_paths" ]]; then
+                echo "::error::$tag already belongs to another product commit. Bump the application version before publishing product changes."
+                printf '%s\n' "$invalid_paths"
+                exit 1
+              fi
+              repair_release=true
+              echo "::notice::Repairing packaging assets for existing $tag without moving the tag."
             fi
           else
             status=$?
@@ -269,9 +304,11 @@ jobs:
             git push origin "refs/tags/$tag"
           fi
 
-          # Retries may finish an unpublished draft, but never erase a live release.
+          release_exists=false
+          is_draft=false
           if is_draft=$(gh release view "$tag" --json isDraft --jq '.isDraft'); then
-            if [[ "$is_draft" != true ]]; then
+            release_exists=true
+            if [[ "$is_draft" != true && "$repair_release" != true ]]; then
               echo "::notice::$tag is already published for this commit; leaving its assets unchanged."
               exit 0
             fi
@@ -284,7 +321,9 @@ jobs:
           fi
           (cd dist && sha256sum apocalipse-*) > dist/SHA256SUMS.txt
           gh release upload "$tag" dist/* --clobber
-          gh release edit "$tag" --draft=false
+          if [[ "$release_exists" != true || "$is_draft" == true ]]; then
+            gh release edit "$tag" --draft=false
+          fi
 
           # Remove the explicitly superseded public release only after the new
           # release has been fully uploaded and published.
