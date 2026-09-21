@@ -7810,6 +7810,18 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
         found: kind.is_some() && extractor.is_file(),
         version: version.or_else(|| kind.map(|value| format!("{value:?}"))),
     });
+    let player = settings.media_player_path.clone().unwrap_or_default();
+    let player_version = if player.is_file() {
+        version_line(&player, &["--version"])
+    } else {
+        None
+    };
+    statuses.push(ToolStatus {
+        id: "player".to_owned(),
+        path: player.to_string_lossy().into_owned(),
+        found: player.is_file(),
+        version: player_version,
+    });
     Ok(statuses)
 }
 
@@ -8215,6 +8227,387 @@ fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
             Err(error.to_string())
         }
     }
+}
+
+
+fn portable_tools_directory() -> Result<PathBuf, String> {
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let root = executable
+        .parent()
+        .ok_or_else(|| "executable_has_no_parent".to_owned())?
+        .join("tools");
+    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    Ok(root)
+}
+
+fn release_asset<F>(
+    release: &serde_json::Value,
+    predicate: F,
+) -> Result<(String, String), String>
+where
+    F: Fn(&str) -> bool,
+{
+    let assets = release
+        .get("assets")
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| "release_has_no_assets".to_owned())?;
+    assets
+        .iter()
+        .find_map(|asset| {
+            let name = asset.get("name")?.as_str()?;
+            if !predicate(&name.to_ascii_lowercase()) {
+                return None;
+            }
+            let url = asset.get("browser_download_url")?.as_str()?;
+            Some((name.to_owned(), url.to_owned()))
+        })
+        .ok_or_else(|| "compatible_release_asset_not_found".to_owned())
+}
+
+async fn github_latest_release(
+    client: &reqwest::Client,
+    repository: &str,
+) -> Result<serde_json::Value, String> {
+    client
+        .get(format!(
+            "https://api.github.com/repos/{repository}/releases/latest"
+        ))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?
+        .json()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+async fn download_release_bytes(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<Vec<u8>, String> {
+    Ok(client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?
+        .bytes()
+        .await
+        .map_err(|error| error.to_string())?
+        .to_vec())
+}
+
+fn install_validated_executable(
+    bytes: &[u8],
+    target: &Path,
+    version_args: &[&str],
+) -> Result<String, String> {
+    if bytes.len() < 16_384 {
+        return Err("downloaded_tool_payload_too_small".to_owned());
+    }
+    let parent = target
+        .parent()
+        .ok_or_else(|| "tool_target_has_no_directory".to_owned())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let name = target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "tool_target_has_no_filename".to_owned())?;
+    let staged = parent.join(format!(".apocalipse-download-{name}"));
+    let backup = parent.join(format!(".apocalipse-download-backup-{name}"));
+    fs::write(&staged, bytes).map_err(|error| error.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))
+            .map_err(|error| error.to_string())?;
+    }
+    let version = version_line(&staged, version_args).ok_or_else(|| {
+        let _ = fs::remove_file(&staged);
+        "downloaded_tool_validation_failed".to_owned()
+    })?;
+    let _ = fs::remove_file(&backup);
+    if target.exists() {
+        fs::rename(target, &backup).map_err(|error| error.to_string())?;
+    }
+    if let Err(error) = fs::rename(&staged, target) {
+        if backup.exists() {
+            let _ = fs::rename(&backup, target);
+        }
+        return Err(error.to_string());
+    }
+    let _ = fs::remove_file(&backup);
+    Ok(version)
+}
+
+fn copy_validated_executable(
+    source: &Path,
+    target: &Path,
+    version_args: &[&str],
+) -> Result<String, String> {
+    let bytes = fs::read(source).map_err(|error| error.to_string())?;
+    install_validated_executable(&bytes, target, version_args)
+}
+
+fn clean_directory(directory: &Path) -> Result<(), String> {
+    if directory.exists() {
+        fs::remove_dir_all(directory).map_err(|error| error.to_string())?;
+    }
+    fs::create_dir_all(directory).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String, String> {
+    let (platform, architecture) = release_platform_architecture()?;
+    let tools_root = portable_tools_directory()?;
+    let tool_dir = tools_root.join(match id.as_str() {
+        "n-m3u8dl-re" => "n-m3u8dl-re",
+        value => value,
+    });
+    fs::create_dir_all(&tool_dir).map_err(|error| error.to_string())?;
+
+    let client = reqwest::Client::builder()
+        .user_agent("Apocalipse-Download-Manager")
+        .build()
+        .map_err(|error| error.to_string())?;
+
+    let result = match id.as_str() {
+        "yt-dlp" => {
+            let release = github_latest_release(&client, "yt-dlp/yt-dlp").await?;
+            let expected = match (platform, architecture) {
+                ("windows", "x86_64") => "yt-dlp.exe",
+                ("windows", "aarch64") => "yt-dlp_arm64.exe",
+                ("linux", "x86_64") => "yt-dlp_linux",
+                ("linux", "aarch64") => "yt-dlp_linux_aarch64",
+                ("macos", _) => "yt-dlp_macos",
+                _ => return Err("tool_download_platform_unsupported:yt-dlp".to_owned()),
+            };
+            let (_, url) = release_asset(&release, |name| name == expected.to_ascii_lowercase())?;
+            let bytes = download_release_bytes(&client, &url).await?;
+            let target = tool_dir.join(if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" });
+            install_validated_executable(&bytes, &target, &["--version"])?;
+            target
+        }
+        "qjs" => {
+            let release = github_latest_release(&client, "quickjs-ng/quickjs").await?;
+            let expected = match (platform, architecture) {
+                ("windows", "x86_64") => "qjs-windows-x86_64.exe",
+                ("windows", "aarch64") => return Err("tool_download_platform_unsupported:qjs".to_owned()),
+                ("linux", "x86_64") => "qjs-linux-x86_64",
+                ("linux", "aarch64") => "qjs-linux-aarch64",
+                ("macos", "x86_64") => "qjs-darwin-x86_64",
+                ("macos", "aarch64") => "qjs-darwin-arm64",
+                _ => return Err("tool_download_platform_unsupported:qjs".to_owned()),
+            };
+            let (_, url) = release_asset(&release, |name| name == expected)?;
+            let bytes = download_release_bytes(&client, &url).await?;
+            let target = tool_dir.join(if cfg!(windows) { "qjs.exe" } else { "qjs" });
+            install_validated_executable(&bytes, &target, &["--version"])?;
+            target
+        }
+        "aria2" => {
+            let release = github_latest_release(&client, "Kenshin9977/aria2").await?;
+            let expected = match (platform, architecture) {
+                ("windows", "x86_64") => "aria2c-windows-x86_64.exe",
+                ("linux", "x86_64") => "aria2c-linux-x86_64",
+                ("linux", "aarch64") => "aria2c-linux-aarch64",
+                ("macos", "aarch64") => "aria2c-macos-arm64",
+                _ => return Err("tool_download_platform_unsupported:aria2".to_owned()),
+            };
+            let (_, url) = release_asset(&release, |name| name == expected)?;
+            let bytes = download_release_bytes(&client, &url).await?;
+            let target = tool_dir.join(if cfg!(windows) { "aria2c.exe" } else { "aria2c" });
+            install_validated_executable(&bytes, &target, &["--version"])?;
+            target
+        }
+        "n-m3u8dl-re" => {
+            let release = github_latest_release(&client, "nilaoda/N_m3u8DL-RE").await?;
+            let (platform_marker, arch_marker) = match (platform, architecture) {
+                ("windows", "x86_64") => ("win-", "x64"),
+                ("windows", "aarch64") => ("win-", "arm64"),
+                ("linux", "x86_64") => ("linux-", "x64"),
+                ("linux", "aarch64") => ("linux-", "arm64"),
+                ("macos", "x86_64") => ("osx-", "x64"),
+                ("macos", "aarch64") => ("osx-", "arm64"),
+                _ => return Err("tool_download_platform_unsupported:n-m3u8dl-re".to_owned()),
+            };
+            let (asset_name, url) = release_asset(&release, |name| {
+                name.contains(platform_marker)
+                    && name.contains(arch_marker)
+                    && (name.ends_with(".zip") || name.ends_with(".tar.gz"))
+            })?;
+            let bytes = download_release_bytes(&client, &url).await?;
+            clean_directory(&tool_dir)?;
+            extract_release_archive(&bytes, &asset_name, &tool_dir)?;
+            let executable_name = if cfg!(windows) { "N_m3u8DL-RE.exe" } else { "N_m3u8DL-RE" };
+            let target = find_named_file(&tool_dir, executable_name, 0)
+                .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
+                    .map_err(|error| error.to_string())?;
+            }
+            version_line(&target, &["--version"])
+                .ok_or_else(|| "downloaded_tool_validation_failed".to_owned())?;
+            target
+        }
+        "ffmpeg" => {
+            let (repository, release) = if platform == "macos" {
+                let repository = "eugeneware/ffmpeg-static";
+                (repository, github_latest_release(&client, repository).await?)
+            } else {
+                let repository = "BtbN/FFmpeg-Builds";
+                (repository, github_latest_release(&client, repository).await?)
+            };
+            if platform == "macos" {
+                let suffix = if architecture == "aarch64" { "arm64" } else { "x64" };
+                let (_, ffmpeg_url) = release_asset(&release, |name| name == format!("ffmpeg-darwin-{suffix}"))?;
+                let (_, ffprobe_url) = release_asset(&release, |name| name == format!("ffprobe-darwin-{suffix}"))?;
+                let ffmpeg_bytes = download_release_bytes(&client, &ffmpeg_url).await?;
+                let ffprobe_bytes = download_release_bytes(&client, &ffprobe_url).await?;
+                let ffmpeg_target = tool_dir.join("ffmpeg");
+                let ffprobe_target = tool_dir.join("ffprobe");
+                install_validated_executable(&ffmpeg_bytes, &ffmpeg_target, &["-version"])?;
+                install_validated_executable(&ffprobe_bytes, &ffprobe_target, &["-version"])?;
+                ffmpeg_target
+            } else {
+                let marker = match (platform, architecture) {
+                    ("windows", "x86_64") => "win64",
+                    ("windows", "aarch64") => "winarm64",
+                    ("linux", "x86_64") => "linux64",
+                    ("linux", "aarch64") => "linuxarm64",
+                    _ => return Err(format!("tool_download_platform_unsupported:ffmpeg:{repository}")),
+                };
+                let (asset_name, url) = release_asset(&release, |name| {
+                    if platform == "windows" {
+                        name.ends_with(&format!("{marker}-gpl.zip")) && !name.contains("shared")
+                    } else {
+                        name.ends_with(&format!("{marker}-gpl.tar.xz")) && !name.contains("shared")
+                    }
+                })?;
+                let bytes = download_release_bytes(&client, &url).await?;
+                let temporary = std::env::temp_dir()
+                    .join(format!("apocalipse-tool-download-{}", uuid::Uuid::new_v4()));
+                let extracted = temporary.join("extracted");
+                fs::create_dir_all(&extracted).map_err(|error| error.to_string())?;
+                extract_release_archive(&bytes, &asset_name, &extracted)?;
+                let ffmpeg_name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+                let ffprobe_name = if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" };
+                let ffmpeg_source = find_named_file(&extracted, ffmpeg_name, 0)
+                    .ok_or_else(|| "ffmpeg_missing_from_release".to_owned())?;
+                let ffprobe_source = find_named_file(&extracted, ffprobe_name, 0)
+                    .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?;
+                let ffmpeg_target = tool_dir.join(ffmpeg_name);
+                let ffprobe_target = tool_dir.join(ffprobe_name);
+                copy_validated_executable(&ffmpeg_source, &ffmpeg_target, &["-version"])?;
+                copy_validated_executable(&ffprobe_source, &ffprobe_target, &["-version"])?;
+                let _ = fs::remove_dir_all(&temporary);
+                ffmpeg_target
+            }
+        }
+        "extractor" => {
+            let release = github_latest_release(&client, "ip7z/7zip").await?;
+            if platform == "windows" {
+                let marker = if architecture == "aarch64" { "-arm64.exe" } else { "-x64.exe" };
+                let (asset_name, url) = release_asset(&release, |name| {
+                    name.starts_with("7z") && name.ends_with(marker)
+                })?;
+                let bytes = download_release_bytes(&client, &url).await?;
+                if bytes.len() < 500_000 {
+                    return Err(format!("downloaded_tool_payload_too_small:{asset_name}"));
+                }
+                clean_directory(&tool_dir)?;
+                let installer = std::env::temp_dir()
+                    .join(format!("apocalipse-7zip-{}.exe", uuid::Uuid::new_v4()));
+                fs::write(&installer, bytes).map_err(|error| error.to_string())?;
+                let mut command = Command::new(&installer);
+                command.arg("/S").arg(format!("/D={}", tool_dir.display()));
+                #[cfg(target_os = "windows")]
+                {
+                    use std::os::windows::process::CommandExt;
+                    command.creation_flags(0x08000000);
+                }
+                let status = command.status().map_err(|error| error.to_string())?;
+                let _ = fs::remove_file(&installer);
+                if !status.success() {
+                    return Err("seven_zip_portable_install_failed".to_owned());
+                }
+                let target = tool_dir.join("7z.exe");
+                extractor_version(&target, ExtractorKind::SevenZip)
+                    .ok_or_else(|| "downloaded_tool_validation_failed".to_owned())?;
+                target
+            } else {
+                let marker = match (platform, architecture) {
+                    ("linux", "x86_64") => "linux-x64.tar.xz",
+                    ("linux", "aarch64") => "linux-arm64.tar.xz",
+                    ("macos", _) => "-mac.tar.xz",
+                    _ => return Err("tool_download_platform_unsupported:extractor".to_owned()),
+                };
+                let (asset_name, url) = release_asset(&release, |name| name.ends_with(marker))?;
+                let bytes = download_release_bytes(&client, &url).await?;
+                clean_directory(&tool_dir)?;
+                extract_release_archive(&bytes, &asset_name, &tool_dir)?;
+                let target = find_named_file(&tool_dir, "7zz", 0)
+                    .ok_or_else(|| "seven_zip_executable_missing".to_owned())?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
+                        .map_err(|error| error.to_string())?;
+                }
+                extractor_version(&target, ExtractorKind::SevenZip)
+                    .ok_or_else(|| "downloaded_tool_validation_failed".to_owned())?;
+                target
+            }
+        }
+        "player" => {
+            if platform == "linux" {
+                let release = github_latest_release(&client, "pkgforge-dev/mpv-AppImage").await?;
+                let marker = if architecture == "aarch64" { "aarch64.appimage" } else { "x86_64.appimage" };
+                let (_, url) = release_asset(&release, |name| name.ends_with(marker) && !name.ends_with(".zsync"))?;
+                let bytes = download_release_bytes(&client, &url).await?;
+                let target = tool_dir.join("mpv.AppImage");
+                install_validated_executable(&bytes, &target, &["--version"])?;
+                target
+            } else {
+                let release = github_latest_release(&client, "mpv-player/mpv").await?;
+                let (asset_name, url) = release_asset(&release, |name| match (platform, architecture) {
+                    ("windows", "x86_64") => name.contains("x86_64-pc-windows-msvc") && name.ends_with(".zip"),
+                    ("windows", "aarch64") => name.contains("aarch64-pc-windows-msvc") && name.ends_with(".zip"),
+                    ("macos", "x86_64") => name.contains("macos") && name.contains("intel") && name.ends_with(".zip"),
+                    ("macos", "aarch64") => name.contains("macos-14-arm") && name.ends_with(".zip"),
+                    _ => false,
+                })?;
+                let bytes = download_release_bytes(&client, &url).await?;
+                clean_directory(&tool_dir)?;
+                extract_release_archive(&bytes, &asset_name, &tool_dir)?;
+                let executable_name = if platform == "windows" { "mpv.exe" } else { "mpv" };
+                let target = find_named_file(&tool_dir, executable_name, 0)
+                    .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
+                        .map_err(|error| error.to_string())?;
+                }
+                version_line(&target, &["--version"])
+                    .ok_or_else(|| "downloaded_tool_validation_failed".to_owned())?;
+                target
+            }
+        }
+        _ => return Err("unknown_tool".to_owned()),
+    };
+
+    diagnostic_log(
+        &state,
+        "INFO",
+        "tool.downloaded",
+        &format!("tool={id} target={}", result.display()),
+    );
+    Ok(result.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -12400,6 +12793,7 @@ fn main() {
             resolve_thumbnail,
             set_media_player,
             preview_torrent,
+            download_tool,
             update_tool,
             suggest_download_name,
             remove_downloads,
