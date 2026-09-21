@@ -240,6 +240,10 @@
           autofocus
         />
         <div id="analysis" class="analysis" hidden></div>
+        <label id="auto-extract-option" class="setting-toggle compact-toggle" hidden>
+          <input id="auto-extract" type="checkbox" />
+          <span><b data-i18n="autoExtract">Extract automatically after download</b><small data-i18n="autoExtractHint">Shown only for archive files. Loose root files are kept inside a folder named after the archive.</small></span>
+        </label>
         <section id="media-inspection" class="media-inspection" hidden>
           <img id="media-thumbnail" alt="" hidden />
           <div>
@@ -273,10 +277,6 @@
             Browse…
           </button>
         </div>
-        <label id="auto-extract-option" class="setting-toggle compact-toggle" hidden>
-          <input id="auto-extract" type="checkbox" />
-          <span><b data-i18n="autoExtract">Extract automatically after download</b><small data-i18n="autoExtractHint">Shown only for archive files. Loose root files are kept inside a folder named after the archive.</small></span>
-        </label>
         <section class="destination-history">
           <div>
             <b data-i18n="recentLocations">Download locations</b>
