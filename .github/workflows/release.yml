@@ -178,9 +178,15 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: |
-            dist/${{ matrix.output }}
-            dist/apocalipse-download-manager-linux-x64.AppImage
+          path: dist/${{ matrix.output }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: apocalipse-download-manager-linux-x64-appimage
+          path: dist/apocalipse-download-manager-linux-x64.AppImage
           if-no-files-found: error
           retention-days: 14
 
@@ -221,8 +227,6 @@ jobs:
           signed="packaging/firefox/apocalipse-firefox-${version}.xpi"
           if [[ -f "$signed" ]]; then
             cp "$signed" "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
-          elif compgen -G "${signed}.b64.part*" >/dev/null; then
-            cat "${signed}.b64.part"* | base64 --decode > "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
           else
             cp -R browser-extension "$stage/firefox"
             python3 - "$stage/firefox/manifest.json" <<'PY'
@@ -269,46 +273,17 @@ jobs:
             exit 1
           fi
 
-          # Never move an existing version tag. A narrow packaging-only repair is
-          # allowed when the product source itself did not change.
-          repair_release=false
+          # Keep an existing version tag fixed. Reusing it is allowed only when
+          # every change since the tagged product commit is release packaging.
           if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
             git fetch --no-tags origin "refs/tags/$tag"
             tagged_commit=$(git rev-parse 'FETCH_HEAD^{commit}')
             if [[ "$tagged_commit" != "$GITHUB_SHA" ]]; then
               changed_paths=$(git diff --name-only "$tagged_commit..$GITHUB_SHA")
-              invalid_paths=$(printf '%s\n' "$changed_paths" | grep -Ev '^(\.github/workflows/release\.yml|packaging/firefox/apocalipse-firefox-[0-9.]+\.xpi\.b64\.part[0-9]+)
-          # Remove the explicitly superseded public release only after the new
-          # release has been fully uploaded and published.
-          old_tag="v0.4.32"
-          if [[ "$old_tag" != "$tag" ]] && gh release view "$old_tag" >/dev/null 2>&1; then
-            gh release delete "$old_tag" --cleanup-tag --yes
-          fi
-
- || true)
-              if [[ -n "$invalid_paths" ]]; then
-                echo "::error::$tag already belongs to another product commit. Bump the application version before publishing product changes."
-                printf '%s\n' "$invalid_paths"
-                exit 1
-              fi
-              repair_release=true
-              echo "::notice::Repairing packaging assets for existing $tag without moving the tag."
-            fi
-          else
-            status=$?
-            if [[ "$status" -ne 2 ]]; then
-              echo "::error::Could not check the remote release tag."
-              exit "$status"
-            fi
-            git tag "$tag" "$GITHUB_SHA"
-            git push origin "refs/tags/$tag"
-          fi
-
-          release_exists=false
-          is_draft=false
+              invalid_paths=$(printf '%s\n' "$changed_paths" | grep -Ev '^(\.github/workflows/release\.yml|packaging/firefox/apocalipse-firefox-0\.3\.167\.xpi)
+          # Retries may finish an unpublished draft, but never erase a live release.
           if is_draft=$(gh release view "$tag" --json isDraft --jq '.isDraft'); then
-            release_exists=true
-            if [[ "$is_draft" != true && "$repair_release" != true ]]; then
+            if [[ "$is_draft" != true ]]; then
               echo "::notice::$tag is already published for this commit; leaving its assets unchanged."
               exit 0
             fi
@@ -321,9 +296,49 @@ jobs:
           fi
           (cd dist && sha256sum apocalipse-*) > dist/SHA256SUMS.txt
           gh release upload "$tag" dist/* --clobber
-          if [[ "$release_exists" != true || "$is_draft" == true ]]; then
-            gh release edit "$tag" --draft=false
+          gh release edit "$tag" --draft=false
+
+          # Remove the explicitly superseded public release only after the new
+          # release has been fully uploaded and published.
+          old_tag="v0.4.32"
+          if [[ "$old_tag" != "$tag" ]] && gh release view "$old_tag" >/dev/null 2>&1; then
+            gh release delete "$old_tag" --cleanup-tag --yes
           fi
+
+ || true)
+              if [[ -n "$invalid_paths" ]]; then
+                echo "::error::$tag belongs to another product commit. Only release packaging changes may reuse the existing tag."
+                printf '%s\n' "$invalid_paths"
+                exit 1
+              fi
+              echo "::notice::Recreating assets for existing $tag without moving the tag."
+            fi
+          else
+            status=$?
+            if [[ "$status" -ne 2 ]]; then
+              echo "::error::Could not check the remote release tag."
+              exit "$status"
+            fi
+            git tag "$tag" "$GITHUB_SHA"
+            git push origin "refs/tags/$tag"
+          fi
+
+          # Retries may finish an unpublished draft, but never erase a live release.
+          if is_draft=$(gh release view "$tag" --json isDraft --jq '.isDraft'); then
+            if [[ "$is_draft" != true ]]; then
+              echo "::notice::$tag is already published for this commit; leaving its assets unchanged."
+              exit 0
+            fi
+          else
+            prerelease=()
+            if [[ "$version" == *-* ]]; then
+              prerelease=(--prerelease)
+            fi
+            gh release create "$tag" --verify-tag --generate-notes --draft "${prerelease[@]}"
+          fi
+          (cd dist && sha256sum apocalipse-*) > dist/SHA256SUMS.txt
+          gh release upload "$tag" dist/* --clobber
+          gh release edit "$tag" --draft=false
 
           # Remove the explicitly superseded public release only after the new
           # release has been fully uploaded and published.
