@@ -2744,24 +2744,19 @@ async fn resolve_thumbnail_internal(state: &AppState, url: &str) -> Result<Optio
     };
 
     let (proxy_url, proxy_username, proxy_password) = proxy.unwrap_or_default();
-    let client = DownloadEngine::network_client_builder(
-        proxy_url.as_deref(),
-        proxy_username.as_deref(),
-        proxy_password.as_deref(),
-        &dns,
-    )
-    .map_err(|error| error.to_string())?
-    .redirect(reqwest::redirect::Policy::none())
-    .timeout(Duration::from_secs(12))
-    .build()
-    .map_err(|error| error.to_string())?;
+    let network = thumbnail_cache::ThumbnailNetwork {
+        proxy_url,
+        proxy_username,
+        proxy_password,
+        dns_servers: dns,
+    };
 
     let cache_root = state
         .queue_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("cache");
-    match thumbnail_cache::resolve(&cache_root, &client, url).await {
+    match thumbnail_cache::resolve(&cache_root, &network, url).await {
         Ok(Some(result)) => {
             state.diagnostics.record(
                 if result.cache_hit {

@@ -1,11 +1,12 @@
+use apocalipse_core::DownloadEngine;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    net::IpAddr,
+    net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::fs;
 use url::Url;
@@ -41,9 +42,21 @@ struct ImageKind {
     mime: &'static str,
 }
 
+/// Network settings needed to fetch a thumbnail with a DNS-rebinding-safe
+/// connection: a fresh client is built per request (per redirect hop, even)
+/// so the resolved IP can be pinned via `ClientBuilder::resolve` instead of
+/// letting the HTTP client re-resolve the hostname at connect time.
+#[derive(Clone, Default)]
+pub(super) struct ThumbnailNetwork {
+    pub(super) proxy_url: Option<String>,
+    pub(super) proxy_username: Option<String>,
+    pub(super) proxy_password: Option<String>,
+    pub(super) dns_servers: Vec<IpAddr>,
+}
+
 pub(super) async fn resolve(
     cache_root: &Path,
-    client: &reqwest::Client,
+    network: &ThumbnailNetwork,
     original_url: &str,
 ) -> Result<Option<ThumbnailResolution>, String> {
     let initial = validate_remote_url(original_url)?;
@@ -57,7 +70,7 @@ pub(super) async fn resolve(
         return Ok(Some(hit));
     }
 
-    let (source_bytes, source_kind) = fetch_validated(client, initial).await?;
+    let (source_bytes, source_kind) = fetch_validated(network, initial).await?;
     let (bytes, kind) =
         normalize_to_webp(&source_bytes, source_kind).unwrap_or((source_bytes, source_kind));
     let content_hash = sha256_hex(&bytes);
@@ -187,10 +200,11 @@ async fn read_cached(
 }
 
 async fn fetch_validated(
-    client: &reqwest::Client,
+    network: &ThumbnailNetwork,
     mut url: Url,
 ) -> Result<(Vec<u8>, ImageKind), String> {
     for redirect in 0..=MAX_REDIRECTS {
+        let client = pinned_client(network, &url).await?;
         let response = client
             .get(url.clone())
             .header(
@@ -246,6 +260,53 @@ async fn fetch_validated(
         return Ok((bytes, kind));
     }
     Err("thumbnail_redirect_limit".to_owned())
+}
+
+/// Builds a client for one request, pinning the connection to a DNS-resolved
+/// IP we've already verified is public. Without this, `validate_remote_url`
+/// only checks the string in the URL at parse time; the HTTP client would
+/// still be free to resolve the hostname again at connect time, so a
+/// DNS-rebinding attacker could point the same hostname at a private/loopback
+/// address only once the request actually connects (also true on every
+/// redirect hop, which is why this runs per hop rather than once up front).
+/// A configured proxy does its own resolution downstream of this process, so
+/// pinning is skipped in that case — the string-level check is what applies.
+async fn pinned_client(network: &ThumbnailNetwork, url: &Url) -> Result<reqwest::Client, String> {
+    let mut builder = DownloadEngine::network_client_builder(
+        network.proxy_url.as_deref(),
+        network.proxy_username.as_deref(),
+        network.proxy_password.as_deref(),
+        &network.dns_servers,
+    )
+    .map_err(|error| error.to_string())?
+    .redirect(reqwest::redirect::Policy::none())
+    .timeout(Duration::from_secs(12));
+
+    if network.proxy_url.is_none() {
+        if let Some(url::Host::Domain(host)) = url.host() {
+            let port = url
+                .port_or_known_default()
+                .unwrap_or(if url.scheme() == "https" { 443 } else { 80 });
+            let addr = resolve_and_verify_public(host, port).await?;
+            builder = builder.resolve(host, addr);
+        }
+    }
+
+    builder.build().map_err(|error| error.to_string())
+}
+
+async fn resolve_and_verify_public(host: &str, port: u16) -> Result<SocketAddr, String> {
+    let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|error| error.to_string())?
+        .collect();
+    if addrs.is_empty() {
+        return Err("thumbnail_dns_resolution_failed".to_owned());
+    }
+    if addrs.iter().any(|addr| is_non_public_ip(addr.ip())) {
+        return Err("thumbnail_local_target_blocked".to_owned());
+    }
+    Ok(addrs[0])
 }
 
 fn validate_remote_url(value: &str) -> Result<Url, String> {
@@ -465,6 +526,28 @@ mod tests {
             assert!(validate_remote_url(url).is_err(), "{url}");
         }
         assert!(validate_remote_url("https://i.ytimg.com/vi/example/hqdefault.jpg").is_ok());
+    }
+
+    #[tokio::test]
+    async fn rejects_hostnames_that_resolve_to_a_non_public_address() {
+        // "localhost" always resolves locally (hosts file / stub resolver),
+        // so this catches the DNS-rebinding case that a string-only check on
+        // the URL (validate_remote_url) cannot: a hostname that looks public
+        // when parsed but actually resolves to a loopback/private address.
+        let error = resolve_and_verify_public("localhost", 443)
+            .await
+            .unwrap_err();
+        assert_eq!(error, "thumbnail_local_target_blocked");
+    }
+
+    #[tokio::test]
+    async fn accepts_hostnames_that_resolve_to_a_public_address() {
+        // A literal public IP as a "hostname" resolves to itself and must
+        // not be blocked.
+        let addr = resolve_and_verify_public("93.184.216.34", 443)
+            .await
+            .unwrap();
+        assert_eq!(addr.ip(), "93.184.216.34".parse::<IpAddr>().unwrap());
     }
 
     #[test]
