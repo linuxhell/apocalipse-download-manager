@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod aria2;
-mod diagnostics_v3;
+mod diagnostics;
 mod prepared_preview;
 mod thumbnail_cache;
 mod tiktok_preview;
@@ -226,7 +226,7 @@ struct AppState {
     aria2_tasks: Mutex<HashMap<DownloadId, String>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
-    diagnostics: diagnostics_v3::Diagnostics,
+    diagnostics: diagnostics::Diagnostics,
     global_bandwidth_limiter: Arc<BandwidthLimiter>,
     download_bandwidth_limiters: Mutex<HashMap<DownloadId, Arc<BandwidthLimiter>>>,
     tray_show: MenuItem<tauri::Wry>,
@@ -12901,7 +12901,7 @@ fn main() {
                 aria2_tasks: Mutex::new(HashMap::new()),
                 log_path,
                 log_write_lock: Mutex::new(()),
-                diagnostics: diagnostics_v3::Diagnostics::new(&app_data.join("logs")),
+                diagnostics: diagnostics::Diagnostics::new(&app_data.join("logs")),
                 global_bandwidth_limiter,
                 download_bandwidth_limiters: Mutex::new(HashMap::new()),
                 tray_show: show.clone(),
