@@ -118,13 +118,24 @@
       void sendRuntimeMessageQuietly({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 8000 });
     }
   }, true);
-  window.addEventListener("blur", () => {
+  // A keyup can be missed by this frame when focus leaves the window or tab
+  // (alt-tab, DevTools, another app) while a modifier is still physically
+  // held. A "stuck" Alt/Shift then silently disables capture (Alt gates
+  // bypass, which suppresses force capture) on pages such as claude.ai and
+  // Rapidgator. Reset the held-key state whenever focus changes or the tab
+  // is hidden so a stale modifier can never persist across those events.
+  const clearHeldShortcutKeys = () => {
     heldShortcutKeys.clear();
     return sendRuntimeMessageQuietly({
       type: "APOCALIPSE_SHORTCUT_STATE",
       bypassPressed: false,
       forcePressed: false,
     }).catch(() => {});
+  };
+  window.addEventListener("blur", clearHeldShortcutKeys);
+  window.addEventListener("focus", clearHeldShortcutKeys);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) clearHeldShortcutKeys();
   });
   const absolute = (value) => {
     // Missing src/poster values are not relative links: new URL("", base)
@@ -1741,7 +1752,7 @@
             : left;
           recordButton.style.left = `${recordLeft}px`;
           recordButton.style.top = `${Math.max(6, top)}px`;
-          recordButton.hidden = rect.width < 100 || rect.height < 55;
+          recordButton.hidden = sponsoredHomeVideo || rect.width < 100 || rect.height < 55;
         }
       };
       document.documentElement.append(button);

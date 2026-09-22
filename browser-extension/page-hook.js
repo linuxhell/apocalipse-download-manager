@@ -22,7 +22,17 @@
   };
   addEventListener("keydown", canonicalKey, true);
   addEventListener("keyup", canonicalKey, true);
-  addEventListener("blur", () => held.clear(), true);
+  // A keyup can be missed while focus is elsewhere (alt-tab, DevTools,
+  // another window), leaving Alt/Shift "stuck" held here and silently
+  // disabling force capture (Alt gates bypass, which suppresses force) on
+  // pages such as claude.ai and Rapidgator. Reset on any focus change and
+  // when the tab is hidden so a stale modifier can never persist.
+  const clearHeld = () => held.clear();
+  addEventListener("blur", clearHeld, true);
+  addEventListener("focus", clearHeld, true);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) clearHeld();
+  }, true);
 
   addEventListener("message", (event) => {
     if (event.source !== window || event.data?.source !== "apocalipse-extension") return;
@@ -37,7 +47,7 @@
       window.postMessage({
         source: "apocalipse-page-hook",
         type: "hook-pong",
-        version: "0.3.169",
+        version: "0.3.173",
         nonce: event.data.nonce || "",
       }, "*");
     }

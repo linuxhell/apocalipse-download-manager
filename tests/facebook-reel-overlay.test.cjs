@@ -282,10 +282,11 @@ test('recording seals each segment and resumes only after real media progress', 
 });
 
 
-test('Facebook sponsored videos show Record only and hide Download', () => {
+test('Facebook sponsored videos hide both Download and Record', () => {
   assert.match(script, /button\.hidden = !canDownload \|\| Boolean\(isFacebookVideo && facebookSponsoredEvidence\(element\)\)/);
   assert.match(script, /const sponsoredHomeVideo = Boolean\(isFacebookVideo && facebookSponsoredEvidence\(element\)\)/);
   assert.match(script, /button\.hidden = sponsoredHomeVideo \|\| !liveCanDownload/);
+  assert.match(script, /recordButton\.hidden = sponsoredHomeVideo \|\| rect\.width < 100 \|\| rect\.height < 55/);
   assert.match(script, /sponsoredRecordOnly:/);
 });
 

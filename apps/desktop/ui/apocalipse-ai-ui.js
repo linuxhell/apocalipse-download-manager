@@ -62,6 +62,16 @@
       return RELEASES_URL;
     }
   }
+  function panelOpen() {
+    return document.querySelector("#ai-panel")?.hidden === false;
+  }
+  function markNewActivity() {
+    if (panelOpen()) return;
+    document.querySelector(".ai-nav-button")?.classList.add("ai-new-activity");
+  }
+  function clearNewActivity() {
+    document.querySelector(".ai-nav-button")?.classList.remove("ai-new-activity");
+  }
   function updateAlert() {
     const dot = document.querySelector("#ai-alert-dot");
     dot.hidden = !corrections.some(item => item.status === "proposed");
@@ -127,6 +137,7 @@
     messages.push({ id: crypto.randomUUID(), role, text, kind, at: Date.now(), ...extra });
     persistMessages();
     renderMessages();
+    if (role === "assistant" && kind !== "welcome") markNewActivity();
   }
   function welcome() {
     if (!messages.length) addMessage("assistant", AI.say(language(), "hello"), "welcome");
@@ -362,7 +373,7 @@
     corrections = corrections.filter(item => ["testing", "confirmed"].includes(item.status));
     persistCorrections(); renderCorrections();
   };
-  window.addEventListener("apocalipse-ai-opened", () => { welcome(); renderMessages(); updateAlert(); input.focus(); });
+  window.addEventListener("apocalipse-ai-opened", () => { welcome(); renderMessages(); updateAlert(); clearNewActivity(); input.focus(); });
   window.addEventListener("apocalipse-language-changed", () => { welcome(); renderMessages(); renderCorrections(); updateAlert(); });
   window.addEventListener("storage", event => {
     if (event.key === FIX_KEY) {

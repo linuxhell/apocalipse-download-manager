@@ -230,6 +230,24 @@ test('Apocalipse AI blinks the alien for new releases and exposes a safe clickab
   assert.match(desktop, /path\.starts_with\("\/linuxhell\/apocalipse-download-manager\/releases\/"\)/);
 });
 
+test('the About caption is short and trilingual', () => {
+  assert.match(app, /aboutDescription: "About the creator\."/);
+  assert.match(app, /aboutDescription: "Sobre o criador\."/);
+  assert.match(app, /aboutDescription: "关于创作者。"/);
+});
+
+test('Apocalipse AI icon pulses for unseen activity and clears when the panel is opened', () => {
+  assert.match(aiUi, /function panelOpen\(\)/);
+  assert.match(aiUi, /function markNewActivity\(\)/);
+  assert.match(aiUi, /function clearNewActivity\(\)/);
+  assert.match(aiUi, /classList\.add\("ai-new-activity"\)/);
+  assert.match(aiUi, /classList\.remove\("ai-new-activity"\)/);
+  assert.match(aiUi, /if \(role === "assistant" && kind !== "welcome"\) markNewActivity\(\);/);
+  assert.match(aiUi, /apocalipse-ai-opened.*clearNewActivity\(\)/);
+  assert.match(css, /\.ai-nav-button\.ai-new-activity \.ai-nav-icon img/);
+  assert.match(css, /@keyframes ai-activity-pulse/);
+});
+
 test('thumbnails use the validated persistent cache instead of direct remote rendering', () => {
   assert.match(app, /invoke\("resolve_thumbnail", \{ url \}\)/);
   assert.match(app, /resolveCachedThumbnail\(requestedThumbnail\)/);

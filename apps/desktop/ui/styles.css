@@ -1233,10 +1233,22 @@ nav button:hover, nav button.active, .download-icon { color: var(--accent); }
   text-decoration:none;
 }
 .ai-message-link:hover { text-decoration:underline; }
+.ai-nav-button.ai-new-activity .ai-nav-icon img {
+  animation: ai-activity-pulse 1s ease-in-out infinite;
+  filter: drop-shadow(0 0 7px color-mix(in srgb,var(--accent) 65%,transparent));
+}
+@keyframes ai-activity-pulse {
+  0%,100% { opacity:1; transform:scale(1); }
+  50% { opacity:.45; transform:scale(.9); }
+}
 @media (prefers-reduced-motion:reduce) {
   .ai-nav-button.ai-update-available .ai-nav-icon img {
     animation:none;
     filter:brightness(1.35) drop-shadow(0 0 10px var(--accent));
+  }
+  .ai-nav-button.ai-new-activity .ai-nav-icon img {
+    animation:none;
+    filter:brightness(1.25) drop-shadow(0 0 8px var(--accent));
   }
 }
 body:has(#ai-panel:not([hidden])) main { height:100vh; overflow:hidden; }
