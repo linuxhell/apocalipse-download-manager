@@ -59,6 +59,7 @@ pub fn classify_url(input: &str) -> Option<DownloadKind> {
                 | "tiktok.com"
                 | "www.tiktok.com"
                 | "vm.tiktok.com"
+                | "vt.tiktok.com"
                 | "instagram.com"
                 | "www.instagram.com"
         )
@@ -101,6 +102,14 @@ mod tests {
         );
         assert_eq!(
             classify_url("https://www.tiktok.com/@creator/video/123"),
+            Some(DownloadKind::MediaPage)
+        );
+        assert_eq!(
+            classify_url("https://vm.tiktok.com/ZMabc123/"),
+            Some(DownloadKind::MediaPage)
+        );
+        assert_eq!(
+            classify_url("https://vt.tiktok.com/ZSabc123/"),
             Some(DownloadKind::MediaPage)
         );
         assert_eq!(
