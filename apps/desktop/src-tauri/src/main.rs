@@ -3383,6 +3383,7 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join("aria2-rpc");
+    let mut spawned = None;
     let endpoint = {
         let mut runtime = state
             .aria2_runtime
@@ -3402,12 +3403,26 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
                 settings.aria2_rpc_port,
                 &settings.aria2_rpc_secret,
             )?);
+            if let Some(current) = runtime.as_ref() {
+                spawned = Some((current.pid(), current.port()));
+            }
         }
         runtime
             .as_ref()
             .map(aria2::Runtime::endpoint)
             .ok_or_else(|| "aria2_rpc_runtime_missing".to_owned())?
     };
+    if let Some((pid, port)) = spawned {
+        diagnostic_log(
+            state,
+            "INFO",
+            "aria2.runtime_spawned",
+            &format!(
+                "pid={pid} parent_pid={} port={port} stop_with_parent=true",
+                std::process::id()
+            ),
+        );
+    }
     endpoint.wait_ready().await?;
     Ok(endpoint)
 }
@@ -3415,7 +3430,15 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
 fn stop_aria2_runtime(state: &AppState) {
     if let Ok(mut runtime) = state.aria2_runtime.lock() {
         if let Some(runtime) = runtime.as_mut() {
+            let pid = runtime.pid();
+            let port = runtime.port();
             runtime.terminate();
+            diagnostic_log(
+                state,
+                "INFO",
+                "aria2.runtime_stopped",
+                &format!("pid={pid} port={port}"),
+            );
         }
         *runtime = None;
     }
@@ -7752,8 +7775,12 @@ fn pick_url_list() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, String> {
-    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, String> {
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
     let definitions = [
         (
             "ffmpeg",
@@ -7799,11 +7826,6 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
             ),
             ["--version"].as_slice(),
         ),
-        (
-            "aria2",
-            configured_aria2(&settings),
-            ["--version"].as_slice(),
-        ),
     ];
     let mut statuses = definitions
         .into_iter()
@@ -7817,6 +7839,30 @@ fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, Stri
             }
         })
         .collect::<Vec<_>>();
+
+    let aria2_path = configured_aria2(&settings);
+    let aria2_endpoint = {
+        let mut runtime = state
+            .aria2_runtime
+            .lock()
+            .map_err(|error| error.to_string())?;
+        if runtime.as_mut().is_some_and(aria2::Runtime::is_running) {
+            runtime.as_ref().map(aria2::Runtime::endpoint)
+        } else {
+            None
+        }
+    };
+    let aria2_version = match aria2_endpoint {
+        Some(endpoint) => endpoint.version().await.ok(),
+        None => None,
+    };
+    statuses.push(ToolStatus {
+        id: "aria2".to_owned(),
+        path: aria2_path.to_string_lossy().into_owned(),
+        found: aria2_path.is_file(),
+        version: aria2_version,
+    });
+
     let extractor = settings.extractor_path.clone().unwrap_or_default();
     let kind = extractor_kind(&extractor);
     let version = kind.and_then(|kind| extractor_version(&extractor, kind));

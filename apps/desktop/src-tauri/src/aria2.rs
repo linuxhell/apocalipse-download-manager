@@ -108,6 +108,7 @@ impl Runtime {
             .arg("--rpc-allow-origin-all=false")
             .arg(format!("--rpc-listen-port={port}"))
             .arg(format!("--rpc-secret={secret}"))
+            .arg(format!("--stop-with-process={}", std::process::id()))
             .arg("--continue=true")
             .arg("--file-allocation=none")
             .arg("--auto-file-renaming=false")
@@ -151,6 +152,10 @@ impl Runtime {
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.child.id()
     }
 
     pub fn is_running(&mut self) -> bool {
