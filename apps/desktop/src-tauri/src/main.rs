@@ -1,10 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod aria2;
 mod diagnostics;
 mod prepared_preview;
+mod surge;
 mod thumbnail_cache;
 mod tiktok_preview;
+mod transmission;
 
 use apocalipse_core::{
     chunk_directory, classify_url, cleanup_chunk_artifacts, contextual_media_page, parse_metalink,
@@ -222,8 +223,10 @@ struct AppState {
     recording_stops: Mutex<HashSet<DownloadId>>,
     request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
     link_transfers: Mutex<HashMap<String, Arc<LinkTransferControl>>>,
-    aria2_runtime: Mutex<Option<aria2::Runtime>>,
-    aria2_tasks: Mutex<HashMap<DownloadId, String>>,
+    surge_runtime: Mutex<Option<surge::Runtime>>,
+    surge_tasks: Mutex<HashMap<DownloadId, String>>,
+    transmission_runtime: Mutex<Option<transmission::Runtime>>,
+    transmission_tasks: Mutex<HashMap<DownloadId, String>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
     diagnostics: diagnostics::Diagnostics,
@@ -307,17 +310,29 @@ struct UserSettings {
     #[serde(default)]
     n_m3u8dl_re_path: Option<PathBuf>,
     #[serde(default)]
-    aria2_path: Option<PathBuf>,
+    surge_path: Option<PathBuf>,
     #[serde(default)]
     extractor_path: Option<PathBuf>,
     #[serde(default = "default_true")]
-    aria2_rpc_enabled: bool,
+    surge_enabled: bool,
     #[serde(default = "default_true")]
-    aria2_rpc_auto_start: bool,
+    surge_auto_start: bool,
     #[serde(default)]
-    aria2_rpc_port: Option<u16>,
-    #[serde(default = "default_aria2_rpc_secret", skip_serializing)]
-    aria2_rpc_secret: String,
+    surge_port: Option<u16>,
+    #[serde(default = "default_local_secret", skip_serializing)]
+    surge_token: String,
+    #[serde(default)]
+    transmission_daemon_path: Option<PathBuf>,
+    #[serde(default = "default_true")]
+    transmission_enabled: bool,
+    #[serde(default = "default_true")]
+    transmission_auto_start: bool,
+    #[serde(default)]
+    transmission_port: Option<u16>,
+    #[serde(default = "default_transmission_username")]
+    transmission_username: String,
+    #[serde(default = "default_local_secret", skip_serializing)]
+    transmission_password: String,
     #[serde(default)]
     media_player_path: Option<PathBuf>,
     #[serde(default)]
@@ -379,8 +394,11 @@ const fn default_connections() -> usize {
 const fn default_true() -> bool {
     true
 }
-fn default_aria2_rpc_secret() -> String {
+fn default_local_secret() -> String {
     uuid::Uuid::new_v4().simple().to_string()
+}
+fn default_transmission_username() -> String {
+    "apocalipse".to_owned()
 }
 fn default_bridge_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
@@ -406,12 +424,18 @@ impl Default for UserSettings {
             yt_dlp_path: None,
             qjs_path: None,
             n_m3u8dl_re_path: None,
-            aria2_path: None,
+            surge_path: None,
             extractor_path: None,
-            aria2_rpc_enabled: true,
-            aria2_rpc_auto_start: true,
-            aria2_rpc_port: None,
-            aria2_rpc_secret: default_aria2_rpc_secret(),
+            surge_enabled: true,
+            surge_auto_start: true,
+            surge_port: None,
+            surge_token: default_local_secret(),
+            transmission_daemon_path: None,
+            transmission_enabled: true,
+            transmission_auto_start: true,
+            transmission_port: None,
+            transmission_username: default_transmission_username(),
+            transmission_password: default_local_secret(),
             media_player_path: None,
             user_agent: None,
             log_editor_path: None,
@@ -2666,7 +2690,7 @@ struct ToolStatus {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Aria2RpcSettingsStatus {
+struct EngineRuntimeStatus {
     enabled: bool,
     auto_start: bool,
     configured_port: Option<u16>,
@@ -2977,13 +3001,20 @@ fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(fallback))
 }
 
-fn configured_aria2(settings: &UserSettings) -> PathBuf {
+fn configured_surge(settings: &UserSettings) -> PathBuf {
     configured_tool(
-        &settings.aria2_path,
+        &settings.surge_path,
+        if cfg!(windows) { "surge.exe" } else { "surge" },
+    )
+}
+
+fn configured_transmission_daemon(settings: &UserSettings) -> PathBuf {
+    configured_tool(
+        &settings.transmission_daemon_path,
         if cfg!(windows) {
-            "aria2c.exe"
+            "transmission-daemon.exe"
         } else {
-            "aria2c"
+            "transmission-daemon"
         },
     )
 }
@@ -3363,40 +3394,43 @@ fn maybe_auto_extract_completed(app: &tauri::AppHandle, id: DownloadId) {
     });
 }
 
-async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::Endpoint, String> {
+async fn surge_endpoint(state: &AppState, force_start: bool) -> Result<surge::Endpoint, String> {
     let settings = state
         .settings
         .lock()
         .map_err(|error| error.to_string())?
         .clone();
-    if !settings.aria2_rpc_enabled {
-        return Err("aria2_rpc_disabled".to_owned());
+    if !settings.surge_enabled {
+        return Err("surge_disabled".to_owned());
     }
-    let executable = configured_aria2(&settings);
+    let executable = configured_surge(&settings);
     let runtime_root = state
         .queue_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join("aria2-rpc");
+        .join("surge-server");
     let mut spawned = None;
     let endpoint = {
+        // Holding the lock across the reuse check and the spawn call is what
+        // prevents two concurrent callers from ever starting two surge.exe
+        // processes at once.
         let mut runtime = state
-            .aria2_runtime
+            .surge_runtime
             .lock()
             .map_err(|error| error.to_string())?;
-        let reuse = runtime.as_mut().is_some_and(aria2::Runtime::is_running);
+        let reuse = runtime.as_mut().is_some_and(surge::Runtime::is_running);
         if !reuse {
-            if !force_start && !settings.aria2_rpc_auto_start {
-                return Err("aria2_rpc_not_running".to_owned());
+            if !force_start && !settings.surge_auto_start {
+                return Err("surge_not_running".to_owned());
             }
             if let Some(current) = runtime.as_mut() {
                 current.terminate();
             }
-            *runtime = Some(aria2::Runtime::spawn(
+            *runtime = Some(surge::Runtime::spawn(
                 &executable,
                 &runtime_root,
-                settings.aria2_rpc_port,
-                &settings.aria2_rpc_secret,
+                settings.surge_port,
+                &settings.surge_token,
             )?);
             if let Some(current) = runtime.as_ref() {
                 spawned = Some((current.pid(), current.port()));
@@ -3404,14 +3438,14 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
         }
         runtime
             .as_ref()
-            .map(aria2::Runtime::endpoint)
-            .ok_or_else(|| "aria2_rpc_runtime_missing".to_owned())?
+            .map(surge::Runtime::endpoint)
+            .ok_or_else(|| "surge_runtime_missing".to_owned())?
     };
     if let Some((pid, port)) = spawned {
         diagnostic_log(
             state,
             "INFO",
-            "aria2.runtime_spawned",
+            "surge.runtime_spawned",
             &format!(
                 "pid={pid} parent_pid={} port={port} stop_with_parent=true",
                 std::process::id()
@@ -3422,8 +3456,8 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
     Ok(endpoint)
 }
 
-fn stop_aria2_runtime(state: &AppState) {
-    if let Ok(mut runtime) = state.aria2_runtime.lock() {
+fn stop_surge_runtime(state: &AppState) {
+    if let Ok(mut runtime) = state.surge_runtime.lock() {
         if let Some(runtime) = runtime.as_mut() {
             let pid = runtime.pid();
             let port = runtime.port();
@@ -3431,7 +3465,91 @@ fn stop_aria2_runtime(state: &AppState) {
             diagnostic_log(
                 state,
                 "INFO",
-                "aria2.runtime_stopped",
+                "surge.runtime_stopped",
+                &format!("pid={pid} port={port}"),
+            );
+        }
+        *runtime = None;
+    }
+}
+
+async fn transmission_endpoint(
+    state: &AppState,
+    force_start: bool,
+) -> Result<transmission::Endpoint, String> {
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    if !settings.transmission_enabled {
+        return Err("transmission_disabled".to_owned());
+    }
+    let executable = configured_transmission_daemon(&settings);
+    let runtime_root = state
+        .queue_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("transmission-daemon");
+    let mut spawned = None;
+    let endpoint = {
+        // Same single-flight guarantee as surge_endpoint: the lock stays
+        // held across the reuse check and the spawn call.
+        let mut runtime = state
+            .transmission_runtime
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let reuse = runtime
+            .as_mut()
+            .is_some_and(transmission::Runtime::is_running);
+        if !reuse {
+            if !force_start && !settings.transmission_auto_start {
+                return Err("transmission_not_running".to_owned());
+            }
+            if let Some(current) = runtime.as_mut() {
+                current.terminate();
+            }
+            *runtime = Some(transmission::Runtime::spawn(
+                &executable,
+                &runtime_root,
+                settings.transmission_port,
+                &settings.transmission_username,
+                &settings.transmission_password,
+            )?);
+            if let Some(current) = runtime.as_ref() {
+                spawned = Some((current.pid(), current.port()));
+            }
+        }
+        runtime
+            .as_ref()
+            .map(transmission::Runtime::endpoint)
+            .ok_or_else(|| "transmission_runtime_missing".to_owned())?
+    };
+    if let Some((pid, port)) = spawned {
+        diagnostic_log(
+            state,
+            "INFO",
+            "transmission.runtime_spawned",
+            &format!(
+                "pid={pid} parent_pid={} port={port} stop_with_parent=true",
+                std::process::id()
+            ),
+        );
+    }
+    endpoint.wait_ready().await?;
+    Ok(endpoint)
+}
+
+fn stop_transmission_runtime(state: &AppState) {
+    if let Ok(mut runtime) = state.transmission_runtime.lock() {
+        if let Some(runtime) = runtime.as_mut() {
+            let pid = runtime.pid();
+            let port = runtime.port();
+            runtime.terminate();
+            diagnostic_log(
+                state,
+                "INFO",
+                "transmission.runtime_stopped",
                 &format!("pid={pid} port={port}"),
             );
         }
@@ -3790,9 +3908,13 @@ fn reconnect_active_downloads_after_network_change(
         let _ = cancel.send(());
     }
     if !ids.is_empty() {
-        stop_aria2_runtime(&state);
-        if let Ok(mut aria2_tasks) = state.aria2_tasks.lock() {
-            aria2_tasks.clear();
+        stop_surge_runtime(&state);
+        stop_transmission_runtime(&state);
+        if let Ok(mut surge_tasks) = state.surge_tasks.lock() {
+            surge_tasks.clear();
+        }
+        if let Ok(mut transmission_tasks) = state.transmission_tasks.lock() {
+            transmission_tasks.clear();
         }
     }
     if current.is_some() {
@@ -4456,7 +4578,8 @@ async fn resolve_file_host_url(url: String) -> Result<FileHostResolution, String
 #[tauri::command]
 fn inspect_url(url: String) -> Result<PlanResponse, String> {
     let capabilities = Capabilities {
-        aria2: true,
+        surge: true,
+        transmission: true,
         yt_dlp: true,
         n_m3u8dl_re: true,
         torrent: false,
@@ -5640,7 +5763,7 @@ async fn log_network_route(state: &AppState, operation: &str, engine: &str) {
     }
 }
 
-fn aria2_request_context(state: &AppState, task: &DownloadTask) -> (aria2::RequestContext, usize) {
+fn surge_request_context(state: &AppState, task: &DownloadTask) -> surge::RequestContext {
     let settings = state
         .settings
         .lock()
@@ -5653,11 +5776,6 @@ fn aria2_request_context(state: &AppState, task: &DownloadTask) -> (aria2::Reque
         .ok()
         .and_then(|items| items.get(&task.id).cloned());
     let host_rule = host_rule_for_url(&settings, &task.source).cloned();
-    let connections = task
-        .connections_override
-        .or_else(|| host_rule.as_ref().and_then(|rule| rule.connections))
-        .unwrap_or(settings.connections_per_download)
-        .clamp(1, 32);
     let mut headers = HashMap::new();
     if let Some(referer) = task.referer.as_deref() {
         headers.insert("Referer".to_owned(), referer.to_owned());
@@ -5692,26 +5810,25 @@ fn aria2_request_context(state: &AppState, task: &DownloadTask) -> (aria2::Reque
         let basic = BASE64.encode(format!("{}:{}", credential.username, credential.password));
         headers.insert("Authorization".to_owned(), format!("Basic {basic}"));
     }
-    (
-        aria2::RequestContext {
-            method: identity
-                .as_ref()
-                .map(|value| value.request_method.clone())
-                .unwrap_or_else(|| "GET".to_owned()),
-            headers,
-            body: identity
-                .and_then(|value| value.request_body)
-                .unwrap_or_default(),
-        },
-        connections,
-    )
+    surge::RequestContext { headers }
 }
 
-async fn run_aria2_download(
+/// Returns just the `Cookie` header value, which is the one thing the
+/// Transmission RPC's `torrent_add` accepts (its `cookies` field) — BitTorrent
+/// itself has no concept of a user-agent/referer/basic-auth header.
+fn transmission_cookie_header(state: &AppState, task: &DownloadTask) -> Option<String> {
+    state
+        .request_identities
+        .lock()
+        .ok()
+        .and_then(|items| items.get(&task.id).cloned())
+        .and_then(|identity| identity.cookie_header)
+}
+
+async fn run_surge_download(
     app: tauri::AppHandle,
     id: DownloadId,
     task: DownloadTask,
-    kind: DownloadKind,
     mut cancellation: oneshot::Receiver<()>,
 ) {
     let state = app.state::<AppState>();
@@ -5724,14 +5841,14 @@ async fn run_aria2_download(
     let route_operation = id.to_string();
     tauri::async_runtime::spawn(async move {
         let state = route_app.state::<AppState>();
-        log_network_route(&state, &route_operation, "aria2").await;
+        log_network_route(&state, &route_operation, "surge").await;
     });
-    let endpoint = match aria2_endpoint(&state, false).await {
+    let endpoint = match surge_endpoint(&state, false).await {
         Ok(endpoint) => endpoint,
         Err(message) => {
             update_task(&app, id, true, |item| {
                 item.state = DownloadState::Failed {
-                    message: format!("aria2_unavailable:{message}"),
+                    message: format!("surge_unavailable:{message}"),
                 }
             });
             if let Ok(mut workers) = state.workers.lock() {
@@ -5741,18 +5858,18 @@ async fn run_aria2_download(
             return;
         }
     };
-    let (context, connections) = aria2_request_context(&state, &task);
+    let context = surge_request_context(&state, &task);
     let existing_task = state
-        .aria2_tasks
+        .surge_tasks
         .lock()
         .ok()
         .and_then(|items| items.get(&id).cloned());
-    let mut gid = match existing_task {
-        Some(gid) => {
-            if let Err(error) = endpoint.resume(&gid).await {
+    let surge_id = match existing_task {
+        Some(surge_id) => {
+            if let Err(error) = endpoint.resume(&surge_id).await {
                 update_task(&app, id, true, |item| {
                     item.state = DownloadState::Failed {
-                        message: format!("aria2_resume_failed:{error}"),
+                        message: format!("surge_resume_failed:{error}"),
                     }
                 });
                 if let Ok(mut workers) = state.workers.lock() {
@@ -5761,49 +5878,37 @@ async fn run_aria2_download(
                 start_next_queued(&app);
                 return;
             }
-            gid
+            surge_id
         }
-        None => {
-            let is_http = matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp);
-            let is_torrent = matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet);
-            match endpoint
-                .add_download(
-                    &task.source,
-                    &task.destination,
-                    connections,
-                    &task.torrent_selection,
-                    &context,
-                    is_http,
-                    is_torrent,
-                )
-                .await
-            {
-                Ok(gid) => {
-                    if let Ok(mut items) = state.aria2_tasks.lock() {
-                        items.insert(id, gid.clone());
-                    }
-                    gid
+        None => match endpoint
+            .add_download(&task.source, &task.destination, &context)
+            .await
+        {
+            Ok(surge_id) => {
+                if let Ok(mut items) = state.surge_tasks.lock() {
+                    items.insert(id, surge_id.clone());
                 }
-                Err(error) => {
-                    update_task(&app, id, true, |item| {
-                        item.state = DownloadState::Failed {
-                            message: format!("aria2_create_failed:{error}"),
-                        }
-                    });
-                    if let Ok(mut workers) = state.workers.lock() {
-                        workers.remove(&id);
-                    }
-                    start_next_queued(&app);
-                    return;
-                }
+                surge_id
             }
-        }
+            Err(error) => {
+                update_task(&app, id, true, |item| {
+                    item.state = DownloadState::Failed {
+                        message: format!("surge_create_failed:{error}"),
+                    }
+                });
+                if let Ok(mut workers) = state.workers.lock() {
+                    workers.remove(&id);
+                }
+                start_next_queued(&app);
+                return;
+            }
+        },
     };
     diagnostic_log(
         &state,
         "INFO",
-        "aria2.task_started",
-        &format!("task={id} gid={gid} engine={kind:?} connections={connections}"),
+        "surge.task_started",
+        &format!("task={id} surge_id={surge_id}"),
     );
     state.diagnostics.record(
         "http.engine_selected",
@@ -5811,16 +5916,7 @@ async fn run_aria2_download(
         None,
         Some(&id.to_string()),
         serde_json::json!({
-            "engine": "aria2-rpc",
-            "connections": connections,
-            "kind": format!("{kind:?}"),
-            "minSplitSize": "1M",
-            "fileAllocation": "none",
-            "torrentPreviewPriority": if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
-                Some("head=32M,tail=32M")
-            } else {
-                None
-            }
+            "engine": "surge",
         }),
     );
 
@@ -5832,115 +5928,60 @@ async fn run_aria2_download(
         tokio::select! {
             biased;
             _ = &mut cancellation => {
-                let _ = endpoint.pause(&gid).await;
-                diagnostic_log(&state, "INFO", "aria2.paused", &format!("task={id} gid={gid}"));
+                let _ = endpoint.pause(&surge_id).await;
+                diagnostic_log(&state, "INFO", "surge.paused", &format!("task={id} surge_id={surge_id}"));
                 return;
             }
             _ = interval.tick() => {
-                let status = match endpoint.status(&gid).await {
+                let status = match endpoint.status(&surge_id).await {
                     Ok(status) => status,
                     Err(error) => {
-                        diagnostic_log(&state, "WARN", "aria2.status_failed", &format!("task={id} error={error}"));
+                        diagnostic_log(&state, "WARN", "surge.status_failed", &format!("task={id} error={error}"));
                         continue;
                     }
-                };
-                if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet)
-                    && !status.followed_by.is_empty()
-                {
-                    let next_gid = status.followed_by[0].clone();
-                    diagnostic_log(
-                        &state,
-                        "INFO",
-                        "aria2.torrent_followed_by",
-                        &format!("task={id} metadata_gid={gid} content_gid={next_gid}"),
-                    );
-                    state.diagnostics.record(
-                        "aria2.torrent_followed_by",
-                        "INFO",
-                        None,
-                        Some(&id.to_string()),
-                        serde_json::json!({
-                            "metadataGid": gid,
-                            "contentGid": next_gid,
-                            "metadataBytes": status.downloaded,
-                            "metadataTotal": status.total
-                        }),
-                    );
-                    let previous_gid = std::mem::replace(&mut gid, next_gid.clone());
-                    if let Ok(mut items) = state.aria2_tasks.lock() {
-                        items.insert(id, next_gid);
-                    }
-                    let _ = endpoint.remove_result(&previous_gid).await;
-                    last_at = Instant::now();
-                    last_downloaded = 0;
-                    update_task(&app, id, true, |item| {
-                        item.received = 0;
-                        item.total = None;
-                        item.progress_percent = Some(0.0);
-                        item.download_speed = Some(0);
-                        item.upload_speed = Some(0);
-                        item.state = DownloadState::Downloading;
-                    });
-                    continue;
-                }
-                let peers = if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
-                    endpoint.peers(&gid).await.unwrap_or_default()
-                } else {
-                    aria2::PeerSummary::default()
                 };
                 let now = Instant::now();
                 let elapsed = now.duration_since(last_at).as_secs_f64().max(0.001);
                 let raw_speed = if status.downloaded >= last_downloaded {
                     ((status.downloaded - last_downloaded) as f64 / elapsed) as u64
                 } else {
-                    status.speed
+                    status.speed as u64
                 };
                 last_at = now;
                 last_downloaded = status.downloaded;
-                let percent = if status.total > 0 {
-                    Some((status.downloaded as f64 * 100.0 / status.total as f64).clamp(0.0, 100.0))
+                let percent = if status.total_size > 0 {
+                    Some((status.downloaded as f64 * 100.0 / status.total_size as f64).clamp(0.0, 100.0))
                 } else {
-                    None
-                };
-                let eta = if status.speed > 0 && status.total > status.downloaded {
-                    Some(format!("{}s", (status.total - status.downloaded) / status.speed))
-                } else {
-                    None
+                    Some(status.progress.clamp(0.0, 100.0))
                 };
                 update_task(&app, id, false, |item| {
                     item.received = status.downloaded;
-                    item.total = (status.total > 0).then_some(status.total);
+                    item.total = (status.total_size > 0).then_some(status.total_size);
                     item.progress_percent = percent;
-                    item.download_speed = Some(status.speed.max(raw_speed));
-                    item.upload_speed = Some(status.upload_speed);
-                    item.torrent_seeders = Some(status.seeders.max(peers.seeders));
-                    item.torrent_leechers = Some(peers.leechers);
-                    item.torrent_eta = eta.clone();
+                    item.download_speed = Some(status.speed.max(raw_speed as f64) as u64);
+                    item.upload_speed = Some(0);
                 });
                 state.diagnostics.record(
-                    if is_http_kind(kind) { "http.performance_sample" } else { "aria2.performance_sample" },
+                    "http.performance_sample",
                     "INFO",
                     None,
                     Some(&id.to_string()),
                     serde_json::json!({
-                        "engine": "aria2-rpc",
+                        "engine": "surge",
                         "bytesPerSecond": raw_speed,
                         "reportedBytesPerSecond": status.speed,
                         "receivedBytes": status.downloaded,
-                        "totalBytes": status.total,
+                        "totalBytes": status.total_size,
                         "progressPercent": percent,
                         "activeConnections": status.connections,
-                        "activePeers": peers.peers,
-                        "seeders": status.seeders.max(peers.seeders),
-                        "leechers": peers.leechers,
                         "sampleWindowMs": 350
                     }),
                 );
                 match status.status.as_str() {
-                    "complete" => {
+                    "completed" => {
                         update_task(&app, id, true, |item| {
-                            item.received = status.total.max(status.downloaded);
-                            item.total = Some(status.total.max(status.downloaded));
+                            item.received = status.total_size.max(status.downloaded);
+                            item.total = Some(status.total_size.max(status.downloaded));
                             item.progress_percent = Some(100.0);
                             item.download_speed = Some(0);
                             item.upload_speed = Some(0);
@@ -5948,20 +5989,24 @@ async fn run_aria2_download(
                             item.completed_at = Some(epoch_seconds());
                         });
                         maybe_auto_extract_completed(&app, id);
-                        let _ = endpoint.remove_result(&gid).await;
-                        if let Ok(mut items) = state.aria2_tasks.lock() {
+                        let _ = endpoint.remove(&surge_id).await;
+                        if let Ok(mut items) = state.surge_tasks.lock() {
                             items.remove(&id);
                         }
                         terminal = true;
                         break;
                     }
-                    "error" | "removed" => {
+                    "error" => {
                         update_task(&app, id, true, |item| {
                             item.state = DownloadState::Failed {
-                                message: "aria2_task_failed".to_owned(),
+                                message: if status.error.is_empty() {
+                                    "surge_task_failed".to_owned()
+                                } else {
+                                    format!("surge_task_failed:{}", status.error)
+                                },
                             };
                         });
-                        if let Ok(mut items) = state.aria2_tasks.lock() {
+                        if let Ok(mut items) = state.surge_tasks.lock() {
                             items.remove(&id);
                         }
                         terminal = true;
@@ -5989,8 +6034,218 @@ async fn run_aria2_download(
     }
 }
 
-fn is_http_kind(kind: DownloadKind) -> bool {
-    matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp)
+async fn run_transmission_download(
+    app: tauri::AppHandle,
+    id: DownloadId,
+    task: DownloadTask,
+    mut cancellation: oneshot::Receiver<()>,
+) {
+    let state = app.state::<AppState>();
+    update_task(&app, id, true, |item| {
+        item.state = DownloadState::Downloading;
+        item.progress_percent = Some(0.0);
+        item.resume_supported = Some(true);
+    });
+    let route_app = app.clone();
+    let route_operation = id.to_string();
+    tauri::async_runtime::spawn(async move {
+        let state = route_app.state::<AppState>();
+        log_network_route(&state, &route_operation, "transmission").await;
+    });
+    let endpoint = match transmission_endpoint(&state, false).await {
+        Ok(endpoint) => endpoint,
+        Err(message) => {
+            update_task(&app, id, true, |item| {
+                item.state = DownloadState::Failed {
+                    message: format!("transmission_unavailable:{message}"),
+                }
+            });
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    };
+    let cookie_header = transmission_cookie_header(&state, &task);
+    let existing_task = state
+        .transmission_tasks
+        .lock()
+        .ok()
+        .and_then(|items| items.get(&id).cloned());
+    let hash = match existing_task {
+        Some(hash) => {
+            if let Err(error) = endpoint.resume(&hash).await {
+                update_task(&app, id, true, |item| {
+                    item.state = DownloadState::Failed {
+                        message: format!("transmission_resume_failed:{error}"),
+                    }
+                });
+                if let Ok(mut workers) = state.workers.lock() {
+                    workers.remove(&id);
+                }
+                start_next_queued(&app);
+                return;
+            }
+            hash
+        }
+        None => {
+            let download_dir = task
+                .destination
+                .parent()
+                .unwrap_or_else(|| Path::new("."));
+            match endpoint
+                .add_download(&task.source, download_dir, cookie_header.as_deref(), true)
+                .await
+            {
+                Ok(hash) => {
+                    if let Ok(mut items) = state.transmission_tasks.lock() {
+                        items.insert(id, hash.clone());
+                    }
+                    hash
+                }
+                Err(error) => {
+                    update_task(&app, id, true, |item| {
+                        item.state = DownloadState::Failed {
+                            message: format!("transmission_create_failed:{error}"),
+                        }
+                    });
+                    if let Ok(mut workers) = state.workers.lock() {
+                        workers.remove(&id);
+                    }
+                    start_next_queued(&app);
+                    return;
+                }
+            }
+        }
+    };
+    diagnostic_log(
+        &state,
+        "INFO",
+        "transmission.task_started",
+        &format!("task={id} hash={hash}"),
+    );
+    state.diagnostics.record(
+        "torrent.engine_selected",
+        "INFO",
+        None,
+        Some(&id.to_string()),
+        serde_json::json!({
+            "engine": "transmission",
+            "sequentialDownload": true,
+        }),
+    );
+
+    let mut last_at = Instant::now();
+    let mut last_downloaded = 0_u64;
+    let mut interval = tokio::time::interval(Duration::from_millis(350));
+    let mut terminal = false;
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut cancellation => {
+                let _ = endpoint.pause(&hash).await;
+                diagnostic_log(&state, "INFO", "transmission.paused", &format!("task={id} hash={hash}"));
+                return;
+            }
+            _ = interval.tick() => {
+                let status = match endpoint.status(&hash).await {
+                    Ok(status) => status,
+                    Err(error) => {
+                        diagnostic_log(&state, "WARN", "transmission.status_failed", &format!("task={id} error={error}"));
+                        continue;
+                    }
+                };
+                let downloaded = status.downloaded();
+                let now = Instant::now();
+                let elapsed = now.duration_since(last_at).as_secs_f64().max(0.001);
+                let raw_speed = if downloaded >= last_downloaded {
+                    ((downloaded - last_downloaded) as f64 / elapsed) as u64
+                } else {
+                    status.rate_download
+                };
+                last_at = now;
+                last_downloaded = downloaded;
+                let percent = Some((status.percent_done * 100.0).clamp(0.0, 100.0));
+                let eta = (status.eta >= 0).then(|| format!("{}s", status.eta));
+                update_task(&app, id, false, |item| {
+                    item.received = downloaded;
+                    item.total = (status.total_size > 0).then_some(status.total_size);
+                    item.progress_percent = percent;
+                    item.download_speed = Some(status.rate_download.max(raw_speed));
+                    item.upload_speed = Some(status.rate_upload);
+                    item.torrent_seeders = None;
+                    item.torrent_leechers = None;
+                    item.torrent_eta = eta.clone();
+                });
+                state.diagnostics.record(
+                    "torrent.performance_sample",
+                    "INFO",
+                    None,
+                    Some(&id.to_string()),
+                    serde_json::json!({
+                        "engine": "transmission",
+                        "bytesPerSecond": raw_speed,
+                        "reportedBytesPerSecond": status.rate_download,
+                        "uploadBytesPerSecond": status.rate_upload,
+                        "receivedBytes": downloaded,
+                        "totalBytes": status.total_size,
+                        "progressPercent": percent,
+                        "peersConnected": status.peers_connected,
+                        "sampleWindowMs": 350
+                    }),
+                );
+                // tr_torrent_activity: 0=stopped, 4=downloading, 6=seeding.
+                if status.error != 0 {
+                    update_task(&app, id, true, |item| {
+                        item.state = DownloadState::Failed {
+                            message: if status.error_string.is_empty() {
+                                "transmission_task_failed".to_owned()
+                            } else {
+                                format!("transmission_task_failed:{}", status.error_string)
+                            },
+                        };
+                    });
+                    if let Ok(mut items) = state.transmission_tasks.lock() {
+                        items.remove(&id);
+                    }
+                    terminal = true;
+                    break;
+                }
+                if status.percent_done >= 1.0 && status.total_size > 0 {
+                    update_task(&app, id, true, |item| {
+                        item.received = status.total_size;
+                        item.total = Some(status.total_size);
+                        item.progress_percent = Some(100.0);
+                        item.download_speed = Some(0);
+                        item.state = DownloadState::Completed;
+                        item.completed_at = Some(epoch_seconds());
+                    });
+                    maybe_auto_extract_completed(&app, id);
+                    if let Ok(mut items) = state.transmission_tasks.lock() {
+                        items.remove(&id);
+                    }
+                    terminal = true;
+                    break;
+                }
+                if status.activity == 0 {
+                    update_task(&app, id, true, |item| {
+                        item.state = DownloadState::Paused;
+                        item.download_speed = Some(0);
+                        item.upload_speed = Some(0);
+                    });
+                    terminal = true;
+                    break;
+                }
+            }
+        }
+    }
+    if terminal {
+        if let Ok(mut workers) = state.workers.lock() {
+            workers.remove(&id);
+        }
+        start_next_queued(&app);
+    }
 }
 
 async fn run_external_download(
@@ -6068,7 +6323,6 @@ async fn run_external_download(
                         "N_m3u8DL-RE"
                     },
                 ),
-                configured_aria2(&settings),
                 settings.connections_per_download.clamp(1, 32),
                 settings
                     .proxy_enabled
@@ -6088,11 +6342,6 @@ async fn run_external_download(
                 "ffmpeg".into(),
                 "yt-dlp".into(),
                 "N_m3u8DL-RE".into(),
-                if cfg!(windows) {
-                    "aria2c.exe".into()
-                } else {
-                    "aria2c".into()
-                },
                 16,
                 None,
                 None,
@@ -6109,7 +6358,7 @@ async fn run_external_download(
     let task_connections = task
         .connections_override
         .or_else(|| host_rule.as_ref().and_then(|rule| rule.connections))
-        .unwrap_or(tools.4)
+        .unwrap_or(tools.3)
         .clamp(1, 32);
     diagnostic_log(
         &app.state::<AppState>(),
@@ -6119,8 +6368,8 @@ async fn run_external_download(
             "task={id} engine={kind:?} threads={} override={} proxy={} dns_servers={} selected_files={}",
             task_connections,
             task.connections_override.is_some(),
-            tools.5.is_some(),
-            tools.8.len(),
+            tools.4.is_some(),
+            tools.7.len(),
             task.torrent_selection.len(),
         ),
     );
@@ -6168,9 +6417,9 @@ async fn run_external_download(
         .or_else(|| identity.as_ref().and_then(|value| value.user_agent.as_deref()))
         .unwrap_or("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36");
     let proxy_url = tools
-        .5
+        .4
         .as_deref()
-        .map(|url| external_proxy_url(url, tools.6.as_deref(), tools.7.as_deref()));
+        .map(|url| external_proxy_url(url, tools.5.as_deref(), tools.6.as_deref()));
     let mut command = match kind {
         DownloadKind::MediaPage => {
             let mut command = tokio::process::Command::new(&tools.1);
@@ -6810,9 +7059,12 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "ytDlp": settings.yt_dlp_path.as_ref().is_some_and(|path| path.is_file()),
             "qjs": settings.qjs_path.as_ref().is_some_and(|path| path.is_file()),
             "nM3u8DlRe": settings.n_m3u8dl_re_path.as_ref().is_some_and(|path| path.is_file()),
-            "aria2": settings.aria2_path.as_ref().is_some_and(|path| path.is_file()),
-            "aria2RpcEnabled": settings.aria2_rpc_enabled,
-            "aria2RpcAutoStart": settings.aria2_rpc_auto_start,
+            "surge": settings.surge_path.as_ref().is_some_and(|path| path.is_file()),
+            "surgeEnabled": settings.surge_enabled,
+            "surgeAutoStart": settings.surge_auto_start,
+            "transmissionDaemon": settings.transmission_daemon_path.as_ref().is_some_and(|path| path.is_file()),
+            "transmissionEnabled": settings.transmission_enabled,
+            "transmissionAutoStart": settings.transmission_auto_start,
             "mediaPlayer": settings.media_player_path.as_ref().is_some_and(|path| path.is_file()),
         },
         "pairingTokenPresent": !settings.bridge_token.is_empty(),
@@ -6907,8 +7159,10 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "bridge"
         } else if event.starts_with("link.") || event.contains("link_transfer") {
             "link"
-        } else if event.starts_with("aria2.") {
-            "aria2"
+        } else if event.starts_with("surge.") {
+            "surge"
+        } else if event.starts_with("transmission.") {
+            "transmission"
         } else if event.starts_with("http.") {
             "http"
         } else if event.starts_with("thumbnail.") {
@@ -6973,9 +7227,15 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             }
         }
     }
-    let aria2_log = runtime_root.join("aria2-rpc").join("aria2.log");
-    if let Some(bytes) = read_sanitized_log_tail(&aria2_log, 1024 * 1024) {
-        entries.push(("engines/aria2-runtime.log".to_owned(), bytes));
+    let surge_log = runtime_root.join("surge-server").join("surge.log");
+    if let Some(bytes) = read_sanitized_log_tail(&surge_log, 1024 * 1024) {
+        entries.push(("engines/surge-runtime.log".to_owned(), bytes));
+    }
+    let transmission_log = runtime_root
+        .join("transmission-daemon")
+        .join("transmission-daemon.log");
+    if let Some(bytes) = read_sanitized_log_tail(&transmission_log, 1024 * 1024) {
+        entries.push(("engines/transmission-daemon.log".to_owned(), bytes));
     }
     let debugger_index = serde_json::json!({
         "format": "Apocalipse Forensic Debugger V4",
@@ -6991,7 +7251,8 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "browserExtension": "logs/by-component/extension-shortcuts-overlays.jsonl",
             "socialMedia": "social/player-debugger.jsonl",
             "link": "logs/by-component/link.jsonl",
-            "aria2": ["logs/by-component/aria2.jsonl", "engines/aria2-runtime.log"],
+            "surge": ["logs/by-component/surge.jsonl", "engines/surge-runtime.log"],
+            "transmission": ["logs/by-component/transmission.jsonl", "engines/transmission-daemon.log"],
             "http": "logs/by-component/http.jsonl",
             "externalMediaEngines": ["logs/by-component/external-media-engines.jsonl", "engines/"],
             "preview": "logs/by-component/preview.jsonl",
@@ -7944,27 +8205,22 @@ async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>
         })
         .collect::<Vec<_>>();
 
-    let aria2_path = configured_aria2(&settings);
-    let aria2_endpoint = {
-        let mut runtime = state
-            .aria2_runtime
-            .lock()
-            .map_err(|error| error.to_string())?;
-        if runtime.as_mut().is_some_and(aria2::Runtime::is_running) {
-            runtime.as_ref().map(aria2::Runtime::endpoint)
-        } else {
-            None
-        }
-    };
-    let aria2_version = match aria2_endpoint {
-        Some(endpoint) => endpoint.version().await.ok(),
-        None => None,
-    };
+    let surge_path = configured_surge(&settings);
+    let surge_version = version_line(&surge_path, ["--version"].as_slice());
     statuses.push(ToolStatus {
-        id: "aria2".to_owned(),
-        path: aria2_path.to_string_lossy().into_owned(),
-        found: aria2_path.is_file(),
-        version: aria2_version,
+        id: "surge".to_owned(),
+        path: surge_path.to_string_lossy().into_owned(),
+        found: surge_version.is_some(),
+        version: surge_version,
+    });
+
+    let transmission_path = configured_transmission_daemon(&settings);
+    let transmission_version = version_line(&transmission_path, ["--version"].as_slice());
+    statuses.push(ToolStatus {
+        id: "transmission-daemon".to_owned(),
+        path: transmission_path.to_string_lossy().into_owned(),
+        found: transmission_version.is_some(),
+        version: transmission_version,
     });
 
     let extractor = settings.extractor_path.clone().unwrap_or_default();
@@ -8012,7 +8268,8 @@ fn set_tool_paths(
     yt_dlp: String,
     qjs: String,
     n_m3u8dl_re: String,
-    aria2: String,
+    surge: String,
+    transmission_daemon: String,
     extractor: String,
 ) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
@@ -8020,15 +8277,14 @@ fn set_tool_paths(
     settings.yt_dlp_path = optional_path(yt_dlp);
     settings.qjs_path = optional_path(qjs);
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
-    settings.aria2_path = optional_path(aria2);
+    settings.surge_path = optional_path(surge);
+    settings.transmission_daemon_path = optional_path(transmission_daemon);
     settings.extractor_path = optional_path(extractor);
     save_settings(&state, &settings)
 }
 
 #[tauri::command]
-async fn get_aria2_rpc_settings(
-    state: State<'_, AppState>,
-) -> Result<Aria2RpcSettingsStatus, String> {
+async fn get_surge_settings(state: State<'_, AppState>) -> Result<EngineRuntimeStatus, String> {
     let settings = state
         .settings
         .lock()
@@ -8036,30 +8292,24 @@ async fn get_aria2_rpc_settings(
         .clone();
     let (connected, active_port, endpoint) = {
         let mut runtime = state
-            .aria2_runtime
+            .surge_runtime
             .lock()
             .map_err(|error| error.to_string())?;
-        let connected = runtime.as_mut().is_some_and(aria2::Runtime::is_running);
-        let active_port = if connected {
-            runtime.as_ref().map(aria2::Runtime::port)
-        } else {
-            None
-        };
-        let endpoint = if connected {
-            runtime.as_ref().map(aria2::Runtime::endpoint)
-        } else {
-            None
-        };
+        let connected = runtime.as_mut().is_some_and(surge::Runtime::is_running);
+        let active_port = connected.then(|| runtime.as_ref().map(surge::Runtime::port)).flatten();
+        let endpoint = connected
+            .then(|| runtime.as_ref().map(surge::Runtime::endpoint))
+            .flatten();
         (connected, active_port, endpoint)
     };
     let version = match endpoint {
-        Some(endpoint) => endpoint.version().await.ok(),
+        Some(endpoint) => endpoint.wait_ready().await.ok().map(|_| "connected".to_owned()),
         None => None,
     };
-    Ok(Aria2RpcSettingsStatus {
-        enabled: settings.aria2_rpc_enabled,
-        auto_start: settings.aria2_rpc_auto_start,
-        configured_port: settings.aria2_rpc_port,
+    Ok(EngineRuntimeStatus {
+        enabled: settings.surge_enabled,
+        auto_start: settings.surge_auto_start,
+        configured_port: settings.surge_port,
         connected,
         active_port,
         version,
@@ -8067,44 +8317,118 @@ async fn get_aria2_rpc_settings(
 }
 
 #[tauri::command]
-fn set_aria2_rpc_settings(
+fn set_surge_settings(
     state: State<'_, AppState>,
     enabled: bool,
     auto_start: bool,
     port: Option<u16>,
 ) -> Result<(), String> {
     if port.is_some_and(|port| port < 1024) {
-        return Err("aria2_rpc_port_invalid".to_owned());
+        return Err("surge_port_invalid".to_owned());
     }
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    let changed = settings.aria2_rpc_enabled != enabled
-        || settings.aria2_rpc_auto_start != auto_start
-        || settings.aria2_rpc_port != port;
-    settings.aria2_rpc_enabled = enabled;
-    settings.aria2_rpc_auto_start = auto_start;
-    settings.aria2_rpc_port = port;
+    let changed = settings.surge_enabled != enabled
+        || settings.surge_auto_start != auto_start
+        || settings.surge_port != port;
+    settings.surge_enabled = enabled;
+    settings.surge_auto_start = auto_start;
+    settings.surge_port = port;
     save_settings(&state, &settings)?;
     drop(settings);
     if changed {
-        stop_aria2_runtime(&state);
+        stop_surge_runtime(&state);
     }
     Ok(())
 }
 
 #[tauri::command]
-async fn test_aria2_rpc(state: State<'_, AppState>) -> Result<Aria2RpcSettingsStatus, String> {
-    let endpoint = aria2_endpoint(&state, true).await?;
-    endpoint.version().await?;
-    get_aria2_rpc_settings(state).await
+async fn test_surge(state: State<'_, AppState>) -> Result<EngineRuntimeStatus, String> {
+    let endpoint = surge_endpoint(&state, true).await?;
+    endpoint.wait_ready().await?;
+    get_surge_settings(state).await
 }
 
 #[tauri::command]
-fn regenerate_aria2_rpc_token(state: State<'_, AppState>) -> Result<(), String> {
+fn regenerate_surge_token(state: State<'_, AppState>) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    settings.aria2_rpc_secret = default_aria2_rpc_secret();
+    settings.surge_token = default_local_secret();
     save_settings(&state, &settings)?;
     drop(settings);
-    stop_aria2_runtime(&state);
+    stop_surge_runtime(&state);
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_transmission_settings(
+    state: State<'_, AppState>,
+) -> Result<EngineRuntimeStatus, String> {
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let (connected, active_port) = {
+        let mut runtime = state
+            .transmission_runtime
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let connected = runtime
+            .as_mut()
+            .is_some_and(transmission::Runtime::is_running);
+        let active_port = connected
+            .then(|| runtime.as_ref().map(transmission::Runtime::port))
+            .flatten();
+        (connected, active_port)
+    };
+    Ok(EngineRuntimeStatus {
+        enabled: settings.transmission_enabled,
+        auto_start: settings.transmission_auto_start,
+        configured_port: settings.transmission_port,
+        connected,
+        active_port,
+        version: connected.then(|| "connected".to_owned()),
+    })
+}
+
+#[tauri::command]
+fn set_transmission_settings(
+    state: State<'_, AppState>,
+    enabled: bool,
+    auto_start: bool,
+    port: Option<u16>,
+) -> Result<(), String> {
+    if port.is_some_and(|port| port < 1024) {
+        return Err("transmission_port_invalid".to_owned());
+    }
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    let changed = settings.transmission_enabled != enabled
+        || settings.transmission_auto_start != auto_start
+        || settings.transmission_port != port;
+    settings.transmission_enabled = enabled;
+    settings.transmission_auto_start = auto_start;
+    settings.transmission_port = port;
+    save_settings(&state, &settings)?;
+    drop(settings);
+    if changed {
+        stop_transmission_runtime(&state);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn test_transmission(state: State<'_, AppState>) -> Result<EngineRuntimeStatus, String> {
+    let endpoint = transmission_endpoint(&state, true).await?;
+    endpoint.wait_ready().await?;
+    get_transmission_settings(state).await
+}
+
+#[tauri::command]
+fn regenerate_transmission_credentials(state: State<'_, AppState>) -> Result<(), String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.transmission_password = default_local_secret();
+    save_settings(&state, &settings)?;
+    drop(settings);
+    stop_transmission_runtime(&state);
     Ok(())
 }
 
@@ -8290,15 +8614,22 @@ fn release_platform_architecture() -> Result<(&'static str, &'static str), Strin
     Ok((platform, architecture))
 }
 
-fn aria2_platform_asset_markers() -> Result<[&'static str; 3], String> {
+/// Matches SurgeDM/Surge's goreleaser asset naming:
+/// `Surge_{version}_{os}_{arch}.{zip|tar.gz}` (os/arch are literal Go
+/// GOOS/GOARCH strings, e.g. "windows"/"amd64", "darwin"/"arm64").
+fn surge_platform_asset_markers() -> Result<[&'static str; 3], String> {
     if cfg!(target_os = "windows") && cfg!(target_arch = "x86_64") {
-        Ok(["aria2c-windows", "x86_64", ".exe"])
+        Ok(["windows", "amd64", ".zip"])
     } else if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
-        Ok(["aria2c-linux", "x86_64", ""])
+        Ok(["linux", "amd64", ".tar.gz"])
+    } else if cfg!(target_os = "linux") && cfg!(target_arch = "aarch64") {
+        Ok(["linux", "arm64", ".tar.gz"])
+    } else if cfg!(target_os = "macos") && cfg!(target_arch = "x86_64") {
+        Ok(["darwin", "amd64", ".tar.gz"])
     } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-        Ok(["aria2c-macos", "arm64", ""])
+        Ok(["darwin", "arm64", ".tar.gz"])
     } else {
-        Err("manual_update_required:aria2".to_owned())
+        Err("manual_update_required:surge".to_owned())
     }
 }
 
@@ -8578,28 +8909,26 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             install_validated_executable(&bytes, &target, &["--version"])?;
             target
         }
-        "aria2" => {
-            let release =
-                github_latest_release(&client, "FerroDownload/aria2-static-builds").await?;
-            let suffix = match (platform, architecture) {
-                ("windows", "x86_64") => "windows-x64.exe",
-                ("windows", "aarch64") => "windows-arm64.exe",
-                ("linux", "x86_64") => "linux-x64",
-                ("linux", "aarch64") => "linux-arm64",
-                ("macos", "x86_64") => "macos-x64",
-                ("macos", "aarch64") => "macos-arm64",
-                _ => return Err("tool_download_platform_unsupported:aria2".to_owned()),
-            };
-            let (_, url) = release_asset(&release, |name| {
-                name.starts_with("aria2c-") && name.ends_with(suffix) && !name.ends_with(".sha256")
+        "surge" => {
+            let release = github_latest_release(&client, "SurgeDM/Surge").await?;
+            let markers = surge_platform_asset_markers()?;
+            let (asset_name, url) = release_asset(&release, |name| {
+                markers.iter().all(|marker| name.contains(marker))
             })?;
             let bytes = download_release_bytes(&client, &url).await?;
-            let target = tool_dir.join(if cfg!(windows) {
-                "aria2c.exe"
-            } else {
-                "aria2c"
-            });
-            install_validated_executable(&bytes, &target, &["--version"])?;
+            clean_directory(&tool_dir)?;
+            extract_release_archive(&bytes, &asset_name, &tool_dir)?;
+            let executable_name = if cfg!(windows) { "surge.exe" } else { "surge" };
+            let target = find_named_file(&tool_dir, executable_name, 0)
+                .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
+                    .map_err(|error| error.to_string())?;
+            }
+            version_line(&target, &["--version"])
+                .ok_or_else(|| "downloaded_tool_validation_failed".to_owned())?;
             target
         }
         "n-m3u8dl-re" => {
@@ -8860,7 +9189,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &settings.qjs_path,
                 if cfg!(windows) { "qjs.exe" } else { "qjs" },
             ),
-            "aria2" => configured_aria2(&settings),
+            "surge" => configured_surge(&settings),
             "n-m3u8dl-re" => configured_tool(
                 &settings.n_m3u8dl_re_path,
                 if cfg!(windows) {
@@ -8913,7 +9242,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
 
     {
         let (platform, architecture) = release_platform_architecture()?;
-        let aria2_markers = aria2_platform_asset_markers()?;
+        let surge_markers = surge_platform_asset_markers()?;
         let (repository, executable_name, asset_markers, version_args): (
             &str,
             &str,
@@ -8926,14 +9255,10 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &[],
                 &["--version"],
             ),
-            "aria2" => (
-                "Kenshin9977/aria2",
-                if cfg!(windows) {
-                    "aria2c.exe"
-                } else {
-                    "aria2c"
-                },
-                aria2_markers.as_slice(),
+            "surge" => (
+                "SurgeDM/Surge",
+                if cfg!(windows) { "surge.exe" } else { "surge" },
+                surge_markers.as_slice(),
                 &["--version"],
             ),
             "n-m3u8dl-re" => (
@@ -9030,7 +9355,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                         }
                         _ => false,
                     },
-                    "aria2" => asset_markers
+                    "surge" => asset_markers
                         .iter()
                         .all(|marker| name.contains(&marker.to_ascii_lowercase())),
                     _ => asset_markers
@@ -9061,7 +9386,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         let temporary =
             std::env::temp_dir().join(format!("apocalipse-tool-update-{}", uuid::Uuid::new_v4()));
         let (replacement, ffprobe_replacement) =
-            if id == "qjs" || id == "aria2" || (id == "ffmpeg" && platform == "macos") {
+            if id == "qjs" || (id == "ffmpeg" && platform == "macos") {
                 let ffprobe_replacement = if id == "ffmpeg" {
                     let marker = "x64";
                     let expected = format!("ffprobe-darwin-{marker}");
@@ -9124,8 +9449,8 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         if replacement.len() < 32_768 || (id == "ffmpeg" && ffprobe_replacement.len() < 32_768) {
             return Err(format!("replacement_executable_invalid:{asset_name}"));
         }
-        if id == "aria2" {
-            stop_aria2_runtime(&state);
+        if id == "surge" {
+            stop_surge_runtime(&state);
         }
         let parent = executable
             .parent()
@@ -9291,49 +9616,41 @@ async fn inspect_torrent_metadata(
         return result;
     }
 
-    let endpoint = aria2_endpoint(&state, true).await?;
+    let endpoint = transmission_endpoint(&state, true).await?;
     let inspection_root = state
         .queue_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join("aria2-metadata-inspection")
+        .join("transmission-metadata-inspection")
         .join(uuid::Uuid::new_v4().simple().to_string());
     fs::create_dir_all(&inspection_root).map_err(|error| error.to_string())?;
-    let gid = endpoint
-        .add_metadata_only(&source, &inspection_root)
+    let hash = endpoint
+        .add_download_with_options(&source, &inspection_root, None, false, true)
         .await?;
     let mut resolved_files = Vec::new();
     for _ in 0..120 {
-        if let Ok(files) = endpoint.files(&gid).await {
-            if !files.is_empty() && files.iter().any(|file| file.size > 0) {
+        if let Ok(files) = endpoint.files(&hash).await {
+            if !files.is_empty() && files.iter().any(|(_, length)| *length > 0) {
                 resolved_files = files;
                 break;
             }
         }
-        if let Ok(status) = endpoint.status(&gid).await {
-            if matches!(status.status.as_str(), "error" | "removed") {
+        if let Ok(status) = endpoint.status(&hash).await {
+            if status.error != 0 {
                 break;
             }
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    let _ = endpoint.remove(&gid).await;
-    let _ = endpoint.remove_result(&gid).await;
+    let _ = endpoint.remove(&hash, true).await;
 
     let files = resolved_files
         .into_iter()
-        .map(|file| {
-            let path = PathBuf::from(&file.path);
-            let relative = path
-                .strip_prefix(&inspection_root)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .replace('\\', "/");
-            TorrentFileInfo {
-                index: file.index,
-                path: relative,
-                size: file.size,
-            }
+        .enumerate()
+        .map(|(index, (name, length))| TorrentFileInfo {
+            index,
+            path: name.replace('\\', "/"),
+            size: length,
         })
         .collect::<Vec<_>>();
     let _ = fs::remove_dir_all(&inspection_root);
@@ -9888,33 +10205,45 @@ fn start_download(
             "INFO",
             "http.native_compatibility_route",
             &format!(
-                "task={} reason=aria2_rpc_compatibility host={}",
+                "task={} reason=surge_compatibility host={}",
                 task.id,
                 host_from_url(&task.source).unwrap_or_default()
             ),
         );
     }
-    if !native_http_compatibility
-        && matches!(
-            kind,
-            DownloadKind::Http
-                | DownloadKind::AcceleratedHttp
-                | DownloadKind::Torrent
-                | DownloadKind::Magnet
-                | DownloadKind::Ftp
-        )
-    {
+    if kind == DownloadKind::Ftp {
+        update_task(&app, task.id, true, |item| {
+            item.state = DownloadState::Failed {
+                message: "ftp_unsupported".to_owned(),
+            };
+        });
+        if let Ok(mut workers) = state.workers.lock() {
+            workers.remove(&task.id);
+        }
+        start_next_queued(&app);
+        return Ok(());
+    }
+    if !native_http_compatibility && matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp) {
         diagnostic_log(
             state,
             "INFO",
-            "aria2.dispatched",
+            "surge.dispatched",
             &format!("task={} engine={kind:?}", task.id),
         );
-        tauri::async_runtime::spawn(run_aria2_download(
+        tauri::async_runtime::spawn(run_surge_download(app.clone(), task.id, task, cancelled));
+        return Ok(());
+    }
+    if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
+        diagnostic_log(
+            state,
+            "INFO",
+            "transmission.dispatched",
+            &format!("task={} engine={kind:?}", task.id),
+        );
+        tauri::async_runtime::spawn(run_transmission_download(
             app.clone(),
             task.id,
             task,
-            kind,
             cancelled,
         ));
         return Ok(());
@@ -12638,37 +12967,36 @@ async fn remove_downloads(
         .cloned()
         .collect::<Vec<_>>();
 
-    let aria2_targets = {
-        let aria2_tasks = state
-            .aria2_tasks
+    let surge_targets = {
+        let surge_tasks = state
+            .surge_tasks
             .lock()
             .map_err(|error| error.to_string())?;
         removed
             .iter()
             .filter_map(|task| {
-                aria2_tasks
+                surge_tasks
                     .get(&task.id)
                     .cloned()
-                    .map(|gid| (task.clone(), gid))
+                    .map(|surge_id| (task.clone(), surge_id))
             })
             .collect::<Vec<_>>()
     };
-    if !aria2_targets.is_empty() {
-        match aria2_endpoint(&state, true).await {
+    if !surge_targets.is_empty() {
+        match surge_endpoint(&state, true).await {
             Ok(endpoint) => {
-                for (task, gid) in &aria2_targets {
-                    let _ = endpoint.remove(gid).await;
-                    let _ = endpoint.remove_result(gid).await;
-                    if let Ok(mut items) = state.aria2_tasks.lock() {
+                for (task, surge_id) in &surge_targets {
+                    let _ = endpoint.remove(surge_id).await;
+                    if let Ok(mut items) = state.surge_tasks.lock() {
                         items.remove(&task.id);
                     }
                     state.diagnostics.record(
-                        "aria2.task_removed",
+                        "surge.task_removed",
                         "INFO",
                         Some(&removal_trace),
                         Some(&task.id.to_string()),
                         serde_json::json!({
-                            "gid": gid,
+                            "surgeId": surge_id,
                             "deleteFiles": delete_files
                         }),
                     );
@@ -12679,7 +13007,53 @@ async fn remove_downloads(
                 diagnostic_log(
                     &state,
                     "WARN",
-                    "aria2.remove_unavailable",
+                    "surge.remove_unavailable",
+                    &format!("error={error}"),
+                );
+            }
+        }
+    }
+    let transmission_targets = {
+        let transmission_tasks = state
+            .transmission_tasks
+            .lock()
+            .map_err(|error| error.to_string())?;
+        removed
+            .iter()
+            .filter_map(|task| {
+                transmission_tasks
+                    .get(&task.id)
+                    .cloned()
+                    .map(|hash| (task.clone(), hash))
+            })
+            .collect::<Vec<_>>()
+    };
+    if !transmission_targets.is_empty() {
+        match transmission_endpoint(&state, true).await {
+            Ok(endpoint) => {
+                for (task, hash) in &transmission_targets {
+                    let _ = endpoint.remove(hash, delete_files).await;
+                    if let Ok(mut items) = state.transmission_tasks.lock() {
+                        items.remove(&task.id);
+                    }
+                    state.diagnostics.record(
+                        "transmission.task_removed",
+                        "INFO",
+                        Some(&removal_trace),
+                        Some(&task.id.to_string()),
+                        serde_json::json!({
+                            "hash": hash,
+                            "deleteFiles": delete_files
+                        }),
+                    );
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+            Err(error) => {
+                diagnostic_log(
+                    &state,
+                    "WARN",
+                    "transmission.remove_unavailable",
                     &format!("error={error}"),
                 );
             }
@@ -12734,7 +13108,10 @@ async fn remove_downloads(
     if let Ok(mut identities) = state.request_identities.lock() {
         identities.retain(|id, _| !ids.contains(id));
     }
-    if let Ok(mut mappings) = state.aria2_tasks.lock() {
+    if let Ok(mut mappings) = state.surge_tasks.lock() {
+        mappings.retain(|id, _| !ids.contains(id));
+    }
+    if let Ok(mut mappings) = state.transmission_tasks.lock() {
         mappings.retain(|id, _| !ids.contains(id));
     }
     save_queue(&state, &queue)?;
@@ -12759,10 +13136,6 @@ async fn remove_downloads(
 fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
     let partial = partial_path(&task.destination);
     let mut paths = vec![task.destination.clone(), partial];
-    let aria2_control = PathBuf::from(format!("{}.aria2", task.destination.display()));
-    if !paths.contains(&aria2_control) {
-        paths.push(aria2_control);
-    }
 
     let recording_source = PathBuf::from(&task.source);
     if task.source.ends_with(".recording.webm") && recording_source.is_absolute() {
@@ -12842,14 +13215,24 @@ fn main() {
             let log_path = app_data.join("logs").join("apocalipse.log");
             let mut initial_settings =
                 load_settings(&settings_path).map_err(std::io::Error::other)?;
-            if initial_settings.aria2_path.is_none() {
-                let aria2_dir = app_data.join("tools").join("aria2");
-                fs::create_dir_all(&aria2_dir)?;
-                initial_settings.aria2_path = Some(aria2_dir.join(if cfg!(windows) {
-                    "aria2c.exe"
-                } else {
-                    "aria2c"
-                }));
+            if initial_settings.surge_path.is_none() {
+                let surge_dir = app_data.join("tools").join("surge");
+                fs::create_dir_all(&surge_dir)?;
+                initial_settings.surge_path = Some(
+                    surge_dir.join(if cfg!(windows) { "surge.exe" } else { "surge" }),
+                );
+                write_settings(&settings_path, &initial_settings).map_err(std::io::Error::other)?;
+            }
+            if initial_settings.transmission_daemon_path.is_none() {
+                let transmission_dir = app_data.join("tools").join("transmission");
+                fs::create_dir_all(&transmission_dir)?;
+                initial_settings.transmission_daemon_path = Some(transmission_dir.join(
+                    if cfg!(windows) {
+                        "transmission-daemon.exe"
+                    } else {
+                        "transmission-daemon"
+                    },
+                ));
                 write_settings(&settings_path, &initial_settings).map_err(std::io::Error::other)?;
             }
             let (show_label, quit_label) = tray_labels(&initial_settings.language);
@@ -12892,8 +13275,10 @@ fn main() {
                 recording_stops: Mutex::new(HashSet::new()),
                 request_identities: Mutex::new(HashMap::new()),
                 link_transfers: Mutex::new(HashMap::new()),
-                aria2_runtime: Mutex::new(None),
-                aria2_tasks: Mutex::new(HashMap::new()),
+                surge_runtime: Mutex::new(None),
+                surge_tasks: Mutex::new(HashMap::new()),
+                transmission_runtime: Mutex::new(None),
+                transmission_tasks: Mutex::new(HashMap::new()),
                 log_path,
                 log_write_lock: Mutex::new(()),
                 diagnostics: diagnostics::Diagnostics::new(&app_data.join("logs")),
@@ -13016,10 +13401,14 @@ fn main() {
             open_paypal_donation,
             get_tool_statuses,
             set_tool_paths,
-            get_aria2_rpc_settings,
-            set_aria2_rpc_settings,
-            test_aria2_rpc,
-            regenerate_aria2_rpc_token,
+            get_surge_settings,
+            set_surge_settings,
+            test_surge,
+            regenerate_surge_token,
+            get_transmission_settings,
+            set_transmission_settings,
+            test_transmission,
+            regenerate_transmission_credentials,
             get_media_player,
             get_app_version,
             check_app_update,
