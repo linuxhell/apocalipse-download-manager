@@ -10,3 +10,4 @@
 /apocalipse-*.zip
 /apocalipse-firefox-*-unsigned*.xpi
 *.log
+/apps/desktop/src-tauri/gen/
