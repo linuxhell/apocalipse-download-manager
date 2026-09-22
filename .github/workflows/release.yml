@@ -230,10 +230,10 @@ jobs:
           signed_parts=(packaging/firefox/apocalipse-firefox-${version}.xpi.b64.part*)
           if [[ ! -f "$signed" && ${#signed_parts[@]} -gt 0 ]]; then
             cat "${signed_parts[@]}" | base64 --decode > "$signed"
-            echo "d5727cf6629de6c8f9e24e4e20bd3645560172b67bc8b7fffb2019f83ed27752  $signed" | sha256sum -c -
+            echo "7e15b613df5389ef03bc608cea7658d891af72c3100474c82918398c35ee938e  $signed" | sha256sum -c -
           fi
           if [[ -f "$signed" ]]; then
-            echo "d5727cf6629de6c8f9e24e4e20bd3645560172b67bc8b7fffb2019f83ed27752  $signed" | sha256sum -c -
+            echo "7e15b613df5389ef03bc608cea7658d891af72c3100474c82918398c35ee938e  $signed" | sha256sum -c -
             cp "$signed" "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
           else
             cp -R browser-extension "$stage/firefox"
@@ -288,7 +288,48 @@ jobs:
             tagged_commit=$(git rev-parse 'FETCH_HEAD^{commit}')
             if [[ "$tagged_commit" != "$GITHUB_SHA" ]]; then
               changed_paths=$(git diff --name-only "$tagged_commit..$GITHUB_SHA")
-              invalid_paths=$(printf '%s\n' "$changed_paths" | grep -Ev '^(\.github/workflows/release\.yml|packaging/firefox/apocalipse-firefox-0\.3\.167\.xpi|packaging/release-trigger-0\.4\.71\.txt)$' || true)
+              invalid_paths=$(printf '%s\n' "$changed_paths" | grep -Ev '^(\.github/workflows/release\.yml|apps/desktop/ui/index\.html|apps/desktop/ui/app\.js|packaging/firefox/apocalipse-firefox-0\.3\.173\.xpi\.b64\.part[0-9]+|packaging/release-notes-v0\.4\.73\.md)
+              if [[ -n "$invalid_paths" ]]; then
+                echo "::error::$tag belongs to another product commit. Only release packaging changes may reuse the existing tag."
+                printf '%s\n' "$invalid_paths"
+                exit 1
+              fi
+              echo "::notice::Recreating assets for existing $tag without moving the tag."
+            fi
+          else
+            status=$?
+            if [[ "$status" -ne 2 ]]; then
+              echo "::error::Could not check the remote release tag."
+              exit "$status"
+            fi
+            git tag "$tag" "$GITHUB_SHA"
+            git push origin "refs/tags/$tag"
+          fi
+
+          if is_draft=$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null); then
+            if [[ "$is_draft" != true ]]; then
+              echo "::notice::$tag already exists; replacing its assets."
+            fi
+          else
+            prerelease=()
+            if [[ "$version" == *-* ]]; then
+              prerelease=(--prerelease)
+            fi
+            gh release create "$tag" --verify-tag --notes-file "packaging/release-notes-v${version}.md" --draft "${prerelease[@]}"
+          fi
+
+          (cd dist && sha256sum apocalipse-*) > dist/SHA256SUMS.txt
+          gh release upload "$tag" dist/* --clobber
+          gh release edit "$tag" --notes-file "packaging/release-notes-v${version}.md" --draft=false
+
+          # Remove the explicitly superseded public release only after the new
+          # release has been fully uploaded and published.
+          old_tag="v0.4.32"
+          if [[ "$old_tag" != "$tag" ]] && gh release view "$old_tag" >/dev/null 2>&1; then
+            gh release delete "$old_tag" --cleanup-tag --yes
+          fi
+
+ || true)
               if [[ -n "$invalid_paths" ]]; then
                 echo "::error::$tag belongs to another product commit. Only release packaging changes may reuse the existing tag."
                 printf '%s\n' "$invalid_paths"
