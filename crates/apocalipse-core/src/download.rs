@@ -2597,6 +2597,29 @@ mod tests {
     }
 
     #[test]
+    fn iso_files_use_the_same_crash_safe_resume_artifacts_as_other_large_files() {
+        let destination = Path::new("windows-install-media.iso");
+        assert_eq!(
+            partial_path(destination),
+            PathBuf::from("windows-install-media.iso.part")
+        );
+
+        let resume_slots = journal_slot_paths(destination, "resume");
+        let segment_slots = journal_slot_paths(destination, "segments");
+        let directory = chunk_directory(destination);
+        assert_eq!(resume_slots[0], directory.join("resume-a.json"));
+        assert_eq!(resume_slots[1], directory.join("resume-b.json"));
+        assert_eq!(segment_slots[0], directory.join("segments-a.json"));
+        assert_eq!(segment_slots[1], directory.join("segments-b.json"));
+
+        let eight_gib = 8_u64 * 1024 * 1024 * 1024;
+        assert_eq!(
+            content_range_total(&format!("bytes 0-0/{eight_gib}")),
+            Some(eight_gib)
+        );
+    }
+
+    #[test]
     fn adaptive_chunk_names_do_not_collide_with_legacy_segments() {
         assert_eq!(
             chunk_path(Path::new("image.iso"), 42),
