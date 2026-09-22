@@ -7449,6 +7449,37 @@ fn suggested_download_name(source: &str) -> String {
     }
 }
 
+/// Windows treats these device names as reserved regardless of case or
+/// extension (`CON.txt`, `com1.tar.gz`, ...); matching is against the
+/// component before the first `.`, as Windows itself does.
+fn windows_reserved_file_stem(name: &str) -> bool {
+    let base = name.split('.').next().unwrap_or(name);
+    matches!(
+        base.to_ascii_uppercase().as_str(),
+        "CON" | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
+}
+
 fn validate_file_name(name: &str) -> Result<String, String> {
     let name = name.trim();
     if name.is_empty()
@@ -7460,6 +7491,12 @@ fn validate_file_name(name: &str) -> Result<String, String> {
     {
         return Err("invalid_file_name".to_owned());
     }
+    let name = if windows_reserved_file_stem(name) {
+        format!("_{name}")
+    } else {
+        name.to_owned()
+    };
+    let name = name.as_str();
     // Keep enough headroom for yt-dlp's temporary format suffixes and for the
     // Windows legacy MAX_PATH limit. Preserve the extension while shortening
     // unusually long titles from social networks.
@@ -13162,6 +13199,18 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn validate_file_name_escapes_windows_reserved_device_names() {
+        assert_eq!(validate_file_name("CON").unwrap(), "_CON");
+        assert_eq!(validate_file_name("con.txt").unwrap(), "_con.txt");
+        assert_eq!(validate_file_name("Com1.tar.gz").unwrap(), "_Com1.tar.gz");
+        assert_eq!(validate_file_name("lpt9").unwrap(), "_lpt9");
+        assert_eq!(validate_file_name("nul").unwrap(), "_nul");
+        assert_eq!(validate_file_name("normal-video.mp4").unwrap(), "normal-video.mp4");
+        assert_eq!(validate_file_name("Concert.mp4").unwrap(), "Concert.mp4");
+        assert_eq!(validate_file_name("COM10.mp4").unwrap(), "COM10.mp4");
+    }
 
     #[test]
     fn yt_dlp_credential_config_quotes_special_characters_and_round_trips() {
