@@ -3701,6 +3701,50 @@ fn write_social_cookie_jar(path: &Path, url: &str, header: &str) -> Result<(), S
     fs::write(path, jar).map_err(|error| error.to_string())
 }
 
+/// Quotes a value the way yt-dlp's config-file parser (POSIX shlex) expects,
+/// so it survives as a single argument even if it contains spaces or quotes.
+fn shell_config_quote(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | '/' | ':' | '@'))
+    {
+        return value.to_owned();
+    }
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('\'');
+    for character in value.chars() {
+        if character == '\'' {
+            quoted.push_str("'\\''");
+        } else {
+            quoted.push(character);
+        }
+    }
+    quoted.push('\'');
+    quoted
+}
+
+/// Writes yt-dlp `--username`/`--password` as a `--config-location` file
+/// instead of passing the secret on argv, where it would be visible to other
+/// local users via `ps`/`/proc/<pid>/cmdline` for the life of the process.
+fn write_yt_dlp_credential_config(path: &Path, username: &str, password: &str) -> Result<(), String> {
+    let contents = format!(
+        "--username {}\n--password {}\n",
+        shell_config_quote(username),
+        shell_config_quote(password)
+    );
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).map_err(|error| error.to_string())?;
+    file.write_all(contents.as_bytes())
+        .map_err(|error| error.to_string())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DestinationChoice {
@@ -4525,12 +4569,21 @@ async fn inspect_media_formats(
                 .unwrap_or_else(|| "none".to_owned()),
         ),
     );
-    if let Some(credential) = credential {
-        command
-            .arg("--username")
-            .arg(credential.username)
-            .arg("--password")
-            .arg(credential.password);
+    let credential_config = credential.as_ref().and_then(|credential| {
+        let path = state
+            .queue_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(format!("inspect-credentials-{}.txt", uuid::Uuid::new_v4()));
+        write_yt_dlp_credential_config(&path, &credential.username, &credential.password)
+            .ok()
+            .map(|_| path)
+    });
+    if let Some(path) = credential_config.as_ref() {
+        command.arg("--config-location").arg(path);
+    }
+    if let Some(mut credential) = credential {
+        credential.password.zeroize();
     }
     #[cfg(target_os = "windows")]
     {
@@ -4542,6 +4595,9 @@ async fn inspect_media_formats(
         .await
         .map_err(|error| format!("yt_dlp_unavailable: {error}"))?;
     if let Some(path) = cookie_jar {
+        let _ = fs::remove_file(path);
+    }
+    if let Some(path) = credential_config {
         let _ = fs::remove_file(path);
     }
     if !output.status.success() {
@@ -6226,11 +6282,22 @@ async fn run_external_download(
             ]);
             command.args(["--user-agent", user_agent]);
             if let Some(credential) = website_credential.as_ref() {
-                command
-                    .arg("--username")
-                    .arg(&credential.username)
-                    .arg("--password")
-                    .arg(&credential.password);
+                let credential_config = media_work_directory
+                    .as_deref()
+                    .map(|directory| directory.join("yt-dlp-credentials.txt"))
+                    .filter(|path| {
+                        write_yt_dlp_credential_config(path, &credential.username, &credential.password)
+                            .is_ok()
+                    });
+                if let Some(path) = credential_config.as_ref() {
+                    command.arg("--config-location").arg(path);
+                } else {
+                    command
+                        .arg("--username")
+                        .arg(&credential.username)
+                        .arg("--password")
+                        .arg(&credential.password);
+                }
             }
             if let Some(referer) = task.referer.as_deref() {
                 command.args(["--referer", referer]);
@@ -13095,6 +13162,34 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn yt_dlp_credential_config_quotes_special_characters_and_round_trips() {
+        assert_eq!(shell_config_quote("plainuser"), "plainuser");
+        assert_eq!(shell_config_quote("a b"), "'a b'");
+        assert_eq!(shell_config_quote("it's a p'wd"), "'it'\\''s a p'\\''wd'");
+        assert_eq!(shell_config_quote(""), "''");
+
+        let directory = std::env::temp_dir().join(format!(
+            "apocalipse-credential-config-test-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).expect("create temp dir");
+        let path = directory.join("config.txt");
+        write_yt_dlp_credential_config(&path, "user name", "p@ss 'word'").expect("write config");
+        let contents = fs::read_to_string(&path).expect("read config");
+        assert_eq!(
+            contents,
+            "--username 'user name'\n--password 'p@ss '\\''word'\\'''\n"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&path).expect("metadata").permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let _ = fs::remove_dir_all(&directory);
+    }
 
     #[test]
     fn extractor_detection_and_safe_destination_arguments_are_cross_platform() {
