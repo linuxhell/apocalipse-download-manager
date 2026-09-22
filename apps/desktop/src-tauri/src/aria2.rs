@@ -95,6 +95,34 @@ impl Runtime {
             return Err("aria2_not_found".to_owned());
         }
         fs::create_dir_all(runtime_root).map_err(|error| error.to_string())?;
+        // Reserving a loopback port and releasing it before aria2c binds the
+        // same one is an inherent TOCTOU race (another process can grab it
+        // first). We can't hand the bound socket to an external process, so
+        // instead retry with a freshly picked port a few times when nothing
+        // pinned the port explicitly and the child dies immediately after
+        // spawn, which is the observable symptom of losing that race.
+        let attempts = if requested_port.is_some() { 1 } else { 4 };
+        let mut last_error = String::new();
+        for attempt in 0..attempts {
+            match Self::spawn_once(executable, runtime_root, requested_port, secret) {
+                Ok(runtime) => return Ok(runtime),
+                Err(error) => {
+                    last_error = error;
+                    if attempt + 1 < attempts {
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                }
+            }
+        }
+        Err(last_error)
+    }
+
+    fn spawn_once(
+        executable: &Path,
+        runtime_root: &Path,
+        requested_port: Option<u16>,
+        secret: &str,
+    ) -> Result<Self, String> {
         let port = reserve_loopback_port(requested_port)?;
         let session = runtime_root.join("aria2.session");
         if !session.exists() {
@@ -129,7 +157,15 @@ impl Runtime {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000);
         }
-        let child = command.spawn().map_err(|error| error.to_string())?;
+        let mut child = command.spawn().map_err(|error| error.to_string())?;
+        // A port lost to another process between reservation and bind makes
+        // aria2c exit almost immediately; catch that here so the caller can
+        // retry with a different port instead of waiting out the full RPC
+        // readiness timeout for a process that already died.
+        std::thread::sleep(Duration::from_millis(150));
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(format!("aria2_exited_early:{status}"));
+        }
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(2))
             .timeout(Duration::from_secs(15))
