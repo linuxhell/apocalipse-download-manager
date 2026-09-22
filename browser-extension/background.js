@@ -237,7 +237,7 @@ if (chrome.webRequest?.onResponseStarted) {
     const requestHost = (() => { try { return new URL(details.url).hostname.toLowerCase(); } catch { return ""; } })();
     const initiatorHost = (() => { try { return new URL(details.initiator || "").hostname.toLowerCase(); } catch { return ""; } })();
     const siteKey = host => host.split('.').slice(-2).join('.');
-    const socialHost = /(?:^|\.)(?:tiktok\.com|tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com|facebook\.com|fbcdn\.net|fbsbx\.com|instagram\.com|cdninstagram\.com)$/i.test(requestHost);
+    const socialHost = /(?:^|\.)(?:tiktok\.com|tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com|facebook\.com|fbcdn\.net|fbsbx\.com|instagram\.com|cdninstagram\.com|soundcloud\.com|sndcdn\.com)$/i.test(requestHost);
     const sameSiteHost = Boolean(requestHost && initiatorHost && siteKey(requestHost) === siteKey(initiatorHost));
     const mediaResponse = /^(?:video|audio)\//i.test(contentType)
       || /(?:\/video\/tos\/|\/aweme\/v1\/play\/|mime_type=video|\.mp4(?:$|[?]))/i.test(details.url);
@@ -804,7 +804,11 @@ async function takeBrowserDownload(item, eraseFromHistory = false, resolvedFileN
     return false;
   }
   const forced = forceIsActive(modifierTabId);
-  const browserAssisted = disposable && !forced;
+  // Disposable links are consumed by their first request, no matter who makes
+  // it. "Force" must never override this: resending the same disposable URL
+  // to the desktop after Chrome already consumed it commonly produces a 404,
+  // so a disposable link always takes the browser-assisted path.
+  const browserAssisted = disposable;
   void diagnostic("browser_download.detected", state, { detail: `disposable=${disposable} assisted=${browserAssisted} force=${forced} initial_url=${item.url === url} final_url=${Boolean(item.finalUrl)} tab=${modifierTabId ?? "none"} file=${effectiveFileName || "unknown"} filename_source=${fileNameDecision.source}` });
 
   // Disposable links are consumed by their first request. At this point Chrome

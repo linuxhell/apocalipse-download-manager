@@ -10,7 +10,7 @@ const popup = readFileSync(join(root, 'popup.js'), 'utf8');
 const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
 
 test('0.3.169 rejects generic media labels before deriving a file name', () => {
-  assert.equal(manifest.version, '0.3.169');
+  assert.equal(manifest.version, '0.3.173');
   assert.match(contentScript, /genericMediaTitle/);
   assert.match(contentScript, /normalize\("NFD"\)/);
   assert.match(contentScript, /pageMediaTitle/);
@@ -39,6 +39,15 @@ test('browser-assisted downloads replace generic Video.mp4-style names before ha
   assert.match(background, /suggest\(\{ filename: decision\.fileName, conflictAction: "uniquify" \}\)/);
   assert.match(background, /fileName: effectiveFileName/);
   assert.match(background, /markAssistedDownload\(\{ \.\.\.item, filename: effectiveFileName \|\| item\.filename \}/);
+});
+
+test('a consumed disposable download link is never resent, even with force capture active', () => {
+  assert.match(background, /const browserAssisted = disposable;/);
+  assert.doesNotMatch(background, /const browserAssisted = disposable && !forced;/);
+});
+
+test('the network capture filter matches SoundCloud media from soundcloud.com and sndcdn.com', () => {
+  assert.match(background, /soundcloud\\\.com\|sndcdn\\\.com/);
 });
 
 test('filename diagnostics report the source without logging the page title itself', () => {

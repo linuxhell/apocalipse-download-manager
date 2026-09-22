@@ -11,7 +11,7 @@ const popup = readFileSync(join(root, 'browser-extension/popup.js'), 'utf8');
 const desktop = readFileSync(join(root, 'apps/desktop/src-tauri/src/main.rs'), 'utf8');
 
 test('0.3.169 loads the opt-in replay before media handlers in every isolated content chain', () => {
-  assert.equal(manifest.version, '0.3.169');
+  assert.equal(manifest.version, '0.3.173');
   for (const entry of manifest.content_scripts.filter(item => item.js.includes('content.js'))) {
     assert.ok(entry.js.includes('diagnostics-media-replay.js'));
     assert.ok(entry.js.indexOf('diagnostics.js') < entry.js.indexOf('diagnostics-media-replay.js'));
@@ -84,6 +84,11 @@ test('forensic timeline preserves local time and authoritative server sequence',
   assert.match(native, /timeline\/events-local\.jsonl/);
   assert.match(native, /serverSequence/);
   assert.match(native, /receivedAt_then_serverSequence/);
+});
+
+test('thumbnails.jsonl is always exported even when no thumbnail events were captured', () => {
+  assert.match(desktop, /buckets\.entry\("thumbnails"\)\.or_default\(\);/);
+  assert.match(desktop, /"thumbnails": "logs\/by-component\/thumbnails\.jsonl"/);
 });
 
 test('marked incidents preserve before-and-after windows instead of stopping capture', () => {

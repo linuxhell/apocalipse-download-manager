@@ -38,6 +38,17 @@ test('Insert is always available as a force shortcut in addition to the configur
   assert.equal((popup.match(/<option>Insert<\/option>/g) || []).length, 2);
 });
 
+test('a stuck Alt/Shift modifier is reset on focus change so capture on claude.ai and Rapidgator never silently stalls', () => {
+  assert.match(content, /const clearHeldShortcutKeys = \(\) => {/);
+  assert.match(content, /window\.addEventListener\("blur", clearHeldShortcutKeys\)/);
+  assert.match(content, /window\.addEventListener\("focus", clearHeldShortcutKeys\)/);
+  assert.match(content, /document\.addEventListener\("visibilitychange", \(\) => {\s*if \(document\.hidden\) clearHeldShortcutKeys\(\);/);
+  assert.match(pageHook, /const clearHeld = \(\) => held\.clear\(\);/);
+  assert.match(pageHook, /addEventListener\("blur", clearHeld, true\)/);
+  assert.match(pageHook, /addEventListener\("focus", clearHeld, true\)/);
+  assert.match(pageHook, /document\.addEventListener\("visibilitychange", \(\) => {\s*if \(document\.hidden\) clearHeld\(\);/);
+});
+
 
 test('ChatGPT generated-file normal clicks arm a short automatic force transaction', () => {
   assert.match(content, /chatgptDownloadGesture/);

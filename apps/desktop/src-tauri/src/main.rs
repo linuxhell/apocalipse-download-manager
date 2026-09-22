@@ -6866,6 +6866,11 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         target.push_str(line);
         target.push('\n');
     }
+    // thumbnails.jsonl is a documented, always-present debugger domain
+    // (see debugger-index.json below); export it even when no
+    // "thumbnail.*" events were captured so the exported bundle always
+    // matches the documented layout instead of silently omitting the file.
+    buckets.entry("thumbnails").or_default();
     for (bucket, contents) in buckets {
         entries.push((
             format!("logs/by-component/{bucket}.jsonl"),
