@@ -61,6 +61,7 @@ const catalogs = {
     cancel: "Cancel",
     analyze: "Analyze",
     torrentMetadataSeeking: "Finding peers and receiving torrent metadata",
+    torrentMetadataPeersStalled: "Peers were reached, but none delivered the torrent metadata in time. This may be specific to this swarm or its peers. Try again or use a torrent file if available.",
     torrentMetadataTimeout: "No peers responded with metadata for this torrent/magnet in time. Trackers or DHT may be slow or the swarm may have no active seeds. You can try again, or check the link.",
     torrentMetadataNoPeers: "No peers could be reached at all for this torrent/magnet, even through DHT. This usually means outbound BitTorrent traffic (UDP) is being blocked by a firewall, VPN, or the network you're on, rather than the swarm being empty.",
     saveTo: "Save to",
@@ -299,6 +300,7 @@ const catalogs = {
     cancel: "Cancelar",
     analyze: "Analisar",
     torrentMetadataSeeking: "Procurando pares e recebendo metadados do torrent",
+    torrentMetadataPeersStalled: "Pares foram alcançados, mas nenhum entregou os metadados do torrent a tempo. Isso pode ser específico deste swarm ou de seus pares. Tente novamente ou use um arquivo .torrent, se disponível.",
     torrentMetadataTimeout: "Nenhum par respondeu com os metadados deste torrent/magnet a tempo. Os trackers ou o DHT podem estar lentos, ou a rede pode não ter seeds ativos no momento. Você pode tentar novamente ou verificar o link.",
     torrentMetadataNoPeers: "Nenhum par foi alcançado para este torrent/magnet, nem mesmo pelo DHT. Isso geralmente indica que o tráfego BitTorrent (UDP) está sendo bloqueado por um firewall, VPN ou pela rede em que você está, e não que o torrent está sem seeds.",
     saveTo: "Salvar em",
@@ -537,6 +539,7 @@ const catalogs = {
     cancel: "取消",
     analyze: "分析",
     torrentMetadataSeeking: "正在查找节点并接收种子元数据",
+    torrentMetadataPeersStalled: "已连接到节点，但没有节点及时传送种子元数据。这可能与该种子群或其节点有关。请重试，或使用可用的 .torrent 文件。",
     torrentMetadataTimeout: "没有节点及时返回这个种子/磁力链接的元数据。Tracker 或 DHT 可能响应缓慢，或者该网络目前没有活跃的做种者。您可以重试，或检查链接是否正确。",
     torrentMetadataNoPeers: "完全没有连接到任何节点，DHT 也没有。这通常意味着 BitTorrent 流量（UDP）被防火墙、VPN 或您所在的网络屏蔽了，而不是没有做种者。",
     saveTo: "保存到",
@@ -2752,6 +2755,7 @@ document.querySelector("#analyze").onclick = async () => {
     const message = String(error);
     box.textContent = /connections=0:seeders=0/.test(message)
       ? t("torrentMetadataNoPeers")
+      : /aria2_metadata_timeout:connections=[1-9][0-9]*/.test(message) ? t("torrentMetadataPeersStalled")
       : /timed? ?out|timeout/i.test(message) ? t("torrentMetadataTimeout") : message;
   } finally {
     if (metadataTimer) window.clearInterval(metadataTimer);
