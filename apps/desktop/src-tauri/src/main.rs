@@ -9415,8 +9415,9 @@ async fn inspect_torrent_metadata(
     let _ = fs::remove_file(&snapshot);
     if let Ok(mut file) = fs::File::open(&aria2_log) {
         if file.seek(SeekFrom::Start(capture_start)).is_ok() {
-            let mut raw = Vec::new();
-            if file.take(log_end.saturating_sub(capture_start).min(max_capture)).read_to_end(&mut raw).is_ok() {
+            let capture_len = log_end.saturating_sub(capture_start).min(max_capture) as usize;
+            let mut raw = vec![0; capture_len];
+            if file.read_exact(&mut raw).is_ok() {
                 let header = format!(
                     "attempt_duration_ms={} result={} log_start={} log_end={} captured_start={} rotated={} truncated={}\n",
                     attempt_started.elapsed().as_millis(),
