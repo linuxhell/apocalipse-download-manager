@@ -9,7 +9,7 @@ pub enum Engine {
     YtDlp,
     NativeHls,
     NM3u8dlRe,
-    NativeTorrent,
+    RqbitTorrent,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -17,7 +17,6 @@ pub struct Capabilities {
     pub aria2: bool,
     pub yt_dlp: bool,
     pub n_m3u8dl_re: bool,
-    pub torrent: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,16 +154,8 @@ pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<Strategy
             reason: "ftp_transfer",
         },
         DownloadKind::Torrent | DownloadKind::Magnet => StrategyPlan {
-            primary: if capabilities.torrent {
-                Engine::NativeTorrent
-            } else {
-                Engine::Aria2Rpc
-            },
-            fallbacks: capabilities
-                .aria2
-                .then_some(Engine::Aria2Rpc)
-                .into_iter()
-                .collect(),
+            primary: Engine::RqbitTorrent,
+            fallbacks: Vec::new(),
             reason: "peer_to_peer",
         },
     };

@@ -121,18 +121,24 @@ jobs:
             output: apocalipse-download-manager-windows-x64-portable.zip
             aria2_suffix: windows-x64.exe
             aria2_binary: aria2c.exe
+            rqbit_asset: rqbit.exe
+            rqbit_binary: rqbit.exe
           - name: Linux x64 portable
             os: ubuntu-22.04
             artifact: apocalipse-linux-x64-candidate
             output: apocalipse-download-manager-linux-x64-portable.tar.gz
             aria2_suffix: linux-x64
             aria2_binary: aria2c
+            rqbit_asset: rqbit-linux-amd64
+            rqbit_binary: rqbit
           - name: macOS x64 portable
             os: macos-15-intel
             artifact: apocalipse-macos-x64-candidate
             output: apocalipse-download-manager-macos-x64-portable.zip
             aria2_suffix: macos-x64
             aria2_binary: aria2c
+            rqbit_asset: rqbit-osx-universal
+            rqbit_binary: rqbit
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
@@ -206,6 +212,45 @@ jobs:
             --output "dist/aria2-backend/$ARIA2_BINARY"
           chmod 755 "dist/aria2-backend/$ARIA2_BINARY"
 
+      - name: Download rqbit backend
+        shell: bash
+        env:
+          RQBIT_ASSET: ${{ matrix.rqbit_asset }}
+          RQBIT_BINARY: ${{ matrix.rqbit_binary }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_json="$RUNNER_TEMP/rqbit-release.json"
+          curl --fail --location --retry 3 \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/ikatson/rqbit/releases/latest" \
+            --output "$release_json"
+          asset_id=$(python3 - "$release_json" "$RQBIT_ASSET" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              release = json.load(stream)
+          expected = sys.argv[2].lower()
+          for asset in release.get("assets", []):
+              name = str(asset.get("name", "")).lower()
+              if name == expected:
+                  print(asset["id"])
+                  break
+          else:
+              raise SystemExit(f"rqbit compatible asset not found: {expected}")
+          PY
+          )
+          mkdir -p dist/rqbit-backend
+          curl --fail --location --retry 3 \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/ikatson/rqbit/releases/assets/$asset_id" \
+            --output "dist/rqbit-backend/$RQBIT_BINARY"
+          chmod 755 "dist/rqbit-backend/$RQBIT_BINARY"
+
       - name: Stage Windows portable
         if: runner.os == 'Windows'
         shell: pwsh
@@ -215,6 +260,8 @@ jobs:
           Copy-Item 'target/release/apocalipse-desktop.exe' "$package/Apocalipse Download Manager.exe"
           New-Item -ItemType Directory -Force "$package/data/tools/aria2" | Out-Null
           Copy-Item 'dist/aria2-backend/aria2c.exe' "$package/data/tools/aria2/aria2c.exe"
+          New-Item -ItemType Directory -Force "$package/data/tools/rqbit" | Out-Null
+          Copy-Item 'dist/rqbit-backend/rqbit.exe' "$package/data/tools/rqbit/rqbit.exe"
           Copy-Item 'README.md','LICENSE' $package
           Compress-Archive -Path $package -DestinationPath 'dist/${{ matrix.output }}' -Force
       - name: Stage Linux portable
@@ -222,9 +269,10 @@ jobs:
         shell: bash
         run: |
           package='dist/Apocalipse Download Manager'
-          mkdir -p "$package/data/tools/aria2"
+          mkdir -p "$package/data/tools/aria2" "$package/data/tools/rqbit"
           install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
           install -m 755 dist/aria2-backend/aria2c "$package/data/tools/aria2/aria2c"
+          install -m 755 dist/rqbit-backend/rqbit "$package/data/tools/rqbit/rqbit"
           cp README.md LICENSE "$package/"
           appimage="$(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
           test -n "$appimage"
@@ -235,10 +283,11 @@ jobs:
         shell: bash
         run: |
           app='dist/Apocalipse Download Manager.app'
-          mkdir -p "$app/Contents/MacOS/data/tools/aria2" "$app/Contents/Resources"
+          mkdir -p "$app/Contents/MacOS/data/tools/aria2" "$app/Contents/MacOS/data/tools/rqbit" "$app/Contents/Resources"
           cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
           chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
           install -m 755 dist/aria2-backend/aria2c "$app/Contents/MacOS/data/tools/aria2/aria2c"
+          install -m 755 dist/rqbit-backend/rqbit "$app/Contents/MacOS/data/tools/rqbit/rqbit"
           cp packaging/macos/Info.plist "$app/Contents/Info.plist"
           cp README.md LICENSE "$app/Contents/Resources/"
           ditto -c -k --sequesterRsrc --keepParent "$app" 'dist/${{ matrix.output }}'

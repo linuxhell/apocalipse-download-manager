@@ -3,6 +3,7 @@
 mod aria2;
 mod diagnostics;
 mod prepared_preview;
+mod rqbit;
 mod thumbnail_cache;
 mod tiktok_preview;
 
@@ -224,6 +225,8 @@ struct AppState {
     link_transfers: Mutex<HashMap<String, Arc<LinkTransferControl>>>,
     aria2_runtime: Mutex<Option<aria2::Runtime>>,
     aria2_tasks: Mutex<HashMap<DownloadId, String>>,
+    rqbit_runtime: Mutex<Option<rqbit::Runtime>>,
+    rqbit_tasks: Mutex<HashMap<DownloadId, usize>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
     diagnostics: diagnostics::Diagnostics,
@@ -319,6 +322,18 @@ struct UserSettings {
     #[serde(default = "default_aria2_rpc_secret", skip_serializing)]
     aria2_rpc_secret: String,
     #[serde(default)]
+    rqbit_path: Option<PathBuf>,
+    #[serde(default = "default_true")]
+    rqbit_enabled: bool,
+    #[serde(default = "default_true")]
+    rqbit_auto_start: bool,
+    #[serde(default)]
+    rqbit_port: Option<u16>,
+    #[serde(default = "default_rqbit_username")]
+    rqbit_username: String,
+    #[serde(default = "default_rqbit_password", skip_serializing)]
+    rqbit_password: String,
+    #[serde(default)]
     media_player_path: Option<PathBuf>,
     #[serde(default)]
     user_agent: Option<String>,
@@ -382,6 +397,12 @@ const fn default_true() -> bool {
 fn default_aria2_rpc_secret() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
+fn default_rqbit_username() -> String {
+    "apocalipse".to_owned()
+}
+fn default_rqbit_password() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
 fn default_bridge_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
@@ -412,6 +433,12 @@ impl Default for UserSettings {
             aria2_rpc_auto_start: true,
             aria2_rpc_port: None,
             aria2_rpc_secret: default_aria2_rpc_secret(),
+            rqbit_path: None,
+            rqbit_enabled: true,
+            rqbit_auto_start: true,
+            rqbit_port: None,
+            rqbit_username: default_rqbit_username(),
+            rqbit_password: default_rqbit_password(),
             media_player_path: None,
             user_agent: None,
             log_editor_path: None,
@@ -2675,6 +2702,17 @@ struct Aria2RpcSettingsStatus {
     version: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RqbitSettingsStatus {
+    enabled: bool,
+    auto_start: bool,
+    configured_port: Option<u16>,
+    connected: bool,
+    active_port: Option<u16>,
+    version: Option<String>,
+}
+
 #[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MediaPreviewRequest {
@@ -2985,6 +3023,13 @@ fn configured_aria2(settings: &UserSettings) -> PathBuf {
         } else {
             "aria2c"
         },
+    )
+}
+
+fn configured_rqbit(settings: &UserSettings) -> PathBuf {
+    configured_tool(
+        &settings.rqbit_path,
+        if cfg!(windows) { "rqbit.exe" } else { "rqbit" },
     )
 }
 
@@ -3439,6 +3484,87 @@ fn stop_aria2_runtime(state: &AppState) {
     }
 }
 
+async fn rqbit_endpoint(state: &AppState, force_start: bool) -> Result<rqbit::Endpoint, String> {
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    if !settings.rqbit_enabled {
+        return Err("rqbit_disabled".to_owned());
+    }
+    let executable = configured_rqbit(&settings);
+    let runtime_root = state
+        .queue_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("rqbit");
+    let mut spawned = None;
+    let endpoint = {
+        // Same single-flight guarantee as aria2_endpoint: the mutex is held
+        // across the reuse-check-and-spawn so two concurrent callers can
+        // never both decide the runtime is missing and each spawn their own
+        // rqbit.exe.
+        let mut runtime = state
+            .rqbit_runtime
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let reuse = runtime.as_mut().is_some_and(rqbit::Runtime::is_running);
+        if !reuse {
+            if !force_start && !settings.rqbit_auto_start {
+                return Err("rqbit_not_running".to_owned());
+            }
+            if let Some(current) = runtime.as_mut() {
+                current.terminate();
+            }
+            *runtime = Some(rqbit::Runtime::spawn(
+                &executable,
+                &runtime_root,
+                settings.rqbit_port,
+                &settings.rqbit_username,
+                &settings.rqbit_password,
+            )?);
+            if let Some(current) = runtime.as_ref() {
+                spawned = Some((current.pid(), current.port()));
+            }
+        }
+        runtime
+            .as_ref()
+            .map(rqbit::Runtime::endpoint)
+            .ok_or_else(|| "rqbit_runtime_missing".to_owned())?
+    };
+    if let Some((pid, port)) = spawned {
+        diagnostic_log(
+            state,
+            "INFO",
+            "rqbit.runtime_spawned",
+            &format!(
+                "pid={pid} parent_pid={} port={port} stop_with_parent=true",
+                std::process::id()
+            ),
+        );
+    }
+    endpoint.wait_ready().await?;
+    Ok(endpoint)
+}
+
+fn stop_rqbit_runtime(state: &AppState) {
+    if let Ok(mut runtime) = state.rqbit_runtime.lock() {
+        if let Some(runtime) = runtime.as_mut() {
+            let pid = runtime.pid();
+            let port = runtime.port();
+            runtime.terminate();
+            diagnostic_log(
+                state,
+                "INFO",
+                "rqbit.runtime_stopped",
+                &format!("pid={pid} port={port}"),
+            );
+        }
+        *runtime = None;
+    }
+}
+
 fn http_origin(url: &str) -> Option<&str> {
     let scheme_end = url.find("://")? + 3;
     let path_start = url[scheme_end..]
@@ -3798,6 +3924,10 @@ fn reconnect_active_downloads_after_network_change(
         stop_aria2_runtime(&state);
         if let Ok(mut aria2_tasks) = state.aria2_tasks.lock() {
             aria2_tasks.clear();
+        }
+        stop_rqbit_runtime(&state);
+        if let Ok(mut rqbit_tasks) = state.rqbit_tasks.lock() {
+            rqbit_tasks.clear();
         }
     }
     if current.is_some() {
@@ -4464,7 +4594,6 @@ fn inspect_url(url: String) -> Result<PlanResponse, String> {
         aria2: true,
         yt_dlp: true,
         n_m3u8dl_re: true,
-        torrent: false,
     };
     let plan = plan_download(&url, capabilities).ok_or_else(|| "unsupported_url".to_owned())?;
     Ok(PlanResponse {
@@ -5752,7 +5881,7 @@ async fn run_aria2_download(
         .lock()
         .ok()
         .and_then(|items| items.get(&id).cloned());
-    let mut gid = match existing_task {
+    let gid = match existing_task {
         Some(gid) => {
             if let Err(error) = endpoint.resume(&gid).await {
                 update_task(&app, id, true, |item| {
@@ -5770,16 +5899,13 @@ async fn run_aria2_download(
         }
         None => {
             let is_http = matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp);
-            let is_torrent = matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet);
             match endpoint
                 .add_download(
                     &task.source,
                     &task.destination,
                     connections,
-                    &task.torrent_selection,
                     &context,
                     is_http,
-                    is_torrent,
                 )
                 .await
             {
@@ -5820,12 +5946,7 @@ async fn run_aria2_download(
             "connections": connections,
             "kind": format!("{kind:?}"),
             "minSplitSize": "1M",
-            "fileAllocation": "none",
-            "torrentPreviewPriority": if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
-                Some("head=32M,tail=32M")
-            } else {
-                None
-            }
+            "fileAllocation": "none"
         }),
     );
 
@@ -5849,50 +5970,6 @@ async fn run_aria2_download(
                         continue;
                     }
                 };
-                if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet)
-                    && !status.followed_by.is_empty()
-                {
-                    let next_gid = status.followed_by[0].clone();
-                    diagnostic_log(
-                        &state,
-                        "INFO",
-                        "aria2.torrent_followed_by",
-                        &format!("task={id} metadata_gid={gid} content_gid={next_gid}"),
-                    );
-                    state.diagnostics.record(
-                        "aria2.torrent_followed_by",
-                        "INFO",
-                        None,
-                        Some(&id.to_string()),
-                        serde_json::json!({
-                            "metadataGid": gid,
-                            "contentGid": next_gid,
-                            "metadataBytes": status.downloaded,
-                            "metadataTotal": status.total
-                        }),
-                    );
-                    let previous_gid = std::mem::replace(&mut gid, next_gid.clone());
-                    if let Ok(mut items) = state.aria2_tasks.lock() {
-                        items.insert(id, next_gid);
-                    }
-                    let _ = endpoint.remove_result(&previous_gid).await;
-                    last_at = Instant::now();
-                    last_downloaded = 0;
-                    update_task(&app, id, true, |item| {
-                        item.received = 0;
-                        item.total = None;
-                        item.progress_percent = Some(0.0);
-                        item.download_speed = Some(0);
-                        item.upload_speed = Some(0);
-                        item.state = DownloadState::Downloading;
-                    });
-                    continue;
-                }
-                let peers = if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
-                    endpoint.peers(&gid).await.unwrap_or_default()
-                } else {
-                    aria2::PeerSummary::default()
-                };
                 let now = Instant::now();
                 let elapsed = now.duration_since(last_at).as_secs_f64().max(0.001);
                 let raw_speed = if status.downloaded >= last_downloaded {
@@ -5907,23 +5984,15 @@ async fn run_aria2_download(
                 } else {
                     None
                 };
-                let eta = if status.speed > 0 && status.total > status.downloaded {
-                    Some(format!("{}s", (status.total - status.downloaded) / status.speed))
-                } else {
-                    None
-                };
                 update_task(&app, id, false, |item| {
                     item.received = status.downloaded;
                     item.total = (status.total > 0).then_some(status.total);
                     item.progress_percent = percent;
                     item.download_speed = Some(status.speed.max(raw_speed));
                     item.upload_speed = Some(status.upload_speed);
-                    item.torrent_seeders = Some(status.seeders.max(peers.seeders));
-                    item.torrent_leechers = Some(peers.leechers);
-                    item.torrent_eta = eta.clone();
                 });
                 state.diagnostics.record(
-                    if is_http_kind(kind) { "http.performance_sample" } else { "aria2.performance_sample" },
+                    "http.performance_sample",
                     "INFO",
                     None,
                     Some(&id.to_string()),
@@ -5935,9 +6004,6 @@ async fn run_aria2_download(
                         "totalBytes": status.total,
                         "progressPercent": percent,
                         "activeConnections": status.connections,
-                        "activePeers": peers.peers,
-                        "seeders": status.seeders.max(peers.seeders),
-                        "leechers": peers.leechers,
                         "sampleWindowMs": 350
                     }),
                 );
@@ -5994,8 +6060,228 @@ async fn run_aria2_download(
     }
 }
 
-fn is_http_kind(kind: DownloadKind) -> bool {
-    matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp)
+async fn run_rqbit_download(
+    app: tauri::AppHandle,
+    id: DownloadId,
+    task: DownloadTask,
+    mut cancellation: oneshot::Receiver<()>,
+) {
+    let state = app.state::<AppState>();
+    update_task(&app, id, true, |item| {
+        item.state = DownloadState::Downloading;
+        item.progress_percent = Some(0.0);
+        item.resume_supported = Some(true);
+    });
+    let route_app = app.clone();
+    let route_operation = id.to_string();
+    tauri::async_runtime::spawn(async move {
+        let state = route_app.state::<AppState>();
+        log_network_route(&state, &route_operation, "rqbit").await;
+    });
+    let endpoint = match rqbit_endpoint(&state, false).await {
+        Ok(endpoint) => endpoint,
+        Err(message) => {
+            update_task(&app, id, true, |item| {
+                item.state = DownloadState::Failed {
+                    message: format!("rqbit_unavailable:{message}"),
+                }
+            });
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    };
+    let existing_task = state
+        .rqbit_tasks
+        .lock()
+        .ok()
+        .and_then(|items| items.get(&id).copied());
+    let torrent_id = match existing_task {
+        Some(torrent_id) => {
+            if let Err(error) = endpoint.resume(torrent_id).await {
+                update_task(&app, id, true, |item| {
+                    item.state = DownloadState::Failed {
+                        message: format!("rqbit_resume_failed:{error}"),
+                    }
+                });
+                if let Ok(mut workers) = state.workers.lock() {
+                    workers.remove(&id);
+                }
+                start_next_queued(&app);
+                return;
+            }
+            torrent_id
+        }
+        None => {
+            let output_folder = task
+                .destination
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf();
+            match endpoint
+                .add_torrent(&task.source, &output_folder, &task.torrent_selection, false)
+                .await
+            {
+                Ok(added) => {
+                    if let Ok(mut items) = state.rqbit_tasks.lock() {
+                        items.insert(id, added.id);
+                    }
+                    diagnostic_log(
+                        &state,
+                        "INFO",
+                        "rqbit.torrent_added",
+                        &format!(
+                            "task={id} torrent_id={} info_hash={} name={}",
+                            added.id,
+                            added.info_hash,
+                            added.name.as_deref().unwrap_or("unknown")
+                        ),
+                    );
+                    added.id
+                }
+                Err(error) => {
+                    update_task(&app, id, true, |item| {
+                        item.state = DownloadState::Failed {
+                            message: format!("rqbit_create_failed:{error}"),
+                        }
+                    });
+                    if let Ok(mut workers) = state.workers.lock() {
+                        workers.remove(&id);
+                    }
+                    start_next_queued(&app);
+                    return;
+                }
+            }
+        }
+    };
+    diagnostic_log(
+        &state,
+        "INFO",
+        "rqbit.task_started",
+        &format!("task={id} torrent_id={torrent_id} engine=rqbit sequential=true"),
+    );
+    state.diagnostics.record(
+        "torrent.engine_selected",
+        "INFO",
+        None,
+        Some(&id.to_string()),
+        serde_json::json!({
+            "engine": "rqbit",
+            "torrentId": torrent_id,
+            "sequentialDownload": true,
+            "streamingEndpoint": format!("/torrents/{torrent_id}/stream/<file_idx>")
+        }),
+    );
+
+    let mut last_at = Instant::now();
+    let mut last_downloaded = 0_u64;
+    let mut interval = tokio::time::interval(Duration::from_millis(350));
+    let mut terminal = false;
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut cancellation => {
+                let _ = endpoint.pause(torrent_id).await;
+                diagnostic_log(&state, "INFO", "rqbit.paused", &format!("task={id} torrent_id={torrent_id}"));
+                return;
+            }
+            _ = interval.tick() => {
+                let status = match endpoint.stats(torrent_id).await {
+                    Ok(status) => status,
+                    Err(error) => {
+                        diagnostic_log(&state, "WARN", "rqbit.status_failed", &format!("task={id} error={error}"));
+                        continue;
+                    }
+                };
+                let now = Instant::now();
+                let elapsed = now.duration_since(last_at).as_secs_f64().max(0.001);
+                let raw_speed = if status.progress_bytes >= last_downloaded {
+                    ((status.progress_bytes - last_downloaded) as f64 / elapsed) as u64
+                } else {
+                    status.download_bytes_per_second
+                };
+                last_at = now;
+                last_downloaded = status.progress_bytes;
+                let percent = if status.total_bytes > 0 {
+                    Some((status.progress_bytes as f64 * 100.0 / status.total_bytes as f64).clamp(0.0, 100.0))
+                } else {
+                    None
+                };
+                update_task(&app, id, false, |item| {
+                    item.received = status.progress_bytes;
+                    item.total = (status.total_bytes > 0).then_some(status.total_bytes);
+                    item.progress_percent = percent;
+                    item.download_speed = Some(status.download_bytes_per_second.max(raw_speed));
+                    item.upload_speed = Some(status.upload_bytes_per_second);
+                    item.torrent_leechers = None;
+                    item.torrent_seeders = Some(status.live_peers);
+                    item.torrent_eta = status.eta_seconds.map(|seconds| format!("{seconds}s"));
+                });
+                state.diagnostics.record(
+                    "torrent.performance_sample",
+                    "INFO",
+                    None,
+                    Some(&id.to_string()),
+                    serde_json::json!({
+                        "engine": "rqbit",
+                        "bytesPerSecond": raw_speed,
+                        "reportedBytesPerSecond": status.download_bytes_per_second,
+                        "receivedBytes": status.progress_bytes,
+                        "totalBytes": status.total_bytes,
+                        "progressPercent": percent,
+                        "livePeers": status.live_peers,
+                        "sampleWindowMs": 350
+                    }),
+                );
+                if let Some(error) = status.error {
+                    diagnostic_log(&state, "ERROR", "rqbit.torrent_error", &format!("task={id} torrent_id={torrent_id} error={error}"));
+                    update_task(&app, id, true, |item| {
+                        item.state = DownloadState::Failed { message: format!("rqbit_torrent_error:{error}") };
+                    });
+                    if let Ok(mut items) = state.rqbit_tasks.lock() {
+                        items.remove(&id);
+                    }
+                    terminal = true;
+                    break;
+                }
+                if status.finished {
+                    update_task(&app, id, true, |item| {
+                        item.received = status.total_bytes.max(status.progress_bytes);
+                        item.total = Some(status.total_bytes.max(status.progress_bytes));
+                        item.progress_percent = Some(100.0);
+                        item.download_speed = Some(0);
+                        item.upload_speed = Some(0);
+                        item.state = DownloadState::Completed;
+                        item.completed_at = Some(epoch_seconds());
+                    });
+                    maybe_auto_extract_completed(&app, id);
+                    let _ = endpoint.forget(torrent_id).await;
+                    if let Ok(mut items) = state.rqbit_tasks.lock() {
+                        items.remove(&id);
+                    }
+                    terminal = true;
+                    break;
+                }
+                if status.state == "paused" {
+                    update_task(&app, id, true, |item| {
+                        item.state = DownloadState::Paused;
+                        item.download_speed = Some(0);
+                        item.upload_speed = Some(0);
+                    });
+                    terminal = true;
+                    break;
+                }
+            }
+        }
+    }
+    if terminal {
+        if let Ok(mut workers) = state.workers.lock() {
+            workers.remove(&id);
+        }
+        start_next_queued(&app);
+    }
 }
 
 async fn run_external_download(
@@ -6822,6 +7108,9 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "aria2": settings.aria2_path.as_ref().is_some_and(|path| path.is_file()),
             "aria2RpcEnabled": settings.aria2_rpc_enabled,
             "aria2RpcAutoStart": settings.aria2_rpc_auto_start,
+            "rqbit": settings.rqbit_path.as_ref().is_some_and(|path| path.is_file()),
+            "rqbitEnabled": settings.rqbit_enabled,
+            "rqbitAutoStart": settings.rqbit_auto_start,
             "mediaPlayer": settings.media_player_path.as_ref().is_some_and(|path| path.is_file()),
         },
         "pairingTokenPresent": !settings.bridge_token.is_empty(),
@@ -6918,6 +7207,8 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "link"
         } else if event.starts_with("aria2.") {
             "aria2"
+        } else if event.starts_with("rqbit.") || event.starts_with("torrent.") {
+            "rqbit"
         } else if event.starts_with("http.") {
             "http"
         } else if event.starts_with("thumbnail.") {
@@ -7001,6 +7292,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "socialMedia": "social/player-debugger.jsonl",
             "link": "logs/by-component/link.jsonl",
             "aria2": ["logs/by-component/aria2.jsonl", "engines/aria2-runtime.log"],
+            "rqbit": "logs/by-component/rqbit.jsonl",
             "http": "logs/by-component/http.jsonl",
             "externalMediaEngines": ["logs/by-component/external-media-engines.jsonl", "engines/"],
             "preview": "logs/by-component/preview.jsonl",
@@ -7977,6 +8269,29 @@ async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>
         version: aria2_version,
     });
 
+    let rqbit_path = configured_rqbit(&settings);
+    let rqbit_endpoint = {
+        let mut runtime = state
+            .rqbit_runtime
+            .lock()
+            .map_err(|error| error.to_string())?;
+        if runtime.as_mut().is_some_and(rqbit::Runtime::is_running) {
+            runtime.as_ref().map(rqbit::Runtime::endpoint)
+        } else {
+            None
+        }
+    };
+    let rqbit_version = match rqbit_endpoint {
+        Some(endpoint) => endpoint.version().await.ok(),
+        None => None,
+    };
+    statuses.push(ToolStatus {
+        id: "rqbit".to_owned(),
+        path: rqbit_path.to_string_lossy().into_owned(),
+        found: rqbit_path.is_file(),
+        version: rqbit_version,
+    });
+
     let extractor = settings.extractor_path.clone().unwrap_or_default();
     let kind = extractor_kind(&extractor);
     let version = kind.and_then(|kind| extractor_version(&extractor, kind));
@@ -8023,6 +8338,7 @@ fn set_tool_paths(
     qjs: String,
     n_m3u8dl_re: String,
     aria2: String,
+    rqbit: String,
     extractor: String,
 ) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
@@ -8031,6 +8347,7 @@ fn set_tool_paths(
     settings.qjs_path = optional_path(qjs);
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
     settings.aria2_path = optional_path(aria2);
+    settings.rqbit_path = optional_path(rqbit);
     settings.extractor_path = optional_path(extractor);
     save_settings(&state, &settings)
 }
@@ -8115,6 +8432,87 @@ fn regenerate_aria2_rpc_token(state: State<'_, AppState>) -> Result<(), String> 
     save_settings(&state, &settings)?;
     drop(settings);
     stop_aria2_runtime(&state);
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_rqbit_settings(state: State<'_, AppState>) -> Result<RqbitSettingsStatus, String> {
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let (connected, active_port, endpoint) = {
+        let mut runtime = state
+            .rqbit_runtime
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let connected = runtime.as_mut().is_some_and(rqbit::Runtime::is_running);
+        let active_port = if connected {
+            runtime.as_ref().map(rqbit::Runtime::port)
+        } else {
+            None
+        };
+        let endpoint = if connected {
+            runtime.as_ref().map(rqbit::Runtime::endpoint)
+        } else {
+            None
+        };
+        (connected, active_port, endpoint)
+    };
+    let version = match endpoint {
+        Some(endpoint) => endpoint.version().await.ok(),
+        None => None,
+    };
+    Ok(RqbitSettingsStatus {
+        enabled: settings.rqbit_enabled,
+        auto_start: settings.rqbit_auto_start,
+        configured_port: settings.rqbit_port,
+        connected,
+        active_port,
+        version,
+    })
+}
+
+#[tauri::command]
+fn set_rqbit_settings(
+    state: State<'_, AppState>,
+    enabled: bool,
+    auto_start: bool,
+    port: Option<u16>,
+) -> Result<(), String> {
+    if port.is_some_and(|port| port < 1024) {
+        return Err("rqbit_port_invalid".to_owned());
+    }
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    let changed = settings.rqbit_enabled != enabled
+        || settings.rqbit_auto_start != auto_start
+        || settings.rqbit_port != port;
+    settings.rqbit_enabled = enabled;
+    settings.rqbit_auto_start = auto_start;
+    settings.rqbit_port = port;
+    save_settings(&state, &settings)?;
+    drop(settings);
+    if changed {
+        stop_rqbit_runtime(&state);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn test_rqbit(state: State<'_, AppState>) -> Result<RqbitSettingsStatus, String> {
+    let endpoint = rqbit_endpoint(&state, true).await?;
+    endpoint.version().await?;
+    get_rqbit_settings(state).await
+}
+
+#[tauri::command]
+fn regenerate_rqbit_credentials(state: State<'_, AppState>) -> Result<(), String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.rqbit_password = default_rqbit_password();
+    save_settings(&state, &settings)?;
+    drop(settings);
+    stop_rqbit_runtime(&state);
     Ok(())
 }
 
@@ -8612,6 +9010,21 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             install_validated_executable(&bytes, &target, &["--version"])?;
             target
         }
+        "rqbit" => {
+            let release = github_latest_release(&client, "ikatson/rqbit").await?;
+            let expected = match (platform, architecture) {
+                ("windows", "x86_64") => "rqbit.exe",
+                ("linux", "x86_64") => "rqbit-linux-amd64",
+                ("linux", "aarch64") => "rqbit-linux-arm64",
+                ("macos", _) => "rqbit-osx-universal",
+                _ => return Err("tool_download_platform_unsupported:rqbit".to_owned()),
+            };
+            let (_, url) = release_asset(&release, |name| name == expected)?;
+            let bytes = download_release_bytes(&client, &url).await?;
+            let target = tool_dir.join(if cfg!(windows) { "rqbit.exe" } else { "rqbit" });
+            install_validated_executable(&bytes, &target, &["--version"])?;
+            target
+        }
         "n-m3u8dl-re" => {
             let release = github_latest_release(&client, "nilaoda/N_m3u8DL-RE").await?;
             let (platform_marker, arch_marker) = match (platform, architecture) {
@@ -8946,6 +9359,12 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 aria2_markers.as_slice(),
                 &["--version"],
             ),
+            "rqbit" => (
+                "ikatson/rqbit",
+                if cfg!(windows) { "rqbit.exe" } else { "rqbit" },
+                &[],
+                &["--version"],
+            ),
             "n-m3u8dl-re" => (
                 "nilaoda/N_m3u8DL-RE",
                 if cfg!(windows) {
@@ -9043,6 +9462,13 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                     "aria2" => asset_markers
                         .iter()
                         .all(|marker| name.contains(&marker.to_ascii_lowercase())),
+                    "rqbit" => match (platform, architecture) {
+                        ("windows", "x86_64") => name == "rqbit.exe",
+                        ("linux", "x86_64") => name == "rqbit-linux-amd64",
+                        ("linux", "aarch64") => name == "rqbit-linux-arm64",
+                        ("macos", _) => name == "rqbit-osx-universal",
+                        _ => false,
+                    },
                     _ => asset_markers
                         .iter()
                         .all(|marker| name.contains(&marker.to_ascii_lowercase())),
@@ -9070,72 +9496,78 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         let sha256 = format!("{:x}", Sha256::digest(&bytes));
         let temporary =
             std::env::temp_dir().join(format!("apocalipse-tool-update-{}", uuid::Uuid::new_v4()));
-        let (replacement, ffprobe_replacement) =
-            if id == "qjs" || id == "aria2" || (id == "ffmpeg" && platform == "macos") {
-                let ffprobe_replacement = if id == "ffmpeg" {
-                    let marker = "x64";
-                    let expected = format!("ffprobe-darwin-{marker}");
-                    let probe_asset = assets
-                        .iter()
-                        .find(|asset| {
-                            asset.get("name").and_then(|value| value.as_str())
-                                == Some(expected.as_str())
-                        })
-                        .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?;
-                    let probe_url = probe_asset
-                        .get("browser_download_url")
-                        .and_then(|value| value.as_str())
-                        .ok_or_else(|| "release_asset_url_missing".to_owned())?;
-                    client
-                        .get(probe_url)
-                        .send()
-                        .await
-                        .map_err(|error| error.to_string())?
-                        .error_for_status()
-                        .map_err(|error| error.to_string())?
-                        .bytes()
-                        .await
-                        .map_err(|error| error.to_string())?
-                        .to_vec()
-                } else {
-                    Vec::new()
-                };
-                (bytes.to_vec(), ffprobe_replacement)
-            } else {
-                let extracted = temporary.join("extracted");
-                fs::create_dir_all(&extracted).map_err(|error| error.to_string())?;
-                if let Err(error) = extract_release_archive(&bytes, asset_name, &extracted) {
-                    let _ = fs::remove_dir_all(&temporary);
-                    return Err(format!("release_extraction_failed:{error}"));
-                }
-                let replacement_path = find_named_file(&extracted, executable_name, 0)
-                    .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
-                let replacement = fs::read(replacement_path).map_err(|error| error.to_string())?;
-                let ffprobe_replacement = if id == "ffmpeg" {
-                    fs::read(
-                        find_named_file(
-                            &extracted,
-                            if cfg!(windows) {
-                                "ffprobe.exe"
-                            } else {
-                                "ffprobe"
-                            },
-                            0,
-                        )
-                        .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?,
-                    )
+        let (replacement, ffprobe_replacement) = if id == "qjs"
+            || id == "aria2"
+            || id == "rqbit"
+            || (id == "ffmpeg" && platform == "macos")
+        {
+            let ffprobe_replacement = if id == "ffmpeg" {
+                let marker = "x64";
+                let expected = format!("ffprobe-darwin-{marker}");
+                let probe_asset = assets
+                    .iter()
+                    .find(|asset| {
+                        asset.get("name").and_then(|value| value.as_str())
+                            == Some(expected.as_str())
+                    })
+                    .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?;
+                let probe_url = probe_asset
+                    .get("browser_download_url")
+                    .and_then(|value| value.as_str())
+                    .ok_or_else(|| "release_asset_url_missing".to_owned())?;
+                client
+                    .get(probe_url)
+                    .send()
+                    .await
                     .map_err(|error| error.to_string())?
-                } else {
-                    Vec::new()
-                };
-                (replacement, ffprobe_replacement)
+                    .error_for_status()
+                    .map_err(|error| error.to_string())?
+                    .bytes()
+                    .await
+                    .map_err(|error| error.to_string())?
+                    .to_vec()
+            } else {
+                Vec::new()
             };
+            (bytes.to_vec(), ffprobe_replacement)
+        } else {
+            let extracted = temporary.join("extracted");
+            fs::create_dir_all(&extracted).map_err(|error| error.to_string())?;
+            if let Err(error) = extract_release_archive(&bytes, asset_name, &extracted) {
+                let _ = fs::remove_dir_all(&temporary);
+                return Err(format!("release_extraction_failed:{error}"));
+            }
+            let replacement_path = find_named_file(&extracted, executable_name, 0)
+                .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
+            let replacement = fs::read(replacement_path).map_err(|error| error.to_string())?;
+            let ffprobe_replacement = if id == "ffmpeg" {
+                fs::read(
+                    find_named_file(
+                        &extracted,
+                        if cfg!(windows) {
+                            "ffprobe.exe"
+                        } else {
+                            "ffprobe"
+                        },
+                        0,
+                    )
+                    .ok_or_else(|| "ffprobe_missing_from_release".to_owned())?,
+                )
+                .map_err(|error| error.to_string())?
+            } else {
+                Vec::new()
+            };
+            (replacement, ffprobe_replacement)
+        };
         let _ = fs::remove_dir_all(&temporary);
         if replacement.len() < 32_768 || (id == "ffmpeg" && ffprobe_replacement.len() < 32_768) {
             return Err(format!("replacement_executable_invalid:{asset_name}"));
         }
         if id == "aria2" {
             stop_aria2_runtime(&state);
+        }
+        if id == "rqbit" {
+            stop_rqbit_runtime(&state);
         }
         let parent = executable
             .parent()
@@ -9301,49 +9733,26 @@ async fn inspect_torrent_metadata(
         return result;
     }
 
-    let endpoint = aria2_endpoint(&state, true).await?;
+    let endpoint = rqbit_endpoint(&state, true).await?;
     let inspection_root = state
         .queue_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join("aria2-metadata-inspection")
+        .join("rqbit-metadata-inspection")
         .join(uuid::Uuid::new_v4().simple().to_string());
     fs::create_dir_all(&inspection_root).map_err(|error| error.to_string())?;
-    let gid = endpoint
-        .add_metadata_only(&source, &inspection_root)
+    let added = endpoint
+        .add_torrent(&source, &inspection_root, &[], true)
         .await?;
-    let mut resolved_files = Vec::new();
-    for _ in 0..120 {
-        if let Ok(files) = endpoint.files(&gid).await {
-            if !files.is_empty() && files.iter().any(|file| file.size > 0) {
-                resolved_files = files;
-                break;
-            }
-        }
-        if let Ok(status) = endpoint.status(&gid).await {
-            if matches!(status.status.as_str(), "error" | "removed") {
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
-    let _ = endpoint.remove(&gid).await;
-    let _ = endpoint.remove_result(&gid).await;
+    let resolved_files = endpoint.files(added.id).await.unwrap_or_default();
+    let _ = endpoint.forget(added.id).await;
 
     let files = resolved_files
         .into_iter()
-        .map(|file| {
-            let path = PathBuf::from(&file.path);
-            let relative = path
-                .strip_prefix(&inspection_root)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .replace('\\', "/");
-            TorrentFileInfo {
-                index: file.index,
-                path: relative,
-                size: file.size,
-            }
+        .map(|file| TorrentFileInfo {
+            index: file.index,
+            path: file.name.replace('\\', "/"),
+            size: file.length,
         })
         .collect::<Vec<_>>();
     let _ = fs::remove_dir_all(&inspection_root);
@@ -9877,6 +10286,16 @@ fn start_download(
         ));
         return Ok(());
     }
+    if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
+        diagnostic_log(
+            state,
+            "INFO",
+            "rqbit.dispatched",
+            &format!("task={} engine={kind:?}", task.id),
+        );
+        tauri::async_runtime::spawn(run_rqbit_download(app.clone(), task.id, task, cancelled));
+        return Ok(());
+    }
     let special_http_request = kind == DownloadKind::Http
         && state
             .request_identities
@@ -9907,11 +10326,7 @@ fn start_download(
     if !native_http_compatibility
         && matches!(
             kind,
-            DownloadKind::Http
-                | DownloadKind::AcceleratedHttp
-                | DownloadKind::Torrent
-                | DownloadKind::Magnet
-                | DownloadKind::Ftp
+            DownloadKind::Http | DownloadKind::AcceleratedHttp | DownloadKind::Ftp
         )
     {
         diagnostic_log(
@@ -12695,6 +13110,52 @@ async fn remove_downloads(
             }
         }
     }
+    let rqbit_targets = {
+        let rqbit_tasks = state
+            .rqbit_tasks
+            .lock()
+            .map_err(|error| error.to_string())?;
+        removed
+            .iter()
+            .filter_map(|task| {
+                rqbit_tasks
+                    .get(&task.id)
+                    .copied()
+                    .map(|torrent_id| (task.clone(), torrent_id))
+            })
+            .collect::<Vec<_>>()
+    };
+    if !rqbit_targets.is_empty() {
+        match rqbit_endpoint(&state, true).await {
+            Ok(endpoint) => {
+                for (task, torrent_id) in &rqbit_targets {
+                    let _ = endpoint.forget(*torrent_id).await;
+                    if let Ok(mut items) = state.rqbit_tasks.lock() {
+                        items.remove(&task.id);
+                    }
+                    state.diagnostics.record(
+                        "rqbit.task_removed",
+                        "INFO",
+                        Some(&removal_trace),
+                        Some(&task.id.to_string()),
+                        serde_json::json!({
+                            "torrentId": torrent_id,
+                            "deleteFiles": delete_files
+                        }),
+                    );
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+            Err(error) => {
+                diagnostic_log(
+                    &state,
+                    "WARN",
+                    "rqbit.remove_unavailable",
+                    &format!("error={error}"),
+                );
+            }
+        }
+    }
     if delete_files {
         for task in &removed {
             cleanup_chunk_artifacts(&task.destination)
@@ -12745,6 +13206,9 @@ async fn remove_downloads(
         identities.retain(|id, _| !ids.contains(id));
     }
     if let Ok(mut mappings) = state.aria2_tasks.lock() {
+        mappings.retain(|id, _| !ids.contains(id));
+    }
+    if let Ok(mut mappings) = state.rqbit_tasks.lock() {
         mappings.retain(|id, _| !ids.contains(id));
     }
     save_queue(&state, &queue)?;
@@ -12904,6 +13368,8 @@ fn main() {
                 link_transfers: Mutex::new(HashMap::new()),
                 aria2_runtime: Mutex::new(None),
                 aria2_tasks: Mutex::new(HashMap::new()),
+                rqbit_runtime: Mutex::new(None),
+                rqbit_tasks: Mutex::new(HashMap::new()),
                 log_path,
                 log_write_lock: Mutex::new(()),
                 diagnostics: diagnostics::Diagnostics::new(&app_data.join("logs")),
@@ -13030,6 +13496,10 @@ fn main() {
             set_aria2_rpc_settings,
             test_aria2_rpc,
             regenerate_aria2_rpc_token,
+            get_rqbit_settings,
+            set_rqbit_settings,
+            test_rqbit,
+            regenerate_rqbit_credentials,
             get_media_player,
             get_app_version,
             check_app_update,

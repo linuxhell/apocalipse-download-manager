@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     fs,
     net::TcpListener,
-    path::{Path, PathBuf},
+    path::Path,
     process::{Child, Command, Stdio},
     time::Duration,
 };
@@ -35,27 +35,8 @@ pub struct RuntimeStatus {
     pub downloaded: u64,
     pub total: u64,
     pub upload_speed: u64,
-    pub uploaded: u64,
     pub speed: u64,
     pub connections: u64,
-    pub seeders: u64,
-    pub followed_by: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct PeerSummary {
-    pub peers: u64,
-    pub seeders: u64,
-    pub leechers: u64,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct FileStatus {
-    pub index: usize,
-    pub path: String,
-    pub size: u64,
-    pub completed: u64,
-    pub selected: bool,
 }
 
 fn number(value: Option<&Value>) -> u64 {
@@ -150,12 +131,6 @@ impl Runtime {
             .arg(format!("--input-file={}", session.display()))
             .arg(format!("--save-session={}", session.display()))
             .arg("--save-session-interval=30")
-            .arg("--enable-dht=true")
-            .arg("--enable-dht6=true")
-            .arg("--enable-peer-exchange=true")
-            .arg("--bt-enable-lpd=true")
-            .arg("--seed-time=0")
-            .arg("--bt-hash-check-seed=false")
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         #[cfg(target_os = "windows")]
@@ -277,10 +252,8 @@ impl Endpoint {
         source: &str,
         destination: &Path,
         connections: usize,
-        selected_files: &[usize],
         context: &RequestContext,
         http_download: bool,
-        torrent_download: bool,
     ) -> Result<String, String> {
         if !context.body.is_empty()
             || (!context.method.is_empty() && !context.method.eq_ignore_ascii_case("GET"))
@@ -314,24 +287,6 @@ impl Endpoint {
                 ),
             );
         }
-        if torrent_download {
-            options.insert(
-                "bt-prioritize-piece".into(),
-                Value::String("head=32M,tail=32M".into()),
-            );
-        }
-        if !selected_files.is_empty() {
-            options.insert(
-                "select-file".into(),
-                Value::String(
-                    selected_files
-                        .iter()
-                        .map(|index| index.to_string())
-                        .collect::<Vec<_>>()
-                        .join(","),
-                ),
-            );
-        }
         if !context.headers.is_empty() {
             options.insert(
                 "header".into(),
@@ -344,53 +299,6 @@ impl Endpoint {
                 ),
             );
         }
-        if source.to_ascii_lowercase().ends_with(".torrent") {
-            options.insert("follow-torrent".into(), Value::String("true".into()));
-        }
-        let local_torrent = PathBuf::from(source);
-        let value = if local_torrent.is_file()
-            && local_torrent
-                .extension()
-                .and_then(|value| value.to_str())
-                .is_some_and(|value| value.eq_ignore_ascii_case("torrent"))
-        {
-            let bytes = fs::read(local_torrent).map_err(|error| error.to_string())?;
-            let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
-            self.call(
-                "aria2.addTorrent",
-                vec![
-                    Value::String(encoded),
-                    Value::Array(Vec::new()),
-                    Value::Object(options),
-                ],
-            )
-            .await?
-        } else {
-            self.call(
-                "aria2.addUri",
-                vec![json!([source]), Value::Object(options)],
-            )
-            .await?
-        };
-        value
-            .as_str()
-            .map(str::to_owned)
-            .ok_or_else(|| "aria2_gid_missing".to_owned())
-    }
-
-    pub async fn add_metadata_only(
-        &self,
-        source: &str,
-        directory: &Path,
-    ) -> Result<String, String> {
-        let mut options = Map::new();
-        options.insert(
-            "dir".into(),
-            Value::String(directory.to_string_lossy().into_owned()),
-        );
-        options.insert("bt-metadata-only".into(), Value::String("true".into()));
-        options.insert("bt-save-metadata".into(), Value::String("false".into()));
-        options.insert("file-allocation".into(), Value::String("none".into()));
         let value = self
             .call(
                 "aria2.addUri",
@@ -411,9 +319,7 @@ impl Endpoint {
             "uploadLength",
             "downloadSpeed",
             "uploadSpeed",
-            "connections",
-            "numSeeders",
-            "followedBy"
+            "connections"
         ]);
         let value = self
             .call(
@@ -429,80 +335,10 @@ impl Endpoint {
                 .to_owned(),
             total: number(value.get("totalLength")),
             downloaded: number(value.get("completedLength")),
-            uploaded: number(value.get("uploadLength")),
             speed: number(value.get("downloadSpeed")),
             upload_speed: number(value.get("uploadSpeed")),
             connections: number(value.get("connections")),
-            seeders: number(value.get("numSeeders")),
-            followed_by: value
-                .get("followedBy")
-                .and_then(Value::as_array)
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default(),
         })
-    }
-
-    pub async fn peers(&self, gid: &str) -> Result<PeerSummary, String> {
-        let value = self
-            .call("aria2.getPeers", vec![Value::String(gid.to_owned())])
-            .await?;
-        let peers = value.as_array().cloned().unwrap_or_default();
-        let seeders = peers
-            .iter()
-            .filter(|peer| {
-                peer.get("seeder")
-                    .and_then(|value| {
-                        value
-                            .as_str()
-                            .map(|text| text == "true")
-                            .or_else(|| value.as_bool())
-                    })
-                    .unwrap_or(false)
-            })
-            .count() as u64;
-        Ok(PeerSummary {
-            peers: peers.len() as u64,
-            seeders,
-            leechers: (peers.len() as u64).saturating_sub(seeders),
-        })
-    }
-
-    pub async fn files(&self, gid: &str) -> Result<Vec<FileStatus>, String> {
-        let value = self
-            .call("aria2.getFiles", vec![Value::String(gid.to_owned())])
-            .await?;
-        Ok(value
-            .as_array()
-            .map(|files| {
-                files
-                    .iter()
-                    .filter_map(|file| {
-                        let index = file.get("index")?.as_str()?.parse::<usize>().ok()?;
-                        Some(FileStatus {
-                            index,
-                            path: file
-                                .get("path")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                                .to_owned(),
-                            size: number(file.get("length")),
-                            completed: number(file.get("completedLength")),
-                            selected: file
-                                .get("selected")
-                                .and_then(Value::as_str)
-                                .map(|value| value == "true")
-                                .unwrap_or(true),
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default())
     }
 
     pub async fn pause(&self, gid: &str) -> Result<(), String> {

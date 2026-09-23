@@ -13,6 +13,10 @@ const aria2 = fs.readFileSync(
   path.join(root, "apps/desktop/src-tauri/src/aria2.rs"),
   "utf8",
 );
+const rqbit = fs.readFileSync(
+  path.join(root, "apps/desktop/src-tauri/src/rqbit.rs"),
+  "utf8",
+);
 const cargo = fs.readFileSync(path.join(root, "Cargo.toml"), "utf8");
 const tauri = JSON.parse(
   fs.readFileSync(path.join(root, "apps/desktop/src-tauri/tauri.conf.json"), "utf8"),
@@ -274,17 +278,15 @@ test("automatic mirrors are server-advertised, identity-checked and latency-rank
 });
 
 
-test("magnet metadata completion follows the real torrent content GID", () => {
-  assert.match(aria2, /"followedBy"/);
-  assert.match(aria2, /pub followed_by: Vec<String>/);
-  assert.match(desktop, /aria2\.torrent_followed_by/);
-  assert.match(desktop, /std::mem::replace\(&mut gid, next_gid\.clone\(\)\)/);
-  assert.match(desktop, /items\.insert\(id, next_gid\)/);
-  assert.match(desktop, /item\.progress_percent = Some\(0\.0\)/);
+test("adding a magnet or torrent resolves a real torrent id directly, no metadata GID handoff", () => {
+  assert.match(rqbit, /pub async fn add_torrent\(/);
+  assert.match(rqbit, /POST, "\/torrents"/);
+  assert.match(rqbit, /pub id: usize,/);
+  assert.match(desktop, /rqbit\.torrent_added/);
+  assert.match(desktop, /rqbit_tasks\.lock\(\)/);
 });
 
-test("torrent preview prioritizes the beginning and end of selected files", () => {
-  assert.match(aria2, /"bt-prioritize-piece"/);
-  assert.match(aria2, /"head=32M,tail=32M"/);
-  assert.match(desktop, /torrentPreviewPriority/);
+test("rqbit downloads torrents sequentially so playback can start before the download finishes", () => {
+  assert.match(desktop, /"sequentialDownload": true/);
+  assert.match(desktop, /streamingEndpoint/);
 });
