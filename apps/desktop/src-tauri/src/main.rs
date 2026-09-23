@@ -4254,10 +4254,11 @@ fn reconnect_active_downloads_after_network_change(
         let _ = cancel.send(());
     }
     if !ids.is_empty() {
+        // aria2-next restores unfinished session entries with the same GID.
+        // Keep ADM's task->GID mapping so the restarted runtime can reconnect
+        // to the restored transfer. If a GID was not persisted by the engine,
+        // run_aria2_download detects it as stale and safely recreates the task.
         stop_aria2_runtime(&state);
-        if let Ok(mut aria2_tasks) = state.aria2_tasks.lock() {
-            aria2_tasks.clear();
-        }
     }
     if current.is_some() {
         if let Ok(queue) = state.queue.lock() {
@@ -5153,10 +5154,39 @@ async fn inspect_media_formats(
 }
 
 fn load_queue(path: &Path) -> Vec<DownloadTask> {
-    fs::read(path)
+    let mut queue: Vec<DownloadTask> = fs::read(path)
         .ok()
         .and_then(|data| serde_json::from_slice(&data).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let mut recovered = false;
+    for task in &mut queue {
+        if matches!(
+            task.state,
+            DownloadState::Downloading | DownloadState::Inspecting | DownloadState::Verifying
+        ) {
+            // Workers do not survive a process restart. Keep the partial data
+            // and persisted aria2-next GID, but present the task as paused
+            // until the user resumes it (or the scheduler explicitly queues it).
+            task.state = DownloadState::Paused;
+            task.download_speed = Some(0);
+            task.upload_speed = Some(0);
+            recovered = true;
+        }
+    }
+    if recovered {
+        if let Ok(data) = serde_json::to_vec_pretty(&queue) {
+            let _ = fs::write(path, data);
+        }
+    }
+    queue
+}
+
+fn restored_aria2_task_map(queue: &[DownloadTask]) -> HashMap<DownloadId, String> {
+    queue
+        .iter()
+        .filter(|task| task.state != DownloadState::Completed)
+        .filter_map(|task| task.aria2_gid.clone().map(|gid| (task.id, gid)))
+        .collect()
 }
 
 fn copy_directory_if_missing(source: &Path, destination: &Path) {
@@ -6290,19 +6320,40 @@ async fn run_aria2_download(
         .lock()
         .ok()
         .and_then(|items| items.get(&id).cloned());
-    let mut gid = match existing_task {
-        Some(gid) => {
-            if let Err(error) = endpoint.resume(&gid).await {
-                update_task(&app, id, true, |item| {
-                    item.state = DownloadState::Failed {
-                        message: format!("aria2_resume_failed:{error}"),
-                    }
-                });
-                if let Ok(mut workers) = state.workers.lock() {
-                    workers.remove(&id);
+    let existing_task = match existing_task {
+        Some(gid) => match endpoint.status(&gid).await {
+            Ok(status) => Some((gid, status.status)),
+            Err(error) => {
+                diagnostic_log(
+                    &state,
+                    "WARN",
+                    "aria2.restored_gid_stale",
+                    &format!("task={id} gid={gid} error={error} recreating=true"),
+                );
+                if let Ok(mut items) = state.aria2_tasks.lock() {
+                    items.remove(&id);
                 }
-                start_next_queued(&app);
-                return;
+                update_task(&app, id, true, |item| item.aria2_gid = None);
+                None
+            }
+        },
+        None => None,
+    };
+    let mut gid = match existing_task {
+        Some((gid, status)) => {
+            if status == "paused" {
+                if let Err(error) = endpoint.resume(&gid).await {
+                    update_task(&app, id, true, |item| {
+                        item.state = DownloadState::Failed {
+                            message: format!("aria2_resume_failed:{error}"),
+                        }
+                    });
+                    if let Ok(mut workers) = state.workers.lock() {
+                        workers.remove(&id);
+                    }
+                    start_next_queued(&app);
+                    return;
+                }
             }
             gid
         }
@@ -6384,6 +6435,7 @@ async fn run_aria2_download(
                     if let Ok(mut items) = state.aria2_tasks.lock() {
                         items.insert(id, gid.clone());
                     }
+                    update_task(&app, id, true, |item| item.aria2_gid = Some(gid.clone()));
                     gid
                 }
                 Err(error) => {
@@ -6527,6 +6579,7 @@ async fn run_aria2_download(
                     if let Ok(mut items) = state.aria2_tasks.lock() {
                         items.insert(id, gid.clone());
                     }
+                    update_task(&app, id, true, |item| item.aria2_gid = Some(gid.clone()));
                     last_at = Instant::now();
                     last_downloaded = 0;
                     continue;
@@ -6601,6 +6654,7 @@ async fn run_aria2_download(
                                 item.state = DownloadState::Failed {
                                     message: "aria2_torrent_expected_size_mismatch".to_owned(),
                                 };
+                                item.aria2_gid = None;
                             });
                             if let Ok(mut items) = state.aria2_tasks.lock() {
                                 items.remove(&id);
@@ -6622,6 +6676,7 @@ async fn run_aria2_download(
                                 item.state = DownloadState::Failed {
                                     message: "aria2_torrent_size_mismatch".to_owned(),
                                 };
+                                item.aria2_gid = None;
                             });
                             if let Ok(mut items) = state.aria2_tasks.lock() {
                                 items.remove(&id);
@@ -6637,6 +6692,7 @@ async fn run_aria2_download(
                             item.upload_speed = Some(0);
                             item.state = DownloadState::Completed;
                             item.completed_at = Some(epoch_seconds());
+                            item.aria2_gid = None;
                         });
                         maybe_auto_extract_completed(&app, id);
                         let _ = endpoint.remove_result(&gid).await;
@@ -6656,6 +6712,7 @@ async fn run_aria2_download(
                                     .map(|reason| format!("{engine_tag}:{reason}"))
                                     .unwrap_or_else(|| engine_tag.to_owned()),
                             };
+                            item.aria2_gid = None;
                         });
                         if let Ok(mut items) = state.aria2_tasks.lock() {
                             items.remove(&id);
@@ -11114,6 +11171,13 @@ fn relocate_download(
     if let Ok(mut mappings) = state.aria2_tasks.lock() {
         mappings.remove(&id);
     }
+    {
+        let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+        if let Some(item) = queue.iter_mut().find(|item| item.id == id) {
+            item.aria2_gid = None;
+        }
+        save_queue(&state, &queue)?;
+    }
     diagnostic_log(
         &state,
         "INFO",
@@ -11159,11 +11223,20 @@ fn redownload_downloads(
             .unwrap_or("download");
         let mut task = DownloadTask::new(&original.source, directory.join(file_name));
         task.format_selection = original.format_selection.clone();
+        task.torrent_selection = original.torrent_selection.clone();
         task.referer = original.referer.clone();
         task.known_duration = original.known_duration;
         task.is_live = original.is_live;
         task.display_title = original.display_title.clone();
         task.thumbnail = original.thumbnail.clone();
+        task.companion_audio_url = original.companion_audio_url.clone();
+        task.mirrors = original.mirrors.clone();
+        task.priority = original.priority;
+        task.bandwidth_limit = original.bandwidth_limit;
+        task.connections_override = original.connections_override;
+        task.expected_size = original.expected_size;
+        task.sha256 = original.sha256.clone();
+        task.auto_extract = original.auto_extract;
         if let Some(identity) = saved_identities.get(&original.id) {
             repeated_identities.push((task.id, identity.clone()));
         }
@@ -13870,8 +13943,10 @@ fn main() {
             let global_bandwidth_limiter = Arc::new(BandwidthLimiter::new(
                 initial_settings.global_bandwidth_limit,
             ));
+            let initial_queue = load_queue(&queue_path);
+            let initial_aria2_tasks = restored_aria2_task_map(&initial_queue);
             app.manage(AppState {
-                queue: Mutex::new(load_queue(&queue_path)),
+                queue: Mutex::new(initial_queue),
                 queue_path,
                 workers: Mutex::new(HashMap::new()),
                 settings: Mutex::new(initial_settings),
@@ -13886,7 +13961,7 @@ fn main() {
                 request_identities: Mutex::new(HashMap::new()),
                 link_transfers: Mutex::new(HashMap::new()),
                 aria2_runtime: Mutex::new(None),
-                aria2_tasks: Mutex::new(HashMap::new()),
+                aria2_tasks: Mutex::new(initial_aria2_tasks),
                 log_path,
                 log_write_lock: Mutex::new(()),
                 diagnostics: diagnostics::Diagnostics::new(&app_data.join("logs")),
