@@ -923,9 +923,7 @@ impl Endpoint {
     ) -> Result<Vec<String>, String> {
         let keys = json!(["gid", "status", "infoHash"]);
         let mut transfers = Vec::new();
-        let active = self
-            .call("aria2.tellActive", vec![keys.clone()])
-            .await?;
+        let active = self.call("aria2.tellActive", vec![keys.clone()]).await?;
         if let Some(items) = active.as_array() {
             transfers.extend(items.iter().cloned());
         }
@@ -975,7 +973,9 @@ impl Endpoint {
                             .and_then(Value::as_str)
                             .map(str::to_owned)
                     })
-                    .is_some_and(|status| matches!(status.as_str(), "active" | "waiting" | "paused"));
+                    .is_some_and(|status| {
+                        matches!(status.as_str(), "active" | "waiting" | "paused")
+                    });
                 if !still_registered {
                     break;
                 }
