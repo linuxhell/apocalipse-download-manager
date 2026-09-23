@@ -119,20 +119,23 @@ jobs:
             os: windows-latest
             artifact: apocalipse-windows-x64-candidate
             output: apocalipse-download-manager-windows-x64-portable.zip
-            aria2_suffix: windows-x64.exe
-            aria2_binary: aria2c.exe
+            surge_markers: windows_amd64
+            surge_archive_ext: .zip
+            surge_binary: surge.exe
           - name: Linux x64 portable
             os: ubuntu-22.04
             artifact: apocalipse-linux-x64-candidate
             output: apocalipse-download-manager-linux-x64-portable.tar.gz
-            aria2_suffix: linux-x64
-            aria2_binary: aria2c
+            surge_markers: linux_amd64
+            surge_archive_ext: .tar.gz
+            surge_binary: surge
           - name: macOS x64 portable
             os: macos-15-intel
             artifact: apocalipse-macos-x64-candidate
             output: apocalipse-download-manager-macos-x64-portable.zip
-            aria2_suffix: macos-x64
-            aria2_binary: aria2c
+            surge_markers: darwin_amd64
+            surge_archive_ext: .tar.gz
+            surge_binary: surge
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
@@ -167,44 +170,71 @@ jobs:
         run: |
           cd apps/desktop
           npx --yes @tauri-apps/cli@2 build --bundles appimage
-      - name: Download aria2 backend
+      - name: Download Surge backend
+        if: runner.os != 'Windows'
         shell: bash
         env:
-          ARIA2_SUFFIX: ${{ matrix.aria2_suffix }}
-          ARIA2_BINARY: ${{ matrix.aria2_binary }}
+          SURGE_MARKERS: ${{ matrix.surge_markers }}
+          SURGE_ARCHIVE_EXT: ${{ matrix.surge_archive_ext }}
+          SURGE_BINARY: ${{ matrix.surge_binary }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          release_json="$RUNNER_TEMP/aria2-release.json"
+          release_json="$RUNNER_TEMP/surge-release.json"
           curl --fail --location --retry 3 \
             --header "Authorization: Bearer $GITHUB_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/latest" \
+            "https://api.github.com/repos/SurgeDM/Surge/releases/latest" \
             --output "$release_json"
-          asset_id=$(python3 - "$release_json" "$ARIA2_SUFFIX" <<'PY'
+          asset_url=$(python3 - "$release_json" "$SURGE_MARKERS" "$SURGE_ARCHIVE_EXT" <<'PY'
           import json
           import sys
 
           with open(sys.argv[1], encoding="utf-8") as stream:
               release = json.load(stream)
-          suffix = sys.argv[2].lower()
+          marker = sys.argv[2].lower()
+          ext = sys.argv[3].lower()
           for asset in release.get("assets", []):
               name = str(asset.get("name", "")).lower()
-              if name.startswith("aria2c-") and name.endswith(suffix) and not name.endswith(".sha256"):
-                  print(asset["id"])
+              if marker in name and name.endswith(ext):
+                  print(asset["browser_download_url"])
                   break
           else:
-              raise SystemExit(f"aria2 compatible asset not found for suffix: {suffix}")
+              raise SystemExit(f"Surge compatible asset not found for marker: {marker}")
           PY
           )
-          mkdir -p dist/aria2-backend
-          curl --fail --location --retry 3 \
-            --header "Authorization: Bearer $GITHUB_TOKEN" \
-            --header "Accept: application/octet-stream" \
-            --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/assets/$asset_id" \
-            --output "dist/aria2-backend/$ARIA2_BINARY"
-          chmod 755 "dist/aria2-backend/$ARIA2_BINARY"
+          mkdir -p dist/surge-backend dist/surge-archive
+          archive="dist/surge-archive/surge$SURGE_ARCHIVE_EXT"
+          curl --fail --location --retry 3 --header "Authorization: Bearer $GITHUB_TOKEN" \
+            "$asset_url" --output "$archive"
+          if [ "$SURGE_ARCHIVE_EXT" = ".zip" ]; then
+            unzip -oq "$archive" -d dist/surge-archive/extracted
+          else
+            mkdir -p dist/surge-archive/extracted
+            tar -xzf "$archive" -C dist/surge-archive/extracted
+          fi
+          found="$(find dist/surge-archive/extracted -type f -name "$SURGE_BINARY" -print -quit)"
+          test -n "$found"
+          cp "$found" "dist/surge-backend/$SURGE_BINARY"
+          chmod 755 "dist/surge-backend/$SURGE_BINARY"
+      - name: Download Surge backend (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SURGE_MARKERS: ${{ matrix.surge_markers }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $headers = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; "X-GitHub-Api-Version" = "2022-11-28" }
+          $release = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/SurgeDM/Surge/releases/latest"
+          $marker = $env:SURGE_MARKERS.ToLower()
+          $asset = $release.assets | Where-Object { $_.name.ToLower().Contains($marker) -and $_.name.ToLower().EndsWith(".zip") } | Select-Object -First 1
+          if (-not $asset) { throw "Surge compatible asset not found for marker: $marker" }
+          New-Item -ItemType Directory -Force dist/surge-backend, dist/surge-archive | Out-Null
+          Invoke-WebRequest -Headers $headers -Uri $asset.browser_download_url -OutFile dist/surge-archive/surge.zip
+          Expand-Archive -Path dist/surge-archive/surge.zip -DestinationPath dist/surge-archive/extracted -Force
+          $found = Get-ChildItem -Path dist/surge-archive/extracted -Recurse -Filter surge.exe | Select-Object -First 1
+          if (-not $found) { throw "surge.exe not found in downloaded archive" }
+          Copy-Item $found.FullName dist/surge-backend/surge.exe
 
       - name: Stage Windows portable
         if: runner.os == 'Windows'
@@ -213,8 +243,8 @@ jobs:
           $package = 'dist/Apocalipse Download Manager'
           New-Item -ItemType Directory -Force $package | Out-Null
           Copy-Item 'target/release/apocalipse-desktop.exe' "$package/Apocalipse Download Manager.exe"
-          New-Item -ItemType Directory -Force "$package/data/tools/aria2" | Out-Null
-          Copy-Item 'dist/aria2-backend/aria2c.exe' "$package/data/tools/aria2/aria2c.exe"
+          New-Item -ItemType Directory -Force "$package/data/tools/surge" | Out-Null
+          Copy-Item 'dist/surge-backend/surge.exe' "$package/data/tools/surge/surge.exe"
           Copy-Item 'README.md','LICENSE' $package
           Compress-Archive -Path $package -DestinationPath 'dist/${{ matrix.output }}' -Force
       - name: Stage Linux portable
@@ -222,9 +252,9 @@ jobs:
         shell: bash
         run: |
           package='dist/Apocalipse Download Manager'
-          mkdir -p "$package/data/tools/aria2"
+          mkdir -p "$package/data/tools/surge"
           install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
-          install -m 755 dist/aria2-backend/aria2c "$package/data/tools/aria2/aria2c"
+          install -m 755 dist/surge-backend/surge "$package/data/tools/surge/surge"
           cp README.md LICENSE "$package/"
           appimage="$(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
           test -n "$appimage"
@@ -235,10 +265,10 @@ jobs:
         shell: bash
         run: |
           app='dist/Apocalipse Download Manager.app'
-          mkdir -p "$app/Contents/MacOS/data/tools/aria2" "$app/Contents/Resources"
+          mkdir -p "$app/Contents/MacOS/data/tools/surge" "$app/Contents/Resources"
           cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
           chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
-          install -m 755 dist/aria2-backend/aria2c "$app/Contents/MacOS/data/tools/aria2/aria2c"
+          install -m 755 dist/surge-backend/surge "$app/Contents/MacOS/data/tools/surge/surge"
           cp packaging/macos/Info.plist "$app/Contents/Info.plist"
           cp README.md LICENSE "$app/Contents/Resources/"
           ditto -c -k --sequesterRsrc --keepParent "$app" 'dist/${{ matrix.output }}'
