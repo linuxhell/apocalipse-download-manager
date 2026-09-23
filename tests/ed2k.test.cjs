@@ -53,14 +53,19 @@ test("ed2k:// links classify and actually dispatch through the shared aria2next 
   assert.doesNotMatch(ed2kCommandsBlock, /aria2::Runtime::spawn/);
 });
 
-test("ED2K server list is validated and persisted, and search/connect use the documented aria2-next RPC surface", () => {
+test("ED2K server sources are attached to real aria2-next download/search requests, not ignored global options", () => {
   assert.match(main, /fn normalize_ed2k_server/);
   assert.match(main, /ed2k_servers: Vec<String>/);
-  assert.match(aria2, /pub async fn set_ed2k_servers/);
-  assert.match(aria2, /"aria2\.changeGlobalOption"/);
+  assert.match(aria2, /pub async fn add_ed2k_download/);
+  assert.match(aria2, /options\.insert\("ed2k-server"\.into\(\)/);
+  assert.match(aria2, /options\.insert\(\s*"ed2k-server-list"\.into\(\)/s);
+  assert.match(main, /\.add_ed2k_download\(/);
   assert.match(aria2, /pub async fn ed2k_search/);
   assert.match(aria2, /"aria2\.ed2kSearch"/);
+  assert.match(aria2, /Value::Object\(options\)/);
   assert.match(aria2, /"aria2\.getEd2kSearchResults"/);
+  assert.doesNotMatch(aria2, /fn set_ed2k_servers/);
+  assert.doesNotMatch(aria2, /fn set_ed2k_server_list_file/);
 });
 
 test("ed2k link download extracts its filename from the pipe-delimited link, not a bogus path segment", () => {
@@ -75,28 +80,29 @@ test("ed2k: system association is available in settings and platform handlers", 
   assert.match(html, /data-association="ed2k"/);
 });
 
-test("ED2K server list auto-updates from a configurable server.met URL, mirroring aMule's own Ed2kServersUrl default", () => {
-  // aria2-next's --ed2k-server-list only accepts a local file path (its own
-  // docs confirm this, not a remote URL), so the configured URL must be
-  // downloaded to a local file first and that file's path applied via RPC.
+test("ED2K server list auto-updates safely from a configurable server.met URL", () => {
+  // aria2-next's ed2k-server-list accepts a local server.met path, so ADM
+  // downloads it into the portable data tree and supplies that path on each
+  // ED2K download/search request.
   assert.match(main, /fn default_ed2k_server_list_url\(\) -> String \{\s*\n\s*"https:\/\/upd\.emule-security\.org\/server\.met"\.to_owned\(\)/);
   assert.match(main, /ed2k_server_list_url: String,/);
+  assert.match(main, /fn validate_ed2k_server_met\(bytes: &\[u8\]\)/);
+  assert.match(main, /count > 100_000/);
   assert.match(main, /async fn ed2k_update_server_list\(/);
   assert.match(main, /fs::write\(&staged, &bytes\)/);
   assert.match(main, /ed2k_server_list_payload_too_large/);
-  assert.match(main, /endpoint\.set_ed2k_server_list_file\(&staged\)\.await/);
   assert.match(main, /met\.backup/);
-  assert.match(main, /ed2k_server_list_apply_failed/);
-  assert.match(aria2, /pub async fn set_ed2k_server_list_file/);
   assert.match(aria2, /"ed2k-server-list"\.into\(\)/);
-  // Connect refreshes server.met first, matching aMule's "update at
-  // startup" behavior, but falls back to whatever's already cached (or to
-  // aria2-next's own built-in bootstrap servers) instead of hard-failing
-  // when the network fetch itself fails.
+
+  // "Connect" prepares the engine and refreshes server.met. aria2-next has
+  // no standalone ED2K connect/disconnect RPC; real handshakes begin with a
+  // search/download task carrying these options.
   const connectBlock = main.slice(main.indexOf("async fn ed2k_connect("), main.indexOf("async fn ed2k_disconnect("));
   assert.match(connectBlock, /ed2k_update_server_list\(state\.clone\(\)\)\.await/);
-  assert.match(connectBlock, /set_ed2k_server_list_file\(&cached\)/);
-  // Backend and UI both expose the URL as editable, not hardcoded only.
+  assert.match(connectBlock, /aria2_endpoint\(&state, true\)\.await/);
+  assert.match(main, /aria2-next exposes no independent ED2K disconnect RPC/);
+
+  // Backend and UI both expose the source URL as editable.
   assert.match(main, /fn ed2k_get_server_list_url/);
   assert.match(main, /fn ed2k_set_server_list_url/);
   const ed2kJs = fs.readFileSync(path.join(root, "apps/desktop/ui/ed2k.js"), "utf8");
