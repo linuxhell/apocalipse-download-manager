@@ -9015,8 +9015,7 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             let expected = match (platform, architecture) {
                 ("windows", "x86_64") => "rqbit.exe",
                 ("linux", "x86_64") => "rqbit-linux-amd64",
-                ("linux", "aarch64") => "rqbit-linux-arm64",
-                ("macos", _) => "rqbit-osx-universal",
+                ("macos", "x86_64") => "rqbit-osx-universal",
                 _ => return Err("tool_download_platform_unsupported:rqbit".to_owned()),
             };
             let (_, url) = release_asset(&release, |name| name == expected)?;
@@ -9284,6 +9283,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 if cfg!(windows) { "qjs.exe" } else { "qjs" },
             ),
             "aria2" => configured_aria2(&settings),
+            "rqbit" => configured_rqbit(&settings),
             "n-m3u8dl-re" => configured_tool(
                 &settings.n_m3u8dl_re_path,
                 if cfg!(windows) {
@@ -9465,8 +9465,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                     "rqbit" => match (platform, architecture) {
                         ("windows", "x86_64") => name == "rqbit.exe",
                         ("linux", "x86_64") => name == "rqbit-linux-amd64",
-                        ("linux", "aarch64") => name == "rqbit-linux-arm64",
-                        ("macos", _) => name == "rqbit-osx-universal",
+                        ("macos", "x86_64") => name == "rqbit-osx-universal",
                         _ => false,
                     },
                     _ => asset_markers

@@ -116,7 +116,12 @@ impl Runtime {
             .arg("server")
             .arg("start")
             .arg(&default_download_dir)
-            .arg(format!("--http-api-listen-addr=127.0.0.1:{port}"))
+            // --http-api-listen-addr is a global flag on rqbit's top-level
+            // Opts, declared before the "server"/"download"/"share"
+            // subcommand, so it cannot be placed after "server start
+            // <dir>" on the command line. Set it via its documented env
+            // var instead, which the same Opts field also reads.
+            .env("RQBIT_HTTP_API_LISTEN_ADDR", format!("127.0.0.1:{port}"))
             .env(
                 "RQBIT_HTTP_BASIC_AUTH_USERPASS",
                 format!("{username}:{password}"),
@@ -236,12 +241,11 @@ impl Endpoint {
             ("list_only", list_only.to_string()),
         ]);
         if !only_files.is_empty() {
-            let joined = only_files
+            let pairs = only_files
                 .iter()
-                .map(usize::to_string)
-                .collect::<Vec<_>>()
-                .join(",");
-            request = request.query(&[("only_files", joined)]);
+                .map(|index| ("only_files", index.to_string()))
+                .collect::<Vec<_>>();
+            request = request.query(&pairs);
         }
         let response = request
             .header("Content-Type", "application/octet-stream")
