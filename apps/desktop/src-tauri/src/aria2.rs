@@ -1179,11 +1179,7 @@ impl Endpoint {
         .map(|_| ())
     }
 
-    pub async fn set_bittorrent_sequential(
-        &self,
-        gid: &str,
-        enabled: bool,
-    ) -> Result<(), String> {
+    pub async fn set_bittorrent_sequential(&self, gid: &str, enabled: bool) -> Result<(), String> {
         let mut options = Map::new();
         options.insert(
             "force-sequential".into(),
