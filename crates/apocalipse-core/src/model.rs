@@ -37,6 +37,12 @@ pub struct DownloadTask {
     pub upload_speed: Option<u64>,
     #[serde(default)]
     pub torrent_selection: Vec<usize>,
+    /// aria2-next GID persisted across ADM restarts. The engine's session
+    /// file restores unfinished transfers with the same GID, allowing the UI
+    /// task to reconnect to the already-restored transfer instead of creating
+    /// a duplicate.
+    #[serde(default)]
+    pub aria2_gid: Option<String>,
     #[serde(default)]
     pub torrent_seeders: Option<u64>,
     #[serde(default)]
@@ -103,6 +109,7 @@ impl DownloadTask {
             download_speed: None,
             upload_speed: None,
             torrent_selection: Vec::new(),
+            aria2_gid: None,
             torrent_seeders: None,
             torrent_leechers: None,
             torrent_eta: None,
