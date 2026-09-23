@@ -4,8 +4,9 @@ use serde_json::{json, Map, Value};
 use std::{
     collections::HashMap,
     fs,
-    net::TcpListener,
-    path::Path,
+    io::{Read, Seek, SeekFrom},
+    net::{TcpListener, UdpSocket},
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::Duration,
 };
@@ -15,12 +16,15 @@ pub struct Endpoint {
     base_url: String,
     secret: String,
     client: Client,
+    bt_port: u16,
+    state_dir: PathBuf,
 }
 
 pub struct Runtime {
     child: Child,
     endpoint: Endpoint,
     port: u16,
+    bt_port: u16,
 }
 
 #[derive(Clone, Default)]
@@ -103,6 +107,72 @@ fn reserve_loopback_port(requested: Option<u16>) -> Result<u16, String> {
     Ok(port)
 }
 
+
+fn reserve_bittorrent_port() -> Result<u16, String> {
+    // Pick a high ephemeral port that is simultaneously free for TCP and UDP.
+    // aria2-next/libtorrent uses the same listen port for incoming BitTorrent
+    // TCP and UDP traffic (DHT/UDP trackers). Probing both protocols avoids the
+    // fixed 6881 collision observed in the real diagnostic bundle.
+    for _ in 0..32 {
+        let tcp = TcpListener::bind(("0.0.0.0", 0)).map_err(|error| error.to_string())?;
+        let port = tcp
+            .local_addr()
+            .map_err(|error| error.to_string())?
+            .port();
+        if port < 1024 {
+            continue;
+        }
+        match UdpSocket::bind(("0.0.0.0", port)) {
+            Ok(udp) => {
+                drop(udp);
+                drop(tcp);
+                return Ok(port);
+            }
+            Err(_) => continue,
+        }
+    }
+    Err("aria2_bt_port_unavailable".to_owned())
+}
+
+fn log_reports_bt_bind_failure(log: &Path, start: u64, port: u16) -> bool {
+    let Ok(mut file) = fs::File::open(log) else {
+        return false;
+    };
+    let length = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+    let offset = if start <= length { start } else { 0 };
+    if file.seek(SeekFrom::Start(offset)).is_err() {
+        return false;
+    }
+    let mut bytes = Vec::new();
+    if file.take(2 * 1024 * 1024).read_to_end(&mut bytes).is_err() {
+        return false;
+    }
+    let port_text = port.to_string();
+    String::from_utf8_lossy(&bytes).lines().any(|line| {
+        let lower = line.to_ascii_lowercase();
+        lower.contains(&port_text)
+            && (lower.contains("sock_bind")
+                || (lower.contains("listen") && lower.contains("fail")))
+    })
+}
+
+fn magnet_info_hash(magnet: &str) -> Option<String> {
+    let query = magnet.split_once('?')?.1;
+    for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+        if !key.eq_ignore_ascii_case("xt") {
+            continue;
+        }
+        let lower = value.to_ascii_lowercase();
+        let Some(hash) = lower.strip_prefix("urn:btih:") else {
+            continue;
+        };
+        if hash.len() == 40 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Some(hash.to_owned());
+        }
+    }
+    None
+}
+
 impl Runtime {
     pub fn spawn(
         executable: &Path,
@@ -114,22 +184,24 @@ impl Runtime {
             return Err("aria2_not_found".to_owned());
         }
         fs::create_dir_all(runtime_root).map_err(|error| error.to_string())?;
-        // Reserving a loopback port and releasing it before aria2next binds the
-        // same one is an inherent TOCTOU race (another process can grab it
-        // first). We can't hand the bound socket to an external process, so
-        // instead retry with a freshly picked port a few times when nothing
-        // pinned the port explicitly and the child dies immediately after
-        // spawn, which is the observable symptom of losing that race.
-        let attempts = if requested_port.is_some() { 1 } else { 4 };
+        // Both RPC and BitTorrent listen ports are selected before spawning.
+        // The sockets cannot be handed into aria2-next, so a small TOCTOU race
+        // remains. Retry a lost dynamic RPC port or a detected BitTorrent bind
+        // failure with a fresh BT port instead of leaving a live daemon that
+        // cannot accept DHT/tracker/incoming peer traffic.
+        let attempts = 4;
         let mut last_error = String::new();
         for attempt in 0..attempts {
             match Self::spawn_once(executable, runtime_root, requested_port, secret) {
                 Ok(runtime) => return Ok(runtime),
                 Err(error) => {
+                    let retryable = requested_port.is_none()
+                        || error.starts_with("aria2_bt_listen_failed");
                     last_error = error;
-                    if attempt + 1 < attempts {
-                        std::thread::sleep(Duration::from_millis(50));
+                    if attempt + 1 >= attempts || !retryable {
+                        break;
                     }
+                    std::thread::sleep(Duration::from_millis(50));
                 }
             }
         }
@@ -143,11 +215,13 @@ impl Runtime {
         secret: &str,
     ) -> Result<Self, String> {
         let port = reserve_loopback_port(requested_port)?;
+        let bt_port = reserve_bittorrent_port()?;
         let session = runtime_root.join("aria2.session");
         if !session.exists() {
             fs::write(&session, b"").map_err(|error| error.to_string())?;
         }
         let log = runtime_root.join("aria2.log");
+        let log_start = fs::metadata(&log).map(|metadata| metadata.len()).unwrap_or(0);
         let state_dir = runtime_root.join("state");
         fs::create_dir_all(&state_dir).map_err(|error| error.to_string())?;
         let mut command = Command::new(executable);
@@ -201,6 +275,7 @@ impl Runtime {
             // connections without refusing plaintext ones (upstream aria2's
             // separate bt-min-crypto-level/bt-require-crypto pair was
             // replaced by this single option).
+            .arg(format!("--listen-port={bt_port}"))
             .arg("--enable-dht=true")
             .arg("--enable-peer-exchange=true")
             .arg("--bt-enable-lpd=true")
@@ -223,9 +298,14 @@ impl Runtime {
         // aria2next exit almost immediately; catch that here so the caller can
         // retry with a different port instead of waiting out the full RPC
         // readiness timeout for a process that already died.
-        std::thread::sleep(Duration::from_millis(150));
+        std::thread::sleep(Duration::from_millis(250));
         if let Ok(Some(status)) = child.try_wait() {
             return Err(format!("aria2_exited_early:{status}"));
+        }
+        if log_reports_bt_bind_failure(&log, log_start, bt_port) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("aria2_bt_listen_failed:{bt_port}"));
         }
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(2))
@@ -238,8 +318,11 @@ impl Runtime {
                 base_url: format!("http://127.0.0.1:{port}/jsonrpc"),
                 secret: secret.to_owned(),
                 client,
+                bt_port,
+                state_dir,
             },
             port,
+            bt_port,
         })
     }
 
@@ -249,6 +332,10 @@ impl Runtime {
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    pub fn bt_port(&self) -> u16 {
+        self.bt_port
     }
 
     pub fn pid(&self) -> u32 {
@@ -272,6 +359,10 @@ impl Drop for Runtime {
 }
 
 impl Endpoint {
+    pub fn bt_listen_port(&self) -> u16 {
+        self.bt_port
+    }
+
     async fn call(&self, method: &str, mut params: Vec<Value>) -> Result<Value, String> {
         params.insert(0, Value::String(format!("token:{}", self.secret)));
         let response = self
@@ -374,12 +465,13 @@ impl Endpoint {
         }
         if http_download {
             let connections = connections.clamp(1, 32);
+            // aria2-next's RangePlanner uses this native option. The legacy
+            // split/max-connection-per-server/min-split-size trio is accepted
+            // only through its compatibility adapter and obscures diagnostics.
             options.insert(
-                "max-connection-per-server".into(),
+                "stream-max-connections".into(),
                 Value::String(connections.to_string()),
             );
-            options.insert("split".into(), Value::String(connections.to_string()));
-            options.insert("min-split-size".into(), Value::String("1M".into()));
             options.insert(
                 "out".into(),
                 Value::String(
@@ -640,6 +732,88 @@ impl Endpoint {
             .ok_or_else(|| "aria2_gid_missing".to_owned())
     }
 
+    async fn live_bittorrent_info_hash(&self, info_hash: &str) -> Result<bool, String> {
+        let keys = json!(["infoHash"]);
+        let active = self.call("aria2.tellActive", vec![keys.clone()]).await?;
+        if active.as_array().is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("infoHash")
+                    .and_then(Value::as_str)
+                    .is_some_and(|hash| hash.eq_ignore_ascii_case(info_hash))
+            })
+        }) {
+            return Ok(true);
+        }
+        let waiting = self
+            .call("aria2.tellWaiting", vec![json!(0), json!(1000), keys])
+            .await?;
+        Ok(waiting.as_array().is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("infoHash")
+                    .and_then(Value::as_str)
+                    .is_some_and(|hash| hash.eq_ignore_ascii_case(info_hash))
+            })
+        }))
+    }
+
+    async fn cleanup_temporary_magnet_preview(&self, gid: &str, info_hash: Option<&str>) {
+        let _ = self
+            .call("aria2.forceRemove", vec![Value::String(gid.to_owned())])
+            .await;
+
+        // libtorrent removes the native torrent handle asynchronously. Do not
+        // delete its fast-resume file while the info-hash is still registered.
+        for _ in 0..40 {
+            let still_registered = self
+                .call(
+                    "aria2.tellStatus",
+                    vec![Value::String(gid.to_owned()), json!(["status"])],
+                )
+                .await
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+                .is_some_and(|status| {
+                    matches!(status.as_str(), "active" | "waiting" | "paused")
+                });
+            if !still_registered {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        let _ = self
+            .call(
+                "aria2.removeDownloadResult",
+                vec![Value::String(gid.to_owned())],
+            )
+            .await;
+        let _ = self.call("aria2.saveSession", Vec::new()).await;
+
+        let Some(info_hash) = info_hash else {
+            return;
+        };
+        // Preserve fastresume whenever a real active/paused task still owns the
+        // same info-hash. Only collect state that belongs exclusively to this
+        // discarded analysis preview.
+        if self
+            .live_bittorrent_info_hash(info_hash)
+            .await
+            .unwrap_or(true)
+        {
+            return;
+        }
+        let torrents = self.state_dir.join("bittorrent").join("torrents");
+        let lower = torrents.join(format!("{}.fastresume", info_hash.to_ascii_lowercase()));
+        let upper = torrents.join(format!("{}.fastresume", info_hash.to_ascii_uppercase()));
+        let _ = fs::remove_file(lower);
+        let _ = fs::remove_file(upper);
+    }
+
     /// Resolves a magnet link's metadata (name, file list, sizes) without
     /// downloading file content. aria2-next keeps the same GID from BEP 9
     /// metadata discovery through file selection and payload. With
@@ -841,29 +1015,17 @@ impl Endpoint {
 
             if now >= deadline {
                 break Err(format!(
-                    "aria2_metadata_timeout:connections={peak_connections}:seeders={peak_seeders}"
+                    "aria2_metadata_timeout:bt_listen_port={}:connections={peak_connections}:seeders={peak_seeders}",
+                    self.bt_port
                 ));
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
         };
-        let _ = self
-            .call("aria2.forceRemove", vec![Value::String(gid.clone())])
-            .await;
-        let _ = self
-            .call("aria2.removeDownloadResult", vec![Value::String(gid)])
+        let info_hash = magnet_info_hash(magnet);
+        self.cleanup_temporary_magnet_preview(&gid, info_hash.as_deref())
             .await;
         if let Some(content_gid) = followed_content_gid {
-            let _ = self
-                .call(
-                    "aria2.forceRemove",
-                    vec![Value::String(content_gid.clone())],
-                )
-                .await;
-            let _ = self
-                .call(
-                    "aria2.removeDownloadResult",
-                    vec![Value::String(content_gid)],
-                )
+            self.cleanup_temporary_magnet_preview(&content_gid, info_hash.as_deref())
                 .await;
         }
         let value = result?;
