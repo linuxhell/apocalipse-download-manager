@@ -902,6 +902,11 @@ fn get_about_media() -> AboutMedia {
     about_media_snapshot()
 }
 
+#[tauri::command]
+fn get_about_background() -> String {
+    about_data_url(ABOUT_BACKGROUND_PNG, "image/png")
+}
+
 fn link_roots() -> Vec<LinkFileEntry> {
     #[cfg(windows)]
     {
@@ -1152,18 +1157,48 @@ async fn ed2k_update_server_list(state: State<'_, AppState>) -> Result<u64, Stri
     if bytes.len() < 16 {
         return Err("ed2k_server_list_payload_too_small".to_owned());
     }
+    if bytes.len() > 16 * 1024 * 1024 {
+        return Err("ed2k_server_list_payload_too_large".to_owned());
+    }
     let path = ed2k_server_list_path(&state);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    fs::write(&path, &bytes).map_err(|error| error.to_string())?;
+    // Never overwrite a previously working server.met with an HTML error page,
+    // proxy response, or malformed list. Let aria2-next parse the staged file
+    // first, then atomically promote it inside the same portable data folder.
+    let staged = path.with_extension(format!("met.download-{}", uuid::Uuid::new_v4()));
+    let backup = path.with_extension("met.backup");
+    fs::write(&staged, &bytes).map_err(|error| error.to_string())?;
     let endpoint = aria2_endpoint(&state, true).await?;
-    endpoint.set_ed2k_server_list_file(&path).await?;
+    if let Err(error) = endpoint.set_ed2k_server_list_file(&staged).await {
+        let _ = fs::remove_file(&staged);
+        return Err(format!("ed2k_server_list_invalid:{error}"));
+    }
+    let _ = fs::remove_file(&backup);
+    if path.exists() {
+        fs::rename(&path, &backup).map_err(|error| error.to_string())?;
+    }
+    if let Err(error) = fs::rename(&staged, &path) {
+        if backup.exists() {
+            let _ = fs::rename(&backup, &path);
+        }
+        return Err(error.to_string());
+    }
+    if let Err(error) = endpoint.set_ed2k_server_list_file(&path).await {
+        let _ = fs::remove_file(&path);
+        if backup.exists() {
+            let _ = fs::rename(&backup, &path);
+            let _ = endpoint.set_ed2k_server_list_file(&path).await;
+        }
+        return Err(format!("ed2k_server_list_apply_failed:{error}"));
+    }
+    let _ = fs::remove_file(&backup);
     diagnostic_log(
         &state,
         "INFO",
         "ed2k.server_list_updated",
-        &format!("url={url} bytes={}", bytes.len()),
+        &format!("url={} bytes={}", redact_url(&url), bytes.len()),
     );
     Ok(bytes.len() as u64)
 }
@@ -3787,6 +3822,30 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
         );
     }
     endpoint.wait_ready().await?;
+    endpoint
+        .set_global_download_limit(settings.global_bandwidth_limit)
+        .await?;
+    if !settings.ed2k_servers.is_empty() {
+        if let Err(error) = endpoint.set_ed2k_servers(&settings.ed2k_servers).await {
+            diagnostic_log(
+                state,
+                "WARN",
+                "ed2k.servers_apply_failed",
+                &format!("error={error}"),
+            );
+        }
+    }
+    let cached_server_met = ed2k_server_list_path(state);
+    if cached_server_met.is_file() {
+        if let Err(error) = endpoint.set_ed2k_server_list_file(&cached_server_met).await {
+            diagnostic_log(
+                state,
+                "WARN",
+                "ed2k.cached_server_list_apply_failed",
+                &format!("error={error}"),
+            );
+        }
+    }
     Ok(endpoint)
 }
 
@@ -6012,7 +6071,10 @@ async fn log_network_route(state: &AppState, operation: &str, engine: &str) {
     }
 }
 
-fn aria2_request_context(state: &AppState, task: &DownloadTask) -> (aria2::RequestContext, usize) {
+fn aria2_request_context(
+    state: &AppState,
+    task: &DownloadTask,
+) -> (aria2::RequestContext, usize, u64) {
     let settings = state
         .settings
         .lock()
@@ -6064,6 +6126,10 @@ fn aria2_request_context(state: &AppState, task: &DownloadTask) -> (aria2::Reque
         let basic = BASE64.encode(format!("{}:{}", credential.username, credential.password));
         headers.insert("Authorization".to_owned(), format!("Basic {basic}"));
     }
+    let download_limit = task
+        .bandwidth_limit
+        .or_else(|| host_rule.as_ref().and_then(|rule| rule.bandwidth_limit))
+        .unwrap_or_default();
     (
         aria2::RequestContext {
             method: identity
@@ -6076,6 +6142,7 @@ fn aria2_request_context(state: &AppState, task: &DownloadTask) -> (aria2::Reque
                 .unwrap_or_default(),
         },
         connections,
+        download_limit,
     )
 }
 
@@ -6114,7 +6181,7 @@ async fn run_aria2_download(
             return;
         }
     };
-    let (context, connections) = aria2_request_context(&state, &task);
+    let (context, connections, download_limit) = aria2_request_context(&state, &task);
     let existing_task = state
         .aria2_tasks
         .lock()
@@ -6166,6 +6233,7 @@ async fn run_aria2_download(
                                 bytes.as_deref(),
                                 &task.destination,
                                 &task.torrent_selection,
+                                download_limit,
                             )
                             .await
                     }
@@ -6179,6 +6247,7 @@ async fn run_aria2_download(
                         connections,
                         &context,
                         is_http,
+                        download_limit,
                     )
                     .await
             };
@@ -6248,13 +6317,75 @@ async fn run_aria2_download(
                         continue;
                     }
                 };
-                // A magnet link is added as a metadata-only download first
-                // (BEP 9): once its tiny metadata blob finishes, aria2
-                // (follow-torrent=true) automatically starts the real
-                // content download under a brand new GID, reachable only
-                // through this field. Switch to tracking that GID instead
-                // of mistaking the metadata phase's "complete" status for
-                // the actual download being done.
+                // aria2-next keeps a Magnet on the same GID. With
+                // pause-metadata=true it pauses after metadata is validated;
+                // commit the user's selection (or all files) through
+                // changeOption, then unpause that same GID before payload.
+                if is_bittorrent
+                    && matches!(
+                        status.file_selection_state.as_deref(),
+                        Some("awaiting" | "ready")
+                    )
+                {
+                    if status.file_count == 0 {
+                        continue;
+                    }
+                    if status.file_selection_state.as_deref() == Some("awaiting") {
+                        let selected = if task.torrent_selection.is_empty() {
+                            (1..=status.file_count).collect::<Vec<_>>()
+                        } else {
+                            task.torrent_selection.clone()
+                        };
+                        if let Err(error) = endpoint.set_selected_files(&gid, &selected).await {
+                            diagnostic_log(
+                                &state,
+                                "ERROR",
+                                "aria2.file_selection_failed",
+                                &format!("task={id} gid={gid} error={error}"),
+                            );
+                            update_task(&app, id, true, |item| {
+                                item.state = DownloadState::Failed {
+                                    message: format!("aria2_file_selection_failed:{error}"),
+                                };
+                            });
+                            terminal = true;
+                            break;
+                        }
+                    }
+                    if let Err(error) = endpoint.resume(&gid).await {
+                        diagnostic_log(
+                            &state,
+                            "ERROR",
+                            "aria2.metadata_resume_failed",
+                            &format!("task={id} gid={gid} error={error}"),
+                        );
+                        update_task(&app, id, true, |item| {
+                            item.state = DownloadState::Failed {
+                                message: format!("aria2_metadata_resume_failed:{error}"),
+                            };
+                        });
+                        terminal = true;
+                        break;
+                    }
+                    diagnostic_log(
+                        &state,
+                        "INFO",
+                        "aria2.metadata_selection_applied",
+                        &format!(
+                            "task={id} gid={gid} files={} selected={}",
+                            status.file_count,
+                            if task.torrent_selection.is_empty() {
+                                status.file_count
+                            } else {
+                                task.torrent_selection.len()
+                            }
+                        ),
+                    );
+                    continue;
+                }
+
+                // Compatibility fallback for legacy aria2-style followedBy
+                // handoffs. aria2-next Magnet downloads should stay on one GID.
                 if let Some(next_gid) = status.followed_by {
                     diagnostic_log(
                         &state,
@@ -6321,6 +6452,32 @@ async fn run_aria2_download(
                 );
                 match status.status.as_str() {
                     "complete" => {
+                        if is_bittorrent
+                            && task
+                                .expected_size
+                                .is_some_and(|expected| status.total < expected)
+                        {
+                            diagnostic_log(
+                                &state,
+                                "ERROR",
+                                "aria2.torrent_expected_size_mismatch",
+                                &format!(
+                                    "task={id} gid={gid} reported_total={} expected_min={}",
+                                    status.total,
+                                    task.expected_size.unwrap_or_default()
+                                ),
+                            );
+                            update_task(&app, id, true, |item| {
+                                item.state = DownloadState::Failed {
+                                    message: "aria2_torrent_expected_size_mismatch".to_owned(),
+                                };
+                            });
+                            if let Ok(mut items) = state.aria2_tasks.lock() {
+                                items.remove(&id);
+                            }
+                            terminal = true;
+                            break;
+                        }
                         if is_bittorrent && status.selected_file_bytes > status.total {
                             diagnostic_log(
                                 &state,
@@ -10461,7 +10618,10 @@ fn start_download(
     if !native_http_compatibility
         && matches!(
             kind,
-            DownloadKind::Http | DownloadKind::AcceleratedHttp | DownloadKind::Ftp
+            DownloadKind::Http
+                | DownloadKind::AcceleratedHttp
+                | DownloadKind::Ftp
+                | DownloadKind::Ed2k
         )
     {
         diagnostic_log(
@@ -12029,6 +12189,8 @@ fn association_id(source: &str) -> Option<&'static str> {
     let lower = source.to_ascii_lowercase();
     if lower.starts_with("magnet:") {
         Some("magnet")
+    } else if lower.starts_with("ed2k:") {
+        Some("ed2k")
     } else if lower.starts_with("sftp:") {
         Some("sftp")
     } else if lower.starts_with("ftp:") {
@@ -13062,7 +13224,7 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<AutostartStatus
     get_autostart(app)
 }
 
-const ASSOCIATION_IDS: [&str; 5] = ["m3u8", "torrent", "magnet", "ftp", "sftp"];
+const ASSOCIATION_IDS: [&str; 6] = ["m3u8", "torrent", "magnet", "ed2k", "ftp", "sftp"];
 
 #[cfg(target_os = "windows")]
 fn configure_association(id: &str, enabled: bool, _: &HashMap<String, bool>) -> Result<(), String> {
@@ -13153,6 +13315,7 @@ fn configure_association(
         ("m3u8", "application/vnd.apple.mpegurl"),
         ("torrent", "application/x-bittorrent"),
         ("magnet", "x-scheme-handler/magnet"),
+        ("ed2k", "x-scheme-handler/ed2k"),
         ("ftp", "x-scheme-handler/ftp"),
         ("sftp", "x-scheme-handler/sftp"),
     ];
@@ -13608,6 +13771,7 @@ fn main() {
             get_link_transfer_progress,
             is_local_link_target,
             get_about_media,
+            get_about_background,
             open_link_window,
             open_ed2k_window,
             ed2k_list_servers,
