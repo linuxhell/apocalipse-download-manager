@@ -87,8 +87,8 @@ test('direct downloads use automatic high-speed defaults without bypassing site 
 test('Apocalipse AI uses theme variables and includes light-theme readability', () => {
   const aiCss = css.slice(css.indexOf('/* Apocalipse AI'));
   for (const token of ['var(--text)', 'var(--muted)', 'var(--surface)', 'var(--input)', 'var(--line)', 'var(--accent)']) assert.match(aiCss, new RegExp(token.replace(/[()]/g, '\\$&')));
-  assert.match(css, /data-theme="pearlblue"/);
-  assert.match(css, /data-theme="polarmint"/);
+  assert.match(css, /data-theme="linen"/);
+  assert.match(css, /data-theme="frost"/);
 });
 
 test('diagnostic details remove common secret query fields before an AI answer', () => {

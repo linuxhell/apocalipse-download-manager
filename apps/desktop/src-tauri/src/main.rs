@@ -7449,32 +7449,9 @@ fn set_application_language(state: State<'_, AppState>, language: String) -> Res
 #[tauri::command]
 fn set_application_theme(state: State<'_, AppState>, theme: String) -> Result<(), String> {
     const THEMES: &[&str] = &[
-        "void",
-        "inferno",
-        "toxic",
-        "synthwave",
-        "royal",
-        "crimson",
-        "arctic",
-        "obsidian",
-        "monochrome",
-        "midnight",
-        "forest",
-        "graphite",
-        "deepsea",
-        "eclipse",
-        "hazard",
-        "cyberstorm",
-        "ultraviolet",
-        "emeraldgold",
-        "scarletice",
-        "coppernavy",
-        "solarizednight",
-        "pearlblue",
-        "whiteaurora",
-        "goldenivory",
-        "crystalrose",
-        "polarmint",
+        "void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom",
+        "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral",
+        "frost",
     ];
     if !THEMES.contains(&theme.as_str()) {
         return Err("unsupported_theme".to_owned());

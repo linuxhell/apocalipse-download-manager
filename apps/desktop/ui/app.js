@@ -734,7 +734,7 @@ const catalogs = {
 window.apocalipseCatalogs = catalogs;
 
 let locale = localStorage.getItem("apocalipse.language") || "en";
-const valid = ["void", "inferno", "toxic", "synthwave", "royal", "crimson", "arctic", "obsidian", "monochrome", "midnight", "forest", "graphite", "deepsea", "eclipse", "hazard", "cyberstorm", "ultraviolet", "emeraldgold", "scarletice", "coppernavy", "solarizednight", "pearlblue", "whiteaurora", "goldenivory", "crystalrose", "polarmint"];
+const valid = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost"];
 const applyTheme = (theme) => {
   document.documentElement.dataset.theme = valid.includes(theme) ? theme : "void";
 };

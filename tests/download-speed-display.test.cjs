@@ -129,8 +129,8 @@ test("desktop package and interface versions cannot diverge", () => {
   assert.ok(ui.indexOf("const invoke =") < ui.indexOf('invoke("set_application_theme"'), "theme sync must run only after the desktop bridge is initialized");
 });
 
-test("five readable light themes are available", () => {
-  for (const theme of ["pearlblue", "whiteaurora", "goldenivory", "crystalrose", "polarmint"]) {
+test("ten readable light themes are available", () => {
+  for (const theme of ["linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost"]) {
     assert.match(desktopHtml, new RegExp(`value="${theme}"`));
     assert.match(desktopCss, new RegExp(`data-theme="${theme}"`));
   }
