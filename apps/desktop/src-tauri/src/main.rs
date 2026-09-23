@@ -6310,7 +6310,9 @@ async fn run_aria2_download(
                         .map_err(|error| error.to_string())
                 } else if task.source.starts_with("http://") || task.source.starts_with("https://")
                 {
-                    fetch_torrent_file_bytes(&task.source).await.map(Some)
+                    fetch_torrent_file_bytes(&state, &task.source)
+                        .await
+                        .map(Some)
                 } else {
                     Ok(None)
                 };
@@ -10019,7 +10021,7 @@ async fn inspect_torrent_metadata(
             .next()
             .is_some_and(|value| value.to_ascii_lowercase().ends_with(".torrent"))
     {
-        let bytes = fetch_torrent_file_bytes(&source).await?;
+        let bytes = fetch_torrent_file_bytes(&state, &source).await?;
         return inspect_torrent_bytes(&bytes);
     }
 
@@ -10161,11 +10163,39 @@ async fn inspect_torrent_metadata(
     })
 }
 
-async fn fetch_torrent_file_bytes(source: &str) -> Result<Vec<u8>, String> {
-    let bytes = reqwest::Client::builder()
-        .user_agent("Apocalipse-Download-Manager")
-        .build()
-        .map_err(|error| error.to_string())?
+async fn fetch_torrent_file_bytes(
+    state: &AppState,
+    source: &str,
+) -> Result<Vec<u8>, String> {
+    let (proxy_url, proxy_username, proxy_password, dns_servers) = state
+        .settings
+        .lock()
+        .map(|settings| {
+            (
+                settings
+                    .proxy_enabled
+                    .then(|| settings.proxy_url.clone())
+                    .flatten(),
+                settings.proxy_username.clone(),
+                settings.proxy_password.clone(),
+                if settings.dns_enabled {
+                    settings.dns_servers.clone()
+                } else {
+                    Vec::new()
+                },
+            )
+        })
+        .map_err(|error| error.to_string())?;
+    let client = DownloadEngine::network_client_builder(
+        proxy_url.as_deref(),
+        proxy_username.as_deref(),
+        proxy_password.as_deref(),
+        &dns_servers,
+    )
+    .map_err(|error| error.to_string())?
+    .build()
+    .map_err(|error| error.to_string())?;
+    let bytes = client
         .get(source)
         .send()
         .await
