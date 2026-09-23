@@ -6089,6 +6089,49 @@ async fn log_network_route(state: &AppState, operation: &str, engine: &str) {
     }
 }
 
+fn aria2_bt_proxy_url(settings: &UserSettings) -> Result<Option<String>, String> {
+    if !settings.proxy_enabled {
+        return Ok(None);
+    }
+    let raw = settings
+        .proxy_url
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "proxy_enabled_without_url".to_owned())?;
+    let mut parsed = url::Url::parse(raw).map_err(|_| "invalid_proxy_url".to_owned())?;
+    match parsed.scheme() {
+        "http" | "socks4" | "socks5" => {}
+        "socks5h" => {
+            parsed
+                .set_scheme("socks5")
+                .map_err(|_| "aria2_bt_proxy_scheme_unsupported".to_owned())?;
+        }
+        _ => return Err("aria2_bt_proxy_scheme_unsupported".to_owned()),
+    }
+    if let Some(username) = settings
+        .proxy_username
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        parsed
+            .set_username(username)
+            .map_err(|_| "invalid_proxy_username".to_owned())?;
+        parsed
+            .set_password(settings.proxy_password.as_deref())
+            .map_err(|_| "invalid_proxy_password".to_owned())?;
+    }
+    Ok(Some(parsed.to_string()))
+}
+
+fn aria2_http_proxy_url(settings: &UserSettings) -> Option<String> {
+    if !settings.proxy_enabled {
+        return None;
+    }
+    let raw = settings.proxy_url.as_deref()?;
+    let parsed = url::Url::parse(raw).ok()?;
+    (parsed.scheme() == "http").then(|| raw.to_owned())
+}
+
 fn aria2_request_context(
     state: &AppState,
     task: &DownloadTask,
@@ -6158,6 +6201,10 @@ fn aria2_request_context(
             body: identity
                 .and_then(|value| value.request_body)
                 .unwrap_or_default(),
+            proxy_url: aria2_http_proxy_url(&settings),
+            proxy_username: settings.proxy_username.clone(),
+            proxy_password: settings.proxy_password.clone(),
+            proxy_required: settings.proxy_enabled,
         },
         connections,
         download_limit,
@@ -6200,6 +6247,30 @@ async fn run_aria2_download(
         }
     };
     let (context, connections, download_limit) = aria2_request_context(&state, &task);
+    let bt_proxy = if is_bittorrent {
+        let settings = state
+            .settings
+            .lock()
+            .map(|settings| settings.clone())
+            .unwrap_or_default();
+        match aria2_bt_proxy_url(&settings) {
+            Ok(proxy) => proxy,
+            Err(error) => {
+                update_task(&app, id, true, |item| {
+                    item.state = DownloadState::Failed {
+                        message: format!("aria2_proxy_failed:{error}"),
+                    }
+                });
+                if let Ok(mut workers) = state.workers.lock() {
+                    workers.remove(&id);
+                }
+                start_next_queued(&app);
+                return;
+            }
+        }
+    } else {
+        None
+    };
     let existing_task = state
         .aria2_tasks
         .lock()
@@ -6252,20 +6323,24 @@ async fn run_aria2_download(
                                 &task.destination,
                                 &task.torrent_selection,
                                 download_limit,
+                                bt_proxy.as_deref(),
                             )
                             .await
                     }
                     Err(error) => Err(error),
                 }
             } else if kind == DownloadKind::Ed2k {
-                let servers = state
-                    .settings
-                    .lock()
-                    .map(|settings| settings.ed2k_servers.clone())
-                    .unwrap_or_default();
-                let server_met = ed2k_server_list_path(&state);
-                endpoint
-                    .add_ed2k_download(
+                if context.proxy_required {
+                    Err("ed2k_proxy_unsupported".to_owned())
+                } else {
+                    let servers = state
+                        .settings
+                        .lock()
+                        .map(|settings| settings.ed2k_servers.clone())
+                        .unwrap_or_default();
+                    let server_met = ed2k_server_list_path(&state);
+                    endpoint
+                        .add_ed2k_download(
                         &task.source,
                         &task.destination,
                         &servers,
@@ -6273,6 +6348,9 @@ async fn run_aria2_download(
                         download_limit,
                     )
                     .await
+                }
+            } else if context.proxy_required && context.proxy_url.is_none() {
+                Err("aria2_proxy_scheme_unsupported".to_owned())
             } else {
                 endpoint
                     .add_download(
@@ -9947,6 +10025,10 @@ async fn inspect_torrent_metadata(
 
     // Only a bare magnet link reaches here: resolving its metadata needs a
     // real BitTorrent round-trip (BEP 9), which only aria2 itself can do.
+    let bt_proxy = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        aria2_bt_proxy_url(&settings)?
+    };
     let endpoint = aria2_endpoint(&state, true).await?;
     let workspace = state
         .queue_path
@@ -9969,6 +10051,7 @@ async fn inspect_torrent_metadata(
         .preview_magnet_metadata(
             &source,
             &workspace,
+            bt_proxy.as_deref(),
             |elapsed_secs, connections, seeders, total_length, completed_length, followed_by| {
                 if let Some(content_gid) = followed_by {
                     diagnostic_log(
@@ -10637,8 +10720,12 @@ fn start_download(
                         .as_deref()
                         .is_some_and(|body| !body.is_empty())
             });
+    let aria2_http_network_compatible = !limits.dns_enabled
+        && (!limits.proxy_enabled || aria2_http_proxy_url(&limits).is_some());
     let native_http_compatibility = kind == DownloadKind::Http
-        && (requires_native_http_compatibility(&task.source) || special_http_request);
+        && (requires_native_http_compatibility(&task.source)
+            || special_http_request
+            || !aria2_http_network_compatible);
     if native_http_compatibility {
         diagnostic_log(
             state,
