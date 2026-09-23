@@ -2998,9 +2998,7 @@ async function consumeBridgeDownload() {
     document.querySelector("#file-name").value = pendingMediaKind === "video" && titleName && (!requestedName || genericMediaName)
       ? `${[...titleName].slice(0, 110).join("")}.mp4`
       : requestedName;
-    document.querySelector("#analysis").hidden = true;
-    document.querySelector("#enqueue").hidden = true;
-    document.querySelector("#analyze").hidden = false;
+    resetAnalysisForNewRequest();
     resetMediaInspection();
     if (pendingThumbnail || pendingTitle || pendingMediaKind === "image") {
       showCapturedPreview({ title: pendingTitle, thumbnail: pendingThumbnail || (pendingMediaKind === "image" ? request.url : null), kind: pendingMediaKind, duration: pendingDuration, size: pendingExpectedSize });
