@@ -10,11 +10,18 @@ pub enum DownloadKind {
     Metalink,
     MediaPage,
     Ftp,
+    Ed2k,
 }
 
 pub fn classify_url(input: &str) -> Option<DownloadKind> {
     if input.starts_with("magnet:?") {
         return Some(DownloadKind::Magnet);
+    }
+    // ed2k:// links are pipe-delimited (ed2k://|file|name|size|hash|/) and
+    // not meaningfully re-parsed as a generic URL, so this is matched by
+    // prefix the same way magnet: is, ahead of the Url::parse below.
+    if input.starts_with("ed2k://") {
+        return Some(DownloadKind::Ed2k);
     }
     let local_path = input
         .split(['?', '#'])

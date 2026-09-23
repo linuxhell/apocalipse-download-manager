@@ -40,7 +40,6 @@ const catalogs = {
     addDownload: "Add download",
     downloadSpeed: "DOWNLOAD SPEED",
     uploadSpeed: "UPLOAD SPEED",
-    whySlow: "Why is this slow?",
     completed: "COMPLETED",
     queue: "IN QUEUE",
     all: "All",
@@ -279,7 +278,6 @@ const catalogs = {
     addDownload: "Adicionar download",
     downloadSpeed: "VELOCIDADE DE DOWNLOAD",
     uploadSpeed: "VELOCIDADE DE ENVIO",
-    whySlow: "Por que está lento?",
     completed: "CONCLUÍDOS",
     queue: "NA FILA",
     all: "Todos",
@@ -518,7 +516,6 @@ const catalogs = {
     addDownload: "添加下载",
     downloadSpeed: "下载速度",
     uploadSpeed: "上传速度",
-    whySlow: "为什么这么慢？",
     completed: "已完成",
     queue: "队列中",
     all: "全部",
@@ -773,7 +770,7 @@ let selectionPointerActive = false;
 let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
-const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", ai: "aiDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", about: "aboutDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
+const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", ed2k: "ed2kDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", about: "aboutDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
 let lastUiInteractionTrace = null;
 const freshUiTrace = () => {
   const now = performance.now();
@@ -1127,31 +1124,6 @@ function renderDownloads(force = false) {
         : `${progressText}${torrentStats}`;
     progress.append(bar);
     info.append(progress, details);
-    if (task.state === "downloading") {
-      const whySlowLink = document.createElement("a");
-      whySlowLink.href = "#";
-      whySlowLink.className = "why-slow-link";
-      whySlowLink.textContent = t("whySlow");
-      const explanation = document.createElement("small");
-      explanation.className = "why-slow-explanation";
-      explanation.hidden = true;
-      whySlowLink.onclick = async (event) => {
-        event.preventDefault();
-        if (!explanation.hidden) {
-          explanation.hidden = true;
-          return;
-        }
-        explanation.hidden = false;
-        explanation.textContent = "…";
-        try {
-          const engineEvents = await invoke("read_ai_diagnostics");
-          explanation.textContent = window.ApocalipseAI.performanceDiagnosis({ engineEvents }, locale, task.id);
-        } catch (error) {
-          explanation.textContent = String(error);
-        }
-      };
-      info.append(whySlowLink, explanation);
-    }
     const resumeCapability = document.createElement("strong");
     resumeCapability.className = "resume-capability";
     const resumeValue = task.resume_supported === true
@@ -1458,13 +1430,17 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
       invoke("record_ui_diagnostic", { level: "INFO", event: "link_window_requested", detail: "source=main_navigation" }).catch(() => {});
       return;
     }
+    if (button.dataset.page === "ed2k") {
+      invoke("open_ed2k_window").catch((error) => window.alert(String(error)));
+      invoke("record_ui_diagnostic", { level: "INFO", event: "ed2k_window_requested", detail: "source=main_navigation" }).catch(() => {});
+      return;
+    }
     activePage = button.dataset.page;
     document.querySelectorAll("nav [data-page]").forEach((item) => item.classList.toggle("active", item === button));
     const heading = button.querySelector("b")?.textContent || t("downloads");
     document.querySelector("header h1").textContent = heading;
     document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
     document.querySelector("#apocalipse-link-panel").hidden = activePage !== "link";
-    document.querySelector("#ai-panel").hidden = activePage !== "ai";
     document.querySelector("#logs-panel").hidden = activePage !== "logs";
     document.querySelector("#themes-panel").hidden = activePage !== "themes";
     document.querySelector("#language-panel").hidden = activePage !== "language";
@@ -1477,12 +1453,11 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
       aboutAudio.pause();
       aboutAudio.currentTime = 0;
     }
-    document.querySelector(".metrics").hidden = ["link", "ai", "logs", "themes", "language", "about"].includes(activePage);
-    document.querySelector(".panel").hidden = ["link", "ai", "logs", "themes", "language", "about"].includes(activePage);
+    document.querySelector(".metrics").hidden = ["link", "logs", "themes", "language", "about"].includes(activePage);
+    document.querySelector(".panel").hidden = ["link", "logs", "themes", "language", "about"].includes(activePage);
     renderDownloads();
     invoke("record_ui_diagnostic", { level: "INFO", event: "page_opened", detail: `page=${activePage} panel_present=${activePage === "link" ? Boolean(document.querySelector("#apocalipse-link-panel")) : activePage === "logs" ? Boolean(document.querySelector("#logs-panel")) : true} duration_ms=${Math.round(performance.now() - openedAt)}` }).catch(() => {});
     if (activePage === "logs") refreshLogEvents().catch(console.error);
-    if (activePage === "ai") window.dispatchEvent(new CustomEvent("apocalipse-ai-opened"));
   };
 });
 

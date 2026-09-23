@@ -803,4 +803,38 @@ impl Endpoint {
         .await
         .map(|_| ())
     }
+
+    /// Applies the eD2K server list to the already-running engine via
+    /// `changeGlobalOption`, so "Connect" in the ED2K window doesn't need to
+    /// restart the shared aria2next runtime that HTTP and BitTorrent
+    /// downloads are also using. An empty list clears it (best-effort
+    /// "disconnect": aria2-next documents no explicit connect/disconnect RPC
+    /// verb, only the server configuration itself).
+    pub async fn set_ed2k_servers(&self, servers: &[String]) -> Result<(), String> {
+        let mut options = Map::new();
+        options.insert("ed2k-server".into(), Value::String(servers.join(",")));
+        self.call("aria2.changeGlobalOption", vec![Value::Object(options)])
+            .await
+            .map(|_| ())
+    }
+
+    /// Starts an ED2K/eMule keyword search, returning the search task's GID.
+    /// Results are read back with `ed2k_search_results`.
+    pub async fn ed2k_search(&self, keyword: &str) -> Result<String, String> {
+        let value = self
+            .call("aria2.ed2kSearch", vec![Value::String(keyword.to_owned())])
+            .await?;
+        value
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "aria2_gid_missing".to_owned())
+    }
+
+    pub async fn ed2k_search_results(&self, gid: &str) -> Result<Value, String> {
+        self.call(
+            "aria2.getEd2kSearchResults",
+            vec![Value::String(gid.to_owned())],
+        )
+        .await
+    }
 }

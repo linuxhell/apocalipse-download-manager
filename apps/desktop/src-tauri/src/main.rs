@@ -309,6 +309,8 @@ struct UserSettings {
     #[serde(default)]
     aria2_path: Option<PathBuf>,
     #[serde(default)]
+    ed2k_servers: Vec<String>,
+    #[serde(default)]
     extractor_path: Option<PathBuf>,
     #[serde(default = "default_true")]
     aria2_rpc_enabled: bool,
@@ -407,6 +409,7 @@ impl Default for UserSettings {
             qjs_path: None,
             n_m3u8dl_re_path: None,
             aria2_path: None,
+            ed2k_servers: Vec::new(),
             extractor_path: None,
             aria2_rpc_enabled: true,
             aria2_rpc_auto_start: true,
@@ -971,6 +974,141 @@ async fn open_link_window(app: tauri::AppHandle) -> Result<(), String> {
         .build()
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+async fn open_ed2k_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("apocalipse-ed2k") {
+        window.show().map_err(|error| error.to_string())?;
+        let _ = window.unminimize();
+        let _ = window.maximize();
+        window.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(&app, "apocalipse-ed2k", WebviewUrl::App("ed2k.html".into()))
+        .title("Apocalipse ED2K")
+        .inner_size(1200.0, 820.0)
+        .min_inner_size(860.0, 600.0)
+        .resizable(true)
+        .maximized(true)
+        .decorations(true)
+        .build()
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn normalize_ed2k_server(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    let (host, port) = value
+        .rsplit_once(':')
+        .ok_or_else(|| "ed2k_server_invalid".to_owned())?;
+    let host = host.trim();
+    let port: u16 = port
+        .trim()
+        .parse()
+        .map_err(|_| "ed2k_server_invalid".to_owned())?;
+    if host.is_empty() || host.contains(['\r', '\n', ',']) || port == 0 {
+        return Err("ed2k_server_invalid".to_owned());
+    }
+    Ok(format!("{host}:{port}"))
+}
+
+#[tauri::command]
+fn ed2k_list_servers(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    Ok(state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .ed2k_servers
+        .clone())
+}
+
+#[tauri::command]
+fn ed2k_add_server(state: State<'_, AppState>, server: String) -> Result<Vec<String>, String> {
+    let server = normalize_ed2k_server(&server)?;
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    if !settings
+        .ed2k_servers
+        .iter()
+        .any(|existing| existing == &server)
+    {
+        settings.ed2k_servers.push(server);
+    }
+    let servers = settings.ed2k_servers.clone();
+    save_settings(&state, &settings)?;
+    Ok(servers)
+}
+
+#[tauri::command]
+fn ed2k_remove_server(state: State<'_, AppState>, server: String) -> Result<Vec<String>, String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.ed2k_servers.retain(|existing| existing != &server);
+    let servers = settings.ed2k_servers.clone();
+    save_settings(&state, &settings)?;
+    Ok(servers)
+}
+
+/// Applies the saved eD2K server list to the shared aria2next runtime (the
+/// same singleton HTTP and BitTorrent downloads already use - this never
+/// spawns a second engine process). aria2-next documents no explicit
+/// connect/disconnect RPC verb for eD2K, only the server configuration
+/// itself, so this is a best-effort "apply and hope a server answers" rather
+/// than a verified connection state; the UI must not claim more than that.
+#[tauri::command]
+async fn ed2k_connect(state: State<'_, AppState>) -> Result<(), String> {
+    let servers = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .ed2k_servers
+        .clone();
+    if servers.is_empty() {
+        return Err("ed2k_no_servers_configured".to_owned());
+    }
+    let endpoint = aria2_endpoint(&state, true).await?;
+    endpoint.set_ed2k_servers(&servers).await?;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "ed2k.connect_requested",
+        &format!("servers={}", servers.len()),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+async fn ed2k_disconnect(state: State<'_, AppState>) -> Result<(), String> {
+    let endpoint = aria2_endpoint(&state, false).await?;
+    endpoint.set_ed2k_servers(&[]).await?;
+    diagnostic_log(&state, "INFO", "ed2k.disconnect_requested", "");
+    Ok(())
+}
+
+#[tauri::command]
+async fn ed2k_search(state: State<'_, AppState>, keyword: String) -> Result<String, String> {
+    let keyword = keyword.trim();
+    if keyword.is_empty() {
+        return Err("ed2k_search_keyword_required".to_owned());
+    }
+    let endpoint = aria2_endpoint(&state, true).await?;
+    let gid = endpoint.ed2k_search(keyword).await?;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "ed2k.search_started",
+        &format!("gid={gid} keyword_len={}", keyword.len()),
+    );
+    Ok(gid)
+}
+
+#[tauri::command]
+async fn ed2k_search_results(
+    state: State<'_, AppState>,
+    gid: String,
+) -> Result<serde_json::Value, String> {
+    let endpoint = aria2_endpoint(&state, false).await?;
+    endpoint.ed2k_search_results(&gid).await
 }
 
 #[cfg(windows)]
@@ -7161,11 +7299,6 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
 }
 
 #[tauri::command]
-fn read_ai_diagnostics(state: State<'_, AppState>) -> Vec<serde_json::Value> {
-    state.diagnostics.ai_snapshot(750)
-}
-
-#[tauri::command]
 fn diagnostics_status(state: State<'_, AppState>) -> serde_json::Value {
     let mut status = state.diagnostics.status();
     if let Some(object) = status.as_object_mut() {
@@ -7540,7 +7673,19 @@ fn suggested_name(source: &str) -> String {
                 .map(|(_, value)| value.into_owned())
         })
         .flatten();
-    magnet_name
+    // ed2k://|file|<name>|<size>|<hash>|/ carries its filename as the third
+    // pipe-delimited field, not as a path segment or query parameter.
+    let ed2k_name = (classify_url(source) == Some(DownloadKind::Ed2k))
+        .then(|| source.split('|').nth(2))
+        .flatten()
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            percent_encoding::percent_decode_str(value)
+                .decode_utf8_lossy()
+                .into_owned()
+        });
+    let resolved_name = magnet_name.or(ed2k_name);
+    resolved_name
         .as_deref()
         .unwrap_or(source)
         .split(['/', '\\'])
@@ -13313,6 +13458,14 @@ fn main() {
             is_local_link_target,
             get_about_media,
             open_link_window,
+            open_ed2k_window,
+            ed2k_list_servers,
+            ed2k_add_server,
+            ed2k_remove_server,
+            ed2k_connect,
+            ed2k_disconnect,
+            ed2k_search,
+            ed2k_search_results,
             authenticate_local_link_account,
             authenticate_remote_link_account,
             list_link_shares,
@@ -13360,7 +13513,6 @@ fn main() {
             suggest_download_name,
             remove_downloads,
             read_general_log,
-            read_ai_diagnostics,
             clear_general_log,
             export_diagnostic_bundle,
             diagnostics_status,

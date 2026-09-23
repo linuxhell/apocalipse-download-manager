@@ -23,9 +23,7 @@
           <span>◉</span><b data-i18n="torrents">Torrents</b>
         </button>
         <button data-page="link"><span>↔</span><b>Apocalipse Link</b></button>
-        <button data-page="ai" class="ai-nav-button">
-          <span class="ai-nav-icon"><img src="assets/apocalipse-alien.png" alt="" /><i id="ai-alert-dot" hidden></i></span><b>Apocalipse AI</b>
-        </button>
+        <button data-page="ed2k"><span>⬡</span><b>Apocalipse ED2K</b></button>
         <button data-page="tools">
           <span>⌁</span><b data-i18n="tools">Tools</b>
         </button>
@@ -98,21 +96,6 @@
         <div class="log-toolbar"><input id="log-search" type="search" data-i18n-placeholder="searchLogs" placeholder="Search events…" /><select id="log-level"><option value="" data-i18n="allLevels">All levels</option><option>ERROR</option><option>WARN</option><option>INFO</option><option>DEBUG</option></select></div>
         <div id="log-event-list" class="log-event-list"></div>
         <p id="log-empty" data-i18n="emptyLog">No diagnostic events recorded yet.</p>
-      </section>
-      <section id="ai-panel" class="ai-panel" hidden>
-        <header class="ai-panel-head">
-          <div class="ai-identity">
-            <img src="assets/apocalipse-alien.png" alt="" />
-            <div><b>Apocalipse AI</b><small data-i18n="aiLocalPrivate">Local, private and specialized in your Apocalipse</small></div>
-          </div>
-          <button id="ai-open-corrections" type="button" data-i18n="aiCorrectionHistory">Correction history</button>
-        </header>
-        <div id="ai-conversation" class="ai-conversation" role="log" aria-live="polite"></div>
-        <form id="ai-form" class="ai-composer">
-          <textarea id="ai-input" rows="2" maxlength="2000" data-i18n-placeholder="aiInputHint" placeholder="Ask about Apocalipse…"></textarea>
-          <button class="primary" type="submit" data-i18n="aiSend">Send</button>
-        </form>
-        <small class="ai-privacy" data-i18n="aiPrivacy">Works locally using application status and privacy-safe diagnostic records.</small>
       </section>
       <section id="themes-panel" class="appearance-page" hidden>
         <section class="appearance-card">
@@ -605,28 +588,10 @@
         <div class="dialog-actions"><button type="button" data-export-close data-i18n="cancel">Cancel</button><button id="export-recording" type="button" class="primary" data-i18n="export">Export</button></div>
       </form>
     </dialog>
-    <dialog id="ai-corrections-dialog" class="ai-corrections-dialog">
-      <form method="dialog">
-        <div class="dialog-head">
-          <div><small>APOCALIPSE AI</small><h2 data-i18n="aiCorrectionsFound">Corrections found</h2></div>
-          <button type="button" class="close" data-ai-corrections-close>×</button>
-        </div>
-        <div class="ai-corrections-toolbar">
-          <p data-i18n="aiCorrectionsHint">Corrections remain local and are only confirmed after your manual test.</p>
-          <button id="ai-delete-all-corrections" type="button" data-i18n="aiDeleteAll">Delete all</button>
-        </div>
-        <div id="ai-corrections-list" class="ai-corrections-list"></div>
-        <p id="ai-corrections-empty" data-i18n="aiNoCorrections">No corrections found.</p>
-        <div class="dialog-actions"><button type="button" data-ai-corrections-close data-i18n="closeLog">Close</button></div>
-      </form>
-    </dialog>
     <script src="button-feedback.js"></script>
     <script src="dialog-scrollbar.js"></script>
     <script src="task-list-state.js"></script>
-    <script src="apocalipse-ai-local-model.js"></script>
-    <script src="apocalipse-ai-core.js"></script>
     <script src="app.js"></script>
-    <script src="apocalipse-ai-ui.js"></script>
     <script src="diagnostics-panel.js"></script>
   </body>
 </html>
