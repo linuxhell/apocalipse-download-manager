@@ -512,12 +512,8 @@ impl Endpoint {
         })
     }
 
-    /// Adds a magnet link or a `.torrent` file (from a local path or its raw
-    /// bytes) as an active BitTorrent download. `destination_dir` becomes the
-    /// download's own root folder (matching how the rest of the app treats a
-    /// Torrent/Magnet task's destination as a directory to clean up as a
-    /// whole), and `only_files` is a 1-based file-index selection, matching
-    /// aria2's own `select-file` convention (empty means "all files").
+    /// Adds an ED2K file link with the configured manual server list and
+    /// optional local server.met supplied as request-scoped aria2-next options.
     pub async fn add_ed2k_download(
         &self,
         source: &str,
@@ -566,6 +562,9 @@ impl Endpoint {
             .ok_or_else(|| "aria2_gid_missing".to_owned())
     }
 
+    /// Adds a magnet link or a `.torrent` file as an active BitTorrent
+    /// download. Magnet file selection is deliberately deferred until
+    /// pause-metadata exposes the real file list on the same aria2-next GID.
     pub async fn add_bittorrent(
         &self,
         source: &str,
@@ -594,7 +593,8 @@ impl Endpoint {
         // For Magnet links use aria2-next's native metadata transaction:
         // metadata is validated on the same GID, then the GID pauses before
         // payload so the final file selection can be committed atomically.
-        if torrent_bytes.is_none() && source.to_ascii_lowercase().starts_with("magnet:") {
+        let is_magnet = torrent_bytes.is_none() && source.to_ascii_lowercase().starts_with("magnet:");
+        if is_magnet {
             options.insert("pause-metadata".into(), Value::String("true".into()));
         }
         // Fetch the first and last pieces of every file first so a
@@ -607,7 +607,7 @@ impl Endpoint {
             "bt-first-last-piece-first".into(),
             Value::String("true".into()),
         );
-        if !only_files.is_empty() {
+        if !is_magnet && !only_files.is_empty() {
             let selection = only_files
                 .iter()
                 .map(usize::to_string)
