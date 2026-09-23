@@ -150,6 +150,12 @@ impl Runtime {
             .arg(format!("--input-file={}", session.display()))
             .arg(format!("--save-session={}", session.display()))
             .arg("--save-session-interval=30")
+            .arg("--enable-dht=true")
+            .arg("--enable-dht6=true")
+            .arg("--enable-peer-exchange=true")
+            .arg("--bt-enable-lpd=true")
+            .arg("--seed-time=0")
+            .arg("--bt-hash-check-seed=false")
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         #[cfg(target_os = "windows")]
