@@ -322,10 +322,6 @@
         result.action.password = "";
       }
       await applyCorrectionAction(result);
-      if (result.prelude) {
-        addMessage("assistant", result.prelude);
-        await new Promise(resolve => setTimeout(resolve, 180));
-      }
       applyResult(result);
       addMessage(
         "assistant",

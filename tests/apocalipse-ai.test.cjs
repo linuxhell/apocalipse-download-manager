@@ -39,7 +39,10 @@ test('natural spelling variants still diagnose a missing site button', () => {
   ]) {
     const result = AI.respond(question, { locale: 'pt-BR', events: '{"event":"page_opened","detail":"url=https://exemplo.com"}' });
     assert.equal(result.intent, 'diagnosis');
-    assert.equal(result.prelude, 'Vou analisar esse problema.');
+    // Regression: a "Vou analisar esse problema." filler bubble used to be
+    // shown as its own permanent chat message before every diagnosis,
+    // adding a stall with no information instead of just answering.
+    assert.equal(result.prelude, undefined);
   }
 });
 

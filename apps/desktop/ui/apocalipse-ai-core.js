@@ -831,7 +831,7 @@
 
     const diagnosis = diagnose(input, context, locale);
     return diagnosis
-      ? { text: diagnosis, prelude: say(locale, "analyzing"), intent: "diagnosis" }
+      ? { text: diagnosis, intent: "diagnosis" }
       : { text: say(locale, "offTopic"), intent: "unknown" };
   }
 
