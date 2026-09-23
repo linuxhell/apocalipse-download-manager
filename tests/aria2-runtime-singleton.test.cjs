@@ -63,3 +63,20 @@ test('aria2-next receives global and per-download bandwidth limits, including li
   assert.match(main, /endpoint\.set_download_limit\(&gid, limit\)\.await/);
 });
 
+test('aria2-next honors HTTP and BitTorrent proxy settings without leaking unsupported routes', () => {
+  assert.match(aria2, /"all-proxy"\.into\(\)/);
+  assert.match(aria2, /"all-proxy-user"\.into\(\)/);
+  assert.match(aria2, /"all-proxy-passwd"\.into\(\)/);
+  assert.match(aria2, /"bt-proxy"\.into\(\)/);
+  assert.match(main, /fn aria2_bt_proxy_url\(/);
+  assert.match(main, /"socks5h"[\s\S]*set_scheme\("socks5"\)/);
+  assert.match(main, /aria2_proxy_failed/);
+  assert.match(main, /ed2k_proxy_unsupported/);
+});
+
+test('custom DNS and proxy schemes unsupported by aria2 HTTP route fall back to the native network engine', () => {
+  assert.match(main, /let aria2_http_network_compatible = !limits\.dns_enabled/);
+  assert.match(main, /aria2_http_proxy_url\(&limits\)\.is_some\(\)/);
+  assert.match(main, /\|\| !aria2_http_network_compatible/);
+});
+
