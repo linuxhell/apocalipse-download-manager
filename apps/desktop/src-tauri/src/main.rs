@@ -10146,15 +10146,24 @@ async fn inspect_torrent_metadata(
     // info-hash registered inside libtorrent, causing the next Analyze click
     // to fail with "torrent already exists in session". Remove only engine
     // torrents that are not owned by a persisted ADM task.
-    prune_orphan_aria2_torrents(&state, &endpoint, "metadata_preview").await?;
-    let workspace = state
-        .queue_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
+    let removed_orphans =
+        prune_orphan_aria2_torrents(&state, &endpoint, "metadata_preview").await?;
+    let runtime_root = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
+    let session_may_restore = fs::metadata(runtime_root.join("aria2-rpc").join("aria2.session"))
+        .map(|metadata| metadata.len() > 0)
+        .unwrap_or(false);
+    if removed_orphans == 0 && session_may_restore {
+        // The RPC listener becomes ready slightly before aria2-next finishes
+        // attaching BitTorrent entries restored from input-file. The user's
+        // diagnostic showed that attach about half a second after startup.
+        // Give that restore one bounded grace window, then reconcile again.
+        tokio::time::sleep(Duration::from_millis(650)).await;
+        prune_orphan_aria2_torrents(&state, &endpoint, "metadata_preview_restore_grace").await?;
+    }
+    let workspace = runtime_root
         .join("aria2-metadata-inspection")
         .join(uuid::Uuid::new_v4().simple().to_string());
     fs::create_dir_all(&workspace).map_err(|error| error.to_string())?;
-    let runtime_root = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
     let aria2_log = runtime_root.join("aria2-rpc").join("aria2.log");
     let log_start = fs::metadata(&aria2_log).map(|info| info.len()).unwrap_or(0);
     let attempt_started = Instant::now();
