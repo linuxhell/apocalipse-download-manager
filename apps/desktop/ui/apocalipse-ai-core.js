@@ -62,7 +62,7 @@
       previewHelp: "Preview opens the selected media in the external player configured in Tools. It must never create a download or open the save-location window.",
       recordingHelp: "Record captures media while it plays and later exports the result. Use it when the page does not provide a complete direct download address.",
       extensionHelp: "The browser extension detects media and sends approved actions to the desktop application. Its connection status appears at the bottom of Apocalipse.",
-      toolsHelp: "Tools manages FFmpeg, FFprobe, yt-dlp, Surge, transmission-daemon, N_m3u8DL-RE, QuickJS and your external media player.",
+      toolsHelp: "Tools manages FFmpeg, FFprobe, yt-dlp, aria2, N_m3u8DL-RE, QuickJS and your external media player.",
       torrentHelp: "The Torrents section manages magnet and torrent tasks, selected files, peers, progress, speed and previews.",
       ed2kHelp: "The ed2k function depends on its network engine and available servers or Kad peers. Connection and source availability determine whether a transfer starts.",
       linkHelp: "Apocalipse Link transfers files between authorized computers. Check the remote ID, password and connection status when a transfer does not start.",
@@ -145,7 +145,7 @@
       previewHelp: "Visualizar abre a mídia escolhida no player externo configurado em Ferramentas. Essa ação nunca deve criar um download nem abrir a janela de escolha do local de salvamento.",
       recordingHelp: "Gravar captura a mídia enquanto ela é reproduzida e permite exportar o resultado depois. Use quando a página não fornecer um endereço direto completo para download.",
       extensionHelp: "A extensão detecta mídias no navegador e envia as ações autorizadas ao aplicativo. O estado da conexão aparece no rodapé do Apocalipse.",
-      toolsHelp: "Ferramentas administra FFmpeg, FFprobe, yt-dlp, Surge, transmission-daemon, N_m3u8DL-RE, QuickJS e o seu player externo.",
+      toolsHelp: "Ferramentas administra FFmpeg, FFprobe, yt-dlp, aria2, N_m3u8DL-RE, QuickJS e o seu player externo.",
       torrentHelp: "A seção Torrents administra magnet e torrent, arquivos escolhidos, pares, progresso, velocidade e visualizações.",
       ed2kHelp: "A função ed2k depende do motor de rede e de servidores ou pares Kad disponíveis. A conexão e a existência de fontes determinam se a transferência começa.",
       linkHelp: "O Apocalipse Link transfere arquivos entre computadores autorizados. Quando não iniciar, confira o ID remoto, a senha e o estado da conexão.",
@@ -227,7 +227,7 @@
       previewHelp: "预览会在“工具”中设置的外部播放器里打开所选媒体。它绝不能创建下载或打开保存位置窗口。",
       recordingHelp: "录制会在媒体播放时捕获内容，之后可以导出结果。当页面没有提供完整的直接下载地址时可使用此功能。",
       extensionHelp: "浏览器扩展负责检测媒体，并把获准的操作发送到桌面应用。连接状态显示在 Apocalipse 底部。",
-      toolsHelp: "“工具”用于管理 FFmpeg、FFprobe、yt-dlp、Surge、transmission-daemon、N_m3u8DL-RE、QuickJS 和你的外部播放器。",
+      toolsHelp: "“工具”用于管理 FFmpeg、FFprobe、yt-dlp、aria2、N_m3u8DL-RE、QuickJS 和你的外部播放器。",
       torrentHelp: "“种子”部分管理磁力链接和种子任务、所选文件、节点、进度、速度和预览。",
       ed2kHelp: "ed2k 功能依赖网络引擎以及可用服务器或 Kad 节点。连接状态和来源数量决定传输能否开始。",
       linkHelp: "Apocalipse Link 在获授权的电脑之间传输文件。无法开始时，请检查远程 ID、密码和连接状态。",
@@ -451,8 +451,7 @@
   function debuggerDomainDiagnosis(question, context, locale) {
     const q = normalizeQuestion(question);
     const domains = [
-      { name: "Surge", test: /\bsurge\b/, event: /^(?:surge\.|http\.engine_selected)/ },
-      { name: "Transmission", test: /transmission|torrent|magnet/, event: /^(?:transmission\.|torrent\.engine_selected)/ },
+      { name: "aria2", test: /aria2|torrent|magnet/, event: /^(?:aria2\.|http\.engine_selected)/ },
       { name: "FFmpeg/FFprobe", test: /ffmpeg|ffprobe/, event: /ffmpeg|ffprobe|media\.preview|preview\./i },
       { name: "HLS/N_m3u8DL-RE", test: /hls|m3u8|n_m3u8dl|m3u8dl/, event: /hls|m3u8|external\./i },
       { name: "yt-dlp", test: /yt-dlp|yt_dlp/, event: /yt_dlp|external\./i },
@@ -532,7 +531,7 @@
     if (/(visualizar|preview|player|播放器|预览)/.test(q)) return say(locale, "previewHelp");
     if (/(gravar|gravacao|record|capture|录制)/.test(q)) return say(locale, "recordingHelp");
     if (/(extensao|extension|扩展)/.test(q)) return say(locale, "extensionHelp");
-    if (/(ffmpeg|ffprobe|yt-dlp|surge|transmission|m3u8dl|quickjs|ferrament|tool|工具)/.test(q)) return say(locale, "toolsHelp");
+    if (/(ffmpeg|ffprobe|yt-dlp|aria2|m3u8dl|quickjs|ferrament|tool|工具)/.test(q)) return say(locale, "toolsHelp");
     if (/(torrent|magnet|seed|peer|种子|磁力)/.test(q)) return say(locale, "torrentHelp");
     if (/(ed2k|emule|amule|kad)/.test(q)) return say(locale, "ed2kHelp");
     if (/(apocalipse link|computador remoto|remote computer|远程)/.test(q)) return say(locale, "linkHelp");

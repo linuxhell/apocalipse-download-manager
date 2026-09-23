@@ -32,7 +32,7 @@ const catalogs = {
     aiStatusProposed: "Awaiting approval", aiStatusTesting: "Testing", aiStatusSaved: "Saved", aiStatusConfirmed: "Confirmed", aiStatusRejected: "Did not work",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
-    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", surgeBackend: "Surge (HTTP/HTTPS)", transmissionBackend: "transmission-daemon (torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", bundledUpdateOnly: "Updated only in new app releases", mediaPlayer: "mpv / media player",
+    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "mpv / media player",
     donatePaypal: "Donate via PayPal",
     about: "About", aboutDescription: "About the creator.", aboutCreator: "Creator: Juliano - Brazil", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume", facebookRecordingFallback: "Facebook could not provide this Reel for direct download. Use Record on the video while it is playing.",
     overview: "OVERVIEW",
@@ -169,35 +169,21 @@ const catalogs = {
     dnsProvider: "Provider",
     dnsCustom: "Custom",
     dnsServers: "DNS servers",
-    dnsScopeHint: "Applied to the native HTTP engine. Surge uses the system resolver; SOCKS5H continues resolving through the proxy.",
-    surgeTitle: "Surge",
-    surgeEnabled: "Use Surge",
-    surgeEnabledHint: "Control accelerated HTTP/HTTPS transfers through the local Surge engine.",
-    surgeAutoStart: "Start Surge automatically when needed",
-    surgeAutoStartHint: "Keeps one local Surge backend for the current Apocalipse session.",
-    surgePort: "Server port",
-    surgePortHint: "Automatic",
-    surgeStatus: "Status",
-    surgeConnected: "Connected",
-    surgeDisconnected: "Disconnected",
-    surgeTesting: "Testing…",
-    surgeTest: "Test connection",
-    surgeRegenerateToken: "Regenerate API token",
-    surgeTokenRegenerated: "API token regenerated",
-    transmissionTitle: "Transmission",
-    transmissionEnabled: "Use Transmission",
-    transmissionEnabledHint: "Control torrent and magnet transfers through the local transmission-daemon engine.",
-    transmissionAutoStart: "Start transmission-daemon automatically when needed",
-    transmissionAutoStartHint: "Keeps one local transmission-daemon backend for the current Apocalipse session.",
-    transmissionPort: "RPC port",
-    transmissionPortHint: "Automatic",
-    transmissionStatus: "Status",
-    transmissionConnected: "Connected",
-    transmissionDisconnected: "Disconnected",
-    transmissionTesting: "Testing…",
-    transmissionTest: "Test connection",
-    transmissionRegenerateToken: "Regenerate RPC credentials",
-    transmissionTokenRegenerated: "RPC credentials regenerated",
+    dnsScopeHint: "Applied to the native HTTP engine. aria2 uses the system resolver; SOCKS5H continues resolving through the proxy.",
+    aria2RpcTitle: "aria2 RPC",
+    aria2RpcEnabled: "Use aria2 RPC",
+    aria2RpcEnabledHint: "Control accelerated HTTP/HTTPS, FTP, torrent and magnet transfers through the local aria2 engine.",
+    aria2RpcAutoStart: "Start aria2 automatically when needed",
+    aria2RpcAutoStartHint: "Keeps one local aria2 backend for the current Apocalipse session.",
+    aria2RpcPort: "RPC port",
+    aria2RpcPortHint: "Automatic",
+    aria2RpcStatus: "RPC status",
+    aria2RpcConnected: "Connected",
+    aria2RpcDisconnected: "Disconnected",
+    aria2RpcTesting: "Testing…",
+    aria2RpcTest: "Test RPC connection",
+    aria2RpcRegenerateToken: "Regenerate RPC token",
+    aria2RpcTokenRegenerated: "RPC token regenerated",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
     automatic: "Automatic",
@@ -275,7 +261,7 @@ const catalogs = {
     aiStatusProposed: "Aguardando aprovação", aiStatusTesting: "Em teste", aiStatusSaved: "Guardada", aiStatusConfirmed: "Confirmada", aiStatusRejected: "Não funcionou",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
-    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", surgeBackend: "Surge (HTTP/HTTPS)", transmissionBackend: "transmission-daemon (torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", bundledUpdateOnly: "Atualizado apenas em novas versões do app", mediaPlayer: "mpv / reprodutor de mídia",
+    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "mpv / reprodutor de mídia",
     donatePaypal: "Faça uma doação pelo PayPal",
     about: "Sobre", aboutDescription: "Sobre o criador.", aboutCreator: "Criador: Juliano - Brasil", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume", facebookRecordingFallback: "O Facebook não disponibilizou este Reel para download direto. Use Gravar no vídeo enquanto ele estiver em reprodução.",
     overview: "VISÃO GERAL",
@@ -412,35 +398,21 @@ const catalogs = {
     dnsProvider: "Provedor",
     dnsCustom: "Personalizado",
     dnsServers: "Servidores DNS",
-    dnsScopeHint: "Aplicado ao motor HTTP nativo. O Surge usa a resolução do sistema; o SOCKS5H continua resolvendo pelo proxy.",
-    surgeTitle: "Surge",
-    surgeEnabled: "Usar Surge",
-    surgeEnabledHint: "Controla transferências HTTP/HTTPS aceleradas pelo motor Surge local.",
-    surgeAutoStart: "Iniciar o Surge automaticamente quando necessário",
-    surgeAutoStartHint: "Mantém um único backend Surge local durante a sessão atual do Apocalipse.",
-    surgePort: "Porta do servidor",
-    surgePortHint: "Automática",
-    surgeStatus: "Status",
-    surgeConnected: "Conectado",
-    surgeDisconnected: "Desconectado",
-    surgeTesting: "Testando…",
-    surgeTest: "Testar conexão",
-    surgeRegenerateToken: "Regenerar token da API",
-    surgeTokenRegenerated: "Token da API regenerado",
-    transmissionTitle: "Transmission",
-    transmissionEnabled: "Usar Transmission",
-    transmissionEnabledHint: "Controla transferências de torrent e magnet pelo motor transmission-daemon local.",
-    transmissionAutoStart: "Iniciar o transmission-daemon automaticamente quando necessário",
-    transmissionAutoStartHint: "Mantém um único backend transmission-daemon local durante a sessão atual do Apocalipse.",
-    transmissionPort: "Porta RPC",
-    transmissionPortHint: "Automática",
-    transmissionStatus: "Status",
-    transmissionConnected: "Conectado",
-    transmissionDisconnected: "Desconectado",
-    transmissionTesting: "Testando…",
-    transmissionTest: "Testar conexão",
-    transmissionRegenerateToken: "Regenerar credenciais RPC",
-    transmissionTokenRegenerated: "Credenciais RPC regeneradas",
+    dnsScopeHint: "Aplicado ao motor HTTP nativo. O aria2 usa a resolução do sistema; o SOCKS5H continua resolvendo pelo proxy.",
+    aria2RpcTitle: "aria2 RPC",
+    aria2RpcEnabled: "Usar aria2 RPC",
+    aria2RpcEnabledHint: "Controla HTTP/HTTPS acelerado, FTP, torrent e magnet pelo motor aria2 local.",
+    aria2RpcAutoStart: "Iniciar o aria2 automaticamente quando necessário",
+    aria2RpcAutoStartHint: "Mantém um único backend aria2 local durante a sessão atual do Apocalipse.",
+    aria2RpcPort: "Porta RPC",
+    aria2RpcPortHint: "Automática",
+    aria2RpcStatus: "Status RPC",
+    aria2RpcConnected: "Conectado",
+    aria2RpcDisconnected: "Desconectado",
+    aria2RpcTesting: "Testando…",
+    aria2RpcTest: "Testar conexão RPC",
+    aria2RpcRegenerateToken: "Regenerar token RPC",
+    aria2RpcTokenRegenerated: "Token RPC regenerado",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
     automatic: "Automático",
@@ -518,7 +490,7 @@ const catalogs = {
     aiStatusProposed: "等待批准", aiStatusTesting: "测试中", aiStatusSaved: "已保存", aiStatusConfirmed: "已确认", aiStatusRejected: "未解决",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
-    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", surgeBackend: "Surge（HTTP/HTTPS）", transmissionBackend: "transmission-daemon（种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", bundledUpdateOnly: "仅在应用新版本中更新", mediaPlayer: "mpv / 媒体播放器",
+    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", aria2Backend: "aria2（HTTP/HTTPS、FTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "mpv / 媒体播放器",
     donatePaypal: "通过 PayPal 捐赠",
     about: "关于", aboutDescription: "关于创作者。", aboutCreator: "创作者：Juliano - 巴西", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量", facebookRecordingFallback: "Facebook 无法提供此 Reel 的直接下载。请在视频播放时使用“录制”。",
     overview: "概览",
@@ -654,35 +626,21 @@ const catalogs = {
     dnsProvider: "提供商",
     dnsCustom: "自定义",
     dnsServers: "DNS 服务器",
-    dnsScopeHint: "应用于原生 HTTP 引擎。Surge 使用系统解析器；SOCKS5H 仍通过代理解析。",
-    surgeTitle: "Surge",
-    surgeEnabled: "使用 Surge",
-    surgeEnabledHint: "通过本地 Surge 引擎控制加速 HTTP/HTTPS 传输。",
-    surgeAutoStart: "需要时自动启动 Surge",
-    surgeAutoStartHint: "当前 Apocalipse 会话只保留一个本地 Surge 后端。",
-    surgePort: "服务器端口",
-    surgePortHint: "自动",
-    surgeStatus: "状态",
-    surgeConnected: "已连接",
-    surgeDisconnected: "未连接",
-    surgeTesting: "测试中…",
-    surgeTest: "测试连接",
-    surgeRegenerateToken: "重新生成 API 令牌",
-    surgeTokenRegenerated: "API 令牌已重新生成",
-    transmissionTitle: "Transmission",
-    transmissionEnabled: "使用 Transmission",
-    transmissionEnabledHint: "通过本地 transmission-daemon 引擎控制种子和磁力链接传输。",
-    transmissionAutoStart: "需要时自动启动 transmission-daemon",
-    transmissionAutoStartHint: "当前 Apocalipse 会话只保留一个本地 transmission-daemon 后端。",
-    transmissionPort: "RPC 端口",
-    transmissionPortHint: "自动",
-    transmissionStatus: "状态",
-    transmissionConnected: "已连接",
-    transmissionDisconnected: "未连接",
-    transmissionTesting: "测试中…",
-    transmissionTest: "测试连接",
-    transmissionRegenerateToken: "重新生成 RPC 凭证",
-    transmissionTokenRegenerated: "RPC 凭证已重新生成",
+    dnsScopeHint: "应用于原生 HTTP 引擎。aria2 使用系统解析器；SOCKS5H 仍通过代理解析。",
+    aria2RpcTitle: "aria2 RPC",
+    aria2RpcEnabled: "使用 aria2 RPC",
+    aria2RpcEnabledHint: "通过本地 aria2 引擎控制加速 HTTP/HTTPS、FTP、种子和磁力链接传输。",
+    aria2RpcAutoStart: "需要时自动启动 aria2",
+    aria2RpcAutoStartHint: "当前 Apocalipse 会话只保留一个本地 aria2 后端。",
+    aria2RpcPort: "RPC 端口",
+    aria2RpcPortHint: "自动",
+    aria2RpcStatus: "RPC 状态",
+    aria2RpcConnected: "已连接",
+    aria2RpcDisconnected: "未连接",
+    aria2RpcTesting: "测试中…",
+    aria2RpcTest: "测试 RPC 连接",
+    aria2RpcRegenerateToken: "重新生成 RPC 令牌",
+    aria2RpcTokenRegenerated: "RPC 令牌已重新生成",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
     automatic: "自动",
@@ -2073,25 +2031,24 @@ document.querySelector("#save-host-rule").onclick = async (event) => {
   }
 };
 
-function renderEngineStatus(prefix, disconnectedKey, connectedKey, status = {}) {
-  const target = document.querySelector(`#${prefix}-status`);
+function renderAria2RpcStatus(status = {}) {
+  const target = document.querySelector("#aria2-rpc-status");
   if (!target) return;
   if (!status.connected) {
-    target.textContent = t(disconnectedKey);
+    target.textContent = t("aria2RpcDisconnected");
     return;
   }
   const details = [
-    t(connectedKey),
+    t("aria2RpcConnected"),
     status.activePort ? `127.0.0.1:${status.activePort}` : "",
+    status.version ? `aria2 ${status.version}` : "",
   ].filter(Boolean);
   target.textContent = details.join(" · ");
 }
-const renderSurgeStatus = (status) => renderEngineStatus("surge", "surgeDisconnected", "surgeConnected", status);
-const renderTransmissionStatus = (status) => renderEngineStatus("transmission", "transmissionDisconnected", "transmissionConnected", status);
 
 const openSettings = async (target = "general") => {
   try {
-    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, surgeRpc, transmissionRpc, associations, hostRules] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, rpc, associations, hostRules] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
@@ -2101,8 +2058,7 @@ const openSettings = async (target = "general") => {
       invoke("get_log_editor"),
       invoke("get_proxy_setting"),
       invoke("get_dns_setting"),
-      invoke("get_surge_settings"),
-      invoke("get_transmission_settings"),
+      invoke("get_aria2_rpc_settings"),
       invoke("get_associations"),
       invoke("list_host_rules"),
     ]);
@@ -2144,14 +2100,10 @@ const openSettings = async (target = "general") => {
       ? dnsValue
       : "custom";
     updateDnsControls();
-    document.querySelector("#surge-enabled").checked = surgeRpc.enabled;
-    document.querySelector("#surge-auto-start").checked = surgeRpc.autoStart;
-    document.querySelector("#surge-port").value = surgeRpc.configuredPort || "";
-    renderSurgeStatus(surgeRpc);
-    document.querySelector("#transmission-enabled").checked = transmissionRpc.enabled;
-    document.querySelector("#transmission-auto-start").checked = transmissionRpc.autoStart;
-    document.querySelector("#transmission-port").value = transmissionRpc.configuredPort || "";
-    renderTransmissionStatus(transmissionRpc);
+    document.querySelector("#aria2-rpc-enabled").checked = rpc.enabled;
+    document.querySelector("#aria2-rpc-auto-start").checked = rpc.autoStart;
+    document.querySelector("#aria2-rpc-port").value = rpc.configuredPort || "";
+    renderAria2RpcStatus(rpc);
     renderHostRules(hostRules);
     updateLogEditorControls();
     settingsDialog.showModal();
@@ -2179,63 +2131,31 @@ document
     applyTheme(localStorage.getItem("apocalipse.theme") || "void");
     settingsDialog.close();
   }));
-document.querySelector("#surge-test").onclick = async () => {
-  const status = document.querySelector("#surge-status");
-  const button = document.querySelector("#surge-test");
+document.querySelector("#aria2-rpc-test").onclick = async () => {
+  const status = document.querySelector("#aria2-rpc-status");
+  const button = document.querySelector("#aria2-rpc-test");
   button.disabled = true;
-  status.textContent = t("surgeTesting");
+  status.textContent = t("aria2RpcTesting");
   try {
-    const rpcPortValue = Number(document.querySelector("#surge-port").value) || 0;
-    await invoke("set_surge_settings", {
-      enabled: document.querySelector("#surge-enabled").checked,
-      autoStart: document.querySelector("#surge-auto-start").checked,
+    const rpcPortValue = Number(document.querySelector("#aria2-rpc-port").value) || 0;
+    await invoke("set_aria2_rpc_settings", {
+      enabled: document.querySelector("#aria2-rpc-enabled").checked,
+      autoStart: document.querySelector("#aria2-rpc-auto-start").checked,
       port: rpcPortValue > 0 ? rpcPortValue : null,
     });
-    renderSurgeStatus(await invoke("test_surge"));
+    renderAria2RpcStatus(await invoke("test_aria2_rpc"));
   } catch (error) {
-    status.textContent = `${t("surgeDisconnected")} · ${error}`;
+    status.textContent = `${t("aria2RpcDisconnected")} · ${error}`;
   } finally {
     button.disabled = false;
   }
 };
-document.querySelector("#surge-regenerate-token").onclick = async () => {
-  const button = document.querySelector("#surge-regenerate-token");
+document.querySelector("#aria2-rpc-regenerate-token").onclick = async () => {
+  const button = document.querySelector("#aria2-rpc-regenerate-token");
   button.disabled = true;
   try {
-    await invoke("regenerate_surge_token");
-    document.querySelector("#surge-status").textContent = t("surgeTokenRegenerated");
-  } catch (error) {
-    console.error(error);
-    window.alert(String(error));
-  } finally {
-    button.disabled = false;
-  }
-};
-document.querySelector("#transmission-test").onclick = async () => {
-  const status = document.querySelector("#transmission-status");
-  const button = document.querySelector("#transmission-test");
-  button.disabled = true;
-  status.textContent = t("transmissionTesting");
-  try {
-    const rpcPortValue = Number(document.querySelector("#transmission-port").value) || 0;
-    await invoke("set_transmission_settings", {
-      enabled: document.querySelector("#transmission-enabled").checked,
-      autoStart: document.querySelector("#transmission-auto-start").checked,
-      port: rpcPortValue > 0 ? rpcPortValue : null,
-    });
-    renderTransmissionStatus(await invoke("test_transmission"));
-  } catch (error) {
-    status.textContent = `${t("transmissionDisconnected")} · ${error}`;
-  } finally {
-    button.disabled = false;
-  }
-};
-document.querySelector("#transmission-regenerate-token").onclick = async () => {
-  const button = document.querySelector("#transmission-regenerate-token");
-  button.disabled = true;
-  try {
-    await invoke("regenerate_transmission_credentials");
-    document.querySelector("#transmission-status").textContent = t("transmissionTokenRegenerated");
+    await invoke("regenerate_aria2_rpc_token");
+    document.querySelector("#aria2-rpc-status").textContent = t("aria2RpcTokenRegenerated");
   } catch (error) {
     console.error(error);
     window.alert(String(error));
@@ -2322,17 +2242,11 @@ document.querySelector("#save-settings").onclick = async () => {
         .map((server) => server.trim())
         .filter(Boolean),
     });
-    const surgePortValue = Number(document.querySelector("#surge-port").value) || 0;
-    await invoke("set_surge_settings", {
-      enabled: document.querySelector("#surge-enabled").checked,
-      autoStart: document.querySelector("#surge-auto-start").checked,
-      port: surgePortValue > 0 ? surgePortValue : null,
-    });
-    const transmissionPortValue = Number(document.querySelector("#transmission-port").value) || 0;
-    await invoke("set_transmission_settings", {
-      enabled: document.querySelector("#transmission-enabled").checked,
-      autoStart: document.querySelector("#transmission-auto-start").checked,
-      port: transmissionPortValue > 0 ? transmissionPortValue : null,
+    const rpcPortValue = Number(document.querySelector("#aria2-rpc-port").value) || 0;
+    await invoke("set_aria2_rpc_settings", {
+      enabled: document.querySelector("#aria2-rpc-enabled").checked,
+      autoStart: document.querySelector("#aria2-rpc-auto-start").checked,
+      port: rpcPortValue > 0 ? rpcPortValue : null,
     });
     for (const input of document.querySelectorAll("[data-association]")) {
       if (!input.disabled && input.dataset.initial !== String(input.checked)) await invoke("set_association", {
@@ -2382,8 +2296,7 @@ document.querySelector("#save-tools").onclick = async (event) => {
       ytDlp: document.querySelector("#tool-yt-dlp").value,
       qjs: document.querySelector("#tool-qjs").value,
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
-      surge: document.querySelector("#tool-surge").value,
-      transmissionDaemon: document.querySelector("#tool-transmission-daemon").value,
+      aria2: document.querySelector("#tool-aria2").value,
       extractor: document.querySelector("#tool-extractor").value,
     });
     await invoke("set_media_player", { path: document.querySelector("#tool-player").value });
@@ -2666,7 +2579,7 @@ document.querySelector("#analyze").onclick = async () => {
     }
     box.textContent = `${plan.primary} · ${plan.reason}`;
     if (plan.primary === "YtDlp") await showMediaInspection(url.value);
-    else if (plan.primary === "TransmissionTorrent" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) {
+    else if (plan.primary === "Aria2Rpc" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) {
       const startedAt = Date.now();
       const updateMetadataStatus = () => {
         const seconds = Math.floor((Date.now() - startedAt) / 1000);

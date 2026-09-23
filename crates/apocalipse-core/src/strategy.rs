@@ -5,8 +5,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum Engine {
     NativeHttp,
-    SurgeHttp,
-    TransmissionTorrent,
+    Aria2Rpc,
     YtDlp,
     NativeHls,
     NM3u8dlRe,
@@ -15,8 +14,7 @@ pub enum Engine {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Capabilities {
-    pub surge: bool,
-    pub transmission: bool,
+    pub aria2: bool,
     pub yt_dlp: bool,
     pub n_m3u8dl_re: bool,
     pub torrent: bool,
@@ -108,18 +106,18 @@ pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<Strategy
     let kind = classify_url(input)?;
     let plan = match kind {
         DownloadKind::Http | DownloadKind::AcceleratedHttp => StrategyPlan {
-            primary: if capabilities.surge {
-                Engine::SurgeHttp
+            primary: if capabilities.aria2 {
+                Engine::Aria2Rpc
             } else {
                 Engine::NativeHttp
             },
             fallbacks: capabilities
-                .surge
+                .aria2
                 .then_some(Engine::NativeHttp)
                 .into_iter()
                 .collect(),
-            reason: if capabilities.surge {
-                "surge_accelerated_http"
+            reason: if capabilities.aria2 {
+                "aria2_accelerated_http"
             } else {
                 "direct_http"
             },
@@ -152,19 +150,19 @@ pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<Strategy
             reason: "hls_manifest",
         },
         DownloadKind::Ftp => StrategyPlan {
-            primary: Engine::NativeHttp,
+            primary: Engine::Aria2Rpc,
             fallbacks: Vec::new(),
-            reason: "ftp_unsupported",
+            reason: "ftp_transfer",
         },
         DownloadKind::Torrent | DownloadKind::Magnet => StrategyPlan {
             primary: if capabilities.torrent {
                 Engine::NativeTorrent
             } else {
-                Engine::TransmissionTorrent
+                Engine::Aria2Rpc
             },
             fallbacks: capabilities
-                .transmission
-                .then_some(Engine::TransmissionTorrent)
+                .aria2
+                .then_some(Engine::Aria2Rpc)
                 .into_iter()
                 .collect(),
             reason: "peer_to_peer",
@@ -178,18 +176,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn direct_download_prefers_surge_and_keeps_native_as_fallback() {
+    fn direct_download_prefers_aria2_and_keeps_native_as_fallback() {
         let plan = plan_download(
             "https://example.test/file.zip",
             Capabilities {
-                surge: true,
+                aria2: true,
                 ..Default::default()
             },
         )
         .unwrap();
-        assert_eq!(plan.primary, Engine::SurgeHttp);
+        assert_eq!(plan.primary, Engine::Aria2Rpc);
         assert_eq!(plan.fallbacks, vec![Engine::NativeHttp]);
-        assert_eq!(plan.reason, "surge_accelerated_http");
+        assert_eq!(plan.reason, "aria2_accelerated_http");
     }
 
     #[test]

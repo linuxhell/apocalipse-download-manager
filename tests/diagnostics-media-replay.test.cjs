@@ -70,8 +70,7 @@ test('desktop ZIP exports dedicated universal social debugger files', () => {
 
 
 test('Debugger V4 exports sanitized engine logs and subsystem index', () => {
-  assert.match(desktop, /engines\/surge-runtime\.log/);
-  assert.match(desktop, /engines\/transmission-daemon\.log/);
+  assert.match(desktop, /engines\/aria2-runtime\.log/);
   assert.match(desktop, /join\("logs"\)\.join\("engines"\)/);
   assert.match(desktop, /debugger-index\.json/);
   assert.match(desktop, /warnings-errors\.jsonl/);
