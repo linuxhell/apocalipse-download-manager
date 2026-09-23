@@ -379,6 +379,21 @@ test("a magnet's metadata-only phase is not mistaken for the real content downlo
   assert.match(desktop, /gid = next_gid;/);
 });
 
+test("torrent helper used by paused task actions is defined outside visibleDownloads", () => {
+  // Regression from a live Windows diagnostic: pausing a torrent succeeded in
+  // Rust and the queue still contained the paused task, but renderDownloads
+  // cleared the list and then threw ReferenceError because isTorrent existed
+  // only as a local inside visibleDownloads.
+  const helper = ui.indexOf("const isTorrent = (task) =>");
+  const visible = ui.indexOf("function visibleDownloads()");
+  const render = ui.indexOf("function renderDownloads(");
+  assert.ok(helper >= 0 && helper < visible && visible < render);
+  const visibleEnd = ui.indexOf("\n}", visible);
+  assert.ok(visibleEnd > visible);
+  assert.doesNotMatch(ui.slice(visible, visibleEnd), /const isTorrent =/);
+  assert.match(ui, /\(key === "paused" \|\| key === "failed"\) && !isTorrent\(task\)/);
+});
+
 test("a paused or failed download can be relocated to a partial file moved to another folder/drive", () => {
   const start = desktop.indexOf("fn relocate_download(");
   const end = desktop.indexOf("\n}", start);
