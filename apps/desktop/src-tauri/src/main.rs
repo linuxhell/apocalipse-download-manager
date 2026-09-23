@@ -8205,6 +8205,10 @@ async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>
         })
         .collect::<Vec<_>>();
 
+    // Surge's own HTTP API has no version field, so there's no way to avoid
+    // a `--version` subprocess for it — but that flag exits immediately
+    // without starting the server (cobra intercepts it before any command
+    // logic runs), so it can never produce a second surge.exe instance.
     let surge_path = configured_surge(&settings);
     let surge_version = version_line(&surge_path, ["--version"].as_slice());
     statuses.push(ToolStatus {
@@ -8215,11 +8219,30 @@ async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>
     });
 
     let transmission_path = configured_transmission_daemon(&settings);
-    let transmission_version = version_line(&transmission_path, ["--version"].as_slice());
+    // Prefer asking the already-running daemon for its version over
+    // spawning a second transmission-daemon process just to check.
+    let running_transmission_version = {
+        let mut runtime = state
+            .transmission_runtime
+            .lock()
+            .map_err(|error| error.to_string())?;
+        if runtime
+            .as_mut()
+            .is_some_and(transmission::Runtime::is_running)
+        {
+            runtime.as_ref().map(transmission::Runtime::endpoint)
+        } else {
+            None
+        }
+    };
+    let transmission_version = match running_transmission_version {
+        Some(endpoint) => endpoint.version().await.ok(),
+        None => version_line(&transmission_path, ["--version"].as_slice()),
+    };
     statuses.push(ToolStatus {
         id: "transmission-daemon".to_owned(),
         path: transmission_path.to_string_lossy().into_owned(),
-        found: transmission_version.is_some(),
+        found: transmission_path.is_file(),
         version: transmission_version,
     });
 

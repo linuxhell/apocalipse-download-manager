@@ -294,6 +294,20 @@ impl Endpoint {
         Err(format!("transmission_start_timeout:{last_error}"))
     }
 
+    /// Reads the daemon's own version from the already-running RPC endpoint,
+    /// so callers that only need this for display (e.g. the Tools screen)
+    /// never have to spawn a second transmission-daemon process just to ask.
+    pub async fn version(&self) -> Result<String, String> {
+        let result = self
+            .call("session_get", json!({"fields": ["version"]}))
+            .await?;
+        result
+            .get("version")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| "transmission_version_missing".to_owned())
+    }
+
     /// Adds a magnet link or `.torrent` file/URL. `cookie_header`, if given,
     /// is passed through as-is (its `name=value; name2=value2;` shape already
     /// matches the RPC `cookies` field's expected format).

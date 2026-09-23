@@ -6,7 +6,7 @@ const { join } = require('node:path');
 const root = join(__dirname, '..');
 const source = readFileSync(join(root, 'browser-extension/diagnostics-media-replay.js'), 'utf8');
 const manifest = JSON.parse(readFileSync(join(root, 'browser-extension/manifest.json'), 'utf8'));
-const native = readFileSync(join(root, 'apps/desktop/src-tauri/src/diagnostics_v3.rs'), 'utf8');
+const native = readFileSync(join(root, 'apps/desktop/src-tauri/src/diagnostics.rs'), 'utf8');
 const popup = readFileSync(join(root, 'browser-extension/popup.js'), 'utf8');
 const desktop = readFileSync(join(root, 'apps/desktop/src-tauri/src/main.rs'), 'utf8');
 
@@ -70,7 +70,8 @@ test('desktop ZIP exports dedicated universal social debugger files', () => {
 
 
 test('Debugger V4 exports sanitized engine logs and subsystem index', () => {
-  assert.match(desktop, /engines\/aria2-runtime\.log/);
+  assert.match(desktop, /engines\/surge-runtime\.log/);
+  assert.match(desktop, /engines\/transmission-daemon\.log/);
   assert.match(desktop, /join\("logs"\)\.join\("engines"\)/);
   assert.match(desktop, /debugger-index\.json/);
   assert.match(desktop, /warnings-errors\.jsonl/);

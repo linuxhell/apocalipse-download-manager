@@ -9,8 +9,8 @@ const desktop = fs.readFileSync(
   path.join(root, "apps/desktop/src-tauri/src/main.rs"),
   "utf8",
 );
-const aria2 = fs.readFileSync(
-  path.join(root, "apps/desktop/src-tauri/src/aria2.rs"),
+const transmission = fs.readFileSync(
+  path.join(root, "apps/desktop/src-tauri/src/transmission.rs"),
   "utf8",
 );
 const cargo = fs.readFileSync(path.join(root, "Cargo.toml"), "utf8");
@@ -86,7 +86,7 @@ test("removing a media task terminates yt-dlp and every child process", () => {
 test("Facebook composite links stay canonicalized before transfer-engine dispatch", () => {
   assert.match(desktop, /fn canonical_facebook_video_url/);
   assert.match(desktop, /Some\(format!\("https:\/\/www\.facebook\.com\/watch\/\?v=\{video_id\}"\)\)/);
-  assert.match(desktop, /run_aria2_download/);
+  assert.match(desktop, /run_surge_download/);
   assert.match(desktop, /requires_native_http_compatibility/);
 });
 
@@ -274,17 +274,15 @@ test("automatic mirrors are server-advertised, identity-checked and latency-rank
 });
 
 
-test("magnet metadata completion follows the real torrent content GID", () => {
-  assert.match(aria2, /"followedBy"/);
-  assert.match(aria2, /pub followed_by: Vec<String>/);
-  assert.match(desktop, /aria2\.torrent_followed_by/);
-  assert.match(desktop, /std::mem::replace\(&mut gid, next_gid\.clone\(\)\)/);
-  assert.match(desktop, /items\.insert\(id, next_gid\)/);
-  assert.match(desktop, /item\.progress_percent = Some\(0\.0\)/);
+test("transmission torrents are tracked by a stable hash_string, with no metadata-to-content GID handoff", () => {
+  assert.match(transmission, /"hash_string"/);
+  assert.match(transmission, /\.get\("hash_string"\)/);
+  assert.match(desktop, /transmission_tasks\.lock\(\)/);
+  assert.match(desktop, /items\.insert\(id, hash\.clone\(\)\)/);
 });
 
-test("torrent preview prioritizes the beginning and end of selected files", () => {
-  assert.match(aria2, /"bt-prioritize-piece"/);
-  assert.match(aria2, /"head=32M,tail=32M"/);
-  assert.match(desktop, /torrentPreviewPriority/);
+test("torrent downloads default to sequential piece order for early playback", () => {
+  assert.match(transmission, /"sequential_download"/);
+  assert.match(transmission, /add_download_with_options/);
+  assert.match(desktop, /add_download\(&task\.source, download_dir, cookie_header\.as_deref\(\), true\)/);
 });
