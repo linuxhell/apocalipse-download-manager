@@ -3810,6 +3810,38 @@ fn maybe_auto_extract_completed(app: &tauri::AppHandle, id: DownloadId) {
     });
 }
 
+fn protected_aria2_gids(state: &AppState) -> Vec<String> {
+    state
+        .aria2_tasks
+        .lock()
+        .map(|items| items.values().cloned().collect())
+        .unwrap_or_default()
+}
+
+async fn prune_orphan_aria2_torrents(
+    state: &AppState,
+    endpoint: &aria2::Endpoint,
+    reason: &str,
+) -> Result<usize, String> {
+    let protected = protected_aria2_gids(state);
+    let removed = endpoint
+        .prune_orphan_bittorrent_transfers(&protected)
+        .await?;
+    if !removed.is_empty() {
+        diagnostic_log(
+            state,
+            "WARN",
+            "aria2.orphan_bittorrent_removed",
+            &format!(
+                "reason={reason} count={} gids={}",
+                removed.len(),
+                removed.join(",")
+            ),
+        );
+    }
+    Ok(removed.len())
+}
+
 async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::Endpoint, String> {
     let settings = state
         .settings
@@ -3854,6 +3886,7 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
             .map(aria2::Runtime::endpoint)
             .ok_or_else(|| "aria2_rpc_runtime_missing".to_owned())?
     };
+    let runtime_spawned = spawned.is_some();
     if let Some((pid, port)) = spawned {
         diagnostic_log(
             state,
@@ -3869,6 +3902,9 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
     endpoint
         .set_global_download_limit(settings.global_bandwidth_limit)
         .await?;
+    if runtime_spawned {
+        prune_orphan_aria2_torrents(state, &endpoint, "runtime_start").await?;
+    }
     Ok(endpoint)
 }
 
@@ -10103,6 +10139,13 @@ async fn inspect_torrent_metadata(
         aria2_bt_proxy_url(&settings)?
     };
     let endpoint = aria2_endpoint(&state, true).await?;
+    // A metadata-only Magnet preview can be checkpointed by aria2-next's
+    // save-session interval if the app is closed while BEP 9 is still
+    // resolving. Such a restored task has no ADM queue row and keeps its
+    // info-hash registered inside libtorrent, causing the next Analyze click
+    // to fail with "torrent already exists in session". Remove only engine
+    // torrents that are not owned by a persisted ADM task.
+    prune_orphan_aria2_torrents(&state, &endpoint, "metadata_preview").await?;
     let workspace = state
         .queue_path
         .parent()
