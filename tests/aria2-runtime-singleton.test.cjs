@@ -158,3 +158,14 @@ test('metadata Analyze reconciles orphan engine torrents before adding a tempora
   assert.ok(endpoint >= 0 && prune > endpoint && preview > prune);
 });
 
+test('Magnet analysis gives restored aria2-next session entries one bounded attach grace before retry', () => {
+  const start = main.indexOf('async fn inspect_torrent_metadata(');
+  const end = main.indexOf('\nasync fn fetch_torrent_file_bytes', start);
+  assert.ok(start >= 0 && end > start);
+  const block = main.slice(start, end);
+  assert.match(block, /session_may_restore/);
+  assert.match(block, /metadata\.len\(\) > 0/);
+  assert.match(block, /Duration::from_millis\(650\)/);
+  assert.match(block, /metadata_preview_restore_grace/);
+});
+
