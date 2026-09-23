@@ -304,24 +304,26 @@ test("torrent/magnet previews prioritize the first and last pieces of every file
 
 test("resolving a magnet's metadata gets a much longer timeout than an ordinary aria2 RPC call", () => {
   assert.match(aria2, /pub async fn preview_magnet_metadata\(/);
-  assert.match(aria2, /"bt-metadata-only"\.into\(\), Value::String\("true"\.into\(\)\)/);
+  assert.match(aria2, /"bt-metadata-only"\.into\(\), Value::String\("false"\.into\(\)\)/);
+  assert.match(aria2, /"pause-metadata"\.into\(\), Value::String\("true"\.into\(\)\)/);
   assert.match(aria2, /Duration::from_secs\(150\)/);
   const app = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8");
   assert.match(app, /torrentMetadataTimeout:/);
   assert.ok(app.includes('t("torrentMetadataTimeout")'));
 });
 
-test("magnet metadata preview uses follow-torrent=mem, not false, so aria2 can actually mark it complete", () => {
-  // Regression: with follow-torrent=false, aria2's metadata-only GID never
-  // reached a clean "complete" status, so every magnet preview ran out the
-  // full 90s timeout instead of resolving in the couple of seconds it
-  // actually takes once a peer answers. "mem" is aria2's documented value
-  // for bt-metadata-only mode: keep the metadata in memory and mark this
-  // same GID complete, without spawning a follow-up content download.
+test("magnet metadata preview follows into a paused content GID so it can inspect the real torrent files", () => {
+  // Regression: tellStatus(files) on aria2's BEP 9 metadata GID describes the
+  // synthetic [METADATA] blob, not the payload files encoded by the torrent.
+  // The preview must therefore allow aria2 to create the content GID, while
+  // pause-metadata=true prevents payload bytes from downloading before its
+  // bittorrent/files fields have been inspected.
   const start = aria2.indexOf("pub async fn preview_magnet_metadata(");
   const end = aria2.indexOf("\n    }", start);
   assert.ok(start >= 0 && end > start);
   const block = aria2.slice(start, end);
+  assert.match(block, /"bt-metadata-only"\.into\(\), Value::String\("false"\.into\(\)\)/);
+  assert.match(block, /"pause-metadata"\.into\(\), Value::String\("true"\.into\(\)\)/);
   assert.match(block, /"follow-torrent"\.into\(\), Value::String\("mem"\.into\(\)\)/);
   assert.doesNotMatch(block, /"follow-torrent"\.into\(\), Value::String\("false"\.into\(\)\)/);
 });
@@ -344,26 +346,23 @@ test("a magnet metadata timeout reports peers/seeders seen so far, and aria2 log
   assert.match(app, /connections=0:seeders=0/);
 });
 
-test("a magnet metadata preview that quietly follows into a real content download is treated as resolved, not stuck", () => {
-  // Regression, confirmed from a live diagnostic bundle: with 35 peer
-  // connections and a seeder present, the preview still ran out its full
-  // timeout. bt-metadata-only=true is supposed to keep the preview GID's
-  // own status "complete" once BEP 9 resolves, but on this build it
-  // instead silently followed into a real content download (the global
-  // follow-torrent=true default winning over the per-download override) -
-  // metadata was known, but the preview GID's status never flipped and a
-  // full download kept running unattended. Detecting followedBy here and
-  // reading the metadata off of it, then removing both GIDs, fixes both
-  // the false "stuck" timeout and the background bandwidth leak.
+test("a magnet metadata preview inspects the followed content GID and removes both temporary jobs", () => {
+  // Regression, confirmed from a live diagnostic bundle: reading files from
+  // the metadata GID produced the synthetic [METADATA] blob (14,489 bytes)
+  // instead of the actual torrent payload. The preview now waits for
+  // followedBy, reads bittorrent/files from that paused content GID, and
+  // removes both temporary jobs afterwards.
   const start = aria2.indexOf("pub async fn preview_magnet_metadata(");
   const end = aria2.indexOf("\n    }", start);
   assert.ok(start >= 0 && end > start);
   const block = aria2.slice(start, end);
   assert.match(block, /"followedBy"/);
   assert.match(block, /if let Some\(next_gid\) = followed_by \{/);
-  assert.match(block, /followed_content_gid = Some\(next_gid\)/);
-  assert.match(block, /forceRemove", vec!\[Value::String\(gid\)\]/);
-  assert.match(block, /forceRemove", vec!\[Value::String\(content_gid\)\]/);
+  assert.match(block, /followed_content_gid = Some\(next_gid\.to_owned\(\)\)/);
+  assert.match(block, /Value::String\(content_gid\.to_owned\(\)\)/);
+  assert.match(block, /json!\(\[\s*"status",\s*"errorMessage",\s*"bittorrent",\s*"files"/);
+  assert.match(block, /"pause-metadata"\.into\(\), Value::String\("true"\.into\(\)\)/);
+  assert.match(block, /removeDownloadResult/);
   const main = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
   assert.match(main, /aria2\.metadata_preview_followed_unexpectedly/);
 });
