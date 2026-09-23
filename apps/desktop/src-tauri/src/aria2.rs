@@ -32,6 +32,7 @@ pub struct RequestContext {
     pub proxy_url: Option<String>,
     pub proxy_username: Option<String>,
     pub proxy_password: Option<String>,
+    pub proxy_required: bool,
 }
 
 #[derive(Debug, Clone, Default)]
