@@ -1135,7 +1135,10 @@ fn validate_ed2k_server_met(bytes: &[u8]) -> Result<u32, String> {
     if bytes.len() < 4 {
         return Err("ed2k_server_list_payload_too_small".to_owned());
     }
-    let count_offset = if matches!(bytes.first(), Some(0x0e | 0x0f | 0xe0)) {
+    let count_offset = if bytes
+        .first()
+        .is_some_and(|byte| matches!(*byte, 0x0e | 0x0f | 0xe0))
+    {
         1
     } else {
         0
