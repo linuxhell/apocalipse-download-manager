@@ -593,7 +593,8 @@ impl Endpoint {
         // For Magnet links use aria2-next's native metadata transaction:
         // metadata is validated on the same GID, then the GID pauses before
         // payload so the final file selection can be committed atomically.
-        let is_magnet = torrent_bytes.is_none() && source.to_ascii_lowercase().starts_with("magnet:");
+        let is_magnet =
+            torrent_bytes.is_none() && source.to_ascii_lowercase().starts_with("magnet:");
         if is_magnet {
             options.insert("pause-metadata".into(), Value::String("true".into()));
         }
