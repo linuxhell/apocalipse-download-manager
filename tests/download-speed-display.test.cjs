@@ -24,14 +24,15 @@ const tauri = JSON.parse(
 const desktopHtml = fs.readFileSync(path.join(root, "apps/desktop/ui/index.html"), "utf8");
 const desktopCss = fs.readFileSync(path.join(root, "apps/desktop/ui/styles.css"), "utf8");
 
-test("native HTTP speed uses a multi-second EWMA instead of noisy quarter-second jumps", () => {
+test("engine-reported speed bypasses UI smoothing while delta EWMA remains a fallback", () => {
   assert.match(ui, /const SPEED_EWMA_SECONDS = 2\.0/);
+  assert.match(ui, /const hasEngineSpeed = active/);
+  assert.match(ui, /const displaySpeed = hasEngineSpeed \? engineSpeed : speed/);
+  assert.match(ui, /if \(!hasEngineSpeed && previous && active\)/);
   assert.match(ui, /1 - Math\.exp\(-elapsed \/ SPEED_EWMA_SECONDS\)/);
-  assert.match(desktop, /smoothedBytesPerSecond/);
-  assert.match(desktop, /bytes_per_second as f64 >= display_rate_ewma/);
-  assert.match(desktop, /0\.80/);
-  assert.match(desktop, /0\.35/);
-  assert.match(desktop, /task\.download_speed = Some\(smoothed_bytes_per_second\)/);
+  assert.match(desktop, /task\.download_speed = Some\(bytes_per_second\)/);
+  assert.doesNotMatch(desktop, /smoothedBytesPerSecond/);
+  assert.doesNotMatch(desktop, /display_rate_ewma/);
 });
 
 test("list-and-files removal passes a fixed true flag instead of a dataset-derived mode", () => {
@@ -41,15 +42,11 @@ test("list-and-files removal passes a fixed true flag instead of a dataset-deriv
   assert.match(desktop, /chunkArtifactsRemaining/);
 });
 
-test("active downloads keep the engine-reported speed visible", () => {
-  assert.match(
-    ui,
-    /const externalSpeed = active \? Number\(task\.download_speed\) \|\| 0 : 0;/,
-  );
-  assert.doesNotMatch(
-    ui,
-    /const externalSpeed = now - changedAt < 2000/,
-  );
+test("active downloads keep the engine-reported speed visible without a second smoothing pass", () => {
+  assert.match(ui, /task\.download_speed !== null/);
+  assert.match(ui, /Number\.isFinite\(Number\(task\.download_speed\)\)/);
+  assert.match(ui, /const displaySpeed = hasEngineSpeed \? engineSpeed : speed/);
+  assert.doesNotMatch(ui, /const externalSpeed = now - changedAt < 2000/);
 });
 
 test("yt-dlp publishes bytes, total, percent and speed to the ADM interface", () => {
