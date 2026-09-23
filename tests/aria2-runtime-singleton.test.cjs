@@ -75,7 +75,7 @@ test('aria2-next honors HTTP and BitTorrent proxy settings without leaking unsup
 });
 
 test('custom DNS and proxy schemes unsupported by aria2 HTTP route fall back to the native network engine', () => {
-  assert.match(main, /let aria2_http_network_compatible = !limits\.dns_enabled/);
+  assert.match(main, /let aria2_http_network_compatible\s*=\s*!limits\.dns_enabled/);
   assert.match(main, /aria2_http_proxy_url\(&limits\)\.is_some\(\)/);
   assert.match(main, /\|\| !aria2_http_network_compatible/);
 });
