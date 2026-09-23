@@ -214,3 +214,25 @@ test('aria2 startup diagnostics expose first payload and worker ramp milestones'
     assert.match(main, new RegExp(event.replace('.', '\\.')));
   }
 });
+
+
+test('aria2-next working directory is isolated under the portable runtime tree', () => {
+  assert.match(aria2, /command\.current_dir\(runtime_root\)/);
+  assert.match(aria2, /--state-dir=\{\}/);
+  assert.match(aria2, /state_dir\.display\(\)/);
+});
+
+test('new BitTorrent tasks warm preview sequentially and release back to rarest-first after 64 MiB', () => {
+  assert.match(aria2, /"force-sequential"\.into\(\),\s*Value::String\("true"\.into\(\)\)/);
+  assert.match(aria2, /pub async fn set_bittorrent_sequential/);
+  assert.match(aria2, /"aria2\.changeOption"/);
+  assert.match(main, /preview_warmup_bytes = 64_u64 \* 1024 \* 1024/);
+  assert.match(main, /set_bittorrent_sequential\(&gid, false\)\.await/);
+  assert.match(main, /torrent\.preview_window_ready/);
+});
+
+test('aria2 startup polling is temporarily accelerated for direct-download UI responsiveness', () => {
+  assert.match(main, /tokio::time::interval\(Duration::from_millis\(100\)\)/);
+  assert.match(main, /transfer_started_at\.elapsed\(\) >= Duration::from_secs\(2\)/);
+  assert.match(main, /tokio::time::interval\(Duration::from_millis\(350\)\)/);
+});
