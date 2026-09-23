@@ -333,3 +333,18 @@ test("a magnet's metadata-only phase is not mistaken for the real content downlo
   assert.match(desktop, /if let Some\(next_gid\) = status\.followed_by \{/);
   assert.match(desktop, /gid = next_gid;/);
 });
+
+test("a paused or failed download can be relocated to a partial file moved to another folder/drive", () => {
+  const start = desktop.indexOf("fn relocate_download(");
+  const end = desktop.indexOf("\n}", start);
+  assert.ok(start >= 0 && end > start);
+  const block = desktop.slice(start, end);
+  assert.match(block, /DownloadState::Paused \| DownloadState::Failed \{ \.\. \}/);
+  assert.match(block, /torrent_relocate_unsupported/);
+  assert.match(block, /new_destination = new_directory\.join\(file_name\)/);
+  assert.match(block, /mappings\.remove\(&id\)/);
+  assert.match(desktop, /\n\s*relocate_download,\s*\n\s*redownload_downloads,/);
+  assert.match(ui, /invoke\("relocate_download", \{ id: task\.id, newDirectory: selected \}\)/);
+  assert.match(ui, /!isTorrent\(task\)/);
+  assert.match(ui, /locateFile: "Locate file…",/);
+});

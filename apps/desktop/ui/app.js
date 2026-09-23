@@ -76,6 +76,8 @@ const catalogs = {
     resumeNo: "No",
     resumeChecking: "Checking…",
     retry: "Retry",
+    locateFile: "Locate file…",
+    locateFileHint: "If you moved the partial file to another folder or drive, point the app at it to resume from there instead of starting over.",
     openFolder: "Open folder",
     preview: "Preview",
     stopRecording: "Stop and save",
@@ -307,6 +309,8 @@ const catalogs = {
     resumeNo: "Não",
     resumeChecking: "Verificando…",
     retry: "Tentar novamente",
+    locateFile: "Localizar arquivo…",
+    locateFileHint: "Se você moveu o arquivo parcial para outra pasta ou disco, indique o novo local para continuar de onde parou em vez de começar do zero.",
     openFolder: "Abrir pasta",
     preview: "Pré-visualizar",
     stopRecording: "Parar e salvar",
@@ -538,6 +542,8 @@ const catalogs = {
     resumeNo: "否",
     resumeChecking: "检查中…",
     retry: "重试",
+    locateFile: "定位文件…",
+    locateFileHint: "如果您已将部分下载的文件移动到其他文件夹或磁盘，请指定新位置以从原进度继续，而不是重新开始。",
     openFolder: "打开文件夹",
     preview: "预览",
     stopRecording: "停止并保存",
@@ -1189,6 +1195,31 @@ function renderDownloads(force = false) {
       addAction(t("pause"), "pause_download");
     if (key === "paused") addAction(t("resume"), "resume_download");
     if (key === "failed") addAction(t("retry"), "resume_download");
+    if ((key === "paused" || key === "failed") && !isTorrent(task)) {
+      const locateButton = document.createElement("button");
+      locateButton.className = "task-action";
+      locateButton.textContent = t("locateFile");
+      locateButton.title = t("locateFileHint");
+      locateButton.onclick = async () => {
+        if (busyIds.has(task.id)) return;
+        busyIds.add(task.id);
+        locateButton.disabled = true;
+        try {
+          const selected = await invoke("pick_directory", { initialDirectory: null });
+          if (selected) {
+            await invoke("relocate_download", { id: task.id, newDirectory: selected });
+            await refreshDownloads();
+          }
+        } catch (error) {
+          console.error(error);
+          window.alert(String(error));
+        } finally {
+          busyIds.delete(task.id);
+          locateButton.disabled = false;
+        }
+      };
+      actions.append(locateButton);
+    }
     if (key === "completed" && /\.recording\.webm$/i.test(task.destination)) {
       const exportButton = document.createElement("button");
       exportButton.className = "task-action";

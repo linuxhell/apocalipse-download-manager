@@ -10145,6 +10145,70 @@ fn resume_download(
     start_download(&app, &state, task, kind)
 }
 
+/// Repoints a paused or failed task at a partial file the user moved to a
+/// different folder or drive (e.g. onto larger external storage), so the
+/// existing partial bytes are reused instead of starting over. This does
+/// not move any file itself: the caller is expected to have already moved
+/// the destination file (and its matching `.part`/`.aria2` sidecar, if
+/// any) into `new_directory` outside the app. Safety is unchanged from an
+/// ordinary resume: the engine still re-validates the partial data against
+/// the remote resource (ETag/Last-Modified/size) before continuing, so a
+/// mismatched or unrelated file at the new path is rejected the same way a
+/// stale partial in the original folder would be, never trusted blindly.
+#[tauri::command]
+fn relocate_download(
+    state: State<'_, AppState>,
+    id: DownloadId,
+    new_directory: String,
+) -> Result<DownloadTask, String> {
+    let new_directory = PathBuf::from(new_directory);
+    if !new_directory.is_absolute() {
+        return Err("destination_must_be_absolute".to_owned());
+    }
+    if !new_directory.is_dir() {
+        return Err("destination_directory_not_found".to_owned());
+    }
+    let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+    let task = queue
+        .iter_mut()
+        .find(|task| task.id == id)
+        .ok_or_else(|| "download_not_found".to_owned())?;
+    if !matches!(
+        task.state,
+        DownloadState::Paused | DownloadState::Failed { .. }
+    ) {
+        return Err("download_not_resumable".to_owned());
+    }
+    if matches!(
+        classify_url(&task.source),
+        Some(DownloadKind::Torrent | DownloadKind::Magnet)
+    ) {
+        return Err("torrent_relocate_unsupported".to_owned());
+    }
+    let file_name = task
+        .destination
+        .file_name()
+        .ok_or_else(|| "download_destination_invalid".to_owned())?;
+    let new_destination = new_directory.join(file_name);
+    if new_destination == task.destination {
+        return Err("destination_unchanged".to_owned());
+    }
+    task.destination = new_destination;
+    let task = task.clone();
+    save_queue(&state, &queue)?;
+    drop(queue);
+    if let Ok(mut mappings) = state.aria2_tasks.lock() {
+        mappings.remove(&id);
+    }
+    diagnostic_log(
+        &state,
+        "INFO",
+        "task.relocated",
+        &format!("task={id} destination={}", task.destination.display()),
+    );
+    Ok(task)
+}
+
 #[tauri::command]
 fn redownload_downloads(
     app: tauri::AppHandle,
@@ -13040,6 +13104,7 @@ fn main() {
             stop_recording,
             pause_download,
             resume_download,
+            relocate_download,
             redownload_downloads,
             reveal_download,
             verify_download_integrity,
