@@ -6341,13 +6341,13 @@ async fn run_aria2_download(
                     let server_met = ed2k_server_list_path(&state);
                     endpoint
                         .add_ed2k_download(
-                        &task.source,
-                        &task.destination,
-                        &servers,
-                        server_met.is_file().then_some(server_met.as_path()),
-                        download_limit,
-                    )
-                    .await
+                            &task.source,
+                            &task.destination,
+                            &servers,
+                            server_met.is_file().then_some(server_met.as_path()),
+                            download_limit,
+                        )
+                        .await
                 }
             } else if context.proxy_required && context.proxy_url.is_none() {
                 Err("aria2_proxy_scheme_unsupported".to_owned())
