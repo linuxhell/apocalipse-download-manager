@@ -3056,13 +3056,13 @@ fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(fallback))
 }
 
-fn configured_aria2(settings: &UserSettings) -> PathBuf {
+fn configured_aria2next(settings: &UserSettings) -> PathBuf {
     configured_tool(
         &settings.aria2_path,
         if cfg!(windows) {
-            "aria2c.exe"
+            "aria2next.exe"
         } else {
-            "aria2c"
+            "aria2next"
         },
     )
 }
@@ -3451,7 +3451,7 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
     if !settings.aria2_rpc_enabled {
         return Err("aria2_rpc_disabled".to_owned());
     }
-    let executable = configured_aria2(&settings);
+    let executable = configured_aria2next(&settings);
     let runtime_root = state
         .queue_path
         .parent()
@@ -5808,7 +5808,7 @@ async fn run_aria2_download(
     let route_operation = id.to_string();
     tauri::async_runtime::spawn(async move {
         let state = route_app.state::<AppState>();
-        log_network_route(&state, &route_operation, "aria2").await;
+        log_network_route(&state, &route_operation, "aria2next").await;
     });
     let endpoint = match aria2_endpoint(&state, false).await {
         Ok(endpoint) => endpoint,
@@ -6184,7 +6184,7 @@ async fn run_external_download(
                         "N_m3u8DL-RE"
                     },
                 ),
-                configured_aria2(&settings),
+                configured_aria2next(&settings),
                 settings.connections_per_download.clamp(1, 32),
                 settings
                     .proxy_enabled
@@ -6205,9 +6205,9 @@ async fn run_external_download(
                 "yt-dlp".into(),
                 "N_m3u8DL-RE".into(),
                 if cfg!(windows) {
-                    "aria2c.exe".into()
+                    "aria2next.exe".into()
                 } else {
-                    "aria2c".into()
+                    "aria2next".into()
                 },
                 16,
                 None,
@@ -6930,7 +6930,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "ytDlp": settings.yt_dlp_path.as_ref().is_some_and(|path| path.is_file()),
             "qjs": settings.qjs_path.as_ref().is_some_and(|path| path.is_file()),
             "nM3u8DlRe": settings.n_m3u8dl_re_path.as_ref().is_some_and(|path| path.is_file()),
-            "aria2": settings.aria2_path.as_ref().is_some_and(|path| path.is_file()),
+            "aria2Next": settings.aria2_path.as_ref().is_some_and(|path| path.is_file()),
             "aria2RpcEnabled": settings.aria2_rpc_enabled,
             "aria2RpcAutoStart": settings.aria2_rpc_auto_start,
             "mediaPlayer": settings.media_player_path.as_ref().is_some_and(|path| path.is_file()),
@@ -8073,7 +8073,7 @@ async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>
         })
         .collect::<Vec<_>>();
 
-    let aria2_path = configured_aria2(&settings);
+    let aria2_path = configured_aria2next(&settings);
     let aria2_endpoint = {
         let mut runtime = state
             .aria2_runtime
@@ -8090,7 +8090,7 @@ async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>
         None => None,
     };
     statuses.push(ToolStatus {
-        id: "aria2".to_owned(),
+        id: "aria2next".to_owned(),
         path: aria2_path.to_string_lossy().into_owned(),
         found: aria2_path.is_file(),
         version: aria2_version,
@@ -8141,7 +8141,7 @@ fn set_tool_paths(
     yt_dlp: String,
     qjs: String,
     n_m3u8dl_re: String,
-    aria2: String,
+    aria2_next: String,
     extractor: String,
 ) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
@@ -8149,7 +8149,7 @@ fn set_tool_paths(
     settings.yt_dlp_path = optional_path(yt_dlp);
     settings.qjs_path = optional_path(qjs);
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
-    settings.aria2_path = optional_path(aria2);
+    settings.aria2_path = optional_path(aria2_next);
     settings.extractor_path = optional_path(extractor);
     save_settings(&state, &settings)
 }
@@ -8419,15 +8419,26 @@ fn release_platform_architecture() -> Result<(&'static str, &'static str), Strin
     Ok((platform, architecture))
 }
 
-fn aria2_platform_asset_markers() -> Result<[&'static str; 3], String> {
+/// aria2-next publishes exact, versioned asset names (e.g.
+/// `aria2-next-2.8.1-linux-x86_64`), unlike upstream aria2's static builds
+/// which this used to match by substring. Matching the exact suffix (minus
+/// the version, which changes every release) is both simpler and safer than
+/// substring markers here.
+fn aria2next_asset_suffix() -> Result<&'static str, String> {
     if cfg!(target_os = "windows") && cfg!(target_arch = "x86_64") {
-        Ok(["aria2c-windows", "x86_64", ".exe"])
+        Ok("windows-x86_64.exe")
+    } else if cfg!(target_os = "windows") && cfg!(target_arch = "aarch64") {
+        Ok("windows-arm64.exe")
     } else if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
-        Ok(["aria2c-linux", "x86_64", ""])
+        Ok("linux-x86_64")
+    } else if cfg!(target_os = "linux") && cfg!(target_arch = "aarch64") {
+        Ok("linux-aarch64")
+    } else if cfg!(target_os = "macos") && cfg!(target_arch = "x86_64") {
+        Ok("macos-x86_64")
     } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-        Ok(["aria2c-macos", "arm64", ""])
+        Ok("macos-arm64")
     } else {
-        Err("manual_update_required:aria2".to_owned())
+        Err("manual_update_required:aria2next".to_owned())
     }
 }
 
@@ -8593,6 +8604,37 @@ async fn download_release_bytes(client: &reqwest::Client, url: &str) -> Result<V
         .to_vec())
 }
 
+/// Verifies `bytes` against a `sha256sum`-formatted checksums file (lines of
+/// `<hex digest>  <filename>` or `<hex digest> *<filename>`) published
+/// alongside a release asset. Unlike upstream aria2's static builds
+/// (distributed for well over a decade, packaged by every major Linux
+/// distro), aria2-next is a single-maintainer fork: trusting whatever bytes
+/// GitHub happens to serve for its release asset is not enough here, so
+/// every download of it is checked against the checksums file the same
+/// release publishes before the binary is ever executed.
+fn verify_release_checksum(
+    checksums_text: &str,
+    asset_name: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
+    let expected = checksums_text
+        .lines()
+        .find_map(|line| {
+            let mut parts = line.split_whitespace();
+            let digest = parts.next()?;
+            let name = parts.next()?.trim_start_matches('*');
+            (name == asset_name).then(|| digest.to_ascii_lowercase())
+        })
+        .ok_or_else(|| format!("checksum_entry_missing:{asset_name}"))?;
+    let actual = format!("{:x}", Sha256::digest(bytes));
+    if actual != expected {
+        return Err(format!(
+            "checksum_mismatch:{asset_name}:expected={expected}:actual={actual}"
+        ));
+    }
+    Ok(())
+}
+
 fn install_validated_executable(
     bytes: &[u8],
     target: &Path,
@@ -8707,26 +8749,25 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             install_validated_executable(&bytes, &target, &["--version"])?;
             target
         }
-        "aria2" => {
-            let release =
-                github_latest_release(&client, "FerroDownload/aria2-static-builds").await?;
-            let suffix = match (platform, architecture) {
-                ("windows", "x86_64") => "windows-x64.exe",
-                ("windows", "aarch64") => "windows-arm64.exe",
-                ("linux", "x86_64") => "linux-x64",
-                ("linux", "aarch64") => "linux-arm64",
-                ("macos", "x86_64") => "macos-x64",
-                ("macos", "aarch64") => "macos-arm64",
-                _ => return Err("tool_download_platform_unsupported:aria2".to_owned()),
-            };
-            let (_, url) = release_asset(&release, |name| {
-                name.starts_with("aria2c-") && name.ends_with(suffix) && !name.ends_with(".sha256")
+        "aria2next" => {
+            let release = github_latest_release(&client, "AnInsomniacy/aria2-next").await?;
+            let suffix = aria2next_asset_suffix()?;
+            let (asset_name, url) = release_asset(&release, |name| {
+                name.starts_with("aria2-next-")
+                    && name.ends_with(suffix)
+                    && !name.ends_with(".sha256")
             })?;
             let bytes = download_release_bytes(&client, &url).await?;
+            let (_, checksums_url) =
+                release_asset(&release, |name| name.ends_with("-checksums.sha256"))?;
+            let checksums_bytes = download_release_bytes(&client, &checksums_url).await?;
+            let checksums_text =
+                String::from_utf8(checksums_bytes).map_err(|error| error.to_string())?;
+            verify_release_checksum(&checksums_text, &asset_name, &bytes)?;
             let target = tool_dir.join(if cfg!(windows) {
-                "aria2c.exe"
+                "aria2next.exe"
             } else {
-                "aria2c"
+                "aria2next"
             });
             install_validated_executable(&bytes, &target, &["--version"])?;
             target
@@ -8989,7 +9030,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &settings.qjs_path,
                 if cfg!(windows) { "qjs.exe" } else { "qjs" },
             ),
-            "aria2" => configured_aria2(&settings),
+            "aria2next" => configured_aria2next(&settings),
             "n-m3u8dl-re" => configured_tool(
                 &settings.n_m3u8dl_re_path,
                 if cfg!(windows) {
@@ -9042,7 +9083,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
 
     {
         let (platform, architecture) = release_platform_architecture()?;
-        let aria2_markers = aria2_platform_asset_markers()?;
+        let aria2next_suffix = aria2next_asset_suffix()?;
         let (repository, executable_name, asset_markers, version_args): (
             &str,
             &str,
@@ -9055,14 +9096,14 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &[],
                 &["--version"],
             ),
-            "aria2" => (
-                "Kenshin9977/aria2",
+            "aria2next" => (
+                "AnInsomniacy/aria2-next",
                 if cfg!(windows) {
-                    "aria2c.exe"
+                    "aria2next.exe"
                 } else {
-                    "aria2c"
+                    "aria2next"
                 },
-                aria2_markers.as_slice(),
+                std::slice::from_ref(&aria2next_suffix),
                 &["--version"],
             ),
             "n-m3u8dl-re" => (
@@ -9159,9 +9200,6 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                         }
                         _ => false,
                     },
-                    "aria2" => asset_markers
-                        .iter()
-                        .all(|marker| name.contains(&marker.to_ascii_lowercase())),
                     _ => asset_markers
                         .iter()
                         .all(|marker| name.contains(&marker.to_ascii_lowercase())),
@@ -9187,10 +9225,27 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             .await
             .map_err(|error| error.to_string())?;
         let sha256 = format!("{:x}", Sha256::digest(&bytes));
+        if id == "aria2next" {
+            let (_, checksums_url) =
+                release_asset(&release, |name| name.ends_with("-checksums.sha256"))?;
+            let checksums_bytes = client
+                .get(&checksums_url)
+                .send()
+                .await
+                .map_err(|error| error.to_string())?
+                .error_for_status()
+                .map_err(|error| error.to_string())?
+                .bytes()
+                .await
+                .map_err(|error| error.to_string())?;
+            let checksums_text =
+                String::from_utf8(checksums_bytes.to_vec()).map_err(|error| error.to_string())?;
+            verify_release_checksum(&checksums_text, asset_name, &bytes)?;
+        }
         let temporary =
             std::env::temp_dir().join(format!("apocalipse-tool-update-{}", uuid::Uuid::new_v4()));
         let (replacement, ffprobe_replacement) =
-            if id == "qjs" || id == "aria2" || (id == "ffmpeg" && platform == "macos") {
+            if id == "qjs" || id == "aria2next" || (id == "ffmpeg" && platform == "macos") {
                 let ffprobe_replacement = if id == "ffmpeg" {
                     let marker = "x64";
                     let expected = format!("ffprobe-darwin-{marker}");
@@ -9253,7 +9308,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         if replacement.len() < 32_768 || (id == "ffmpeg" && ffprobe_replacement.len() < 32_768) {
             return Err(format!("replacement_executable_invalid:{asset_name}"));
         }
-        if id == "aria2" {
+        if id == "aria2next" {
             stop_aria2_runtime(&state);
         }
         let parent = executable
@@ -13116,12 +13171,12 @@ fn main() {
             let mut initial_settings =
                 load_settings(&settings_path).map_err(std::io::Error::other)?;
             if initial_settings.aria2_path.is_none() {
-                let aria2_dir = app_data.join("tools").join("aria2");
+                let aria2_dir = app_data.join("tools").join("aria2next");
                 fs::create_dir_all(&aria2_dir)?;
                 initial_settings.aria2_path = Some(aria2_dir.join(if cfg!(windows) {
-                    "aria2c.exe"
+                    "aria2next.exe"
                 } else {
-                    "aria2c"
+                    "aria2next"
                 }));
                 write_settings(&settings_path, &initial_settings).map_err(std::io::Error::other)?;
             }

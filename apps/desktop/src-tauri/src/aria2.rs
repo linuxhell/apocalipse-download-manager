@@ -103,7 +103,7 @@ impl Runtime {
             return Err("aria2_not_found".to_owned());
         }
         fs::create_dir_all(runtime_root).map_err(|error| error.to_string())?;
-        // Reserving a loopback port and releasing it before aria2c binds the
+        // Reserving a loopback port and releasing it before aria2next binds the
         // same one is an inherent TOCTOU race (another process can grab it
         // first). We can't hand the bound socket to an external process, so
         // instead retry with a freshly picked port a few times when nothing
@@ -171,20 +171,22 @@ impl Runtime {
             .arg(format!("--input-file={}", session.display()))
             .arg(format!("--save-session={}", session.display()))
             .arg("--save-session-interval=30")
-            // BitTorrent extensions: DHT (IPv4 + IPv6) and Local Peer
-            // Discovery find peers without a tracker, Peer Exchange (PEX)
-            // trades known peers with already-connected ones (on by
-            // default, kept explicit), and the Fast Extension plus UDP
-            // tracker support are always compiled into aria2 with no flag
-            // needed. bt-min-crypto-level prefers MSE/PSE-encrypted peer
-            // connections without refusing plaintext ones (bt-require-crypto
-            // stays false for compatibility with older/plain peers).
+            // BitTorrent extensions: DHT (aria2-next's libtorrent-rasterbar
+            // backend handles IPv4 and IPv6 together under one flag now -
+            // the old separate --enable-dht6 is accepted only as a legacy
+            // alias that logs a warning and maps onto this same option) and
+            // Local Peer Discovery find peers without a tracker, Peer
+            // Exchange (PEX) trades known peers with already-connected ones
+            // (on by default, kept explicit), and the Fast Extension plus
+            // UDP tracker support are always compiled in with no flag
+            // needed. bt-encryption=preferred prefers MSE/PSE-encrypted peer
+            // connections without refusing plaintext ones (upstream aria2's
+            // separate bt-min-crypto-level/bt-require-crypto pair was
+            // replaced by this single option).
             .arg("--enable-dht=true")
-            .arg("--enable-dht6=true")
             .arg("--enable-peer-exchange=true")
             .arg("--bt-enable-lpd=true")
-            .arg("--bt-min-crypto-level=arc4")
-            .arg("--bt-require-crypto=false")
+            .arg("--bt-encryption=preferred")
             .arg("--follow-torrent=true")
             // This is a download manager, not a seedbox: stop contributing
             // upload bandwidth for a torrent the moment it finishes instead
@@ -200,7 +202,7 @@ impl Runtime {
         }
         let mut child = command.spawn().map_err(|error| error.to_string())?;
         // A port lost to another process between reservation and bind makes
-        // aria2c exit almost immediately; catch that here so the caller can
+        // aria2next exit almost immediately; catch that here so the caller can
         // retry with a different port instead of waiting out the full RPC
         // readiness timeout for a process that already died.
         std::thread::sleep(Duration::from_millis(150));
@@ -481,11 +483,15 @@ impl Endpoint {
         );
         options.insert("continue".into(), Value::String("true".into()));
         options.insert("file-allocation".into(), Value::String("none".into()));
-        // Fetch the first and last couple of MB of every file first so a
+        // Fetch the first and last pieces of every file first so a
         // preview/player can start reading before the rest has arrived.
+        // aria2-next's libtorrent-rasterbar backend replaced the old
+        // byte-range bt-prioritize-piece=head=2M,tail=2M option with this
+        // boolean (libtorrent's own "prioritize first/last piece" knob, no
+        // custom byte range).
         options.insert(
-            "bt-prioritize-piece".into(),
-            Value::String("head=2M,tail=2M".into()),
+            "bt-first-last-piece-first".into(),
+            Value::String("true".into()),
         );
         if !only_files.is_empty() {
             let selection = only_files

@@ -283,10 +283,9 @@ test("torrent and magnet downloads go through aria2 with BitTorrent extensions e
   assert.doesNotMatch(aria2, /rqbit/i);
   assert.match(aria2, /pub async fn add_bittorrent\(/);
   assert.match(aria2, /--enable-dht=true/);
-  assert.match(aria2, /--enable-dht6=true/);
   assert.match(aria2, /--enable-peer-exchange=true/);
   assert.match(aria2, /--bt-enable-lpd=true/);
-  assert.match(aria2, /--bt-min-crypto-level=arc4/);
+  assert.match(aria2, /--bt-encryption=preferred/);
   assert.match(aria2, /--follow-torrent=true/);
   assert.match(desktop, /matches!\(kind, DownloadKind::Torrent \| DownloadKind::Magnet\)/);
 });
@@ -299,7 +298,7 @@ test("torrent/magnet downloads land inside their own folder, not loose files, an
 });
 
 test("torrent/magnet previews prioritize the first and last pieces of every file", () => {
-  assert.match(aria2, /"bt-prioritize-piece"\.into\(\),\s*Value::String\("head=2M,tail=2M"\.into\(\)\)/);
+  assert.match(aria2, /"bt-first-last-piece-first"\.into\(\),\s*Value::String\("true"\.into\(\)\)/);
 });
 
 test("resolving a magnet's metadata gets a much longer timeout than an ordinary aria2 RPC call", () => {
