@@ -110,7 +110,6 @@ Apocalipse is distributed primarily as a portable application, with no mandatory
 - Linux: a portable `.tar.gz`; AppImage will be added after compatibility validation
 - macOS: an application bundle (`.app`) inside a `.zip`
 - Browser-extension files are kept inside the `browser extensions` directory in every package
-- Windows ARM64, Linux ARM64 and Apple Silicon-native packages will be added as each target is validated
 
 The **Portable builds** workflow can be run manually for test artifacts. Tags beginning with `v` attach the same validated packages to GitHub Releases. Android is not supported or built.
 
