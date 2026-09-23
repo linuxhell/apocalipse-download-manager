@@ -3818,9 +3818,10 @@ fn write_social_cookie_jar(path: &Path, url: &str, header: &str) -> Result<(), S
 /// so it survives as a single argument even if it contains spaces or quotes.
 fn shell_config_quote(value: &str) -> String {
     if !value.is_empty()
-        && value
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | '/' | ':' | '@'))
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || matches!(character, '-' | '_' | '.' | '/' | ':' | '@')
+        })
     {
         return value.to_owned();
     }
@@ -3840,7 +3841,11 @@ fn shell_config_quote(value: &str) -> String {
 /// Writes yt-dlp `--username`/`--password` as a `--config-location` file
 /// instead of passing the secret on argv, where it would be visible to other
 /// local users via `ps`/`/proc/<pid>/cmdline` for the life of the process.
-fn write_yt_dlp_credential_config(path: &Path, username: &str, password: &str) -> Result<(), String> {
+fn write_yt_dlp_credential_config(
+    path: &Path,
+    username: &str,
+    password: &str,
+) -> Result<(), String> {
     let contents = format!(
         "--username {}\n--password {}\n",
         shell_config_quote(username),
@@ -6090,10 +6095,7 @@ async fn run_transmission_download(
             hash
         }
         None => {
-            let download_dir = task
-                .destination
-                .parent()
-                .unwrap_or_else(|| Path::new("."));
+            let download_dir = task.destination.parent().unwrap_or_else(|| Path::new("."));
             match endpoint
                 .add_download(&task.source, download_dir, cookie_header.as_deref(), true)
                 .await
@@ -6530,8 +6532,12 @@ async fn run_external_download(
                     .as_deref()
                     .map(|directory| directory.join("yt-dlp-credentials.txt"))
                     .filter(|path| {
-                        write_yt_dlp_credential_config(path, &credential.username, &credential.password)
-                            .is_ok()
+                        write_yt_dlp_credential_config(
+                            path,
+                            &credential.username,
+                            &credential.password,
+                        )
+                        .is_ok()
                     });
                 if let Some(path) = credential_config.as_ref() {
                     command.arg("--config-location").arg(path);
@@ -7712,7 +7718,8 @@ fn windows_reserved_file_stem(name: &str) -> bool {
     let base = name.split('.').next().unwrap_or(name);
     matches!(
         base.to_ascii_uppercase().as_str(),
-        "CON" | "PRN"
+        "CON"
+            | "PRN"
             | "AUX"
             | "NUL"
             | "COM1"
@@ -8319,14 +8326,20 @@ async fn get_surge_settings(state: State<'_, AppState>) -> Result<EngineRuntimeS
             .lock()
             .map_err(|error| error.to_string())?;
         let connected = runtime.as_mut().is_some_and(surge::Runtime::is_running);
-        let active_port = connected.then(|| runtime.as_ref().map(surge::Runtime::port)).flatten();
+        let active_port = connected
+            .then(|| runtime.as_ref().map(surge::Runtime::port))
+            .flatten();
         let endpoint = connected
             .then(|| runtime.as_ref().map(surge::Runtime::endpoint))
             .flatten();
         (connected, active_port, endpoint)
     };
     let version = match endpoint {
-        Some(endpoint) => endpoint.wait_ready().await.ok().map(|_| "connected".to_owned()),
+        Some(endpoint) => endpoint
+            .wait_ready()
+            .await
+            .ok()
+            .map(|_| "connected".to_owned()),
         None => None,
     };
     Ok(EngineRuntimeStatus {
@@ -10246,7 +10259,9 @@ fn start_download(
         start_next_queued(&app);
         return Ok(());
     }
-    if !native_http_compatibility && matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp) {
+    if !native_http_compatibility
+        && matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp)
+    {
         diagnostic_log(
             state,
             "INFO",
@@ -13241,21 +13256,19 @@ fn main() {
             if initial_settings.surge_path.is_none() {
                 let surge_dir = app_data.join("tools").join("surge");
                 fs::create_dir_all(&surge_dir)?;
-                initial_settings.surge_path = Some(
-                    surge_dir.join(if cfg!(windows) { "surge.exe" } else { "surge" }),
-                );
+                initial_settings.surge_path =
+                    Some(surge_dir.join(if cfg!(windows) { "surge.exe" } else { "surge" }));
                 write_settings(&settings_path, &initial_settings).map_err(std::io::Error::other)?;
             }
             if initial_settings.transmission_daemon_path.is_none() {
                 let transmission_dir = app_data.join("tools").join("transmission");
                 fs::create_dir_all(&transmission_dir)?;
-                initial_settings.transmission_daemon_path = Some(transmission_dir.join(
-                    if cfg!(windows) {
+                initial_settings.transmission_daemon_path =
+                    Some(transmission_dir.join(if cfg!(windows) {
                         "transmission-daemon.exe"
                     } else {
                         "transmission-daemon"
-                    },
-                ));
+                    }));
                 write_settings(&settings_path, &initial_settings).map_err(std::io::Error::other)?;
             }
             let (show_label, quit_label) = tray_labels(&initial_settings.language);
@@ -13614,7 +13627,10 @@ mod tests {
         assert_eq!(validate_file_name("Com1.tar.gz").unwrap(), "_Com1.tar.gz");
         assert_eq!(validate_file_name("lpt9").unwrap(), "_lpt9");
         assert_eq!(validate_file_name("nul").unwrap(), "_nul");
-        assert_eq!(validate_file_name("normal-video.mp4").unwrap(), "normal-video.mp4");
+        assert_eq!(
+            validate_file_name("normal-video.mp4").unwrap(),
+            "normal-video.mp4"
+        );
         assert_eq!(validate_file_name("Concert.mp4").unwrap(), "Concert.mp4");
         assert_eq!(validate_file_name("COM10.mp4").unwrap(), "COM10.mp4");
     }

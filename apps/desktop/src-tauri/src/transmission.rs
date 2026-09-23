@@ -238,7 +238,10 @@ impl Endpoint {
             "arguments": arguments,
         });
         for attempt in 0..2 {
-            let session_id = self.session_id.lock().map_or_else(|_| String::new(), |value| value.clone());
+            let session_id = self
+                .session_id
+                .lock()
+                .map_or_else(|_| String::new(), |value| value.clone());
             let response = self
                 .client
                 .post(&self.base_url)
@@ -285,7 +288,10 @@ impl Endpoint {
     pub async fn wait_ready(&self) -> Result<(), String> {
         let mut last_error = String::new();
         for _ in 0..80 {
-            match self.call("session_get", json!({"fields": ["version"]})).await {
+            match self
+                .call("session_get", json!({"fields": ["version"]}))
+                .await
+            {
                 Ok(_) => return Ok(()),
                 Err(error) => last_error = error,
             }
@@ -373,10 +379,7 @@ impl Endpoint {
     /// handshake) has actually arrived.
     pub async fn files(&self, hash: &str) -> Result<Vec<(String, u64)>, String> {
         let result = self
-            .call(
-                "torrent_get",
-                json!({ "ids": [hash], "fields": ["files"] }),
-            )
+            .call("torrent_get", json!({ "ids": [hash], "fields": ["files"] }))
             .await?;
         let files = result
             .get("torrents")
