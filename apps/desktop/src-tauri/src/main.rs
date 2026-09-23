@@ -1131,6 +1131,35 @@ fn ed2k_set_server_list_url(state: State<'_, AppState>, url: String) -> Result<(
 /// aria2next runtime. aria2-next's --ed2k-server-list only takes a local
 /// file path, so the file is cached under this app's own data directory
 /// and that path is what's actually handed to the engine.
+fn validate_ed2k_server_met(bytes: &[u8]) -> Result<u32, String> {
+    if bytes.len() < 4 {
+        return Err("ed2k_server_list_payload_too_small".to_owned());
+    }
+    let count_offset = if matches!(bytes.first(), Some(0x0e | 0x0f | 0xe0)) {
+        1
+    } else {
+        0
+    };
+    if bytes.len() < count_offset + 4 {
+        return Err("ed2k_server_list_invalid".to_owned());
+    }
+    let count = u32::from_le_bytes(
+        bytes[count_offset..count_offset + 4]
+            .try_into()
+            .map_err(|_| "ed2k_server_list_invalid".to_owned())?,
+    );
+    // Every entry needs at least IPv4+port (6 bytes) and a tag count (4
+    // bytes). This cheap lower-bound rejects HTML/error pages and absurd
+    // counts without reimplementing aria2-next's full eMule tag parser.
+    if count == 0
+        || count > 100_000
+        || bytes.len().saturating_sub(count_offset + 4) < count as usize * 10
+    {
+        return Err("ed2k_server_list_invalid".to_owned());
+    }
+    Ok(count)
+}
+
 #[tauri::command]
 async fn ed2k_update_server_list(state: State<'_, AppState>) -> Result<u64, String> {
     let url = state
@@ -1154,27 +1183,19 @@ async fn ed2k_update_server_list(state: State<'_, AppState>) -> Result<u64, Stri
         .bytes()
         .await
         .map_err(|error| error.to_string())?;
-    if bytes.len() < 16 {
-        return Err("ed2k_server_list_payload_too_small".to_owned());
-    }
     if bytes.len() > 16 * 1024 * 1024 {
         return Err("ed2k_server_list_payload_too_large".to_owned());
     }
+    let server_count = validate_ed2k_server_met(&bytes)?;
     let path = ed2k_server_list_path(&state);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    // Never overwrite a previously working server.met with an HTML error page,
-    // proxy response, or malformed list. Let aria2-next parse the staged file
-    // first, then atomically promote it inside the same portable data folder.
+    // Keep the previous known-good cache until the newly downloaded payload
+    // passes structural validation and has been fully written.
     let staged = path.with_extension(format!("met.download-{}", uuid::Uuid::new_v4()));
     let backup = path.with_extension("met.backup");
     fs::write(&staged, &bytes).map_err(|error| error.to_string())?;
-    let endpoint = aria2_endpoint(&state, true).await?;
-    if let Err(error) = endpoint.set_ed2k_server_list_file(&staged).await {
-        let _ = fs::remove_file(&staged);
-        return Err(format!("ed2k_server_list_invalid:{error}"));
-    }
     let _ = fs::remove_file(&backup);
     if path.exists() {
         fs::rename(&path, &backup).map_err(|error| error.to_string())?;
@@ -1185,35 +1206,24 @@ async fn ed2k_update_server_list(state: State<'_, AppState>) -> Result<u64, Stri
         }
         return Err(error.to_string());
     }
-    if let Err(error) = endpoint.set_ed2k_server_list_file(&path).await {
-        let _ = fs::remove_file(&path);
-        if backup.exists() {
-            let _ = fs::rename(&backup, &path);
-            let _ = endpoint.set_ed2k_server_list_file(&path).await;
-        }
-        return Err(format!("ed2k_server_list_apply_failed:{error}"));
-    }
     let _ = fs::remove_file(&backup);
     diagnostic_log(
         &state,
         "INFO",
         "ed2k.server_list_updated",
-        &format!("url={} bytes={}", redact_url(&url), bytes.len()),
+        &format!(
+            "url={} bytes={} servers={server_count}",
+            redact_url(&url),
+            bytes.len()
+        ),
     );
     Ok(bytes.len() as u64)
 }
 
-/// Applies the saved eD2K server list to the shared aria2next runtime (the
-/// same singleton HTTP and BitTorrent downloads already use - this never
-/// spawns a second engine process). aria2-next documents no explicit
-/// connect/disconnect RPC verb for eD2K, only the server configuration
-/// itself, so this is a best-effort "apply and hope a server answers" rather
-/// than a verified connection state; the UI must not claim more than that.
-/// Also refreshes server.met from the configured URL first (matching
-/// aMule's own "update server list at startup" behavior); a failed refresh
-/// falls back to whatever was already cached locally, or to aria2-next's
-/// own built-in bootstrap servers if nothing has ever been cached, instead
-/// of blocking the connect attempt entirely.
+/// Prepares the shared aria2-next ED2K subsystem and refreshes the cached
+/// server.met. aria2-next has no standalone ED2K connect/disconnect RPC: the
+/// actual server handshake is created by an ED2K download/search task, which
+/// receives the configured servers and local server.met as request options.
 #[tauri::command]
 async fn ed2k_connect(state: State<'_, AppState>) -> Result<(), String> {
     let servers = state
@@ -1222,52 +1232,51 @@ async fn ed2k_connect(state: State<'_, AppState>) -> Result<(), String> {
         .map_err(|error| error.to_string())?
         .ed2k_servers
         .clone();
-    let endpoint = aria2_endpoint(&state, true).await?;
-    if !servers.is_empty() {
-        endpoint.set_ed2k_servers(&servers).await?;
-    }
+    let _endpoint = aria2_endpoint(&state, true).await?;
     match ed2k_update_server_list(state.clone()).await {
         Ok(bytes) => diagnostic_log(
             &state,
             "INFO",
-            "ed2k.connect_server_list_refreshed",
-            &format!("bytes={bytes}"),
+            "ed2k.server_sources_refreshed",
+            &format!("bytes={bytes} manual_servers={}", servers.len()),
         ),
         Err(error) => {
             let cached = ed2k_server_list_path(&state);
-            if cached.is_file() {
-                let _ = endpoint.set_ed2k_server_list_file(&cached).await;
-            }
             diagnostic_log(
                 &state,
                 "WARN",
-                "ed2k.connect_server_list_refresh_failed",
+                "ed2k.server_list_refresh_failed",
                 &format!("error={error} using_cached={}", cached.is_file()),
             );
+            if servers.is_empty() && !cached.is_file() {
+                diagnostic_log(
+                    &state,
+                    "INFO",
+                    "ed2k.builtin_bootstrap",
+                    "using aria2-next built-in ED2K bootstrap servers",
+                );
+            }
         }
-    }
-    if servers.is_empty() && !ed2k_server_list_path(&state).is_file() {
-        diagnostic_log(
-            &state,
-            "INFO",
-            "ed2k.connect_no_configured_sources",
-            "falling back to aria2-next built-in bootstrap servers",
-        );
     }
     diagnostic_log(
         &state,
         "INFO",
-        "ed2k.connect_requested",
-        &format!("servers={}", servers.len()),
+        "ed2k.ready",
+        &format!(
+            "manual_servers={} server_met={}",
+            servers.len(),
+            ed2k_server_list_path(&state).is_file()
+        ),
     );
     Ok(())
 }
 
 #[tauri::command]
 async fn ed2k_disconnect(state: State<'_, AppState>) -> Result<(), String> {
-    let endpoint = aria2_endpoint(&state, false).await?;
-    endpoint.set_ed2k_servers(&[]).await?;
-    diagnostic_log(&state, "INFO", "ed2k.disconnect_requested", "");
+    // aria2-next exposes no independent ED2K disconnect RPC. Existing ED2K
+    // transfers remain under the normal pause/remove controls; this command
+    // only changes the ED2K window's prepared/idle presentation.
+    diagnostic_log(&state, "INFO", "ed2k.window_disconnected", "");
     Ok(())
 }
 
@@ -1277,13 +1286,31 @@ async fn ed2k_search(state: State<'_, AppState>, keyword: String) -> Result<Stri
     if keyword.is_empty() {
         return Err("ed2k_search_keyword_required".to_owned());
     }
+    let servers = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .ed2k_servers
+        .clone();
+    let server_met = ed2k_server_list_path(&state);
     let endpoint = aria2_endpoint(&state, true).await?;
-    let gid = endpoint.ed2k_search(keyword).await?;
+    let gid = endpoint
+        .ed2k_search(
+            keyword,
+            &servers,
+            server_met.is_file().then_some(server_met.as_path()),
+        )
+        .await?;
     diagnostic_log(
         &state,
         "INFO",
         "ed2k.search_started",
-        &format!("gid={gid} keyword_len={}", keyword.len()),
+        &format!(
+            "gid={gid} keyword_len={} manual_servers={} server_met={}",
+            keyword.len(),
+            servers.len(),
+            server_met.is_file()
+        ),
     );
     Ok(gid)
 }
@@ -3825,27 +3852,6 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
     endpoint
         .set_global_download_limit(settings.global_bandwidth_limit)
         .await?;
-    if !settings.ed2k_servers.is_empty() {
-        if let Err(error) = endpoint.set_ed2k_servers(&settings.ed2k_servers).await {
-            diagnostic_log(
-                state,
-                "WARN",
-                "ed2k.servers_apply_failed",
-                &format!("error={error}"),
-            );
-        }
-    }
-    let cached_server_met = ed2k_server_list_path(state);
-    if cached_server_met.is_file() {
-        if let Err(error) = endpoint.set_ed2k_server_list_file(&cached_server_met).await {
-            diagnostic_log(
-                state,
-                "WARN",
-                "ed2k.cached_server_list_apply_failed",
-                &format!("error={error}"),
-            );
-        }
-    }
     Ok(endpoint)
 }
 
@@ -6248,6 +6254,22 @@ async fn run_aria2_download(
                     }
                     Err(error) => Err(error),
                 }
+            } else if kind == DownloadKind::Ed2k {
+                let servers = state
+                    .settings
+                    .lock()
+                    .map(|settings| settings.ed2k_servers.clone())
+                    .unwrap_or_default();
+                let server_met = ed2k_server_list_path(&state);
+                endpoint
+                    .add_ed2k_download(
+                        &task.source,
+                        &task.destination,
+                        &servers,
+                        server_met.is_file().then_some(server_met.as_path()),
+                        download_limit,
+                    )
+                    .await
             } else {
                 endpoint
                     .add_download(
@@ -6291,6 +6313,8 @@ async fn run_aria2_download(
     state.diagnostics.record(
         if is_bittorrent {
             "torrent.engine_selected"
+        } else if kind == DownloadKind::Ed2k {
+            "ed2k.engine_selected"
         } else {
             "http.engine_selected"
         },
