@@ -217,6 +217,7 @@ struct AppState {
     clipboard_suppressed_until: Mutex<Option<Instant>>,
     clipboard_suppressed_value: Mutex<Option<String>>,
     bridge_pending: Mutex<Vec<BridgeDownload>>,
+    bridge_recent_prompts: Mutex<HashMap<String, Instant>>,
     browser_assisted_pending: Mutex<Vec<BrowserDownloadComplete>>,
     blob_uploads: Mutex<HashMap<uuid::Uuid, BlobUpload>>,
     recording_stops: Mutex<HashSet<DownloadId>>,
@@ -12103,6 +12104,27 @@ fn open_paypal_donation() -> Result<(), String> {
     result.map(|_| ()).map_err(|error| error.to_string())
 }
 
+fn duplicate_bridge_prompt(state: &AppState, request: &BridgeDownload) -> bool {
+    if request.start_immediately {
+        return false;
+    }
+    let now = Instant::now();
+    let key = format!("{:x}", Sha256::digest(request.url.as_bytes()));
+    let Ok(mut recent) = state.bridge_recent_prompts.lock() else {
+        return false;
+    };
+    recent.retain(|_, seen| now.duration_since(*seen) < Duration::from_secs(3));
+    if recent
+        .get(&key)
+        .is_some_and(|seen| now.duration_since(*seen) < Duration::from_secs(2))
+    {
+        true
+    } else {
+        recent.insert(key, now);
+        false
+    }
+}
+
 fn queue_from_bridge(
     app: &tauri::AppHandle,
     mut request: BridgeDownload,
@@ -12282,6 +12304,22 @@ fn queue_from_bridge(
             request.cookie_header.as_deref().map_or(0, str::len),
         ),
     );
+    if duplicate_bridge_prompt(&state, &request) {
+        state.diagnostics.record(
+            "handoff.duplicate_prompt_suppressed",
+            "INFO",
+            request.trace_id.as_deref(),
+            None,
+            serde_json::json!({"windowMs":2000}),
+        );
+        diagnostic_log(
+            &state,
+            "INFO",
+            "bridge.duplicate_prompt_suppressed",
+            &format!("url={} window_ms=2000", redact_url(&request.url)),
+        );
+        return Ok(None);
+    }
     if request.start_immediately {
         let context = DownloadContext {
             trace_id: request.trace_id.clone(),
@@ -13998,6 +14036,7 @@ fn main() {
                 clipboard_suppressed_until: Mutex::new(None),
                 clipboard_suppressed_value: Mutex::new(None),
                 bridge_pending: Mutex::new(Vec::new()),
+                bridge_recent_prompts: Mutex::new(HashMap::new()),
                 browser_assisted_pending: Mutex::new(Vec::new()),
                 blob_uploads: Mutex::new(HashMap::new()),
                 recording_stops: Mutex::new(HashSet::new()),
