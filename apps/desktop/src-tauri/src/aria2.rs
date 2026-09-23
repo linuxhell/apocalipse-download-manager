@@ -107,7 +107,6 @@ fn reserve_loopback_port(requested: Option<u16>) -> Result<u16, String> {
     Ok(port)
 }
 
-
 fn reserve_bittorrent_port() -> Result<u16, String> {
     // Pick a high ephemeral port that is simultaneously free for TCP and UDP.
     // aria2-next/libtorrent uses the same listen port for incoming BitTorrent
@@ -115,10 +114,7 @@ fn reserve_bittorrent_port() -> Result<u16, String> {
     // fixed 6881 collision observed in the real diagnostic bundle.
     for _ in 0..32 {
         let tcp = TcpListener::bind(("0.0.0.0", 0)).map_err(|error| error.to_string())?;
-        let port = tcp
-            .local_addr()
-            .map_err(|error| error.to_string())?
-            .port();
+        let port = tcp.local_addr().map_err(|error| error.to_string())?.port();
         if port < 1024 {
             continue;
         }
@@ -151,8 +147,7 @@ fn log_reports_bt_bind_failure(log: &Path, start: u64, port: u16) -> bool {
     String::from_utf8_lossy(&bytes).lines().any(|line| {
         let lower = line.to_ascii_lowercase();
         lower.contains(&port_text)
-            && (lower.contains("sock_bind")
-                || (lower.contains("listen") && lower.contains("fail")))
+            && (lower.contains("sock_bind") || (lower.contains("listen") && lower.contains("fail")))
     })
 }
 
@@ -195,8 +190,8 @@ impl Runtime {
             match Self::spawn_once(executable, runtime_root, requested_port, secret) {
                 Ok(runtime) => return Ok(runtime),
                 Err(error) => {
-                    let retryable = requested_port.is_none()
-                        || error.starts_with("aria2_bt_listen_failed");
+                    let retryable =
+                        requested_port.is_none() || error.starts_with("aria2_bt_listen_failed");
                     last_error = error;
                     if attempt + 1 >= attempts || !retryable {
                         break;
@@ -221,7 +216,9 @@ impl Runtime {
             fs::write(&session, b"").map_err(|error| error.to_string())?;
         }
         let log = runtime_root.join("aria2.log");
-        let log_start = fs::metadata(&log).map(|metadata| metadata.len()).unwrap_or(0);
+        let log_start = fs::metadata(&log)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
         let state_dir = runtime_root.join("state");
         fs::create_dir_all(&state_dir).map_err(|error| error.to_string())?;
         let mut command = Command::new(executable);
@@ -777,9 +774,7 @@ impl Endpoint {
                         .and_then(Value::as_str)
                         .map(str::to_owned)
                 })
-                .is_some_and(|status| {
-                    matches!(status.as_str(), "active" | "waiting" | "paused")
-                });
+                .is_some_and(|status| matches!(status.as_str(), "active" | "waiting" | "paused"));
             if !still_registered {
                 break;
             }
