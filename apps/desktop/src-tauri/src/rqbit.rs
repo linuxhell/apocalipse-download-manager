@@ -24,9 +24,13 @@ pub struct Runtime {
 
 #[derive(Debug, Clone, Default)]
 pub struct AddedTorrent {
-    pub id: usize,
+    // None when the torrent was added with list_only=true: rqbit previews
+    // the metadata without actually registering a tracked torrent, so no
+    // id is assigned yet. `files` below is still populated in that case.
+    pub id: Option<usize>,
     pub info_hash: String,
     pub name: Option<String>,
+    pub files: Vec<TorrentFile>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -51,6 +55,28 @@ pub struct TorrentStatus {
 
 fn number(value: Option<&Value>) -> u64 {
     value.and_then(Value::as_u64).unwrap_or(0)
+}
+
+fn parse_files(value: &Value) -> Vec<TorrentFile> {
+    value
+        .get("files")
+        .and_then(Value::as_array)
+        .map(|files| {
+            files
+                .iter()
+                .enumerate()
+                .map(|(index, file)| TorrentFile {
+                    index,
+                    name: file
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    length: number(file.get("length")),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn reserve_loopback_port(requested: Option<u16>) -> Result<u16, String> {
@@ -256,13 +282,18 @@ impl Endpoint {
             .error_for_status()
             .map_err(|error| error.to_string())?;
         let payload: Value = response.json().await.map_err(|error| error.to_string())?;
+        // list_only=true previews metadata without registering a tracked
+        // torrent, so rqbit answers with id: null in that case; only a
+        // real (non-preview) add is required to have one. Read files
+        // straight from this response's `details.files` either way,
+        // instead of a follow-up GET that a missing id could not resolve.
         let details = payload.get("details").unwrap_or(&payload);
         Ok(AddedTorrent {
             id: payload
                 .get("id")
                 .and_then(Value::as_u64)
                 .or_else(|| details.get("id").and_then(Value::as_u64))
-                .ok_or_else(|| "rqbit_torrent_id_missing".to_owned())? as usize,
+                .map(|id| id as usize),
             info_hash: details
                 .get("info_hash")
                 .and_then(Value::as_str)
@@ -272,37 +303,8 @@ impl Endpoint {
                 .get("name")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
+            files: parse_files(details),
         })
-    }
-
-    pub async fn files(&self, id: usize) -> Result<Vec<TorrentFile>, String> {
-        let response = self
-            .request(reqwest::Method::GET, &format!("/torrents/{id}"))
-            .send()
-            .await
-            .map_err(|error| error.to_string())?
-            .error_for_status()
-            .map_err(|error| error.to_string())?;
-        let payload: Value = response.json().await.map_err(|error| error.to_string())?;
-        Ok(payload
-            .get("files")
-            .and_then(Value::as_array)
-            .map(|files| {
-                files
-                    .iter()
-                    .enumerate()
-                    .map(|(index, file)| TorrentFile {
-                        index,
-                        name: file
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_owned(),
-                        length: number(file.get("length")),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default())
     }
 
     pub async fn stats(&self, id: usize) -> Result<TorrentStatus, String> {

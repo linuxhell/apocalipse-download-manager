@@ -6120,26 +6120,31 @@ async fn run_rqbit_download(
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf();
-            match endpoint
+            let added = endpoint
                 .add_torrent(&task.source, &output_folder, &task.torrent_selection, false)
                 .await
-            {
-                Ok(added) => {
+                .and_then(|added| {
+                    added
+                        .id
+                        .ok_or_else(|| "rqbit_torrent_id_missing".to_owned())
+                        .map(|torrent_id| (torrent_id, added))
+                });
+            match added {
+                Ok((torrent_id, added)) => {
                     if let Ok(mut items) = state.rqbit_tasks.lock() {
-                        items.insert(id, added.id);
+                        items.insert(id, torrent_id);
                     }
                     diagnostic_log(
                         &state,
                         "INFO",
                         "rqbit.torrent_added",
                         &format!(
-                            "task={id} torrent_id={} info_hash={} name={}",
-                            added.id,
+                            "task={id} torrent_id={torrent_id} info_hash={} name={}",
                             added.info_hash,
                             added.name.as_deref().unwrap_or("unknown")
                         ),
                     );
-                    added.id
+                    torrent_id
                 }
                 Err(error) => {
                     update_task(&app, id, true, |item| {
@@ -9742,11 +9747,35 @@ async fn inspect_torrent_metadata(
     fs::create_dir_all(&inspection_root).map_err(|error| error.to_string())?;
     let added = endpoint
         .add_torrent(&source, &inspection_root, &[], true)
-        .await?;
-    let resolved_files = endpoint.files(added.id).await.unwrap_or_default();
-    let _ = endpoint.forget(added.id).await;
+        .await
+        .map_err(|error| {
+            diagnostic_log(
+                &state,
+                "WARN",
+                "rqbit.metadata_preview_failed",
+                &format!("error={error}"),
+            );
+            error
+        })?;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "rqbit.metadata_previewed",
+        &format!(
+            "torrent_id={} info_hash={} files={}",
+            added
+                .id
+                .map_or_else(|| "none".to_owned(), |id| id.to_string()),
+            added.info_hash,
+            added.files.len()
+        ),
+    );
+    if let Some(torrent_id) = added.id {
+        let _ = endpoint.forget(torrent_id).await;
+    }
 
-    let files = resolved_files
+    let files = added
+        .files
         .into_iter()
         .map(|file| TorrentFileInfo {
             index: file.index,

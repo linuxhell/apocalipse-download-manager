@@ -281,7 +281,7 @@ test("automatic mirrors are server-advertised, identity-checked and latency-rank
 test("adding a magnet or torrent resolves a real torrent id directly, no metadata GID handoff", () => {
   assert.match(rqbit, /pub async fn add_torrent\(/);
   assert.match(rqbit, /POST, "\/torrents"/);
-  assert.match(rqbit, /pub id: usize,/);
+  assert.match(rqbit, /pub id: Option<usize>,/);
   assert.match(desktop, /rqbit\.torrent_added/);
   assert.match(desktop, /rqbit_tasks\.lock\(\)/);
 });
