@@ -841,7 +841,7 @@ fn safe_link_path(path: &str) -> Result<PathBuf, String> {
 }
 
 const ABOUT_CREATOR_JPEG: &[u8] = include_bytes!("../assets/about-creator.jpg");
-const ABOUT_BACKGROUND_JPEG: &[u8] = include_bytes!("../assets/about-background.jpg");
+const ABOUT_BACKGROUND_PNG: &[u8] = include_bytes!("../assets/about-background.png");
 const ABOUT_THEME_MP4: &[u8] = include_bytes!("../assets/about-theme.mp4");
 
 fn about_data_url(bytes: &[u8], mime: &str) -> String {
@@ -850,7 +850,7 @@ fn about_data_url(bytes: &[u8], mime: &str) -> String {
 
 fn about_media_snapshot() -> AboutMedia {
     AboutMedia {
-        background_data_url: Some(about_data_url(ABOUT_BACKGROUND_JPEG, "image/jpeg")),
+        background_data_url: Some(about_data_url(ABOUT_BACKGROUND_PNG, "image/png")),
         photo_data_url: Some(about_data_url(ABOUT_CREATOR_JPEG, "image/jpeg")),
         audio_data_url: Some(about_data_url(ABOUT_THEME_MP4, "audio/mp4")),
     }
