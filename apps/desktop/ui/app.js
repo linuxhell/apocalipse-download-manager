@@ -875,12 +875,17 @@ function updateSpeeds(tasks) {
     const active = stateKey(task.state) === "downloading";
     const changed = !previous || task.received !== previous.bytes;
     const changedAt = changed ? now : previous.changedAt;
-    // External engines can report byte counters at a different cadence from
-    // their live throughput. Prefer the explicit engine speed while active and
-    // use byte deltas as a second signal for a responsive ADM display.
-    const externalSpeed = active ? Number(task.download_speed) || 0 : 0;
+    // When the backend has an engine-reported byte/s value, display that
+    // value directly. Do not apply a second UI EWMA: aria2-next, yt-dlp and
+    // N_m3u8DL-RE already report their own live throughput. Byte-delta EWMA
+    // remains only as a fallback for engines that cannot provide byte/s.
+    const hasEngineSpeed = active
+      && task.download_speed !== null
+      && task.download_speed !== undefined
+      && Number.isFinite(Number(task.download_speed));
+    const engineSpeed = hasEngineSpeed ? Math.max(0, Number(task.download_speed)) : 0;
     let speed = active ? previous?.speed || 0 : 0;
-    if (previous && active) {
+    if (!hasEngineSpeed && previous && active) {
       const elapsed = Math.max(0.001, (now - previous.at) / 1000);
       const delta = Math.max(0, task.received - previous.bytes);
       if (delta > 0) {
@@ -893,14 +898,15 @@ function updateSpeeds(tasks) {
         speed = 0;
       }
     }
+    const displaySpeed = hasEngineSpeed ? engineSpeed : speed;
     speedSamples.set(task.id, {
       at: now,
       bytes: task.received,
-      speed: externalSpeed || speed,
+      speed: displaySpeed,
       changedAt,
     });
     if (active) {
-      overallSpeed += externalSpeed || speed;
+      overallSpeed += displaySpeed;
       overallUploadSpeed += Number(task.upload_speed) || 0;
     }
   }
