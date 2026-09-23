@@ -697,6 +697,12 @@ impl Endpoint {
             "bt-first-last-piece-first".into(),
             Value::String("true".into()),
         );
+        // Keep only the initial preview window sequential. aria2-next maps
+        // force-sequential to libtorrent's native sequential piece picker and
+        // allows it to be changed while the torrent is active. The desktop
+        // releases this mode after enough contiguous media bytes are expected
+        // to be available, then returns to rarest-first for normal throughput.
+        options.insert("force-sequential".into(), Value::String("true".into()));
         if !is_magnet && !only_files.is_empty() {
             let selection = only_files
                 .iter()
@@ -1160,6 +1166,24 @@ impl Endpoint {
             .join(",");
         let mut options = Map::new();
         options.insert("select-file".into(), Value::String(selection));
+        self.call(
+            "aria2.changeOption",
+            vec![Value::String(gid.to_owned()), Value::Object(options)],
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn set_bittorrent_sequential(
+        &self,
+        gid: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        let mut options = Map::new();
+        options.insert(
+            "force-sequential".into(),
+            Value::String(if enabled { "true" } else { "false" }.into()),
+        );
         self.call(
             "aria2.changeOption",
             vec![Value::String(gid.to_owned()), Value::Object(options)],
