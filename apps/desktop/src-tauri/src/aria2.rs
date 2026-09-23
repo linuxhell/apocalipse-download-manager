@@ -664,7 +664,6 @@ impl Endpoint {
         // bytes are requested. Do not send the retired bt-metadata-only alias:
         // aria2-next normalizes it to pause-metadata, and mixing both contracts
         // can make the preview wait for a child GID that aria2-next never needs.
-        options.insert("bt-save-metadata".into(), Value::String("false".into()));
         options.insert("pause-metadata".into(), Value::String("true".into()));
         if let Some(proxy) = bt_proxy {
             options.insert("bt-proxy".into(), Value::String(proxy.to_owned()));
@@ -911,6 +910,86 @@ impl Endpoint {
             files,
             total_size,
         })
+    }
+
+    /// Removes BitTorrent transfers restored by aria2-next that ADM no longer
+    /// owns. Metadata-only previews can be serialized by save-session while
+    /// they are waiting for BEP 9; after an app restart those invisible
+    /// transfers would otherwise keep the info-hash registered in libtorrent
+    /// and make the next preview fail with "torrent already exists in session".
+    pub async fn prune_orphan_bittorrent_transfers(
+        &self,
+        protected_gids: &[String],
+    ) -> Result<Vec<String>, String> {
+        let keys = json!(["gid", "status", "infoHash"]);
+        let mut transfers = Vec::new();
+        let active = self
+            .call("aria2.tellActive", vec![keys.clone()])
+            .await?;
+        if let Some(items) = active.as_array() {
+            transfers.extend(items.iter().cloned());
+        }
+        let waiting = self
+            .call(
+                "aria2.tellWaiting",
+                vec![json!(0), json!(1000), keys.clone()],
+            )
+            .await?;
+        if let Some(items) = waiting.as_array() {
+            transfers.extend(items.iter().cloned());
+        }
+
+        let mut removed = Vec::new();
+        for transfer in transfers {
+            let Some(gid) = transfer.get("gid").and_then(Value::as_str) else {
+                continue;
+            };
+            let is_bittorrent = transfer
+                .get("infoHash")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty());
+            if !is_bittorrent || protected_gids.iter().any(|known| known == gid) {
+                continue;
+            }
+
+            let gid = gid.to_owned();
+            let _ = self
+                .call("aria2.forceRemove", vec![Value::String(gid.clone())])
+                .await;
+
+            // libtorrent releases the info-hash asynchronously. Wait until the
+            // request group is no longer active/paused so a retry cannot race
+            // the native remove_torrent alert.
+            for _ in 0..20 {
+                let status = self
+                    .call(
+                        "aria2.tellStatus",
+                        vec![Value::String(gid.clone()), json!(["status"])],
+                    )
+                    .await;
+                let still_registered = status
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("status")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
+                    .is_some_and(|status| matches!(status.as_str(), "active" | "waiting" | "paused"));
+                if !still_registered {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            let _ = self
+                .call(
+                    "aria2.removeDownloadResult",
+                    vec![Value::String(gid.clone())],
+                )
+                .await;
+            removed.push(gid);
+        }
+        Ok(removed)
     }
 
     pub async fn set_selected_files(&self, gid: &str, selected: &[usize]) -> Result<(), String> {
