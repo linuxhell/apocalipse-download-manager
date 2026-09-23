@@ -43,6 +43,12 @@ pub struct RuntimeStatus {
     // object, absent for plain HTTP/FTP transfers.
     pub seeders: Option<u64>,
     pub followed_by: Option<String>,
+    /// aria2-next BitTorrent file-selection transaction state. For Magnet
+    /// downloads using pause-metadata this becomes "awaiting" or "ready"
+    /// on the same GID once metadata is available.
+    pub file_selection_state: Option<String>,
+    /// Number of real torrent files currently exposed by tellStatus(files).
+    pub file_count: usize,
     // Number of HTTP/HTTPS webseed URIs aria2 is actively pulling from
     // alongside the BT swarm for this download (0 for a plain HTTP/FTP
     // task, where every file only ever has its own source URI "in use").
@@ -137,6 +143,8 @@ impl Runtime {
             fs::write(&session, b"").map_err(|error| error.to_string())?;
         }
         let log = runtime_root.join("aria2.log");
+        let state_dir = runtime_root.join("state");
+        fs::create_dir_all(&state_dir).map_err(|error| error.to_string())?;
         let mut command = Command::new(executable);
         command
             .arg("--enable-rpc=true")
@@ -171,6 +179,11 @@ impl Runtime {
             .arg(format!("--input-file={}", session.display()))
             .arg(format!("--save-session={}", session.display()))
             .arg("--save-session-interval=30")
+            // aria2-next no longer stores protocol resume state beside payload
+            // files. Keep HTTP range state, BitTorrent fast-resume/DHT state,
+            // and ED2K's state.db inside ADM's portable data directory.
+            .arg(format!("--state-dir={}", state_dir.display()))
+            .arg("--state-save-interval=30")
             // BitTorrent extensions: DHT (aria2-next's libtorrent-rasterbar
             // backend handles IPv4 and IPv6 together under one flag now -
             // the old separate --enable-dht6 is accepted only as a legacy
@@ -316,6 +329,7 @@ impl Endpoint {
         connections: usize,
         context: &RequestContext,
         http_download: bool,
+        download_limit: u64,
     ) -> Result<String, String> {
         if !context.body.is_empty()
             || (!context.method.is_empty() && !context.method.eq_ignore_ascii_case("GET"))
@@ -330,6 +344,12 @@ impl Endpoint {
         );
         options.insert("continue".into(), Value::String("true".into()));
         options.insert("file-allocation".into(), Value::String("none".into()));
+        if download_limit > 0 {
+            options.insert(
+                "max-download-limit".into(),
+                Value::String(download_limit.to_string()),
+            );
+        }
         if http_download {
             let connections = connections.clamp(1, 32);
             options.insert(
@@ -385,6 +405,7 @@ impl Endpoint {
             "errorMessage",
             "numSeeders",
             "followedBy",
+            "bittorrent",
             "files"
         ]);
         let value = self
@@ -436,6 +457,16 @@ impl Endpoint {
                 .and_then(|list| list.first())
                 .and_then(Value::as_str)
                 .map(str::to_owned),
+            file_selection_state: value
+                .get("bittorrent")
+                .and_then(|bt| bt.get("fileSelectionState"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            file_count: value
+                .get("files")
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .unwrap_or(0),
             // For a BitTorrent download, each file's "uris" lists the
             // WebSeeding (BEP 19) HTTP/HTTPS sources declared in the
             // torrent itself; "used" means aria2 is actively pulling bytes
@@ -475,6 +506,7 @@ impl Endpoint {
         torrent_bytes: Option<&[u8]>,
         destination_dir: &Path,
         only_files: &[usize],
+        download_limit: u64,
     ) -> Result<String, String> {
         let mut options = Map::new();
         options.insert(
@@ -483,6 +515,18 @@ impl Endpoint {
         );
         options.insert("continue".into(), Value::String("true".into()));
         options.insert("file-allocation".into(), Value::String("none".into()));
+        if download_limit > 0 {
+            options.insert(
+                "max-download-limit".into(),
+                Value::String(download_limit.to_string()),
+            );
+        }
+        // For Magnet links use aria2-next's native metadata transaction:
+        // metadata is validated on the same GID, then the GID pauses before
+        // payload so the final file selection can be committed atomically.
+        if torrent_bytes.is_none() && source.to_ascii_lowercase().starts_with("magnet:") {
+            options.insert("pause-metadata".into(), Value::String("true".into()));
+        }
         // Fetch the first and last pieces of every file first so a
         // preview/player can start reading before the rest has arrived.
         // aria2-next's libtorrent-rasterbar backend replaced the old
@@ -526,10 +570,10 @@ impl Endpoint {
     }
 
     /// Resolves a magnet link's metadata (name, file list, sizes) without
-    /// downloading file content. aria2 first fetches the BEP 9 metadata job,
-    /// then creates the real BitTorrent content GID. `pause-metadata=true`
-    /// makes that follow-up GID start paused, so we can inspect its real file
-    /// list and sizes before removing both temporary jobs.
+    /// downloading file content. aria2-next keeps the same GID from BEP 9
+    /// metadata discovery through file selection and payload. With
+    /// `pause-metadata=true` that GID pauses after metadata is validated so
+    /// the complete real file list can be inspected without payload transfer.
     pub async fn preview_magnet_metadata(
         &self,
         magnet: &str,
@@ -792,6 +836,54 @@ impl Endpoint {
             files,
             total_size,
         })
+    }
+
+    pub async fn set_selected_files(
+        &self,
+        gid: &str,
+        selected: &[usize],
+    ) -> Result<(), String> {
+        if selected.is_empty() {
+            return Err("aria2_select_file_required".to_owned());
+        }
+        let selection = selected
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut options = Map::new();
+        options.insert("select-file".into(), Value::String(selection));
+        self.call(
+            "aria2.changeOption",
+            vec![Value::String(gid.to_owned()), Value::Object(options)],
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn set_download_limit(&self, gid: &str, bytes_per_second: u64) -> Result<(), String> {
+        let mut options = Map::new();
+        options.insert(
+            "max-download-limit".into(),
+            Value::String(bytes_per_second.to_string()),
+        );
+        self.call(
+            "aria2.changeOption",
+            vec![Value::String(gid.to_owned()), Value::Object(options)],
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn set_global_download_limit(&self, bytes_per_second: u64) -> Result<(), String> {
+        let mut options = Map::new();
+        options.insert(
+            "max-overall-download-limit".into(),
+            Value::String(bytes_per_second.to_string()),
+        );
+        self.call("aria2.changeGlobalOption", vec![Value::Object(options)])
+            .await
+            .map(|_| ())
     }
 
     pub async fn pause(&self, gid: &str) -> Result<(), String> {
