@@ -169,3 +169,48 @@ test('Magnet analysis gives restored aria2-next session entries one bounded atta
   assert.match(block, /metadata_preview_restore_grace/);
 });
 
+
+
+test('aria2-next uses a dynamically selected BitTorrent listen port instead of fixed 6881', () => {
+  assert.match(aria2, /fn reserve_bittorrent_port\(\)/);
+  assert.match(aria2, /UdpSocket::bind\(\("0\.0\.0\.0", port\)\)/);
+  assert.match(aria2, /--listen-port=\{bt_port\}/);
+  assert.match(aria2, /aria2_bt_listen_failed/);
+  assert.doesNotMatch(aria2, /--listen-port=6881/);
+  assert.match(main, /bt_listen_port=\{bt_port\}/);
+});
+
+test('discarded Magnet metadata previews wait for removal and collect only orphan fastresume state', () => {
+  assert.match(aria2, /async fn cleanup_temporary_magnet_preview/);
+  assert.match(aria2, /"aria2\.forceRemove"/);
+  assert.match(aria2, /"aria2\.removeDownloadResult"/);
+  assert.match(aria2, /"aria2\.saveSession"/);
+  assert.match(aria2, /live_bittorrent_info_hash/);
+  assert.match(aria2, /state_dir\.join\("bittorrent"\)\.join\("torrents"\)/);
+  assert.match(aria2, /\.fastresume/);
+  assert.match(aria2, /magnet_info_hash\(magnet\)/);
+});
+
+test('aria2-next HTTP downloads use native stream-max-connections without legacy split aliases', () => {
+  const start = aria2.indexOf('pub async fn add_download(');
+  const end = aria2.indexOf('\n    pub async fn status(', start);
+  assert.ok(start >= 0 && end > start);
+  const block = aria2.slice(start, end);
+  assert.match(block, /"stream-max-connections"/);
+  assert.doesNotMatch(block, /"max-connection-per-server"/);
+  assert.doesNotMatch(block, /"min-split-size"/);
+  assert.doesNotMatch(block, /options\.insert\("split"/);
+  assert.match(main, /"streamMaxConnections": connections/);
+});
+
+test('aria2 startup diagnostics expose first payload and worker ramp milestones', () => {
+  for (const event of [
+    'aria2.first_payload_byte',
+    'aria2.workers_2',
+    'aria2.workers_4',
+    'aria2.workers_8',
+    'aria2.workers_16',
+  ]) {
+    assert.match(main, new RegExp(event.replace('.', '\\.')));
+  }
+});
