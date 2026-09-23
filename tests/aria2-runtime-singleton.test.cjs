@@ -132,3 +132,29 @@ test('redownload preserves torrent selection and transfer options while allocati
   }
   assert.doesNotMatch(block, /task\.aria2_gid = original\.aria2_gid/);
 });
+
+test('invisible restored Magnet previews are pruned before they can block the same info-hash', () => {
+  assert.match(aria2, /pub async fn prune_orphan_bittorrent_transfers/);
+  assert.match(aria2, /"aria2\.tellActive"/);
+  assert.match(aria2, /"aria2\.tellWaiting"/);
+  assert.match(aria2, /"infoHash"/);
+  assert.match(aria2, /"aria2\.forceRemove"/);
+  assert.match(aria2, /matches!\(status\.as_str\(\), "active" \| "waiting" \| "paused"\)/);
+  assert.match(main, /fn protected_aria2_gids\(/);
+  assert.match(main, /async fn prune_orphan_aria2_torrents\(/);
+  assert.match(main, /aria2\.orphan_bittorrent_removed/);
+  assert.match(main, /reason=\{reason\}/);
+  assert.match(main, /prune_orphan_aria2_torrents\(state, &endpoint, "runtime_start"\)\.await/);
+});
+
+test('metadata Analyze reconciles orphan engine torrents before adding a temporary Magnet preview', () => {
+  const start = main.indexOf('async fn inspect_torrent_metadata(');
+  const end = main.indexOf('\nasync fn fetch_torrent_file_bytes', start);
+  assert.ok(start >= 0 && end > start);
+  const block = main.slice(start, end);
+  const endpoint = block.indexOf('aria2_endpoint(&state, true).await?');
+  const prune = block.indexOf('prune_orphan_aria2_torrents(&state, &endpoint, "metadata_preview").await?');
+  const preview = block.indexOf('.preview_magnet_metadata(');
+  assert.ok(endpoint >= 0 && prune > endpoint && preview > prune);
+});
+
