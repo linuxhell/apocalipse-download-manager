@@ -3879,7 +3879,7 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
                 &settings.aria2_rpc_secret,
             )?);
             if let Some(current) = runtime.as_ref() {
-                spawned = Some((current.pid(), current.port()));
+                spawned = Some((current.pid(), current.port(), current.bt_port()));
             }
         }
         runtime
@@ -3888,13 +3888,13 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
             .ok_or_else(|| "aria2_rpc_runtime_missing".to_owned())?
     };
     let runtime_spawned = spawned.is_some();
-    if let Some((pid, port)) = spawned {
+    if let Some((pid, port, bt_port)) = spawned {
         diagnostic_log(
             state,
             "INFO",
             "aria2.runtime_spawned",
             &format!(
-                "pid={pid} parent_pid={} port={port} stop_with_parent=true",
+                "pid={pid} parent_pid={} port={port} bt_listen_port={bt_port} stop_with_parent=true",
                 std::process::id()
             ),
         );
@@ -6494,7 +6494,10 @@ async fn run_aria2_download(
         &state,
         "INFO",
         "aria2.task_started",
-        &format!("task={id} gid={gid} engine={kind:?} connections={connections}"),
+        &format!(
+            "task={id} gid={gid} engine={kind:?} connections={connections} bt_listen_port={}",
+            endpoint.bt_listen_port()
+        ),
     );
     state.diagnostics.record(
         if is_bittorrent {
@@ -6511,13 +6514,20 @@ async fn run_aria2_download(
             "engine": "aria2-rpc",
             "connections": connections,
             "kind": format!("{kind:?}"),
-            "minSplitSize": "1M",
+            "streamMaxConnections": connections,
+            "btListenPort": endpoint.bt_listen_port(),
             "fileAllocation": "none"
         }),
     );
 
     let mut last_at = Instant::now();
+    let transfer_started_at = Instant::now();
     let mut last_downloaded = 0_u64;
+    let mut first_payload_logged = false;
+    let mut workers_2_logged = false;
+    let mut workers_4_logged = false;
+    let mut workers_8_logged = false;
+    let mut workers_16_logged = false;
     let mut interval = tokio::time::interval(Duration::from_millis(350));
     let mut terminal = false;
     loop {
@@ -6622,6 +6632,38 @@ async fn run_aria2_download(
                     continue;
                 }
                 let now = Instant::now();
+                let startup_ms = transfer_started_at.elapsed().as_millis();
+                if !first_payload_logged && status.downloaded > 0 {
+                    first_payload_logged = true;
+                    diagnostic_log(
+                        &state,
+                        "INFO",
+                        "aria2.first_payload_byte",
+                        &format!(
+                            "task={id} gid={gid} elapsed_ms={startup_ms} bytes={} connections={}",
+                            status.downloaded, status.connections
+                        ),
+                    );
+                }
+                for (threshold, logged, event) in [
+                    (2_u64, &mut workers_2_logged, "aria2.workers_2"),
+                    (4_u64, &mut workers_4_logged, "aria2.workers_4"),
+                    (8_u64, &mut workers_8_logged, "aria2.workers_8"),
+                    (16_u64, &mut workers_16_logged, "aria2.workers_16"),
+                ] {
+                    if !*logged && status.connections >= threshold {
+                        *logged = true;
+                        diagnostic_log(
+                            &state,
+                            "INFO",
+                            event,
+                            &format!(
+                                "task={id} gid={gid} elapsed_ms={startup_ms} connections={}",
+                                status.connections
+                            ),
+                        );
+                    }
+                }
                 let elapsed = now.duration_since(last_at).as_secs_f64().max(0.001);
                 let raw_speed = if status.downloaded >= last_downloaded {
                     ((status.downloaded - last_downloaded) as f64 / elapsed) as u64
