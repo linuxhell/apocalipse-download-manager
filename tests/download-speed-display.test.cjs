@@ -365,6 +365,7 @@ test("real magnet downloads commit select-file then resume the same aria2-next G
   assert.match(aria2, /pub file_selection_state: Option<String>/);
   assert.match(aria2, /pub async fn set_selected_files/);
   assert.match(aria2, /"aria2\.changeOption"/);
+  assert.match(aria2, /if !is_magnet && !only_files\.is_empty\(\)/);
   assert.match(desktop, /status\.file_selection_state\.as_deref\(\)/);
   assert.match(desktop, /endpoint\.set_selected_files\(&gid, &selected\)\.await/);
   assert.match(desktop, /endpoint\.resume\(&gid\)\.await/);
