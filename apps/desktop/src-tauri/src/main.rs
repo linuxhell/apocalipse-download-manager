@@ -7078,6 +7078,10 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
     if let Some(bytes) = read_sanitized_log_tail(&aria2_log, 1024 * 1024) {
         entries.push(("engines/aria2-runtime.log".to_owned(), bytes));
     }
+    let metadata_failure_log = runtime_root.join("logs").join("engines").join("aria2-metadata-failure.log");
+    if let Some(bytes) = read_sanitized_log_tail(&metadata_failure_log, 16 * 1024 * 1024) {
+        entries.push(("engines/aria2-metadata-failure.log".to_owned(), bytes));
+    }
     let debugger_index = serde_json::json!({
         "format": "Apocalipse Forensic Debugger V4",
         "startHere": [
@@ -9394,6 +9398,17 @@ async fn inspect_torrent_metadata(
         .await;
     let _ = fs::remove_dir_all(&workspace);
     let metadata = metadata.map_err(|error| {
+        if error.starts_with("aria2_metadata_timeout:") {
+            let runtime_root = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
+            let source_log = runtime_root.join("aria2-rpc").join("aria2.log");
+            let snapshot = runtime_root.join("logs").join("engines").join("aria2-metadata-failure.log");
+            if let Some(bytes) = read_sanitized_log_tail(&source_log, 16 * 1024 * 1024) {
+                if let Some(parent) = snapshot.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                let _ = fs::write(&snapshot, bytes);
+            }
+        }
         diagnostic_log(
             &state,
             "WARN",
