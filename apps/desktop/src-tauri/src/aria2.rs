@@ -520,11 +520,10 @@ impl Endpoint {
     }
 
     /// Resolves a magnet link's metadata (name, file list, sizes) without
-    /// downloading any file content, using aria2's own metadata-only mode
-    /// (BEP 9) over the BitTorrent network. `workspace` is a scratch
-    /// directory the caller owns and should remove afterwards; aria2 needs
-    /// one to resolve each returned file's path against, but no file
-    /// content is ever written there.
+    /// downloading file content. aria2 first fetches the BEP 9 metadata job,
+    /// then creates the real BitTorrent content GID. `pause-metadata=true`
+    /// makes that follow-up GID start paused, so we can inspect its real file
+    /// list and sizes before removing both temporary jobs.
     pub async fn preview_magnet_metadata(
         &self,
         magnet: &str,
@@ -536,16 +535,14 @@ impl Endpoint {
             "dir".into(),
             Value::String(workspace.to_string_lossy().into_owned()),
         );
-        options.insert("bt-metadata-only".into(), Value::String("true".into()));
+        // bt-metadata-only=true leaves tellStatus(files) pointing at aria2's
+        // synthetic [METADATA] object (the .torrent/BEP 9 blob), not at the
+        // files described by the torrent. Let aria2 create its normal content
+        // GID instead, but pause that child immediately so no payload bytes
+        // are downloaded during this preview.
+        options.insert("bt-metadata-only".into(), Value::String("false".into()));
         options.insert("bt-save-metadata".into(), Value::String("false".into()));
-        // "mem" is aria2's documented value for metadata-only mode: it keeps
-        // the resolved metadata in memory and marks this GID "complete" once
-        // BEP 9 finishes, without spawning a follow-up content download.
-        // "false" leaves aria2's internal state machine unable to reach a
-        // clean "complete" status for a metadata-only GID, so polling for it
-        // never succeeds and this always ran out the clock on the timeout
-        // below instead of resolving in the couple of seconds it actually
-        // takes once a peer answers.
+        options.insert("pause-metadata".into(), Value::String("true".into()));
         options.insert("follow-torrent".into(), Value::String("mem".into()));
         let gid = self
             .call(
@@ -569,17 +566,10 @@ impl Endpoint {
             "followedBy"
         ]);
         // Metadata arrives once at least one connected peer answers the BEP
-        // 9 metadata exchange. A cold DHT routing table (first run, nothing
-        // cached from a previous session) needs time to bootstrap before it
-        // can resolve peers for a specific hash on its own, and this magnet's
-        // own tracker list may be entirely dead, leaving DHT as the only
-        // path; 150 seconds gives that bootstrap room instead of a single
-        // short-timeout request. `on_progress` reports what was actually
-        // observed (connections/seeders, and whether any bytes of the
-        // metadata itself started arriving, or aria2 quietly moved on to a
-        // followed-up content GID instead of stopping at metadata) so a
-        // stall can be told apart from "no peers reachable at all" (a
-        // network/firewall problem) after the fact.
+        // 9 exchange. A cold DHT routing table can need time to bootstrap, so
+        // keep the existing 150-second ceiling. Once the metadata GID finishes
+        // it should expose a followedBy content GID; pause-metadata keeps that
+        // content GID from downloading while we read bittorrent/files from it.
         let deadline = tokio::time::Instant::now() + Duration::from_secs(150);
         let start = tokio::time::Instant::now();
         let mut last_report = start;
@@ -587,6 +577,7 @@ impl Endpoint {
         let mut peak_seeders: i64 = 0;
         let mut peak_total_length: i64 = 0;
         let mut peak_completed_length: i64 = 0;
+        let mut metadata_completed_at: Option<tokio::time::Instant> = None;
         let mut followed_content_gid: Option<String> = None;
         let result = loop {
             let value = self
@@ -627,59 +618,104 @@ impl Endpoint {
                     followed_by,
                 );
             }
-            // bt-metadata-only should keep this GID's own status "complete"
-            // once BEP 9 resolves, without ever following into a real
-            // content download. On some aria2 builds it instead silently
-            // "follows" anyway (the global follow-torrent=true default
-            // winning over the per-download override): the metadata is
-            // known at that point, but this GID's own status never becomes
-            // "complete", and a full content download keeps running
-            // unattended under the new GID otherwise. Treat followedBy
-            // appearing as proof metadata resolved, read it from whichever
-            // GID actually carries it, and force-remove both so the preview
-            // never leaves a real download running in the background.
+
             if let Some(next_gid) = followed_by {
-                let next_gid = next_gid.to_owned();
+                if followed_content_gid.as_deref() != Some(next_gid) {
+                    followed_content_gid = Some(next_gid.to_owned());
+                }
+            }
+
+            if let Some(content_gid) = followed_content_gid.as_deref() {
                 let content_status = self
                     .call(
                         "aria2.tellStatus",
                         vec![
-                            Value::String(next_gid.clone()),
-                            json!(["bittorrent", "files"]),
+                            Value::String(content_gid.to_owned()),
+                            json!([
+                                "status",
+                                "errorMessage",
+                                "bittorrent",
+                                "files",
+                                "totalLength",
+                                "completedLength"
+                            ]),
                         ],
                     )
                     .await?;
-                followed_content_gid = Some(next_gid);
-                let source = if content_status.get("bittorrent").is_some() {
-                    content_status
-                } else {
-                    value
-                };
-                break Ok(source);
+                let has_bittorrent_info = content_status
+                    .get("bittorrent")
+                    .and_then(|bt| bt.get("info"))
+                    .is_some();
+                let has_real_files = content_status
+                    .get("files")
+                    .and_then(Value::as_array)
+                    .is_some_and(|files| !files.is_empty());
+                if has_bittorrent_info && has_real_files {
+                    break Ok(content_status);
+                }
+                if matches!(
+                    content_status.get("status").and_then(Value::as_str),
+                    Some("error" | "removed")
+                ) {
+                    let message = content_status
+                        .get("errorMessage")
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or("aria2_metadata_followup_failed");
+                    break Err(message.to_owned());
+                }
             }
+
             match value.get("status").and_then(Value::as_str) {
-                Some("complete") => break Ok(value),
-                Some("error") => {
+                Some("complete") => {
+                    if metadata_completed_at.is_none() {
+                        metadata_completed_at = Some(now);
+                    }
+                    if followed_content_gid.is_none()
+                        && metadata_completed_at
+                            .as_ref()
+                            .is_some_and(|at| now.duration_since(*at) >= Duration::from_secs(5))
+                    {
+                        break Err("aria2_metadata_followup_missing".to_owned());
+                    }
+                }
+                Some("error" | "removed") => {
                     let message = value
                         .get("errorMessage")
                         .and_then(Value::as_str)
+                        .filter(|value| !value.is_empty())
                         .unwrap_or("aria2_metadata_failed");
                     break Err(message.to_owned());
                 }
-                _ if tokio::time::Instant::now() >= deadline => {
-                    break Err(format!(
-                        "aria2_metadata_timeout:connections={peak_connections}:seeders={peak_seeders}"
-                    ));
-                }
-                _ => tokio::time::sleep(Duration::from_millis(500)).await,
+                _ => {}
             }
+
+            if now >= deadline {
+                break Err(format!(
+                    "aria2_metadata_timeout:connections={peak_connections}:seeders={peak_seeders}"
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
         };
+
         let _ = self
-            .call("aria2.forceRemove", vec![Value::String(gid)])
+            .call("aria2.forceRemove", vec![Value::String(gid.clone())])
+            .await;
+        let _ = self
+            .call("aria2.removeDownloadResult", vec![Value::String(gid)])
             .await;
         if let Some(content_gid) = followed_content_gid {
             let _ = self
-                .call("aria2.forceRemove", vec![Value::String(content_gid)])
+                .call(
+                    "aria2.forceRemove",
+                    vec![Value::String(content_gid.clone())],
+                )
+                .await;
+            let _ = self
+                .call(
+                    "aria2.removeDownloadResult",
+                    vec![Value::String(content_gid)],
+                )
                 .await;
         }
         let value = result?;
