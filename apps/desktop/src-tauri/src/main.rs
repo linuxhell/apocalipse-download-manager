@@ -3866,6 +3866,14 @@ fn stop_aria2_runtime(state: &AppState) {
     }
 }
 
+fn running_aria2_endpoint(state: &AppState) -> Option<aria2::Endpoint> {
+    let mut runtime = state.aria2_runtime.lock().ok()?;
+    runtime
+        .as_mut()
+        .filter(|runtime| runtime.is_running())
+        .map(|runtime| runtime.endpoint())
+}
+
 fn http_origin(url: &str) -> Option<&str> {
     let scheme_end = url.find("://")? + 3;
     let path_start = url[scheme_end..]
@@ -11047,58 +11055,78 @@ fn get_transfer_limits(state: State<'_, AppState>) -> Result<TransferLimits, Str
 }
 
 #[tauri::command]
-fn set_transfer_limits(
+async fn set_transfer_limits(
     state: State<'_, AppState>,
     max_active_downloads: usize,
     connections_per_download: usize,
     adaptive_efficiency: bool,
     global_bandwidth_limit: u64,
 ) -> Result<TransferLimits, String> {
-    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    settings.max_active_downloads = max_active_downloads.clamp(1, 20);
-    settings.connections_per_download = connections_per_download.clamp(1, 32);
-    settings.adaptive_efficiency = adaptive_efficiency;
-    settings.global_bandwidth_limit = global_bandwidth_limit.min(10 * 1024 * 1024 * 1024);
-    state
-        .global_bandwidth_limiter
-        .set_limit(settings.global_bandwidth_limit);
-    save_settings(&state, &settings)?;
-    Ok(TransferLimits {
-        max_active_downloads: settings.max_active_downloads,
-        connections_per_download: settings.connections_per_download,
-        adaptive_efficiency: settings.adaptive_efficiency,
-        global_bandwidth_limit: settings.global_bandwidth_limit,
-    })
+    let result = {
+        let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+        settings.max_active_downloads = max_active_downloads.clamp(1, 20);
+        settings.connections_per_download = connections_per_download.clamp(1, 32);
+        settings.adaptive_efficiency = adaptive_efficiency;
+        settings.global_bandwidth_limit =
+            global_bandwidth_limit.min(10 * 1024 * 1024 * 1024);
+        state
+            .global_bandwidth_limiter
+            .set_limit(settings.global_bandwidth_limit);
+        save_settings(&state, &settings)?;
+        TransferLimits {
+            max_active_downloads: settings.max_active_downloads,
+            connections_per_download: settings.connections_per_download,
+            adaptive_efficiency: settings.adaptive_efficiency,
+            global_bandwidth_limit: settings.global_bandwidth_limit,
+        }
+    };
+    if let Some(endpoint) = running_aria2_endpoint(&state) {
+        endpoint
+            .set_global_download_limit(result.global_bandwidth_limit)
+            .await?;
+    }
+    Ok(result)
 }
 
 #[tauri::command]
-fn set_download_bandwidth_limit(
+async fn set_download_bandwidth_limit(
     state: State<'_, AppState>,
     id: DownloadId,
     bandwidth_limit: u64,
 ) -> Result<u64, String> {
     let limit = bandwidth_limit.min(10 * 1024 * 1024 * 1024);
-    let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
-    let task = queue
-        .iter_mut()
-        .find(|task| task.id == id)
-        .ok_or_else(|| "download_not_found".to_owned())?;
-    task.bandwidth_limit = (limit > 0).then_some(limit);
-    save_queue(&state, &queue)?;
-    drop(queue);
-    let mut limiters = state
-        .download_bandwidth_limiters
-        .lock()
-        .map_err(|error| error.to_string())?;
-    if limit == 0 {
-        if let Some(limiter) = limiters.remove(&id) {
-            limiter.set_limit(0);
+    {
+        let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+        let task = queue
+            .iter_mut()
+            .find(|task| task.id == id)
+            .ok_or_else(|| "download_not_found".to_owned())?;
+        task.bandwidth_limit = (limit > 0).then_some(limit);
+        save_queue(&state, &queue)?;
+    }
+    {
+        let mut limiters = state
+            .download_bandwidth_limiters
+            .lock()
+            .map_err(|error| error.to_string())?;
+        if limit == 0 {
+            if let Some(limiter) = limiters.remove(&id) {
+                limiter.set_limit(0);
+            }
+        } else {
+            limiters
+                .entry(id)
+                .or_insert_with(|| Arc::new(BandwidthLimiter::new(limit)))
+                .set_limit(limit);
         }
-    } else {
-        limiters
-            .entry(id)
-            .or_insert_with(|| Arc::new(BandwidthLimiter::new(limit)))
-            .set_limit(limit);
+    }
+    let gid = state
+        .aria2_tasks
+        .lock()
+        .ok()
+        .and_then(|items| items.get(&id).cloned());
+    if let (Some(gid), Some(endpoint)) = (gid, running_aria2_endpoint(&state)) {
+        endpoint.set_download_limit(&gid, limit).await?;
     }
     Ok(limit)
 }
