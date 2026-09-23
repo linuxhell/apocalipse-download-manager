@@ -1189,20 +1189,20 @@ async fn ed2k_update_server_list(state: State<'_, AppState>) -> Result<u64, Stri
     .timeout(Duration::from_secs(20))
     .build()
     .map_err(|error| error.to_string())?;
-    let bytes = client
+    let response = client
         .get(&url)
         .header(reqwest::header::USER_AGENT, "Apocalipse-Download-Manager")
         .send()
         .await
         .map_err(|error| error.to_string())?
         .error_for_status()
-        .map_err(|error| error.to_string())?
-        .bytes()
-        .await
         .map_err(|error| error.to_string())?;
-    if bytes.len() > 16 * 1024 * 1024 {
-        return Err("ed2k_server_list_payload_too_large".to_owned());
-    }
+    let bytes = read_response_limited(
+        response,
+        16 * 1024 * 1024,
+        "ed2k_server_list_payload_too_large",
+    )
+    .await?;
     let server_count = validate_ed2k_server_met(&bytes)?;
     let path = ed2k_server_list_path(&state);
     if let Some(parent) = path.parent() {
@@ -10177,6 +10177,32 @@ async fn inspect_torrent_metadata(
     })
 }
 
+async fn read_response_limited(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+    too_large_error: &str,
+) -> Result<Vec<u8>, String> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes as u64)
+    {
+        return Err(too_large_error.to_owned());
+    }
+    let mut bytes = Vec::with_capacity(
+        response
+            .content_length()
+            .unwrap_or_default()
+            .min(max_bytes as u64) as usize,
+    );
+    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
+        if bytes.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(too_large_error.to_owned());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
 async fn fetch_torrent_file_bytes(state: &AppState, source: &str) -> Result<Vec<u8>, String> {
     let (proxy_url, proxy_username, proxy_password, dns_servers) = state
         .settings
@@ -10206,17 +10232,14 @@ async fn fetch_torrent_file_bytes(state: &AppState, source: &str) -> Result<Vec<
     .map_err(|error| error.to_string())?
     .build()
     .map_err(|error| error.to_string())?;
-    let bytes = client
+    let response = client
         .get(source)
         .send()
         .await
         .map_err(|error| error.to_string())?
         .error_for_status()
-        .map_err(|error| error.to_string())?
-        .bytes()
-        .await
         .map_err(|error| error.to_string())?;
-    Ok(bytes.to_vec())
+    read_response_limited(response, 32 * 1024 * 1024, "torrent_file_payload_too_large").await
 }
 
 #[allow(clippy::too_many_arguments)]
