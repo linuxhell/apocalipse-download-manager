@@ -1312,6 +1312,7 @@ function translate() {
 }
 
 const warnedFacebookRecordingFallbacks = new Set();
+const aiNotifiedFailures = new Set();
 async function refreshDownloads() {
   try {
     const ticket = downloadListState.beginRead();
@@ -1322,10 +1323,18 @@ async function refreshDownloads() {
     downloads = accepted;
     for (const task of downloads) {
       const failure = typeof task.state === "object" ? task.state.failed?.message : null;
-      if (failure !== "facebook_direct_download_unavailable_use_recording"
-          || warnedFacebookRecordingFallbacks.has(task.id)) continue;
-      warnedFacebookRecordingFallbacks.add(task.id);
-      window.alert(t("facebookRecordingFallback"));
+      if (!failure) continue;
+      if (failure === "facebook_direct_download_unavailable_use_recording"
+          && !warnedFacebookRecordingFallbacks.has(task.id)) {
+        warnedFacebookRecordingFallbacks.add(task.id);
+        window.alert(t("facebookRecordingFallback"));
+      }
+      if (!aiNotifiedFailures.has(task.id)) {
+        aiNotifiedFailures.add(task.id);
+        window.dispatchEvent(new CustomEvent("apocalipse-task-failed", {
+          detail: { id: task.id, source: task.source, message: failure },
+        }));
+      }
     }
     const ids = new Set(downloads.map((task) => task.id));
     for (const id of selectedIds) if (!ids.has(id)) selectedIds.delete(id);

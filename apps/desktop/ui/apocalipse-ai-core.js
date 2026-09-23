@@ -30,6 +30,9 @@
       socialMissing: "The structured social debugger found {count} visible player(s) without a live overlay on {site}. The latest confirmed reason is “{reason}” for player {player}. This conclusion comes from player-decision telemetry, not a guess.",
       socialSummary: "Social debugger for {site}: {visible} visible player(s), {eligible} eligible, {overlays} overlay(s), {missing} missing, {sponsored} sponsored, {inactive} inactive and {noAction} without a supported action.",
       genericFailure: "The latest related failure was: {detail}",
+      proactiveAlert: "I noticed the download for {site} just failed and found something relevant in the records:",
+      rateLimitFixName: "Limit {site} to 1 connection",
+      proposedFixPrompt: "Want me to apply this now — {name}? Reply yes to try it, or no to skip.",
       domainEvidence: "Forensic Debugger V4 found observed evidence for {domain}. Latest relevant event: {event}. Detail: {detail}. This is recorded telemetry, not a guessed cause.",
       historyEmpty: "There are no saved corrections.",
       historyCount: "There are {count} saved correction(s). Open Correction history to view, apply or remove them.",
@@ -45,6 +48,7 @@
       clarifyButton: "Are you referring to the button over the video or to the download already listed in Apocalipse?",
       clarifyAction: "Did this happen when you clicked Download, Preview or Record?",
       taskSummary: "There are {total} task(s): {active} active, {paused} paused, {failed} failed and {completed} completed.",
+      statusReportIntro: "Here is everything I can see right now:",
       downloadSlow: "A slow download may be caused by the website, the number of allowed connections, a configured speed limit, proxy/VPN routing or lack of torrent peers. Tell me the website or task so I can check its records.",
       performanceObserved: "The transfer-engine telemetry shows {speed} now, with a recorded peak of {peak}, using {connections} connection(s), {sources} verified source(s) and {protocol}. {finding}",
       performanceNeedDiagnostics: "I do not have structured transfer telemetry for this download yet. Enable Advanced diagnostics while reproducing the slow transfer so I can measure connections, mirrors, resume decisions and throughput.",
@@ -68,6 +72,9 @@
       linkHelp: "Apocalipse Link transfers files between authorized computers. Check the remote ID, password and connection status when a transfer does not start.",
       settingsHelp: "Settings contains the download folder, clipboard capture, network, proxy, DNS, credentials, associations and extension pairing.",
       filesHelp: "The destination folder can be selected for each task or set as the default in Settings. Open folder uses the completed task’s actual destination.",
+      bandwidthHelp: "The global download limit is set in Settings under Bandwidth, in MB/s, and applies to every active task combined; leave it at 0 for unlimited. A single task can also get its own connection or bandwidth override from its host rule.",
+      schedulerHelp: "The download schedule in Settings automatically pauses new and active downloads outside the start/end time window you configure, using this computer’s local clock, and resumes them once the window opens again.",
+      themesHelp: "The Themes page lets you switch the interface’s colors instantly, with dark and light options; the choice is saved on this computer and applies the next time Apocalipse opens.",
       privacyHelp: "Apocalipse AI runs locally. It analyzes privacy-safe diagnostic events and does not send the conversation to an external model.",
       credentialSaved: "Credentials for {host} were saved for user {username}.",
       credentialInvalid: "I understood that you want to add site credentials, but the site, username or password is missing. Use: add a rule for site example.com username myuser password mypassword.",
@@ -113,6 +120,9 @@
       socialMissing: "O debugger social estruturado encontrou {count} player(s) visível(is) sem overlay ativo no {site}. O motivo confirmado mais recente é “{reason}” no player {player}. Essa conclusão vem da telemetria de decisão do player, não de uma suposição.",
       socialSummary: "Debugger social do {site}: {visible} player(s) visível(is), {eligible} elegível(is), {overlays} overlay(s), {missing} faltando, {sponsored} patrocinado(s), {inactive} inativo(s) e {noAction} sem ação suportada.",
       genericFailure: "A última falha relacionada foi: {detail}",
+      proactiveAlert: "Percebi que o download de {site} acabou de falhar e encontrei algo relevante nos registros:",
+      rateLimitFixName: "Limitar {site} a 1 conexão",
+      proposedFixPrompt: "Quer que eu aplique agora — {name}? Responda sim para tentar, ou não para pular.",
       domainEvidence: "O Debugger Forense V4 encontrou evidência observada para {domain}. Último evento relevante: {event}. Detalhe: {detail}. Isso vem da telemetria registrada, não de uma causa presumida.",
       historyEmpty: "Não há correções guardadas.",
       historyCount: "Existem {count} correção(ões) guardada(s). Abra o Histórico de correções para visualizar, aplicar ou apagar.",
@@ -128,6 +138,7 @@
       clarifyButton: "Você está falando do botão sobre o vídeo ou do download que já aparece na lista do Apocalipse?",
       clarifyAction: "Isso aconteceu quando você clicou em Baixar, Visualizar ou Gravar?",
       taskSummary: "Existem {total} tarefa(s): {active} ativa(s), {paused} pausada(s), {failed} com falha e {completed} concluída(s).",
+      statusReportIntro: "Aqui está tudo que consigo ver agora:",
       downloadSlow: "Um download lento pode ser causado pelo site, quantidade de conexões permitidas, limite de velocidade, rota de proxy/VPN ou falta de pares no torrent. Informe o site ou a tarefa para eu conferir os registros.",
       performanceObserved: "A telemetria do motor mostra {speed} agora, com pico registrado de {peak}, usando {connections} conexão(ões), {sources} fonte(s) verificada(s) e {protocol}. {finding}",
       performanceNeedDiagnostics: "Ainda não tenho telemetria estruturada do motor para esse download. Ative o Diagnóstico avançado enquanto reproduz a lentidão para eu medir conexões, mirrors, decisões de retomada e velocidade.",
@@ -151,6 +162,9 @@
       linkHelp: "O Apocalipse Link transfere arquivos entre computadores autorizados. Quando não iniciar, confira o ID remoto, a senha e o estado da conexão.",
       settingsHelp: "Configurações contém pasta de download, captura da área de transferência, rede, proxy, DNS, credenciais, associações e pareamento da extensão.",
       filesHelp: "A pasta de destino pode ser escolhida em cada tarefa ou definida como padrão nas Configurações. Abrir pasta usa o destino real da tarefa concluída.",
+      bandwidthHelp: "O limite global de download fica em Configurações, em Banda, em MB/s, e vale para todas as tarefas ativas somadas; deixe em 0 para ilimitado. Uma tarefa específica também pode ter conexões ou banda próprias definidas na regra do site.",
+      schedulerHelp: "O agendamento de download em Configurações pausa automaticamente downloads novos e ativos fora da janela de horário que você definir, usando o relógio local deste computador, e retoma tudo quando a janela abrir de novo.",
+      themesHelp: "A página Temas troca as cores da interface na hora, com opções escuras e claras; a escolha fica salva neste computador e vale já na próxima vez que o Apocalipse abrir.",
       privacyHelp: "O Apocalipse AI funciona localmente. Ele analisa eventos de diagnóstico protegidos e não envia a conversa para um modelo externo.",
       credentialSaved: "As credenciais de {host} foram salvas para o usuário {username}.",
       credentialInvalid: "Entendi que você quer adicionar credenciais de site, mas falta o site, o usuário ou a senha. Use: adicione uma regra para o site exemplo.com nome de usuário meuusuario e senha minhasenha.",
@@ -196,6 +210,9 @@
       socialMissing: "结构化社交媒体调试器在 {site} 上发现 {count} 个可见播放器没有活动覆盖按钮。最近确认的原因是播放器 {player} 的“{reason}”。这个结论直接来自播放器决策遥测，而不是猜测。",
       socialSummary: "{site} 社交调试摘要：{visible} 个可见播放器，{eligible} 个可处理，{overlays} 个覆盖按钮，{missing} 个缺失，{sponsored} 个赞助内容，{inactive} 个非活动播放器，{noAction} 个没有受支持操作。",
       genericFailure: "最近一次相关故障是：{detail}",
+      proactiveAlert: "我注意到 {site} 的下载刚刚失败了，并在记录中发现了一些相关信息：",
+      rateLimitFixName: "将 {site} 限制为 1 个连接",
+      proposedFixPrompt: "需要我现在应用吗——{name}？回复“是”尝试，或“否”跳过。",
       historyEmpty: "没有保存的修正。",
       historyCount: "已保存 {count} 个修正。打开“修正历史”可以查看、应用或删除。",
       knownCorrection: "我已经有一个针对 {site} 的本地已确认修正：“{name}”。它已成功 {count} 次，最近一次是在 Apocalipse {version}。如果问题再次出现，可以重新应用它进行测试。",
@@ -210,6 +227,7 @@
       clarifyButton: "你指的是视频上方的按钮，还是已经出现在 Apocalipse 列表中的下载？",
       clarifyAction: "这是在你点击下载、预览还是录制时发生的？",
       taskSummary: "共有 {total} 个任务：{active} 个活动、{paused} 个暂停、{failed} 个失败、{completed} 个完成。",
+      statusReportIntro: "以下是我现在能看到的所有情况：",
       downloadSlow: "下载缓慢可能由网站、允许的连接数、速度限制、代理或 VPN 路由，或种子缺少节点造成。请告诉我网站或任务，以便检查日志。",
       performanceObserved: "传输引擎遥测显示当前速度为 {speed}，本次记录峰值为 {peak}，正在使用 {connections} 个连接、{sources} 个已验证来源以及 {protocol}。{finding}",
       performanceNeedDiagnostics: "目前还没有这个下载的结构化传输遥测。请在重现下载缓慢时开启“高级诊断”，这样我才能测量连接数、镜像、续传决策和吞吐量。",
@@ -233,6 +251,9 @@
       linkHelp: "Apocalipse Link 在获授权的电脑之间传输文件。无法开始时，请检查远程 ID、密码和连接状态。",
       settingsHelp: "“设置”包含下载文件夹、剪贴板捕获、网络、代理、DNS、凭据、关联和扩展配对。",
       filesHelp: "可以为每个任务选择目标文件夹，也可以在“设置”中设为默认文件夹。“打开文件夹”使用已完成任务的实际位置。",
+      bandwidthHelp: "全局下载限速在“设置”的“带宽”里设置，单位是 MB/s，作用于所有活动任务的总和；设为 0 表示不限速。单个任务也可以在站点规则里设置自己的连接数或带宽上限。",
+      schedulerHelp: "“设置”里的下载计划会在你设定的开始/结束时间之外，按本机本地时间自动暂停新的和正在进行的下载，时间窗口一到就会自动恢复。",
+      themesHelp: "“主题”页面可以立即切换界面配色，提供深色和浅色选项；选择会保存在本机，下次打开 Apocalipse 时依然生效。",
       privacyHelp: "Apocalipse AI 在本地运行。它分析经过隐私保护的诊断事件，不会把对话发送给外部模型。",
       credentialSaved: "已为用户 {username} 保存 {host} 的凭据。",
       credentialInvalid: "我知道你想添加网站凭据，但缺少网站、用户名或密码。请使用：为网站 example.com 添加规则，用户名 myuser，密码 mypassword。",
@@ -274,6 +295,30 @@
     .replace(/\b(?:face book)\b/g, "facebook")
     .replace(/\b(?:obg|brigado|brigada)\b/g, "obrigado")
     .replace(/\b(?:vlw|valeu demais)\b/g, "valeu")
+    .replace(/\bdownload est(?:a|á) lendo\b/g, "download esta lento")
+    .replace(/\b(?:mto|mt)\b/g, "muito")
+    .replace(/\bvc(?:s)?\b/g, "voce")
+    .replace(/\bpra\b/g, "para")
+    .replace(/\bqdo\b/g, "quando")
+    .replace(/\btd\b/g, "tudo")
+    .replace(/\bdps\b/g, "depois")
+    .replace(/\bblz\b/g, "beleza")
+    .replace(/\bnaum\b/g, "nao")
+    .replace(/\bqq\b/g, "qualquer")
+    .replace(/\bcmg\b/g, "comigo")
+    .replace(/\bur\b/g, "your")
+    .replace(/\brn\b/g, "right now")
+    .replace(/\bidk\b/g, "i dont know")
+    .replace(/\b(?:pls|plz)\b/g, "please")
+    .replace(/\basap\b/g, "as soon as possible")
+    .replace(/\bwanna\b/g, "want to")
+    .replace(/\bgonna\b/g, "going to")
+    .replace(/\bcoz\b/g, "because")
+    .replace(/咋回事/g, "怎么回事")
+    .replace(/咋样/g, "怎么样")
+    .replace(/咋整/g, "怎么办")
+    .replace(/咋/g, "怎么")
+    .replace(/啥/g, "什么")
     .replace(/\s+/g, " ").trim();
   const safeDetail = value => detailText(value).replace(/([?&](?:token|sig|key|auth|password|cookie)=[^\s&]+)/gi, " [protected]").slice(0, 360);
   const detailText = value => typeof value === "string" ? value : value && typeof value === "object" ? JSON.stringify(value) : String(value || "");
@@ -478,6 +523,48 @@
     });
   }
 
+  // Runs when a task fails, without the user asking anything. Only the
+  // evidence-based branches of diagnose() apply here (never its keyword-only
+  // help topics: a magnet URL or a raw failure code can accidentally contain
+  // a word like "torrent", and surfacing generic help instead of a real
+  // finding would misrepresent a guess as a diagnosis). Returns null rather
+  // than a weak restatement of the visible failure when nothing solid holds.
+  // Returns { text, correction? } or null. `correction`, when present, is a
+  // concrete and reversible action the caller can offer to apply after the
+  // user confirms - never applied here, only described.
+  function proactiveFailureDiagnosis(task, context, locale) {
+    const site = siteFrom(task?.source || "");
+    const scoped = relatedEvents(context.events, site);
+    const text = scoped.map(eventText).join("\n");
+    const failureMessage = String(task?.message || "");
+    const social = socialDiagnosis(
+      [...parseEvents(context.events), ...parseEvents(context.engineEvents || [])],
+      site, locale, failureMessage,
+    );
+    if (social) return { text: social };
+    const domainEvidence = debuggerDomainDiagnosis(failureMessage, context, locale);
+    if (domainEvidence) return { text: domainEvidence };
+    const combined = `${failureMessage}\n${text}`;
+    if (site === "rapidgator" && /(404|not found|nao iniciou|nao baix|falh|failed)/.test(combined)) {
+      return { text: say(locale, "rapidgator404") };
+    }
+    if (/429|too many requests|rate.?limit/.test(combined)) {
+      const host = site && site.includes(".") ? site : null;
+      return {
+        text: say(locale, "rateLimit"),
+        correction: host ? {
+          name: say(locale, "rateLimitFixName", { site: host }),
+          site: host,
+          action: { type: "limit_connections", host, connections: 1 },
+        } : null,
+      };
+    }
+    if (/403|401|forbidden|unauthorized|access denied/.test(combined)) return { text: say(locale, "accessDenied") };
+    if (/faixa incompleta|incomplete.*track|track.*incomplete|isolated_social_track/.test(combined)) return { text: say(locale, "incomplete") };
+    if (/bridge.*disconnected|extension disconnected|bridge_unavailable/.test(combined)) return { text: say(locale, "disconnected") };
+    return null;
+  }
+
   function diagnose(question, context, locale) {
     const q = contextualQuestion(question, context.messages);
     const site = siteFrom(q);
@@ -506,41 +593,53 @@
     if (/(atualiz|latest|ultima vers|最新|版本)/.test(q)) return say(locale, "installed", {
       app: context.appVersion || "—", extension: context.extensionVersion || "—",
     });
-    if (/(quant|how many|状态|多少|fila|tarefas|tasks|downloads.*tem)/.test(q) && /(download|tarefa|task|fila|下载|任务)/.test(q)) {
+    if (/(o que est(?:a|á) acontecendo|o que aconteceu|me (?:informe|conte|diga) tudo|relatorio (?:geral|completo)|resumo geral|status geral|situacao geral|me atualiz|what.?s happening|what happened|tell me everything|give me (?:a |an )?(?:full report|update|status)|full report|status report|发生了什么|怎么回事|汇报|报告一下|告诉我情况|现在什么情况)/.test(q)) {
+      const tasks = context.downloads || [];
+      const count = key => tasks.filter(task => stateKey(task).includes(key)).length;
+      const summary = say(locale, "taskSummary", { total: tasks.length, active: count("download"), paused: count("paus"), failed: count("fail") || count("falh"), completed: count("complete") || count("conclu") });
+      const errLine = failures.length
+        ? say(locale, "genericFailure", { detail: safeDetail(failures.at(-1)?.detail || failures.at(-1)?.raw || failures.at(-1)?.event) })
+        : say(locale, "noErrors");
+      return `${say(locale, "statusReportIntro")} ${summary} ${errLine}`;
+    }
+    if (/(quant|how many|状态|多少|fila|queue|tarefas|tasks|downloads.*tem|list of downloads)/.test(q) && /(download|tarefa|task|fila|queue|下载|任务)/.test(q)) {
       const tasks = context.downloads || [];
       const count = key => tasks.filter(task => stateKey(task).includes(key)).length;
       return say(locale, "taskSummary", { total: tasks.length, active: count("download"), paused: count("paus"), failed: count("fail") || count("falh"), completed: count("complete") || count("conclu") });
     }
-    if (/(histor|corre|fix|修正|历史)/.test(q) && !/(nao funcion|did not work|没用|无效)/.test(q)) {
+    if (/(histor|corre[cç][aã]o|correcoes|fix|solution|solucao|修正|历史|解决方案)/.test(q) && !/(nao funcion|did not work|没用|无效)/.test(q)) {
       const count = context.corrections?.length || 0;
       return say(locale, count ? "historyCount" : "historyEmpty", { count });
     }
     if (/rapidgator/.test(`${q}\n${text}`) && /(404|not found|nao iniciou|nao baix|falh|failed|不启动|失败)/.test(`${q}\n${text}`)) return say(locale, "rapidgator404");
-    if (/429|too many requests|rate.?limit/.test(text)) return say(locale, "rateLimit");
-    if (/403|401|forbidden|unauthorized|access denied/.test(text)) return say(locale, "accessDenied");
-    if (/faixa incompleta|incomplete.*track|track.*incomplete|isolated_social_track/.test(text)) return say(locale, "incomplete");
-    if (/bridge.*disconnected|extension disconnected|bridge_unavailable/.test(text)) return say(locale, "disconnected");
+    if (/429|too many requests|rate.?limit|limitou|限制|请求过多/.test(text)) return say(locale, "rateLimit");
+    if (/403|401|forbidden|unauthorized|access denied|acesso negado|访问被拒绝|禁止访问/.test(text)) return say(locale, "accessDenied");
+    if (/faixa incompleta|incomplete.*track|track.*incomplete|isolated_social_track|不完整的.*轨道/.test(text)) return say(locale, "incomplete");
+    if (/bridge.*disconnected|extension disconnected|bridge_unavailable|extensao desconectada|扩展.*断开/.test(text)) return say(locale, "disconnected");
     if (/sponsored|patrocinado|赞助/.test(text) && /(botao|button|captur|list|按钮)/.test(q)) return say(locale, "sponsored");
     if (/canDownload=false|recording.only|visual.only|recording_only/i.test(scoped.map(event => `${event?.detail || ""} ${event?.event || ""}`).join("\n"))) return say(locale, "recordOnly");
     if (/(botao|button|按钮)/.test(q) && /(download|baix|下载)/.test(q)) return say(locale, scoped.length ? "missingButton" : "noEvidence");
-    if (/(lent|devagar|slow|speed|veloc|performance|desempenho|mirror|espelho|retom|resume|慢|速度|性能|镜像|续传)/.test(q)
+    if (/(lent|lerd|devagar|arrast|rastej|travou|travando|parou|parado|emperrou|engasg|caminhando|na tartaruga|slow|sluggish|crawling|snail|creeping|barely moving|taking forever|forever to|not moving|stuck|frozen|stalled|hanging|speed|veloc|performance|desempenho|mirror|espelho|retom|resume|慢|好慢|太慢|超级慢|龟速|慢死|卡住|卡顿|停住|速度|性能|镜像|续传)/.test(q)
         && /(download|baix|transfer|motor|engine|torrent|下载|传输|引擎)/.test(q)) {
       return Array.isArray(context.engineEvents)
         ? performanceDiagnosis(context, locale)
         : say(locale, "downloadSlow");
     }
-    if (/(visualizar|preview|player|播放器|预览)/.test(q)) return say(locale, "previewHelp");
-    if (/(gravar|gravacao|record|capture|录制)/.test(q)) return say(locale, "recordingHelp");
-    if (/(extensao|extension|扩展)/.test(q)) return say(locale, "extensionHelp");
-    if (/(ffmpeg|ffprobe|yt-dlp|aria2|rqbit|m3u8dl|quickjs|ferrament|tool|工具)/.test(q)) return say(locale, "toolsHelp");
-    if (/(torrent|magnet|seed|peer|种子|磁力)/.test(q)) return say(locale, "torrentHelp");
+    if (/(visualizar|assistir|reproduzir|preview|watch|play video|player|播放器|预览|观看|播放)/.test(q)) return say(locale, "previewHelp");
+    if (/(gravar|gravacao|grava[cç][aã]o|record|recording|capture|录制|录像|录屏)/.test(q)) return say(locale, "recordingHelp");
+    if (/(extensao|plugin do navegador|extension|browser plugin|扩展|插件)/.test(q)) return say(locale, "extensionHelp");
+    if (/(ffmpeg|ffprobe|yt-dlp|aria2|rqbit|m3u8dl|quickjs|ferrament|tool|工具|软件工具)/.test(q)) return say(locale, "toolsHelp");
+    if (/(torrent|magnet|seed|peer|semente|\bpares\b|种子|磁力|磁力链接)/.test(q)) return say(locale, "torrentHelp");
     if (/(ed2k|emule|amule|kad)/.test(q)) return say(locale, "ed2kHelp");
-    if (/(apocalipse link|computador remoto|remote computer|远程)/.test(q)) return say(locale, "linkHelp");
-    if (/(configur|setting|proxy|vpn|dns|credencial|设置|代理)/.test(q)) return say(locale, "settingsHelp");
-    if (/(pasta|diretorio|folder|directory|文件夹|目录)/.test(q)) return say(locale, "filesHelp");
-    if (/(privacidade|privacy|modelo externo|external model|隐私|外部模型)/.test(q)) return say(locale, "privacyHelp");
+    if (/(apocalipse link|computador remoto|outro computador|remote computer|another computer|远程|远程电脑)/.test(q)) return say(locale, "linkHelp");
+    if (/(configur|setting|proxy|vpn|dns|credencial|credential|设置|代理|凭据)/.test(q)) return say(locale, "settingsHelp");
+    if (/(pasta|diretorio|local do arquivo|folder|directory|save location|文件夹|目录|保存位置)/.test(q)) return say(locale, "filesHelp");
+    if (/(banda|limite de velocidade|bandwidth|speed limit|throttle|限速|带宽|速度限制)/.test(q)) return say(locale, "bandwidthHelp");
+    if (/(agend|hor[aá]rio.*download|schedule|scheduled download|计划|定时|定时下载)/.test(q)) return say(locale, "schedulerHelp");
+    if (/(tema|cor da interface|apar[eê]ncia|theme|color scheme|appearance|主题|外观|界面颜色)/.test(q)) return say(locale, "themesHelp");
+    if (/(privacidade|dados pessoais|privacy|personal data|modelo externo|external model|隐私|个人数据|外部模型)/.test(q)) return say(locale, "privacyHelp");
     if (failures.length) return say(locale, "genericFailure", { detail: safeDetail(failures.at(-1)?.detail || failures.at(-1)?.raw || failures.at(-1)?.event) });
-    if (/(bug|erro|error|falh|problem|问题|错误)/.test(q)) return say(locale, scoped.length ? "noErrors" : "noEvidence");
+    if (/(bug|erro|falha|error|issue|glitch|falh|problem|trouble|问题|错误|故障)/.test(q)) return say(locale, scoped.length ? "noErrors" : "noEvidence");
     return null;
   }
 
@@ -648,22 +747,22 @@
         action: { type: "save_website_credential", ...credential },
       };
     }
-    if (/^(oi|ola|bom dia|boa tarde|boa noite|hello|hi|hey|你好|早上好|下午好|晚上好)[!. ]*$/.test(q)) return { text: say(locale, "hello"), intent: "greeting" };
+    if (/^(oi|ol[aá]|e ai|eae|salve|bom dia|boa tarde|boa noite|oii|oiie|hello|hi|hey|hiya|howdy|yo|good morning|good afternoon|good evening|你好|您好|你好呀|早上好|下午好|晚上好|哈喽|嗨)[!. ]*$/.test(q)) return { text: say(locale, "hello"), intent: "greeting" };
 
     if (pending && /(nao funcion|continua igual|piorou|did not work|still the same|got worse|没有用|还是一样|更糟)/.test(q)) {
-      return { text: say(locale, "correctionRejected"), intent: "correction_rejected", correctionId: pending.id, status: "rejected", analyzeAgain: true };
+      return { text: say(locale, "correctionRejected"), intent: "correction_rejected", correctionId: pending.id, status: "rejected", correctionAction: pending.action, analyzeAgain: true };
     }
     if (/(funcionou|deu certo|worked|fixed|有效|成功|修好了)/.test(q) && pending?.status === "testing") {
       return { text: say(locale, "correctionConfirmed", { name: pending.name }), intent: "correction_confirmed", correctionId: pending.id, status: "confirmed" };
     }
     if (/^(sim|pode|aplique|yes|apply|可以|是|应用)[!. ]*$/.test(q)) {
       if (!pending) return { text: say(locale, "noPending"), intent: "correction_missing" };
-      return { text: say(locale, "correctionTesting", { name: pending.name }), intent: "correction_testing", correctionId: pending.id, status: "testing" };
+      return { text: say(locale, "correctionTesting", { name: pending.name }), intent: "correction_testing", correctionId: pending.id, status: "testing", correctionAction: pending.action };
     }
     if (/^(aplique|aplicar|apply|应用)(?:\s|$)/.test(q)) {
       const found = findCorrection(input, corrections);
       if (!found) return { text: say(locale, "correctionNotFound"), intent: "correction_missing" };
-      return { text: say(locale, "correctionTesting", { name: found.name }), intent: "correction_testing", correctionId: found.id, status: "testing" };
+      return { text: say(locale, "correctionTesting", { name: found.name }), intent: "correction_testing", correctionId: found.id, status: "testing", correctionAction: found.action };
     }
     if (/^(nao|não|no|否|不)[!. ]*$/.test(q) && pending?.status === "proposed") {
       return { text: say(locale, "correctionSaved", { name: pending.name }), intent: "correction_saved", correctionId: pending.id, status: "saved" };
@@ -691,7 +790,7 @@
     if (/(botao|button|按钮)/.test(q) && !/(video|download|baix|gravar|record|visuali|preview|视频|下载|录制|预览)/.test(q)) {
       return { text: say(locale, "clarifyButton"), intent: "clarification", confidence: 0.45 };
     }
-    if (/(nao funcion|falhou|deu (?:erro|problema)|did not work|failed|problem|没有用|失败|问题)/.test(q) && !/(download|baix|visuali|preview|gravar|record|torrent|ed2k|link|下载|预览|录制)/.test(q) && !previousSubject(context.messages)) {
+    if (/(nao funcion|falhou|deu (?:erro|problema)|parou de funcionar|quebrou|did not work|didn't work|not working|failed|broke|broken|problem|没有用|不管用|失败|坏了|问题)/.test(q) && !/(download|baix|visuali|preview|gravar|record|torrent|ed2k|link|下载|预览|录制)/.test(q) && !previousSubject(context.messages)) {
       return { text: say(locale, "clarifyAction"), intent: "clarification", confidence: 0.4 };
     }
     const diagnosis = diagnose(input, context, locale);
@@ -700,5 +799,5 @@
       : { text: say(locale, "offTopic"), intent: "unknown" };
   }
 
-  return { contextualQuestion, copy, debuggerDomainDiagnosis, diagnose, findRelevantConfirmedCorrection, fold, formatRate, localeOf, normalizeQuestion, parseCorrectionTeachCommand, parseCredentialCommand, parseEvents, performanceDiagnosis, previousSubject, redactCredentialCommand, respond, say, siteFrom, socialDiagnosis };
+  return { contextualQuestion, copy, debuggerDomainDiagnosis, diagnose, findRelevantConfirmedCorrection, fold, formatRate, localeOf, normalizeQuestion, parseCorrectionTeachCommand, parseCredentialCommand, parseEvents, performanceDiagnosis, previousSubject, proactiveFailureDiagnosis, redactCredentialCommand, respond, say, siteFrom, socialDiagnosis };
 });

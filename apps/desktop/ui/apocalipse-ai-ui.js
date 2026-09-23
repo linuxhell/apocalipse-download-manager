@@ -183,6 +183,31 @@
     persistCorrections();
     renderCorrections();
   }
+  // Applies (on "testing") or reverts (on "rejected") the one concrete,
+  // reversible action Apocalipse AI can propose today (site connection
+  // limit), only ever in response to the user's own confirmation - never
+  // when the correction is merely proposed or saved without a reply.
+  async function applyCorrectionAction(result) {
+    const action = result.correctionAction;
+    if (!action || action.type !== "limit_connections") return;
+    if (result.status === "testing") {
+      await invoke("save_host_rule", {
+        pattern: action.host, username: "", password: "",
+        userAgent: action.previousUserAgent || "",
+        connections: action.connections,
+        bandwidthLimit: action.previousBandwidthLimit ?? null,
+        clearPassword: false,
+      }).catch(() => {});
+    } else if (result.status === "rejected") {
+      await invoke("save_host_rule", {
+        pattern: action.host, username: "", password: "",
+        userAgent: action.previousUserAgent || "",
+        connections: action.previousConnections ?? null,
+        bandwidthLimit: action.previousBandwidthLimit ?? null,
+        clearPassword: false,
+      }).catch(() => {});
+    }
+  }
   function storeUpdateStatus(status) {
     if (!status) return;
     updateState = {
@@ -296,6 +321,7 @@
         });
         result.action.password = "";
       }
+      await applyCorrectionAction(result);
       if (result.prelude) {
         addMessage("assistant", result.prelude);
         await new Promise(resolve => setTimeout(resolve, 180));
@@ -373,6 +399,63 @@
     corrections = corrections.filter(item => ["testing", "confirmed"].includes(item.status));
     persistCorrections(); renderCorrections();
   };
+  const notifiedFailures = new Set();
+  window.addEventListener("apocalipse-task-failed", async event => {
+    const task = event.detail || {};
+    if (!task.id || notifiedFailures.has(task.id)) return;
+    notifiedFailures.add(task.id);
+    try {
+      const ctx = await context();
+      const site = AI.siteFrom(task.source || "");
+      const known = AI.findRelevantConfirmedCorrection(task.source || "", corrections);
+      if (known) {
+        addMessage("assistant", AI.say(language(), "knownCorrection", {
+          site: known.site || site || "Apocalipse",
+          name: known.name,
+          count: Math.max(1, Number(known.successCount || 1)),
+          version: known.lastVerifiedVersion || ctx.appVersion || "—",
+        }), "proactive_known_correction", { correctionId: known.id });
+        return;
+      }
+      const finding = AI.proactiveFailureDiagnosis(task, ctx, language());
+      if (!finding || !site) return;
+      let correctionId = null;
+      let prompt = "";
+      if (finding.correction) {
+        const rules = await invoke("list_host_rules").catch(() => []);
+        const existing = (rules || []).find(rule => rule.pattern === finding.correction.site);
+        correctionId = crypto.randomUUID();
+        corrections.push({
+          id: correctionId,
+          name: finding.correction.name,
+          site: finding.correction.site,
+          status: "proposed",
+          action: {
+            ...finding.correction.action,
+            previousConnections: existing?.connections ?? null,
+            previousUserAgent: existing?.userAgent || "",
+            previousBandwidthLimit: existing?.bandwidthLimit ?? null,
+          },
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          successCount: 0,
+          source: "ai",
+        });
+        persistCorrections();
+        renderCorrections();
+        prompt = ` ${AI.say(language(), "proposedFixPrompt", { name: finding.correction.name })}`;
+      }
+      addMessage(
+        "assistant",
+        `${AI.say(language(), "proactiveAlert", { site })} ${finding.text}${prompt}`,
+        "proactive_diagnosis",
+        correctionId ? { correctionId } : {},
+      );
+    } catch {
+      // Best-effort only: a failed proactive check must never surface an
+      // error of its own or block the regular download-list refresh.
+    }
+  });
   window.addEventListener("apocalipse-ai-opened", () => { welcome(); renderMessages(); updateAlert(); clearNewActivity(); input.focus(); });
   window.addEventListener("apocalipse-language-changed", () => { welcome(); renderMessages(); renderCorrections(); updateAlert(); });
   window.addEventListener("storage", event => {

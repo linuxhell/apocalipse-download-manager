@@ -507,3 +507,101 @@ test('Apocalipse AI always answers diagnostic evidence in the selected UI langua
   assert.doesNotMatch(pt.text, /^The structured social debugger/);
   assert.doesNotMatch(en.text, /^O debugger social estruturado/);
 });
+
+test('Apocalipse AI now explains bandwidth limit, scheduler and themes', () => {
+  assert.match(AI.respond('como funciona o limite de banda?', { locale: 'pt-BR' }).text, /MB\/s/);
+  assert.match(AI.respond('how does the download schedule work?', { locale: 'en' }).text, /pauses/i);
+  assert.match(AI.respond('主题怎么切换？', { locale: 'zh-CN' }).text, /主题/);
+});
+
+test('proactiveFailureDiagnosis stays silent without real evidence', () => {
+  const task = { source: 'https://example.test/file.zip', message: 'network_error' };
+  assert.equal(AI.proactiveFailureDiagnosis(task, { events: [], engineEvents: [] }, 'en'), null);
+});
+
+test('proactiveFailureDiagnosis proposes a reversible, confirmable fix for rate-limited sites', () => {
+  const task = { source: 'https://rsload.net/file/123', message: 'http_429' };
+  const events = [{ event: 'http.status', level: 'ERROR', detail: 'rsload.net rate limit 429 too many requests' }];
+  const finding = AI.proactiveFailureDiagnosis(task, { events, engineEvents: [] }, 'pt-BR');
+  assert.match(finding.text, /limitou temporariamente/);
+  assert.deepEqual(finding.correction.action, { type: 'limit_connections', host: 'rsload.net', connections: 1 });
+  assert.match(finding.correction.name, /rsload\.net/);
+});
+
+test('proactiveFailureDiagnosis never proposes a fix for evidence with no safe automatic action', () => {
+  const task = { source: 'https://example.test/file.zip', message: 'http_403' };
+  const events = [{ event: 'http.status', level: 'ERROR', detail: '403 forbidden access denied' }];
+  const finding = AI.proactiveFailureDiagnosis(task, { events, engineEvents: [] }, 'en');
+  assert.match(finding.text, /denied/i);
+  assert.equal(finding.correction, undefined);
+});
+
+test('confirming a proposed correction carries its action through so the UI can apply it', () => {
+  const corrections = [{ id: 'abc', name: 'Limit rsload.net to 1 connection', site: 'rsload.net', status: 'proposed', action: { type: 'limit_connections', host: 'rsload.net', connections: 1, previousConnections: null } }];
+  const result = AI.respond('sim', { locale: 'pt-BR', corrections });
+  assert.equal(result.status, 'testing');
+  assert.equal(result.correctionId, 'abc');
+  assert.deepEqual(result.correctionAction, corrections[0].action);
+});
+
+test('rejecting a testing correction carries its action through so the UI can revert it', () => {
+  const corrections = [{ id: 'abc', name: 'Limit rsload.net to 1 connection', site: 'rsload.net', status: 'testing', action: { type: 'limit_connections', host: 'rsload.net', connections: 1, previousConnections: null } }];
+  const result = AI.respond('não funcionou', { locale: 'pt-BR', corrections });
+  assert.equal(result.status, 'rejected');
+  assert.deepEqual(result.correctionAction, corrections[0].action);
+});
+
+test('a failed download proactively notifies Apocalipse AI and can propose an applicable fix', () => {
+  assert.match(app, /window\.dispatchEvent\(new CustomEvent\("apocalipse-task-failed"/);
+  assert.match(app, /const aiNotifiedFailures = new Set\(\);/);
+  assert.match(aiUi, /window\.addEventListener\("apocalipse-task-failed", async event => \{/);
+  assert.match(aiUi, /AI\.findRelevantConfirmedCorrection\(task\.source \|\| "", corrections\)/);
+  assert.match(aiUi, /AI\.proactiveFailureDiagnosis\(task, ctx, language\(\)\)/);
+  assert.match(aiUi, /async function applyCorrectionAction\(result\)/);
+  assert.match(aiUi, /invoke\("save_host_rule", \{/);
+  assert.match(aiUi, /status === "proposed"/);
+});
+
+test('slow-download questions are understood across slang, abbreviations and typos in all 3 languages', () => {
+  const ctx = { downloads: [], events: [], engineEvents: [], corrections: [], messages: [] };
+  const slowPtBr = [
+    'porque meu download esta lendo',
+    'por que meu download está lento?',
+    'pq meu download esta lento',
+    'meu download ta mt lento',
+    'o download esta muito devagar',
+    'o download parou, na tartaruga',
+  ];
+  for (const question of slowPtBr) {
+    const answer = AI.diagnose(question, ctx, 'pt-BR');
+    assert.match(answer, /telemetria|lento/i, `expected slow-download answer for "${question}", got: ${answer}`);
+  }
+  const slowEn = ['why is my download slow', 'my download is taking forever', 'download is crawling'];
+  for (const question of slowEn) {
+    const answer = AI.diagnose(question, ctx, 'en');
+    assert.match(answer, /telemetry|slow/i, `expected slow-download answer for "${question}", got: ${answer}`);
+  }
+  const slowZh = ['为什么我的下载好慢', '下载好慢啊', '下载龟速'];
+  for (const question of slowZh) {
+    const answer = AI.diagnose(question, ctx, 'zh-CN');
+    assert.match(answer, /遥测|慢/, `expected slow-download answer for "${question}", got: ${answer}`);
+  }
+});
+
+test('normalizeQuestion expands common internet abbreviations without colliding with real words', () => {
+  assert.equal(AI.normalizeQuestion('vc pode me ajudar pra ver isso dps'), 'voce pode me ajudar para ver isso depois');
+  assert.equal(AI.normalizeQuestion('pra que serve essa opcao'), 'para que serve essa opcao');
+  assert.equal(AI.normalizeQuestion('estou lendo um livro'), 'estou lendo um livro');
+});
+
+test('a broad status request reports task counts and recent errors in the selected language', () => {
+  const ctx = { downloads: [{ state: 'downloading' }, { state: 'failed' }], events: [], engineEvents: [], corrections: [], messages: [] };
+  for (const [question, locale, marker] of [
+    ['o que esta acontecendo?', 'pt-BR', 'Aqui está tudo que consigo ver agora'],
+    ['what happened?', 'en', 'Here is everything I can see right now'],
+    ['发生了什么', 'zh-CN', '以下是我现在能看到的所有情况'],
+  ]) {
+    const answer = AI.diagnose(question, ctx, locale);
+    assert.match(answer, new RegExp(marker));
+  }
+});
