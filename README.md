@@ -42,7 +42,8 @@ Apocalipse combines fast resumable downloads, media discovery, streaming capture
 
 - One portable download manager for Windows, Linux and macOS
 - Media discovery for video, audio and images through Chrome, Edge and Firefox extensions
-- Resumable HTTP/HTTPS downloads, HLS capture, yt-dlp, FFmpeg and torrent workflows
+- Resumable HTTP/HTTPS downloads, HLS capture, yt-dlp, FFmpeg and torrent/magnet downloads (aria2, with DHT, Peer Exchange, Local Peer Discovery, encrypted peer connections, multi-tracker and WebSeeding support)
+- Apocalipse AI, a built-in assistant that explains slow transfers, diagnoses failures and answers questions about your own download history — no data leaves your machine
 - Native interface and browser extension available in English, Brazilian Portuguese and Simplified Chinese
 - Open source, privacy-conscious and built in Rust
 
@@ -108,7 +109,6 @@ Apocalipse is distributed primarily as a portable application, with no mandatory
 - Linux: a portable `.tar.gz`; AppImage will be added after compatibility validation
 - macOS: an application bundle (`.app`) inside a `.zip`
 - Browser-extension files are kept inside the `browser extensions` directory in every package
-- Windows ARM64, Linux ARM64 and Apple Silicon-native packages will be added as each target is validated
 
 The **Portable builds** workflow can be run manually for test artifacts. Tags beginning with `v` attach the same validated packages to GitHub Releases. Android is not supported or built.
 
@@ -131,6 +131,8 @@ O Apocalipse é um gerenciador de downloads livre para Windows, Linux e macOS. E
 
 - Downloads portáteis para Windows, Linux e macOS
 - Extensões para Chrome, Edge e Firefox
+- Torrents e magnet via aria2, com DHT, Peer Exchange, Local Peer Discovery, conexões criptografadas, multi-tracker e WebSeeding
+- Apocalipse AI, assistente integrado que explica downloads lentos, diagnostica falhas e responde perguntas sobre seu próprio histórico — sem enviar dados para fora da sua máquina
 - Melhor vídeo e melhor áudio selecionados por padrão
 - Pausa, retomada, filas, temas, proxy e DNS personalizado
 - Fila inteligente, pesquisa no histórico, importação de listas, espelhos e verificação SHA-256
@@ -144,6 +146,8 @@ Apocalipse 是一款适用于 Windows、Linux 和 macOS 的自由开源下载管
 
 - Windows、Linux 和 macOS 便携版本
 - Chrome、Edge 和 Firefox 扩展
+- 通过 aria2 支持种子和磁力链接下载，具备 DHT、PEX、本地节点发现、加密连接、多 Tracker 和 WebSeeding 支持
+- Apocalipse AI 内置助手，可以解释下载缓慢的原因、诊断失败并回答关于您下载记录的问题——数据不会离开您的设备
 - 默认选择最佳视频和最佳音频
 - 支持暂停、继续、队列、主题、代理和自定义 DNS
 - 智能优先级队列、历史搜索、网址列表导入、镜像故障转移和 SHA-256 验证
