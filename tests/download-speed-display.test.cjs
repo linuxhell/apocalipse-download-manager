@@ -543,7 +543,7 @@ test("engine speed is zeroed at transfer lifecycle boundaries", () => {
   );
   assert.match(
     ariaBlock,
-    /"complete"[\s\S]{0,1600}item\.download_speed = Some\(0\);[\s\S]{0,120}item\.upload_speed = Some\(0\);[\s\S]{0,220}item\.state = DownloadState::Completed;/,
+    /item\.progress_percent = Some\(100\.0\);[\s\S]{0,160}item\.download_speed = Some\(0\);[\s\S]{0,120}item\.upload_speed = Some\(0\);[\s\S]{0,160}item\.state = DownloadState::Completed;/,
   );
   assert.match(
     ariaBlock,
