@@ -24,7 +24,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     fs::OpenOptions,
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     net::{IpAddr, TcpListener, TcpStream, UdpSocket},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -7078,9 +7078,9 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
     if let Some(bytes) = read_sanitized_log_tail(&aria2_log, 1024 * 1024) {
         entries.push(("engines/aria2-runtime.log".to_owned(), bytes));
     }
-    let metadata_failure_log = runtime_root.join("logs").join("engines").join("aria2-metadata-failure.log");
-    if let Some(bytes) = read_sanitized_log_tail(&metadata_failure_log, 16 * 1024 * 1024) {
-        entries.push(("engines/aria2-metadata-failure.log".to_owned(), bytes));
+    let metadata_attempt_log = runtime_root.join("logs").join("engines").join("aria2-metadata-attempt.log");
+    if let Some(bytes) = read_sanitized_log_tail(&metadata_attempt_log, 33 * 1024 * 1024) {
+        entries.push(("engines/aria2-metadata-attempt.log".to_owned(), bytes));
     }
     let debugger_index = serde_json::json!({
         "format": "Apocalipse Forensic Debugger V4",
@@ -9366,6 +9366,11 @@ async fn inspect_torrent_metadata(
         .join("aria2-metadata-inspection")
         .join(uuid::Uuid::new_v4().simple().to_string());
     fs::create_dir_all(&workspace).map_err(|error| error.to_string())?;
+    let runtime_root = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
+    let aria2_log = runtime_root.join("aria2-rpc").join("aria2.log");
+    let log_start = fs::metadata(&aria2_log).map(|info| info.len()).unwrap_or(0);
+    let attempt_started = Instant::now();
+    diagnostic_log(&state, "INFO", "aria2.metadata_attempt_started", &format!("log_offset={log_start}"));
     let metadata = endpoint
         .preview_magnet_metadata(
             &source,
@@ -9397,18 +9402,41 @@ async fn inspect_torrent_metadata(
         )
         .await;
     let _ = fs::remove_dir_all(&workspace);
-    let metadata = metadata.map_err(|error| {
-        if error.starts_with("aria2_metadata_timeout:") {
-            let runtime_root = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
-            let source_log = runtime_root.join("aria2-rpc").join("aria2.log");
-            let snapshot = runtime_root.join("logs").join("engines").join("aria2-metadata-failure.log");
-            if let Some(bytes) = read_sanitized_log_tail(&source_log, 16 * 1024 * 1024) {
+    // Capture the exact aria2 log interval while the attempt is still recent.
+    // Later DHT debug traffic must not evict its BEP 9 handshake from the ZIP.
+    let log_end = fs::metadata(&aria2_log).map(|info| info.len()).unwrap_or(0);
+    let snapshot = runtime_root.join("logs").join("engines").join("aria2-metadata-attempt.log");
+    let max_capture = 32 * 1024 * 1024_u64;
+    let rotated = log_end < log_start;
+    let start = if rotated { 0 } else { log_start };
+    let capture_start = start.max(log_end.saturating_sub(max_capture));
+    let truncated = capture_start > start;
+    let mut saved = false;
+    let _ = fs::remove_file(&snapshot);
+    if let Ok(mut file) = fs::File::open(&aria2_log) {
+        if file.seek(SeekFrom::Start(capture_start)).is_ok() {
+            let mut raw = Vec::new();
+            if file.take(log_end.saturating_sub(capture_start).min(max_capture)).read_to_end(&mut raw).is_ok() {
+                let header = format!(
+                    "attempt_duration_ms={} result={} log_start={} log_end={} captured_start={} rotated={} truncated={}\n",
+                    attempt_started.elapsed().as_millis(),
+                    if metadata.is_ok() { "success" } else { "error" },
+                    log_start, log_end, capture_start, rotated, truncated
+                );
+                let body = String::from_utf8_lossy(&raw);
+                let sanitized = body.lines().map(sanitize_log_detail).collect::<Vec<_>>().join("\n");
                 if let Some(parent) = snapshot.parent() {
                     let _ = fs::create_dir_all(parent);
                 }
-                let _ = fs::write(&snapshot, bytes);
+                saved = fs::write(&snapshot, format!("{header}{sanitized}")).is_ok();
             }
         }
+    }
+    diagnostic_log(&state, "INFO", "aria2.metadata_attempt_captured", &format!(
+        "duration_ms={} log_start={} log_end={} captured_start={} rotated={} truncated={} saved={}",
+        attempt_started.elapsed().as_millis(), log_start, log_end, capture_start, rotated, truncated, saved
+    ));
+    let metadata = metadata.map_err(|error| {
         diagnostic_log(
             &state,
             "WARN",
