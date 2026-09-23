@@ -32,7 +32,7 @@ const catalogs = {
     aiStatusProposed: "Awaiting approval", aiStatusTesting: "Testing", aiStatusSaved: "Saved", aiStatusConfirmed: "Confirmed", aiStatusRejected: "Did not work",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
-    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", aria2Backend: "aria2 (HTTP/HTTPS, FTP)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "mpv / media player",
+    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "mpv / media player",
     donatePaypal: "Donate via PayPal",
     about: "About", aboutDescription: "About the creator.", aboutCreator: "Creator: Juliano - Brazil", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume", facebookRecordingFallback: "Facebook could not provide this Reel for direct download. Use Record on the video while it is playing.",
     overview: "OVERVIEW",
@@ -185,21 +185,6 @@ const catalogs = {
     aria2RpcTest: "Test RPC connection",
     aria2RpcRegenerateToken: "Regenerate RPC token",
     aria2RpcTokenRegenerated: "RPC token regenerated",
-    rqbitTitle: "rqbit",
-    rqbitBackend: "rqbit (torrent and magnet)",
-    rqbitEnabled: "Use rqbit",
-    rqbitEnabledHint: "Control torrent and magnet transfers through the local rqbit engine (sequential download, streams while downloading).",
-    rqbitAutoStart: "Start rqbit automatically when needed",
-    rqbitAutoStartHint: "Keeps one local rqbit backend for the current Apocalipse session.",
-    rqbitPort: "API port",
-    rqbitPortHint: "Automatic",
-    rqbitStatus: "Status",
-    rqbitConnected: "Connected",
-    rqbitDisconnected: "Disconnected",
-    rqbitTesting: "Testing…",
-    rqbitTest: "Test connection",
-    rqbitRegenerateToken: "Regenerate credentials",
-    rqbitTokenRegenerated: "Credentials regenerated",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
     automatic: "Automatic",
@@ -277,7 +262,7 @@ const catalogs = {
     aiStatusProposed: "Aguardando aprovação", aiStatusTesting: "Em teste", aiStatusSaved: "Guardada", aiStatusConfirmed: "Confirmada", aiStatusRejected: "Não funcionou",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
-    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", aria2Backend: "aria2 (HTTP/HTTPS, FTP)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "mpv / reprodutor de mídia",
+    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "mpv / reprodutor de mídia",
     donatePaypal: "Faça uma doação pelo PayPal",
     about: "Sobre", aboutDescription: "Sobre o criador.", aboutCreator: "Criador: Juliano - Brasil", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume", facebookRecordingFallback: "O Facebook não disponibilizou este Reel para download direto. Use Gravar no vídeo enquanto ele estiver em reprodução.",
     overview: "VISÃO GERAL",
@@ -430,21 +415,6 @@ const catalogs = {
     aria2RpcTest: "Testar conexão RPC",
     aria2RpcRegenerateToken: "Regenerar token RPC",
     aria2RpcTokenRegenerated: "Token RPC regenerado",
-    rqbitTitle: "rqbit",
-    rqbitBackend: "rqbit (torrent e magnet)",
-    rqbitEnabled: "Usar rqbit",
-    rqbitEnabledHint: "Controla torrent e magnet pelo motor rqbit local (download sequencial, permite assistir enquanto baixa).",
-    rqbitAutoStart: "Iniciar o rqbit automaticamente quando necessário",
-    rqbitAutoStartHint: "Mantém um único backend rqbit local durante a sessão atual do Apocalipse.",
-    rqbitPort: "Porta da API",
-    rqbitPortHint: "Automática",
-    rqbitStatus: "Status",
-    rqbitConnected: "Conectado",
-    rqbitDisconnected: "Desconectado",
-    rqbitTesting: "Testando…",
-    rqbitTest: "Testar conexão",
-    rqbitRegenerateToken: "Regenerar credenciais",
-    rqbitTokenRegenerated: "Credenciais regeneradas",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
     automatic: "Automático",
@@ -522,7 +492,7 @@ const catalogs = {
     aiStatusProposed: "等待批准", aiStatusTesting: "测试中", aiStatusSaved: "已保存", aiStatusConfirmed: "已确认", aiStatusRejected: "未解决",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
-    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", aria2Backend: "aria2（HTTP/HTTPS、FTP）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "mpv / 媒体播放器",
+    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", aria2Backend: "aria2（HTTP/HTTPS、FTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "mpv / 媒体播放器",
     donatePaypal: "通过 PayPal 捐赠",
     about: "关于", aboutDescription: "关于创作者。", aboutCreator: "创作者：Juliano - 巴西", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量", facebookRecordingFallback: "Facebook 无法提供此 Reel 的直接下载。请在视频播放时使用“录制”。",
     overview: "概览",
@@ -675,21 +645,6 @@ const catalogs = {
     aria2RpcTest: "测试 RPC 连接",
     aria2RpcRegenerateToken: "重新生成 RPC 令牌",
     aria2RpcTokenRegenerated: "RPC 令牌已重新生成",
-    rqbitTitle: "rqbit",
-    rqbitBackend: "rqbit（种子和磁力链接）",
-    rqbitEnabled: "使用 rqbit",
-    rqbitEnabledHint: "通过本地 rqbit 引擎控制种子和磁力链接传输（顺序下载，支持边下边播）。",
-    rqbitAutoStart: "需要时自动启动 rqbit",
-    rqbitAutoStartHint: "当前 Apocalipse 会话只保留一个本地 rqbit 后端。",
-    rqbitPort: "API 端口",
-    rqbitPortHint: "自动",
-    rqbitStatus: "状态",
-    rqbitConnected: "已连接",
-    rqbitDisconnected: "未连接",
-    rqbitTesting: "测试中…",
-    rqbitTest: "测试连接",
-    rqbitRegenerateToken: "重新生成凭据",
-    rqbitTokenRegenerated: "凭据已重新生成",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
     automatic: "自动",
@@ -2104,24 +2059,9 @@ function renderAria2RpcStatus(status = {}) {
   target.textContent = details.join(" · ");
 }
 
-function renderRqbitStatus(status = {}) {
-  const target = document.querySelector("#rqbit-status");
-  if (!target) return;
-  if (!status.connected) {
-    target.textContent = t("rqbitDisconnected");
-    return;
-  }
-  const details = [
-    t("rqbitConnected"),
-    status.activePort ? `127.0.0.1:${status.activePort}` : "",
-    status.version ? `rqbit ${status.version}` : "",
-  ].filter(Boolean);
-  target.textContent = details.join(" · ");
-}
-
 const openSettings = async (target = "general") => {
   try {
-    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, rpc, rqbitRpc, associations, hostRules] = await Promise.all([
+    const [autostart, directory, clipboard, limits, pairing, userAgent, logEditor, proxy, dns, rpc, associations, hostRules] = await Promise.all([
       invoke("get_autostart"),
       invoke("default_download_directory"),
       invoke("get_clipboard_monitor"),
@@ -2132,7 +2072,6 @@ const openSettings = async (target = "general") => {
       invoke("get_proxy_setting"),
       invoke("get_dns_setting"),
       invoke("get_aria2_rpc_settings"),
-      invoke("get_rqbit_settings"),
       invoke("get_associations"),
       invoke("list_host_rules"),
     ]);
@@ -2178,10 +2117,6 @@ const openSettings = async (target = "general") => {
     document.querySelector("#aria2-rpc-auto-start").checked = rpc.autoStart;
     document.querySelector("#aria2-rpc-port").value = rpc.configuredPort || "";
     renderAria2RpcStatus(rpc);
-    document.querySelector("#rqbit-enabled").checked = rqbitRpc.enabled;
-    document.querySelector("#rqbit-auto-start").checked = rqbitRpc.autoStart;
-    document.querySelector("#rqbit-port").value = rqbitRpc.configuredPort || "";
-    renderRqbitStatus(rqbitRpc);
     renderHostRules(hostRules);
     updateLogEditorControls();
     settingsDialog.showModal();
@@ -2241,39 +2176,6 @@ document.querySelector("#aria2-rpc-regenerate-token").onclick = async () => {
     button.disabled = false;
   }
 };
-document.querySelector("#rqbit-test").onclick = async () => {
-  const status = document.querySelector("#rqbit-status");
-  const button = document.querySelector("#rqbit-test");
-  button.disabled = true;
-  status.textContent = t("rqbitTesting");
-  try {
-    const rqbitPortValue = Number(document.querySelector("#rqbit-port").value) || 0;
-    await invoke("set_rqbit_settings", {
-      enabled: document.querySelector("#rqbit-enabled").checked,
-      autoStart: document.querySelector("#rqbit-auto-start").checked,
-      port: rqbitPortValue > 0 ? rqbitPortValue : null,
-    });
-    renderRqbitStatus(await invoke("test_rqbit"));
-  } catch (error) {
-    status.textContent = `${t("rqbitDisconnected")} · ${error}`;
-  } finally {
-    button.disabled = false;
-  }
-};
-document.querySelector("#rqbit-regenerate-token").onclick = async () => {
-  const button = document.querySelector("#rqbit-regenerate-token");
-  button.disabled = true;
-  try {
-    await invoke("regenerate_rqbit_credentials");
-    document.querySelector("#rqbit-status").textContent = t("rqbitTokenRegenerated");
-  } catch (error) {
-    console.error(error);
-    window.alert(String(error));
-  } finally {
-    button.disabled = false;
-  }
-};
-
 document.querySelector("#theme").onchange = (event) => {
   localStorage.setItem("apocalipse.theme", event.target.value);
   applyTheme(event.target.value);
@@ -2358,12 +2260,6 @@ document.querySelector("#save-settings").onclick = async () => {
       autoStart: document.querySelector("#aria2-rpc-auto-start").checked,
       port: rpcPortValue > 0 ? rpcPortValue : null,
     });
-    const rqbitPortValue = Number(document.querySelector("#rqbit-port").value) || 0;
-    await invoke("set_rqbit_settings", {
-      enabled: document.querySelector("#rqbit-enabled").checked,
-      autoStart: document.querySelector("#rqbit-auto-start").checked,
-      port: rqbitPortValue > 0 ? rqbitPortValue : null,
-    });
     for (const input of document.querySelectorAll("[data-association]")) {
       if (!input.disabled && input.dataset.initial !== String(input.checked)) await invoke("set_association", {
         id: input.dataset.association,
@@ -2413,7 +2309,6 @@ document.querySelector("#save-tools").onclick = async (event) => {
       qjs: document.querySelector("#tool-qjs").value,
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
       aria2: document.querySelector("#tool-aria2").value,
-      rqbit: document.querySelector("#tool-rqbit").value,
       extractor: document.querySelector("#tool-extractor").value,
     });
     await invoke("set_media_player", { path: document.querySelector("#tool-player").value });
@@ -2696,7 +2591,7 @@ document.querySelector("#analyze").onclick = async () => {
     }
     box.textContent = `${plan.primary} · ${plan.reason}`;
     if (plan.primary === "YtDlp") await showMediaInspection(url.value);
-    else if (plan.primary === "RqbitTorrent" && (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0]))) {
+    else if (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0])) {
       const startedAt = Date.now();
       const updateMetadataStatus = () => {
         const seconds = Math.floor((Date.now() - startedAt) / 1000);

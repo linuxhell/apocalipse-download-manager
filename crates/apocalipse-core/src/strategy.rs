@@ -9,7 +9,6 @@ pub enum Engine {
     YtDlp,
     NativeHls,
     NM3u8dlRe,
-    RqbitTorrent,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -154,7 +153,7 @@ pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<Strategy
             reason: "ftp_transfer",
         },
         DownloadKind::Torrent | DownloadKind::Magnet => StrategyPlan {
-            primary: Engine::RqbitTorrent,
+            primary: Engine::Aria2Rpc,
             fallbacks: Vec::new(),
             reason: "peer_to_peer",
         },

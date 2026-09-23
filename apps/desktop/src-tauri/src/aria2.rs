@@ -1,3 +1,4 @@
+use base64::Engine as _;
 use reqwest::Client;
 use serde_json::{json, Map, Value};
 use std::{
@@ -37,6 +38,26 @@ pub struct RuntimeStatus {
     pub upload_speed: u64,
     pub speed: u64,
     pub connections: u64,
+    pub error_message: Option<String>,
+    // BitTorrent-only: populated when tellStatus includes a "bittorrent"
+    // object, absent for plain HTTP/FTP transfers.
+    pub seeders: Option<u64>,
+    pub followed_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TorrentFile {
+    // 1-based, matching aria2's own select-file convention.
+    pub index: usize,
+    pub path: String,
+    pub length: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TorrentMetadata {
+    pub name: String,
+    pub files: Vec<TorrentFile>,
+    pub total_size: u64,
 }
 
 fn number(value: Option<&Value>) -> u64 {
@@ -131,6 +152,26 @@ impl Runtime {
             .arg(format!("--input-file={}", session.display()))
             .arg(format!("--save-session={}", session.display()))
             .arg("--save-session-interval=30")
+            // BitTorrent extensions: DHT (IPv4 + IPv6) and Local Peer
+            // Discovery find peers without a tracker, Peer Exchange (PEX)
+            // trades known peers with already-connected ones (on by
+            // default, kept explicit), and the Fast Extension plus UDP
+            // tracker support are always compiled into aria2 with no flag
+            // needed. bt-min-crypto-level prefers MSE/PSE-encrypted peer
+            // connections without refusing plaintext ones (bt-require-crypto
+            // stays false for compatibility with older/plain peers).
+            .arg("--enable-dht=true")
+            .arg("--enable-dht6=true")
+            .arg("--enable-peer-exchange=true")
+            .arg("--bt-enable-lpd=true")
+            .arg("--bt-min-crypto-level=arc4")
+            .arg("--bt-require-crypto=false")
+            .arg("--follow-torrent=true")
+            // This is a download manager, not a seedbox: stop contributing
+            // upload bandwidth for a torrent the moment it finishes instead
+            // of continuing to seed in the background.
+            .arg("--seed-time=0")
+            .arg("--seed-ratio=0.0")
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         #[cfg(target_os = "windows")]
@@ -319,7 +360,10 @@ impl Endpoint {
             "uploadLength",
             "downloadSpeed",
             "uploadSpeed",
-            "connections"
+            "connections",
+            "errorMessage",
+            "numSeeders",
+            "followedBy"
         ]);
         let value = self
             .call(
@@ -338,6 +382,191 @@ impl Endpoint {
             speed: number(value.get("downloadSpeed")),
             upload_speed: number(value.get("uploadSpeed")),
             connections: number(value.get("connections")),
+            error_message: value
+                .get("errorMessage")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+            seeders: value
+                .get("numSeeders")
+                .map(|_| number(value.get("numSeeders"))),
+            // A magnet link is added as a metadata-only download first (BEP
+            // 9); once its small metadata blob finishes, aria2 (with
+            // follow-torrent=true, set globally in Runtime::spawn)
+            // automatically starts the REAL content download under a new
+            // GID, reachable only through this field. The caller must
+            // switch to tracking that GID instead of treating the metadata
+            // phase's "complete" status as the download being done.
+            followed_by: value
+                .get("followedBy")
+                .and_then(Value::as_array)
+                .and_then(|list| list.first())
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        })
+    }
+
+    /// Adds a magnet link or a `.torrent` file (from a local path or its raw
+    /// bytes) as an active BitTorrent download. `destination_dir` becomes the
+    /// download's own root folder (matching how the rest of the app treats a
+    /// Torrent/Magnet task's destination as a directory to clean up as a
+    /// whole), and `only_files` is a 1-based file-index selection, matching
+    /// aria2's own `select-file` convention (empty means "all files").
+    pub async fn add_bittorrent(
+        &self,
+        source: &str,
+        torrent_bytes: Option<&[u8]>,
+        destination_dir: &Path,
+        only_files: &[usize],
+    ) -> Result<String, String> {
+        let mut options = Map::new();
+        options.insert(
+            "dir".into(),
+            Value::String(destination_dir.to_string_lossy().into_owned()),
+        );
+        options.insert("continue".into(), Value::String("true".into()));
+        options.insert("file-allocation".into(), Value::String("none".into()));
+        // Fetch the first and last couple of MB of every file first so a
+        // preview/player can start reading before the rest has arrived.
+        options.insert(
+            "bt-prioritize-piece".into(),
+            Value::String("head=2M,tail=2M".into()),
+        );
+        if !only_files.is_empty() {
+            let selection = only_files
+                .iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            options.insert("select-file".into(), Value::String(selection));
+        }
+        let value = if let Some(bytes) = torrent_bytes {
+            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+            self.call(
+                "aria2.addTorrent",
+                vec![
+                    Value::String(encoded),
+                    Value::Array(Vec::new()),
+                    Value::Object(options),
+                ],
+            )
+            .await?
+        } else {
+            self.call(
+                "aria2.addUri",
+                vec![json!([source]), Value::Object(options)],
+            )
+            .await?
+        };
+        value
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "aria2_gid_missing".to_owned())
+    }
+
+    /// Resolves a magnet link's metadata (name, file list, sizes) without
+    /// downloading any file content, using aria2's own metadata-only mode
+    /// (BEP 9) over the BitTorrent network. `workspace` is a scratch
+    /// directory the caller owns and should remove afterwards; aria2 needs
+    /// one to resolve each returned file's path against, but no file
+    /// content is ever written there.
+    pub async fn preview_magnet_metadata(
+        &self,
+        magnet: &str,
+        workspace: &Path,
+    ) -> Result<TorrentMetadata, String> {
+        let mut options = Map::new();
+        options.insert(
+            "dir".into(),
+            Value::String(workspace.to_string_lossy().into_owned()),
+        );
+        options.insert("bt-metadata-only".into(), Value::String("true".into()));
+        options.insert("bt-save-metadata".into(), Value::String("false".into()));
+        options.insert("follow-torrent".into(), Value::String("false".into()));
+        let gid = self
+            .call(
+                "aria2.addUri",
+                vec![json!([magnet]), Value::Object(options)],
+            )
+            .await?;
+        let gid = gid
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "aria2_gid_missing".to_owned())?;
+        let keys = json!(["status", "errorMessage", "bittorrent", "files"]);
+        // Metadata arrives once at least one connected peer answers the
+        // BEP 9 metadata exchange; that can take much longer than an
+        // ordinary local API call on a slow-to-respond swarm, so this polls
+        // for up to 90 seconds instead of a single short-timeout request.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+        let result = loop {
+            let value = self
+                .call(
+                    "aria2.tellStatus",
+                    vec![Value::String(gid.clone()), keys.clone()],
+                )
+                .await?;
+            match value.get("status").and_then(Value::as_str) {
+                Some("complete") => break Ok(value),
+                Some("error") => {
+                    let message = value
+                        .get("errorMessage")
+                        .and_then(Value::as_str)
+                        .unwrap_or("aria2_metadata_failed");
+                    break Err(message.to_owned());
+                }
+                _ if tokio::time::Instant::now() >= deadline => {
+                    break Err("aria2_metadata_timeout".to_owned());
+                }
+                _ => tokio::time::sleep(Duration::from_millis(500)).await,
+            }
+        };
+        let _ = self
+            .call("aria2.forceRemove", vec![Value::String(gid)])
+            .await;
+        let value = result?;
+        let name = value
+            .get("bittorrent")
+            .and_then(|bt| bt.get("info"))
+            .and_then(|info| info.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("torrent")
+            .to_owned();
+        let files: Vec<TorrentFile> = value
+            .get("files")
+            .and_then(Value::as_array)
+            .map(|files| {
+                files
+                    .iter()
+                    .enumerate()
+                    .map(|(position, file)| {
+                        let absolute = file.get("path").and_then(Value::as_str).unwrap_or_default();
+                        let relative = Path::new(absolute)
+                            .strip_prefix(workspace)
+                            .ok()
+                            .map(|path| path.to_string_lossy().replace('\\', "/"))
+                            .unwrap_or_else(|| absolute.replace('\\', "/"));
+                        TorrentFile {
+                            index: file
+                                .get("index")
+                                .and_then(Value::as_str)
+                                .and_then(|value| value.parse::<usize>().ok())
+                                .unwrap_or(position + 1),
+                            path: relative,
+                            length: number(file.get("length")),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let total_size = files.iter().map(|file: &TorrentFile| file.length).sum();
+        if files.is_empty() {
+            return Err("torrent_metadata_unavailable".to_owned());
+        }
+        Ok(TorrentMetadata {
+            name,
+            files,
+            total_size,
         })
     }
 

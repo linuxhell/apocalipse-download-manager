@@ -13,10 +13,6 @@ const aria2 = fs.readFileSync(
   path.join(root, "apps/desktop/src-tauri/src/aria2.rs"),
   "utf8",
 );
-const rqbit = fs.readFileSync(
-  path.join(root, "apps/desktop/src-tauri/src/rqbit.rs"),
-  "utf8",
-);
 const cargo = fs.readFileSync(path.join(root, "Cargo.toml"), "utf8");
 const tauri = JSON.parse(
   fs.readFileSync(path.join(root, "apps/desktop/src-tauri/tauri.conf.json"), "utf8"),
@@ -278,24 +274,47 @@ test("automatic mirrors are server-advertised, identity-checked and latency-rank
 });
 
 
-test("adding a magnet or torrent resolves a real torrent id directly, no metadata GID handoff", () => {
-  assert.match(rqbit, /pub async fn add_torrent\(/);
-  assert.match(rqbit, /POST, "\/torrents"/);
-  assert.match(rqbit, /pub id: Option<usize>,/);
-  assert.match(desktop, /rqbit\.torrent_added/);
-  assert.match(desktop, /rqbit_tasks\.lock\(\)/);
+test("torrent and magnet downloads go through aria2 with BitTorrent extensions enabled, no rqbit anywhere", () => {
+  assert.doesNotMatch(desktop, /rqbit/i);
+  assert.doesNotMatch(aria2, /rqbit/i);
+  assert.match(aria2, /pub async fn add_bittorrent\(/);
+  assert.match(aria2, /--enable-dht=true/);
+  assert.match(aria2, /--enable-dht6=true/);
+  assert.match(aria2, /--enable-peer-exchange=true/);
+  assert.match(aria2, /--bt-enable-lpd=true/);
+  assert.match(aria2, /--bt-min-crypto-level=arc4/);
+  assert.match(aria2, /--follow-torrent=true/);
+  assert.match(desktop, /matches!\(kind, DownloadKind::Torrent \| DownloadKind::Magnet\)/);
 });
 
-test("rqbit downloads torrents sequentially so playback can start before the download finishes", () => {
-  assert.match(desktop, /"sequentialDownload": true/);
-  assert.match(desktop, /streamingEndpoint/);
+test("torrent/magnet downloads land inside their own folder, not loose files, and get cleaned up recursively", () => {
+  assert.match(desktop, /\.add_bittorrent\(/);
+  assert.match(desktop, /bytes\.as_deref\(\),\s*\n\s*&task\.destination,\s*\n\s*&task\.torrent_selection,/);
+  assert.match(desktop, /torrent_root = matches!/);
+  assert.match(desktop, /&& path == task\.destination/);
 });
 
-test("previewing magnet/torrent metadata gets a longer timeout than the client's default", () => {
-  assert.match(rqbit, /\.timeout\(Duration::from_secs\(15\)\)/);
-  assert.match(rqbit, /if list_only \{/);
-  assert.match(rqbit, /request = request\.timeout\(Duration::from_secs\(90\)\);/);
+test("torrent/magnet previews prioritize the first and last pieces of every file", () => {
+  assert.match(aria2, /"bt-prioritize-piece"\.into\(\),\s*Value::String\("head=2M,tail=2M"\.into\(\)\)/);
+});
+
+test("resolving a magnet's metadata gets a much longer timeout than an ordinary aria2 RPC call", () => {
+  assert.match(aria2, /pub async fn preview_magnet_metadata\(/);
+  assert.match(aria2, /"bt-metadata-only"\.into\(\), Value::String\("true"\.into\(\)\)/);
+  assert.match(aria2, /Duration::from_secs\(90\)/);
   const app = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8");
   assert.match(app, /torrentMetadataTimeout:/);
   assert.ok(app.includes('t("torrentMetadataTimeout")'));
+});
+
+test("a magnet's metadata-only phase is not mistaken for the real content download finishing", () => {
+  // aria2 adds a magnet as a metadata-only download first (BEP 9); once
+  // that small blob finishes, follow-torrent=true makes aria2 start the
+  // real content download under a brand new GID, reachable only through
+  // tellStatus's "followedBy" field. The poller must follow that handoff
+  // instead of marking the task Completed the moment metadata resolves.
+  assert.match(aria2, /"followedBy"/);
+  assert.match(aria2, /pub followed_by: Option<String>,/);
+  assert.match(desktop, /if let Some\(next_gid\) = status\.followed_by \{/);
+  assert.match(desktop, /gid = next_gid;/);
 });
