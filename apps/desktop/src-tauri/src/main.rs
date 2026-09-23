@@ -7268,7 +7268,11 @@ fn set_application_language(state: State<'_, AppState>, language: String) -> Res
 }
 
 #[tauri::command]
-fn set_application_theme(state: State<'_, AppState>, theme: String) -> Result<(), String> {
+fn set_application_theme(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    theme: String,
+) -> Result<(), String> {
     const THEMES: &[&str] = &[
         "void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom",
         "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral",
@@ -7287,7 +7291,24 @@ fn set_application_theme(state: State<'_, AppState>, theme: String) -> Result<()
         "application.theme_changed",
         &format!("theme={theme}"),
     );
+    // Every window (the main window, the Apocalipse Link popup, and any
+    // future standalone window) applies the theme itself from its own
+    // localStorage, which Tauri does not share across separate webview
+    // windows on every platform. Broadcasting the change lets a window
+    // that is already open follow it instead of staying on whatever
+    // theme it happened to load with.
+    let _ = app.emit("theme-changed", &theme);
     Ok(())
+}
+
+#[tauri::command]
+fn get_application_theme(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .theme
+        .clone())
 }
 
 #[tauri::command]
@@ -13294,6 +13315,7 @@ fn main() {
             record_ui_diagnostic,
             set_application_language,
             set_application_theme,
+            get_application_theme,
             get_log_editor,
             set_log_editor,
             open_log_external,

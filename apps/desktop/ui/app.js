@@ -2943,6 +2943,14 @@ async function consumeBrowserAssistedDownload() {
 setInterval(consumeBrowserAssistedDownload, 400);
 window.__TAURI__?.event?.listen?.("browser-assisted-ready", consumeBrowserAssistedDownload).catch(console.error);
 
+window.__TAURI__?.event?.listen?.("theme-changed", (event) => {
+  const theme = event.payload;
+  if (typeof theme === "string") {
+    localStorage.setItem("apocalipse.theme", theme);
+    applyTheme(theme);
+  }
+}).catch(console.error);
+
 let consumingBridgeDownload = false;
 async function consumeBridgeDownload() {
   if (consumingBridgeDownload) return;

@@ -359,3 +359,27 @@ test("a remote Link file matching a paused/failed download can fill it instead o
     assert.match(ui, /const row = document\.createElement\("div"\);\s*\n\s*row\.className = "link-file";/);
   }
 });
+
+test("the Apocalipse Link popup window recognizes every real theme instead of falling back to void", () => {
+  // Regression: link.js kept its own copy of the theme allowlist from
+  // before the 25-to-20-theme overhaul (commit 9958df1). None of those
+  // old names (e.g. "inferno", "synthwave") exist in styles.css anymore,
+  // so no matter which of the current themes the main window actually
+  // had selected, this window's own validation always rejected it and
+  // silently fell back to "void" - looking like the popup "didn't follow
+  // the chosen theme" at all.
+  const currentThemes = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost"];
+  for (const theme of currentThemes) {
+    assert.ok(linkJs.includes(`"${theme}"`), `link.js's validThemes is missing "${theme}"`);
+  }
+  assert.doesNotMatch(linkJs, /"inferno"|"synthwave"|"toxic"|"polarmint"/);
+  // The popup also needs the backend's persisted theme, not just its own
+  // localStorage (not guaranteed to be shared across separate webview
+  // windows), and has to follow a theme changed in the main window while
+  // it's already open.
+  assert.match(rust, /fn get_application_theme\(/);
+  assert.match(rust, /app\.emit\("theme-changed", &theme\)/);
+  assert.match(linkJs, /invoke\("get_application_theme"\)/);
+  assert.match(linkJs, /listen\?\.\("theme-changed",/);
+  assert.match(app, /listen\?\.\("theme-changed",/);
+});

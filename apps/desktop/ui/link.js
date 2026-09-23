@@ -164,7 +164,13 @@ let locale = localStorage.getItem("apocalipse.language") || "en";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
 
-const validThemes = ["void", "inferno", "toxic", "synthwave", "royal", "crimson", "arctic", "obsidian", "monochrome", "midnight", "forest", "graphite", "deepsea", "eclipse", "hazard", "cyberstorm", "ultraviolet", "emeraldgold", "scarletice", "coppernavy", "solarizednight", "pearlblue", "whiteaurora", "goldenivory", "crystalrose", "polarmint"];
+// Must stay in sync with the THEMES list in set_application_theme
+// (main.rs) and the data-theme selectors in styles.css, which this
+// window shares with the main window. This list used to carry theme
+// names from before the 25-to-20-theme overhaul (commit 9958df1),
+// none of which exist in styles.css anymore, so every theme the main
+// window could actually be set to fell through to "void" here.
+const validThemes = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost"];
 const appearanceDefaults = { transparencyEnabled: false, transparencyLevel: 30, roundedEnabled: true, cornerRadius: 10, interfaceSize: "normal" };
 
 function syncPresentation() {
@@ -789,6 +795,27 @@ window.__TAURI__?.event?.listen?.("link-transfer-progress", (event) => {
 
 syncPresentation();
 window.addEventListener("storage", syncPresentation);
+// localStorage is not guaranteed to be shared between this popup window
+// and the main window on every platform Tauri targets, so this window's
+// own copy of the theme can be stale or simply empty even though the
+// main window is set correctly. The backend's persisted setting is the
+// real source of truth, and it also broadcasts "theme-changed" whenever
+// the user picks a new one from the main window while this one is open.
+invoke("get_application_theme")
+  .then((theme) => {
+    if (typeof theme === "string" && validThemes.includes(theme)) {
+      localStorage.setItem("apocalipse.theme", theme);
+      syncPresentation();
+    }
+  })
+  .catch(console.error);
+window.__TAURI__?.event?.listen?.("theme-changed", (event) => {
+  const theme = event.payload;
+  if (typeof theme === "string" && validThemes.includes(theme)) {
+    localStorage.setItem("apocalipse.theme", theme);
+    syncPresentation();
+  }
+}).catch(console.error);
 invoke("record_ui_diagnostic", { level: "INFO", event: "link_window_opened", detail: "dedicated=true maximized=true" }).catch(() => {});
 loadLinkIdentity().catch((error) => {
   document.querySelector("#link-status").textContent = String(error);
