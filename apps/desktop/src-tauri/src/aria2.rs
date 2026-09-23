@@ -222,6 +222,11 @@ impl Runtime {
         let state_dir = runtime_root.join("state");
         fs::create_dir_all(&state_dir).map_err(|error| error.to_string())?;
         let mut command = Command::new(executable);
+        // Never let aria2-next inherit ADM's installation directory as its
+        // working directory. Any engine fallback/cache/temp file that still
+        // uses a relative path must stay inside the portable runtime tree,
+        // not beside Apocalipse Download Manager.exe.
+        command.current_dir(runtime_root);
         command
             .arg("--enable-rpc=true")
             .arg("--rpc-listen-all=false")
