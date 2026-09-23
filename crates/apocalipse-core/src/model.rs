@@ -43,6 +43,10 @@ pub struct DownloadTask {
     pub torrent_leechers: Option<u64>,
     #[serde(default)]
     pub torrent_eta: Option<String>,
+    /// Number of HTTP/HTTPS webseed sources (BEP 19) currently in use
+    /// alongside the BT swarm for this task, when the torrent declares any.
+    #[serde(default)]
+    pub torrent_web_seeds: Option<u64>,
     #[serde(default)]
     pub format_selection: Option<String>,
     #[serde(default)]
@@ -102,6 +106,7 @@ impl DownloadTask {
             torrent_seeders: None,
             torrent_leechers: None,
             torrent_eta: None,
+            torrent_web_seeds: None,
             format_selection: None,
             referer: None,
             known_duration: None,

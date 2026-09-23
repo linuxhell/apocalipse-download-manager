@@ -5935,6 +5935,7 @@ async fn run_aria2_download(
                         item.torrent_leechers = None;
                         item.torrent_seeders = status.seeders;
                         item.torrent_eta = eta_seconds.map(|seconds| format!("{seconds}s"));
+                        item.torrent_web_seeds = (status.web_seeds > 0).then_some(status.web_seeds);
                     }
                 });
                 state.diagnostics.record(

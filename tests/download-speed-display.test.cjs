@@ -14,6 +14,10 @@ const aria2 = fs.readFileSync(
   "utf8",
 );
 const cargo = fs.readFileSync(path.join(root, "Cargo.toml"), "utf8");
+const model = fs.readFileSync(
+  path.join(root, "crates/apocalipse-core/src/model.rs"),
+  "utf8",
+);
 const tauri = JSON.parse(
   fs.readFileSync(path.join(root, "apps/desktop/src-tauri/tauri.conf.json"), "utf8"),
 );
@@ -347,4 +351,15 @@ test("a paused or failed download can be relocated to a partial file moved to an
   assert.match(ui, /invoke\("relocate_download", \{ id: task\.id, newDirectory: selected \}\)/);
   assert.match(ui, /!isTorrent\(task\)/);
   assert.match(ui, /locateFile: "Locate file…",/);
+});
+
+test("a torrent using WebSeeding (BEP 19) shows its HTTP mirror count alongside the swarm", () => {
+  assert.match(aria2, /pub web_seeds: u64,/);
+  assert.match(aria2, /"files"\s*\n\s*\]\);/);
+  assert.match(aria2, /uri\.get\("status"\)\.and_then\(Value::as_str\) == Some\("used"\)/);
+  assert.match(aria2, /value\.starts_with\("http:\/\/"\) \|\| value\.starts_with\("https:\/\/"\)/);
+  assert.match(model, /pub torrent_web_seeds: Option<u64>,/);
+  assert.match(desktop, /item\.torrent_web_seeds = \(status\.web_seeds > 0\)\.then_some\(status\.web_seeds\);/);
+  assert.match(ui, /webSeedStats/);
+  assert.match(ui, /webMirror: "HTTP mirror",/);
 });

@@ -43,6 +43,10 @@ pub struct RuntimeStatus {
     // object, absent for plain HTTP/FTP transfers.
     pub seeders: Option<u64>,
     pub followed_by: Option<String>,
+    // Number of HTTP/HTTPS webseed URIs aria2 is actively pulling from
+    // alongside the BT swarm for this download (0 for a plain HTTP/FTP
+    // task, where every file only ever has its own source URI "in use").
+    pub web_seeds: u64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -363,7 +367,8 @@ impl Endpoint {
             "connections",
             "errorMessage",
             "numSeeders",
-            "followedBy"
+            "followedBy",
+            "files"
         ]);
         let value = self
             .call(
@@ -403,6 +408,30 @@ impl Endpoint {
                 .and_then(|list| list.first())
                 .and_then(Value::as_str)
                 .map(str::to_owned),
+            // For a BitTorrent download, each file's "uris" lists the
+            // WebSeeding (BEP 19) HTTP/HTTPS sources declared in the
+            // torrent itself; "used" means aria2 is actively pulling bytes
+            // from it right now, alongside the BT swarm. Meaningless for a
+            // plain HTTP/FTP task (its single source URI always shows as
+            // "used" here too), so callers only surface this for BT.
+            web_seeds: value
+                .get("files")
+                .and_then(Value::as_array)
+                .map(|files| {
+                    files
+                        .iter()
+                        .filter_map(|file| file.get("uris"))
+                        .filter_map(Value::as_array)
+                        .flatten()
+                        .filter(|uri| {
+                            uri.get("status").and_then(Value::as_str) == Some("used")
+                                && uri.get("uri").and_then(Value::as_str).is_some_and(|value| {
+                                    value.starts_with("http://") || value.starts_with("https://")
+                                })
+                        })
+                        .count() as u64
+                })
+                .unwrap_or(0),
         })
     }
 

@@ -76,6 +76,7 @@ const catalogs = {
     resumeNo: "No",
     resumeChecking: "Checking…",
     retry: "Retry",
+    webMirror: "HTTP mirror",
     locateFile: "Locate file…",
     locateFileHint: "If you moved the partial file to another folder or drive, point the app at it to resume from there instead of starting over.",
     openFolder: "Open folder",
@@ -309,6 +310,7 @@ const catalogs = {
     resumeNo: "Não",
     resumeChecking: "Verificando…",
     retry: "Tentar novamente",
+    webMirror: "mirror HTTP",
     locateFile: "Localizar arquivo…",
     locateFileHint: "Se você moveu o arquivo parcial para outra pasta ou disco, indique o novo local para continuar de onde parou em vez de começar do zero.",
     openFolder: "Abrir pasta",
@@ -542,6 +544,7 @@ const catalogs = {
     resumeNo: "否",
     resumeChecking: "检查中…",
     retry: "重试",
+    webMirror: "HTTP 镜像",
     locateFile: "定位文件…",
     locateFileHint: "如果您已将部分下载的文件移动到其他文件夹或磁盘，请指定新位置以从原进度继续，而不是重新开始。",
     openFolder: "打开文件夹",
@@ -1099,8 +1102,9 @@ function renderDownloads(force = false) {
       : task.total
       ? `${formatBytes(task.received)} / ${formatBytes(task.total)} · ${percent.toFixed(1)}%`
       : formatBytes(task.received);
+    const webSeedStats = task.torrent_web_seeds ? ` · +${task.torrent_web_seeds} ${t("webMirror")}` : "";
     const torrentStats = task.torrent_seeders !== null && task.torrent_seeders !== undefined
-      ? ` · S:${task.torrent_seeders} L:${task.torrent_leechers || 0}${task.torrent_eta ? ` · ETA ${task.torrent_eta}` : ""}` : "";
+      ? ` · S:${task.torrent_seeders} L:${task.torrent_leechers || 0}${task.torrent_eta ? ` · ETA ${task.torrent_eta}` : ""}${webSeedStats}` : "";
     details.textContent =
       speed && task.state === "downloading"
         ? `${progressText} · ↓ ${formatBytes(speed)}/s · ↑ ${formatBytes(uploadSpeed)}/s${torrentStats}`
