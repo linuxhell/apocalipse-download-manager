@@ -1125,12 +1125,9 @@ fn ed2k_set_server_list_url(state: State<'_, AppState>, url: String) -> Result<(
     save_settings(&state, &settings)
 }
 
-/// Downloads server.met from the configured URL (aMule 3.0.0's own
-/// documented default, upd.emule-security.org, mirrors the same idea as
-/// its Ed2kServersUrl auto-update setting) and applies it to the shared
-/// aria2next runtime. aria2-next's --ed2k-server-list only takes a local
-/// file path, so the file is cached under this app's own data directory
-/// and that path is what's actually handed to the engine.
+/// Validates the downloaded server.met before it replaces the portable cache.
+/// aria2-next consumes the resulting local path as an initial option on each
+/// ED2K download/search request; it is not a changeable global runtime option.
 fn validate_ed2k_server_met(bytes: &[u8]) -> Result<u32, String> {
     if bytes.len() < 4 {
         return Err("ed2k_server_list_payload_too_small".to_owned());
