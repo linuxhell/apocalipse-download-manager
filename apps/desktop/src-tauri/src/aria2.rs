@@ -509,7 +509,7 @@ impl Endpoint {
         &self,
         magnet: &str,
         workspace: &Path,
-        mut on_progress: impl FnMut(u64, i64, i64),
+        mut on_progress: impl FnMut(u64, i64, i64, i64, i64, Option<&str>),
     ) -> Result<TorrentMetadata, String> {
         let mut options = Map::new();
         options.insert(
@@ -543,7 +543,10 @@ impl Endpoint {
             "bittorrent",
             "files",
             "connections",
-            "numSeeders"
+            "numSeeders",
+            "totalLength",
+            "completedLength",
+            "followedBy"
         ]);
         // Metadata arrives once at least one connected peer answers the BEP
         // 9 metadata exchange. A cold DHT routing table (first run, nothing
@@ -551,14 +554,20 @@ impl Endpoint {
         // can resolve peers for a specific hash on its own, and this magnet's
         // own tracker list may be entirely dead, leaving DHT as the only
         // path; 150 seconds gives that bootstrap room instead of a single
-        // short-timeout request. `on_progress` reports connections/seeders
-        // seen so far so a stall can be told apart from "no peers reachable
-        // at all" (a network/firewall problem) after the fact.
+        // short-timeout request. `on_progress` reports what was actually
+        // observed (connections/seeders, and whether any bytes of the
+        // metadata itself started arriving, or aria2 quietly moved on to a
+        // followed-up content GID instead of stopping at metadata) so a
+        // stall can be told apart from "no peers reachable at all" (a
+        // network/firewall problem) after the fact.
         let deadline = tokio::time::Instant::now() + Duration::from_secs(150);
         let start = tokio::time::Instant::now();
         let mut last_report = start;
         let mut peak_connections: i64 = 0;
         let mut peak_seeders: i64 = 0;
+        let mut peak_total_length: i64 = 0;
+        let mut peak_completed_length: i64 = 0;
+        let mut followed_content_gid: Option<String> = None;
         let result = loop {
             let value = self
                 .call(
@@ -566,26 +575,67 @@ impl Endpoint {
                     vec![Value::String(gid.clone()), keys.clone()],
                 )
                 .await?;
-            let connections = value
-                .get("connections")
-                .and_then(Value::as_str)
-                .and_then(|value| value.parse::<i64>().ok())
-                .unwrap_or(0);
-            let seeders = value
-                .get("numSeeders")
-                .and_then(Value::as_str)
-                .and_then(|value| value.parse::<i64>().ok())
-                .unwrap_or(0);
+            let parse_i64 = |key: &str| {
+                value
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .and_then(|value| value.parse::<i64>().ok())
+                    .unwrap_or(0)
+            };
+            let connections = parse_i64("connections");
+            let seeders = parse_i64("numSeeders");
+            let total_length = parse_i64("totalLength");
+            let completed_length = parse_i64("completedLength");
+            let followed_by = value
+                .get("followedBy")
+                .and_then(Value::as_array)
+                .and_then(|list| list.first())
+                .and_then(Value::as_str);
             peak_connections = peak_connections.max(connections);
             peak_seeders = peak_seeders.max(seeders);
+            peak_total_length = peak_total_length.max(total_length);
+            peak_completed_length = peak_completed_length.max(completed_length);
             let now = tokio::time::Instant::now();
-            if now.duration_since(last_report) >= Duration::from_secs(5) {
+            if now.duration_since(last_report) >= Duration::from_secs(5) || followed_by.is_some() {
                 last_report = now;
                 on_progress(
                     now.duration_since(start).as_secs(),
                     peak_connections,
                     peak_seeders,
+                    peak_total_length,
+                    peak_completed_length,
+                    followed_by,
                 );
+            }
+            // bt-metadata-only should keep this GID's own status "complete"
+            // once BEP 9 resolves, without ever following into a real
+            // content download. On some aria2 builds it instead silently
+            // "follows" anyway (the global follow-torrent=true default
+            // winning over the per-download override): the metadata is
+            // known at that point, but this GID's own status never becomes
+            // "complete", and a full content download keeps running
+            // unattended under the new GID otherwise. Treat followedBy
+            // appearing as proof metadata resolved, read it from whichever
+            // GID actually carries it, and force-remove both so the preview
+            // never leaves a real download running in the background.
+            if let Some(next_gid) = followed_by {
+                let next_gid = next_gid.to_owned();
+                let content_status = self
+                    .call(
+                        "aria2.tellStatus",
+                        vec![
+                            Value::String(next_gid.clone()),
+                            json!(["bittorrent", "files"]),
+                        ],
+                    )
+                    .await?;
+                followed_content_gid = Some(next_gid);
+                let source = if content_status.get("bittorrent").is_some() {
+                    content_status
+                } else {
+                    value
+                };
+                break Ok(source);
             }
             match value.get("status").and_then(Value::as_str) {
                 Some("complete") => break Ok(value),
@@ -607,6 +657,11 @@ impl Endpoint {
         let _ = self
             .call("aria2.forceRemove", vec![Value::String(gid)])
             .await;
+        if let Some(content_gid) = followed_content_gid {
+            let _ = self
+                .call("aria2.forceRemove", vec![Value::String(content_gid)])
+                .await;
+        }
         let value = result?;
         let name = value
             .get("bittorrent")

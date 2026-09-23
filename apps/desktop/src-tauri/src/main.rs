@@ -9363,16 +9363,34 @@ async fn inspect_torrent_metadata(
         .join(uuid::Uuid::new_v4().simple().to_string());
     fs::create_dir_all(&workspace).map_err(|error| error.to_string())?;
     let metadata = endpoint
-        .preview_magnet_metadata(&source, &workspace, |elapsed_secs, connections, seeders| {
-            diagnostic_log(
-                &state,
-                "INFO",
-                "aria2.metadata_preview_progress",
-                &format!(
-                    "elapsed={elapsed_secs}s peak_connections={connections} peak_seeders={seeders}"
-                ),
-            );
-        })
+        .preview_magnet_metadata(
+            &source,
+            &workspace,
+            |elapsed_secs, connections, seeders, total_length, completed_length, followed_by| {
+                if let Some(content_gid) = followed_by {
+                    diagnostic_log(
+                        &state,
+                        "WARN",
+                        "aria2.metadata_preview_followed_unexpectedly",
+                        &format!(
+                            "elapsed={elapsed_secs}s content_gid={content_gid} \
+                             peak_connections={connections} peak_seeders={seeders}"
+                        ),
+                    );
+                } else {
+                    diagnostic_log(
+                        &state,
+                        "INFO",
+                        "aria2.metadata_preview_progress",
+                        &format!(
+                            "elapsed={elapsed_secs}s peak_connections={connections} \
+                             peak_seeders={seeders} peak_total_length={total_length} \
+                             peak_completed_length={completed_length}"
+                        ),
+                    );
+                }
+            },
+        )
         .await;
     let _ = fs::remove_dir_all(&workspace);
     let metadata = metadata.map_err(|error| {

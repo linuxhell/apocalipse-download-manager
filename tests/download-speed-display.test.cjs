@@ -331,17 +331,41 @@ test("a magnet metadata timeout reports peers/seeders seen so far, and aria2 log
   // swarm at all (network/firewall blocking outbound BitTorrent) or reached
   // peers but got stuck resolving metadata (a real bug) - both looked
   // identical to the user and to us reading a diagnostic bundle.
-  assert.match(aria2, /mut on_progress: impl FnMut\(u64, i64, i64\)/);
+  assert.match(aria2, /mut on_progress: impl FnMut\(u64, i64, i64, i64, i64, Option<&str>\)/);
   assert.match(aria2, /"connections"/);
   assert.match(aria2, /"numSeeders"/);
   assert.match(aria2, /aria2_metadata_timeout:connections=\{peak_connections\}:seeders=\{peak_seeders\}/);
   assert.match(aria2, /--log-level=info/);
   const main = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
-  assert.match(main, /preview_magnet_metadata\(&source, &workspace, \|elapsed_secs, connections, seeders\|/);
+  assert.match(main, /preview_magnet_metadata\(\s*\n\s*&source,\s*\n\s*&workspace,/);
   assert.match(main, /aria2\.metadata_preview_progress/);
   const app = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8");
   assert.match(app, /torrentMetadataNoPeers:/);
   assert.match(app, /connections=0:seeders=0/);
+});
+
+test("a magnet metadata preview that quietly follows into a real content download is treated as resolved, not stuck", () => {
+  // Regression, confirmed from a live diagnostic bundle: with 35 peer
+  // connections and a seeder present, the preview still ran out its full
+  // timeout. bt-metadata-only=true is supposed to keep the preview GID's
+  // own status "complete" once BEP 9 resolves, but on this build it
+  // instead silently followed into a real content download (the global
+  // follow-torrent=true default winning over the per-download override) -
+  // metadata was known, but the preview GID's status never flipped and a
+  // full download kept running unattended. Detecting followedBy here and
+  // reading the metadata off of it, then removing both GIDs, fixes both
+  // the false "stuck" timeout and the background bandwidth leak.
+  const start = aria2.indexOf("pub async fn preview_magnet_metadata(");
+  const end = aria2.indexOf("\n    }", start);
+  assert.ok(start >= 0 && end > start);
+  const block = aria2.slice(start, end);
+  assert.match(block, /"followedBy"/);
+  assert.match(block, /if let Some\(next_gid\) = followed_by \{/);
+  assert.match(block, /followed_content_gid = Some\(next_gid\)/);
+  assert.match(block, /forceRemove", vec!\[Value::String\(gid\)\]/);
+  assert.match(block, /forceRemove", vec!\[Value::String\(content_gid\)\]/);
+  const main = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
+  assert.match(main, /aria2\.metadata_preview_followed_unexpectedly/);
 });
 
 test("a magnet's metadata-only phase is not mistaken for the real content download finishing", () => {
