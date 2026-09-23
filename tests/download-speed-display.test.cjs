@@ -479,3 +479,13 @@ test("small control-file fetches are bounded while streaming", () => {
   assert.match(desktop, /ed2k_server_list_payload_too_large/);
   assert.match(desktop, /16 \* 1024 \* 1024/);
 });
+
+test("magnet metadata preview uses aria2-next pause-metadata without the retired bt-save-metadata alias", () => {
+  const start = aria2.indexOf("pub async fn preview_magnet_metadata(");
+  const end = aria2.indexOf("\n    pub async fn prune_orphan_bittorrent_transfers", start);
+  assert.ok(start >= 0 && end > start);
+  const block = aria2.slice(start, end);
+  assert.match(block, /"pause-metadata"\.into\(\), Value::String\("true"\.into\(\)\)/);
+  assert.doesNotMatch(block, /bt-save-metadata/);
+});
+
