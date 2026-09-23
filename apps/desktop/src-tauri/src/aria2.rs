@@ -482,7 +482,15 @@ impl Endpoint {
         );
         options.insert("bt-metadata-only".into(), Value::String("true".into()));
         options.insert("bt-save-metadata".into(), Value::String("false".into()));
-        options.insert("follow-torrent".into(), Value::String("false".into()));
+        // "mem" is aria2's documented value for metadata-only mode: it keeps
+        // the resolved metadata in memory and marks this GID "complete" once
+        // BEP 9 finishes, without spawning a follow-up content download.
+        // "false" leaves aria2's internal state machine unable to reach a
+        // clean "complete" status for a metadata-only GID, so polling for it
+        // never succeeds and this always ran out the clock on the timeout
+        // below instead of resolving in the couple of seconds it actually
+        // takes once a peer answers.
+        options.insert("follow-torrent".into(), Value::String("mem".into()));
         let gid = self
             .call(
                 "aria2.addUri",

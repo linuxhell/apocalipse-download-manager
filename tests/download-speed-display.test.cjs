@@ -307,6 +307,21 @@ test("resolving a magnet's metadata gets a much longer timeout than an ordinary 
   assert.ok(app.includes('t("torrentMetadataTimeout")'));
 });
 
+test("magnet metadata preview uses follow-torrent=mem, not false, so aria2 can actually mark it complete", () => {
+  // Regression: with follow-torrent=false, aria2's metadata-only GID never
+  // reached a clean "complete" status, so every magnet preview ran out the
+  // full 90s timeout instead of resolving in the couple of seconds it
+  // actually takes once a peer answers. "mem" is aria2's documented value
+  // for bt-metadata-only mode: keep the metadata in memory and mark this
+  // same GID complete, without spawning a follow-up content download.
+  const start = aria2.indexOf("pub async fn preview_magnet_metadata(");
+  const end = aria2.indexOf("\n    }", start);
+  assert.ok(start >= 0 && end > start);
+  const block = aria2.slice(start, end);
+  assert.match(block, /"follow-torrent"\.into\(\), Value::String\("mem"\.into\(\)\)/);
+  assert.doesNotMatch(block, /"follow-torrent"\.into\(\), Value::String\("false"\.into\(\)\)/);
+});
+
 test("a magnet's metadata-only phase is not mistaken for the real content download finishing", () => {
   // aria2 adds a magnet as a metadata-only download first (BEP 9); once
   // that small blob finishes, follow-torrent=true makes aria2 start the
