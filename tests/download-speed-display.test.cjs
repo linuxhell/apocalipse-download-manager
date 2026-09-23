@@ -468,3 +468,13 @@ test("torrent preview size is carried into the task so a short false-100% result
   assert.match(desktop, /status\.total < expected/);
 });
 
+
+test("small control-file fetches are bounded while streaming", () => {
+  assert.match(desktop, /async fn read_response_limited\(/);
+  assert.match(desktop, /content_length\(\)[\s\S]*length > max_bytes as u64/);
+  assert.match(desktop, /while let Some\(chunk\) = response\.chunk\(\)\.await/);
+  assert.match(desktop, /torrent_file_payload_too_large/);
+  assert.match(desktop, /32 \* 1024 \* 1024/);
+  assert.match(desktop, /ed2k_server_list_payload_too_large/);
+  assert.match(desktop, /16 \* 1024 \* 1024/);
+});
