@@ -753,6 +753,7 @@ let pendingRequestBody = null;
 let pendingRequestContentType = null;
 let pendingBrowserAssistedPath = null;
 let taskConnectionsManuallyChanged = false;
+let analysisGeneration = 0;
 let downloads = [];
 const downloadListState = createTaskListState();
 let activeFilter = "all";
@@ -1400,6 +1401,10 @@ async function applyAboutMedia(media) {
 }
 
 async function loadAboutMedia() {
+  const background = await invoke("get_about_background");
+  if (background) {
+    document.querySelector(".about-scene").style.backgroundImage = `url("${background}")`;
+  }
   await applyAboutMedia(await invoke("get_about_media"));
 }
 
@@ -1879,6 +1884,22 @@ document.querySelectorAll("[data-pick-for]").forEach((button) => {
 document
   .querySelectorAll("[data-dialog-close]")
   .forEach((button) => (button.onclick = () => dialog.close()));
+
+function resetAnalysisForNewRequest() {
+  analysisGeneration += 1;
+  const analyze = document.querySelector("#analyze");
+  analyze.disabled = false;
+  analyze.hidden = false;
+  document.querySelector("#analysis").hidden = true;
+  document.querySelector("#enqueue").hidden = true;
+  return analysisGeneration;
+}
+const analysisIsCurrent = (generation) => generation === analysisGeneration;
+dialog.addEventListener("close", () => {
+  analysisGeneration += 1;
+  document.querySelector("#analyze").disabled = false;
+});
+
 function resetMediaInspection() {
   const panel = document.querySelector("#media-inspection");
   const thumbnail = document.querySelector("#media-thumbnail");
@@ -1911,20 +1932,24 @@ function showCapturedPreview({ title, thumbnail, kind, duration, size, showForma
   panel.hidden = false;
 }
 
-async function showTorrentInspection(source) {
+async function showTorrentInspection(source, generation = analysisGeneration) {
   const torrent = await invoke("inspect_torrent_metadata", { source });
+  if (!analysisIsCurrent(generation)) return false;
   document.querySelector("#torrent-title").textContent = torrent.name;
   document.querySelector("#torrent-total").textContent = formatBytes(torrent.totalSize);
+  pendingExpectedSize = Number.isFinite(torrent.totalSize) ? torrent.totalSize : null;
   const root = document.querySelector("#torrent-files");
   root.replaceChildren();
   for (const file of torrent.files) {
     const row = document.createElement("label");
     const input = Object.assign(document.createElement("input"), { type: "checkbox", checked: true });
     input.dataset.torrentIndex = file.index;
+    input.dataset.torrentSize = Number(file.size) || 0;
     row.append(input, Object.assign(document.createElement("span"), { textContent: file.path }), Object.assign(document.createElement("small"), { textContent: formatBytes(file.size) }));
     root.append(row);
   }
   document.querySelector("#torrent-inspection").hidden = false;
+  return true;
 }
 function resetTaskConnections() {
   taskConnectionsManuallyChanged = false;
@@ -1934,9 +1959,7 @@ function resetTaskConnections() {
 document.querySelectorAll("#add").forEach(
   (button) =>
     (button.onclick = () => {
-      document.querySelector("#analysis").hidden = true;
-      document.querySelector("#enqueue").hidden = true;
-      document.querySelector("#analyze").hidden = false;
+      resetAnalysisForNewRequest();
       pendingDiagnosticTrace = null;
       pendingReferer = null;
       pendingDuration = null;
@@ -2568,9 +2591,7 @@ function refreshAutoExtractOption() {
 }
 document.querySelector("#file-name").addEventListener("input", refreshAutoExtractOption);
 document.querySelector("#url").oninput = () => {
-  document.querySelector("#analysis").hidden = true;
-  document.querySelector("#enqueue").hidden = true;
-  document.querySelector("#analyze").hidden = false;
+  resetAnalysisForNewRequest();
   document.querySelector("#auto-extract").checked = false;
   document.querySelector("#auto-extract-option").hidden = true;
   resetMediaInspection();
@@ -2588,7 +2609,8 @@ function option(select, value, label) {
   select.append(Object.assign(document.createElement("option"), { value, textContent: label }));
 }
 
-async function showMediaInspection(url) {
+async function showMediaInspection(url, generation = analysisGeneration) {
+  if (!analysisIsCurrent(generation)) return false;
   const panel = document.querySelector("#media-inspection");
   const select = document.querySelector("#media-format");
   select.replaceChildren();
@@ -2605,6 +2627,7 @@ async function showMediaInspection(url) {
       userAgent: pendingUserAgent,
       referer: pendingReferer,
     });
+    if (!analysisIsCurrent(generation)) return false;
     pendingTitle = media.title || pendingTitle;
     pendingThumbnail = media.thumbnail || pendingThumbnail;
     pendingDuration = Number.isFinite(media.duration) ? media.duration : pendingDuration;
@@ -2619,7 +2642,9 @@ async function showMediaInspection(url) {
     document.querySelector("#file-name").value = media.suggestedFileName;
     refreshAutoExtractOption();
     panel.hidden = false;
+    return true;
   } catch (error) {
+    if (!analysisIsCurrent(generation)) return false;
     console.warn(error);
     // The extension may already have supplied trustworthy title/thumbnail
     // metadata. Preserve it when yt-dlp inspection is blocked by a VPN,
@@ -2632,6 +2657,7 @@ async function showMediaInspection(url) {
       size: pendingExpectedSize,
       showFormats: true,
     });
+    return true;
   }
 }
 function applyAudioFormatSelection(value) {
@@ -2661,14 +2687,20 @@ document.querySelector("#analyze").onclick = async () => {
   if (!url.reportValidity()) return;
   const analyzeButton = document.querySelector("#analyze");
   if (analyzeButton.disabled) return;
+  const generation = ++analysisGeneration;
+  const current = () => analysisIsCurrent(generation);
   analyzeButton.disabled = true;
   const box = document.querySelector("#analysis");
   box.hidden = false;
   box.textContent = "…";
   let metadataTimer = null;
+  const stopMetadataTimer = () => {
+    if (metadataTimer) window.clearInterval(metadataTimer);
+    metadataTimer = null;
+  };
   try {
     if (pendingBrowserAssistedPath) {
-      const fileName = document.querySelector("#file-name");
+      if (!current()) return;
       box.textContent = t("browserAssistedArchiveReady");
       refreshAutoExtractOption();
       document.querySelector("#analyze").hidden = true;
@@ -2677,39 +2709,41 @@ document.querySelector("#analyze").onclick = async () => {
     }
     try {
       const hostResolution = await invoke("resolve_file_host_url", { url: url.value });
-      if (hostResolution?.adapted && hostResolution.url) {
-        url.value = hostResolution.url;
-      }
+      if (!current()) return;
+      if (hostResolution?.adapted && hostResolution.url) url.value = hostResolution.url;
     } catch (error) {
+      if (!current()) return;
       console.warn("file-host-adapter", error);
     }
     const plan = await invoke("inspect_url", { url: url.value });
+    if (!current()) return;
     const fileName = document.querySelector("#file-name");
-    const suggestedFileName = await invoke(
-      "suggest_download_name",
-      { url: url.value },
-    );
+    const suggestedFileName = await invoke("suggest_download_name", { url: url.value });
+    if (!current()) return;
     const currentName = fileName.value.trim();
     const genericName = /^(?:watch|reel|video|download)(?:\.[a-z0-9]{1,10})?$/i.test(currentName);
-    if (!currentName || (genericName && !pendingTitle)) {
-      fileName.value = suggestedFileName;
-    }
+    if (!currentName || (genericName && !pendingTitle)) fileName.value = suggestedFileName;
     box.textContent = `${plan.primary} · ${plan.reason}`;
-    if (plan.primary === "YtDlp") await showMediaInspection(url.value);
-    else if (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0])) {
+    if (plan.primary === "YtDlp") {
+      const shown = await showMediaInspection(url.value, generation);
+      if (!shown || !current()) return;
+    } else if (/^magnet:/i.test(url.value) || /\.torrent$/i.test(url.value.split(/[?#]/)[0])) {
       const startedAt = Date.now();
       const updateMetadataStatus = () => {
+        if (!current()) {
+          stopMetadataTimer();
+          return;
+        }
         const seconds = Math.floor((Date.now() - startedAt) / 1000);
         box.textContent = `${t("torrentMetadataSeeking")} · ${seconds}s`;
       };
       updateMetadataStatus();
       metadataTimer = window.setInterval(updateMetadataStatus, 1000);
-      await showTorrentInspection(url.value);
-      window.clearInterval(metadataTimer);
-      metadataTimer = null;
+      const shown = await showTorrentInspection(url.value, generation);
+      stopMetadataTimer();
+      if (!shown || !current()) return;
       box.textContent = `${plan.primary} · ${plan.reason}`;
-    }
-    else if (plan.reason === "hls_manifest") {
+    } else if (plan.reason === "hls_manifest") {
       const select = document.querySelector("#media-format");
       select.replaceChildren();
       option(select, "original", pendingMediaKind === "audio" ? "Original (MP4/M4A)" : t("bestQuality"));
@@ -2724,18 +2758,20 @@ document.querySelector("#analyze").onclick = async () => {
     } else if (pendingMediaKind === "image" || /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)(?:$|[?#])/i.test(url.value)) {
       showCapturedPreview({ title: pendingTitle || fileName.value, thumbnail: pendingThumbnail || url.value, kind: pendingMediaKind || "image", duration: null, size: pendingExpectedSize });
     }
+    if (!current()) return;
     refreshAutoExtractOption();
     document.querySelector("#analyze").hidden = true;
     document.querySelector("#enqueue").hidden = false;
   } catch (error) {
+    if (!current()) return;
     const message = String(error);
     box.textContent = /connections=0:seeders=0/.test(message)
       ? t("torrentMetadataNoPeers")
       : /aria2_metadata_timeout:connections=[1-9][0-9]*/.test(message) ? t("torrentMetadataPeersStalled")
       : /timed? ?out|timeout/i.test(message) ? t("torrentMetadataTimeout") : message;
   } finally {
-    if (metadataTimer) window.clearInterval(metadataTimer);
-    analyzeButton.disabled = false;
+    stopMetadataTimer();
+    if (current()) analyzeButton.disabled = false;
   }
 };
 document.querySelector("#enqueue").onclick = async () => {
@@ -2743,9 +2779,15 @@ document.querySelector("#enqueue").onclick = async () => {
   const button = document.querySelector("#enqueue");
   button.disabled = true;
   try {
-    const torrentSelection = document.querySelector("#torrent-inspection").hidden
-      ? null : [...document.querySelectorAll("[data-torrent-index]:checked")].map((input) => Number(input.dataset.torrentIndex));
+    const torrentInputs = document.querySelector("#torrent-inspection").hidden
+      ? null : [...document.querySelectorAll("[data-torrent-index]:checked")];
+    const torrentSelection = torrentInputs
+      ? torrentInputs.map((input) => Number(input.dataset.torrentIndex))
+      : null;
     if (torrentSelection && !torrentSelection.length) throw new Error("Selecione pelo menos um arquivo do torrent.");
+    const torrentExpectedSize = torrentInputs
+      ? torrentInputs.reduce((total, input) => total + (Number(input.dataset.torrentSize) || 0), 0)
+      : null;
     const autoExtract = document.querySelector("#auto-extract-option").hidden ? false : document.querySelector("#auto-extract").checked;
     const acceptedTask = pendingBrowserAssistedPath
       ? await invoke("import_browser_assisted_download", {
@@ -2776,7 +2818,7 @@ document.querySelector("#enqueue").onclick = async () => {
           title: pendingTitle,
           thumbnail: pendingThumbnail,
           audioUrl: pendingAudioUrl,
-          expectedSize: pendingExpectedSize,
+          expectedSize: torrentExpectedSize || pendingExpectedSize,
           cookieHeader: pendingCookieHeader,
           userAgent: pendingUserAgent,
           requestMethod: pendingRequestMethod,
@@ -2862,9 +2904,7 @@ setInterval(async () => {
     resetTaskConnections();
     const url = document.querySelector("#url");
     url.value = link;
-    document.querySelector("#analysis").hidden = true;
-    document.querySelector("#enqueue").hidden = true;
-    document.querySelector("#analyze").hidden = false;
+    resetAnalysisForNewRequest();
     resetMediaInspection();
     await invoke("activate_main_window");
     if (!dialog.open) dialog.showModal();
@@ -2899,9 +2939,7 @@ async function consumeBrowserAssistedDownload() {
     document.querySelector("#url").value = request.url;
     const sourceName = String(request.fileName || "").split(/[\\/]/).pop() || "download.zip";
     document.querySelector("#file-name").value = sourceName;
-    document.querySelector("#analysis").hidden = true;
-    document.querySelector("#enqueue").hidden = true;
-    document.querySelector("#analyze").hidden = false;
+    resetAnalysisForNewRequest();
     document.querySelector("#destination").value = await invoke("default_download_directory");
     resetMediaInspection();
     refreshAutoExtractOption();
