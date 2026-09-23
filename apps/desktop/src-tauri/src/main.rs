@@ -8223,9 +8223,8 @@ fn parse_external_progress(text: &str) -> Option<f64> {
 fn parse_external_download_speed(text: &str) -> Option<u64> {
     let mut latest = None;
     for token in text.split_whitespace() {
-        let token = token.trim_matches(|character: char| {
-            !character.is_ascii_alphanumeric() && character != '.'
-        });
+        let token = token
+            .trim_matches(|character: char| !character.is_ascii_alphanumeric() && character != '.');
         let (number, multiplier) = if let Some(value) = token.strip_suffix("GBps") {
             (value, 1024_u64.pow(3))
         } else if let Some(value) = token.strip_suffix("MBps") {
