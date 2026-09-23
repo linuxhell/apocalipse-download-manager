@@ -150,7 +150,13 @@ impl Runtime {
             .arg("--max-concurrent-downloads=20")
             .arg("--summary-interval=0")
             .arg("--console-log-level=warn")
-            .arg("--log-level=notice")
+            // "info" (rather than the default "notice") makes aria2 write
+            // DHT bootstrap and tracker/peer activity into aria2.log, which
+            // is otherwise the only way to tell "no peers reachable at all"
+            // (network/firewall) apart from "peers connected but a specific
+            // exchange is stuck" (an aria2/config bug) when a magnet's
+            // metadata never resolves.
+            .arg("--log-level=info")
             .arg(format!("--log={}", log.display()))
             .arg("--download-result=hide")
             .arg(format!("--input-file={}", session.display()))
@@ -503,6 +509,7 @@ impl Endpoint {
         &self,
         magnet: &str,
         workspace: &Path,
+        mut on_progress: impl FnMut(u64, i64, i64),
     ) -> Result<TorrentMetadata, String> {
         let mut options = Map::new();
         options.insert(
@@ -530,12 +537,28 @@ impl Endpoint {
             .as_str()
             .map(str::to_owned)
             .ok_or_else(|| "aria2_gid_missing".to_owned())?;
-        let keys = json!(["status", "errorMessage", "bittorrent", "files"]);
-        // Metadata arrives once at least one connected peer answers the
-        // BEP 9 metadata exchange; that can take much longer than an
-        // ordinary local API call on a slow-to-respond swarm, so this polls
-        // for up to 90 seconds instead of a single short-timeout request.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+        let keys = json!([
+            "status",
+            "errorMessage",
+            "bittorrent",
+            "files",
+            "connections",
+            "numSeeders"
+        ]);
+        // Metadata arrives once at least one connected peer answers the BEP
+        // 9 metadata exchange. A cold DHT routing table (first run, nothing
+        // cached from a previous session) needs time to bootstrap before it
+        // can resolve peers for a specific hash on its own, and this magnet's
+        // own tracker list may be entirely dead, leaving DHT as the only
+        // path; 150 seconds gives that bootstrap room instead of a single
+        // short-timeout request. `on_progress` reports connections/seeders
+        // seen so far so a stall can be told apart from "no peers reachable
+        // at all" (a network/firewall problem) after the fact.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(150);
+        let start = tokio::time::Instant::now();
+        let mut last_report = start;
+        let mut peak_connections: i64 = 0;
+        let mut peak_seeders: i64 = 0;
         let result = loop {
             let value = self
                 .call(
@@ -543,6 +566,27 @@ impl Endpoint {
                     vec![Value::String(gid.clone()), keys.clone()],
                 )
                 .await?;
+            let connections = value
+                .get("connections")
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse::<i64>().ok())
+                .unwrap_or(0);
+            let seeders = value
+                .get("numSeeders")
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse::<i64>().ok())
+                .unwrap_or(0);
+            peak_connections = peak_connections.max(connections);
+            peak_seeders = peak_seeders.max(seeders);
+            let now = tokio::time::Instant::now();
+            if now.duration_since(last_report) >= Duration::from_secs(5) {
+                last_report = now;
+                on_progress(
+                    now.duration_since(start).as_secs(),
+                    peak_connections,
+                    peak_seeders,
+                );
+            }
             match value.get("status").and_then(Value::as_str) {
                 Some("complete") => break Ok(value),
                 Some("error") => {
@@ -553,7 +597,9 @@ impl Endpoint {
                     break Err(message.to_owned());
                 }
                 _ if tokio::time::Instant::now() >= deadline => {
-                    break Err("aria2_metadata_timeout".to_owned());
+                    break Err(format!(
+                        "aria2_metadata_timeout:connections={peak_connections}:seeders={peak_seeders}"
+                    ));
                 }
                 _ => tokio::time::sleep(Duration::from_millis(500)).await,
             }

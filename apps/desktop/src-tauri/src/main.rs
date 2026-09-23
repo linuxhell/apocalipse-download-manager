@@ -9362,7 +9362,18 @@ async fn inspect_torrent_metadata(
         .join("aria2-metadata-inspection")
         .join(uuid::Uuid::new_v4().simple().to_string());
     fs::create_dir_all(&workspace).map_err(|error| error.to_string())?;
-    let metadata = endpoint.preview_magnet_metadata(&source, &workspace).await;
+    let metadata = endpoint
+        .preview_magnet_metadata(&source, &workspace, |elapsed_secs, connections, seeders| {
+            diagnostic_log(
+                &state,
+                "INFO",
+                "aria2.metadata_preview_progress",
+                &format!(
+                    "elapsed={elapsed_secs}s peak_connections={connections} peak_seeders={seeders}"
+                ),
+            );
+        })
+        .await;
     let _ = fs::remove_dir_all(&workspace);
     let metadata = metadata.map_err(|error| {
         diagnostic_log(

@@ -305,7 +305,7 @@ test("torrent/magnet previews prioritize the first and last pieces of every file
 test("resolving a magnet's metadata gets a much longer timeout than an ordinary aria2 RPC call", () => {
   assert.match(aria2, /pub async fn preview_magnet_metadata\(/);
   assert.match(aria2, /"bt-metadata-only"\.into\(\), Value::String\("true"\.into\(\)\)/);
-  assert.match(aria2, /Duration::from_secs\(90\)/);
+  assert.match(aria2, /Duration::from_secs\(150\)/);
   const app = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8");
   assert.match(app, /torrentMetadataTimeout:/);
   assert.ok(app.includes('t("torrentMetadataTimeout")'));
@@ -324,6 +324,24 @@ test("magnet metadata preview uses follow-torrent=mem, not false, so aria2 can a
   const block = aria2.slice(start, end);
   assert.match(block, /"follow-torrent"\.into\(\), Value::String\("mem"\.into\(\)\)/);
   assert.doesNotMatch(block, /"follow-torrent"\.into\(\), Value::String\("false"\.into\(\)\)/);
+});
+
+test("a magnet metadata timeout reports peers/seeders seen so far, and aria2 logs DHT/tracker activity", () => {
+  // Regression: a bare "timeout" told nobody whether aria2 ever reached the
+  // swarm at all (network/firewall blocking outbound BitTorrent) or reached
+  // peers but got stuck resolving metadata (a real bug) - both looked
+  // identical to the user and to us reading a diagnostic bundle.
+  assert.match(aria2, /mut on_progress: impl FnMut\(u64, i64, i64\)/);
+  assert.match(aria2, /"connections"/);
+  assert.match(aria2, /"numSeeders"/);
+  assert.match(aria2, /aria2_metadata_timeout:connections=\{peak_connections\}:seeders=\{peak_seeders\}/);
+  assert.match(aria2, /--log-level=info/);
+  const main = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
+  assert.match(main, /preview_magnet_metadata\(&source, &workspace, \|elapsed_secs, connections, seeders\|/);
+  assert.match(main, /aria2\.metadata_preview_progress/);
+  const app = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8");
+  assert.match(app, /torrentMetadataNoPeers:/);
+  assert.match(app, /connections=0:seeders=0/);
 });
 
 test("a magnet's metadata-only phase is not mistaken for the real content download finishing", () => {
