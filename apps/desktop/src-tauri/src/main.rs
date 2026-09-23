@@ -6829,8 +6829,6 @@ async fn run_aria2_download(
                             item.upload_speed = Some(0);
                             item.state = DownloadState::Completed;
                             item.completed_at = Some(epoch_seconds());
-                            item.download_speed = Some(0);
-                            item.upload_speed = Some(0);
                             item.aria2_gid = None;
                         });
                         maybe_auto_extract_completed(&app, id);
@@ -6851,6 +6849,8 @@ async fn run_aria2_download(
                                     .map(|reason| format!("{engine_tag}:{reason}"))
                                     .unwrap_or_else(|| engine_tag.to_owned()),
                             };
+                            item.download_speed = Some(0);
+                            item.upload_speed = Some(0);
                             item.aria2_gid = None;
                         });
                         if let Ok(mut items) = state.aria2_tasks.lock() {
