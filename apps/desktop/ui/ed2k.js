@@ -11,6 +11,11 @@ const catalogs = {
     ed2kNoResults: "No results yet.", ed2kSearchDownload: "Download",
     ed2kNoServersConfigured: "Add at least one server before connecting.",
     ed2kConnectFailed: "Could not apply the server list",
+    ed2kServerListUrl: "server.met auto-update URL", ed2kSave: "Save", ed2kUpdateNow: "Update now",
+    ed2kServerListUpdating: "Updating…",
+    ed2kServerListUpdated: "server.met updated ({bytes} bytes)",
+    ed2kServerListUpdateFailed: "Could not update server.met: {error}",
+    ed2kServerListSaved: "URL saved.",
   },
   "pt-BR": {
     ed2kConnect: "Conectar", ed2kDisconnect: "Desconectar",
@@ -24,6 +29,11 @@ const catalogs = {
     ed2kNoResults: "Nenhum resultado ainda.", ed2kSearchDownload: "Baixar",
     ed2kNoServersConfigured: "Adicione pelo menos um servidor antes de conectar.",
     ed2kConnectFailed: "Não foi possível aplicar a lista de servidores",
+    ed2kServerListUrl: "URL de atualização automática do server.met", ed2kSave: "Salvar", ed2kUpdateNow: "Atualizar agora",
+    ed2kServerListUpdating: "Atualizando…",
+    ed2kServerListUpdated: "server.met atualizado ({bytes} bytes)",
+    ed2kServerListUpdateFailed: "Não foi possível atualizar o server.met: {error}",
+    ed2kServerListSaved: "URL salva.",
   },
   "zh-CN": {
     ed2kConnect: "连接", ed2kDisconnect: "断开",
@@ -37,11 +47,17 @@ const catalogs = {
     ed2kNoResults: "还没有结果。", ed2kSearchDownload: "下载",
     ed2kNoServersConfigured: "连接前请至少添加一个服务器。",
     ed2kConnectFailed: "无法应用服务器列表",
+    ed2kServerListUrl: "server.met 自动更新地址", ed2kSave: "保存", ed2kUpdateNow: "立即更新",
+    ed2kServerListUpdating: "更新中…",
+    ed2kServerListUpdated: "server.met 已更新（{bytes} 字节）",
+    ed2kServerListUpdateFailed: "无法更新 server.met：{error}",
+    ed2kServerListSaved: "地址已保存。",
   },
 };
 
 let locale = localStorage.getItem("apocalipse.language") || "en";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
+const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
 
 // Must stay in sync with the THEMES list in set_application_theme
 // (main.rs) and the data-theme selectors in styles.css.
@@ -122,6 +138,37 @@ async function renderServers() {
     list.append(row);
   }
 }
+
+async function loadServerListUrl() {
+  const url = await invoke("ed2k_get_server_list_url");
+  document.querySelector("#ed2k-server-list-url").value = url;
+}
+
+document.querySelector("#ed2k-server-list-save").onclick = async () => {
+  const input = document.querySelector("#ed2k-server-list-url");
+  const status = document.querySelector("#ed2k-server-list-status");
+  try {
+    await invoke("ed2k_set_server_list_url", { url: input.value.trim() });
+    status.textContent = t("ed2kServerListSaved");
+  } catch (error) {
+    status.textContent = String(error);
+  }
+};
+
+document.querySelector("#ed2k-server-list-update").onclick = async () => {
+  const button = document.querySelector("#ed2k-server-list-update");
+  const status = document.querySelector("#ed2k-server-list-status");
+  button.disabled = true;
+  status.textContent = t("ed2kServerListUpdating");
+  try {
+    const bytes = await invoke("ed2k_update_server_list");
+    status.textContent = tf("ed2kServerListUpdated", { bytes });
+  } catch (error) {
+    status.textContent = tf("ed2kServerListUpdateFailed", { error: String(error) });
+  } finally {
+    button.disabled = false;
+  }
+};
 
 document.querySelector("#ed2k-server-add").onclick = async () => {
   const host = document.querySelector("#ed2k-server-host");
@@ -304,6 +351,7 @@ window.__TAURI__?.event?.listen?.("theme-changed", (event) => {
 }).catch(console.error);
 
 renderServers().catch(console.error);
+loadServerListUrl().catch(console.error);
 renderDownloads().catch(console.error);
 setInterval(() => renderDownloads().catch(() => {}), 3000);
 invoke("record_ui_diagnostic", { level: "INFO", event: "ed2k_window_opened", detail: "" }).catch(() => {});

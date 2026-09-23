@@ -308,8 +308,10 @@ struct UserSettings {
     n_m3u8dl_re_path: Option<PathBuf>,
     #[serde(default)]
     aria2_path: Option<PathBuf>,
-    #[serde(default)]
+    #[serde(default = "default_ed2k_servers")]
     ed2k_servers: Vec<String>,
+    #[serde(default = "default_ed2k_server_list_url")]
+    ed2k_server_list_url: String,
     #[serde(default)]
     extractor_path: Option<PathBuf>,
     #[serde(default = "default_true")]
@@ -364,6 +366,44 @@ fn default_theme() -> String {
     "void".to_owned()
 }
 
+/// A handful of well-known, publicly-listed eD2K servers (the same kind of
+/// public rendezvous infrastructure a BitTorrent client ships default
+/// trackers/DHT bootstrap nodes for) to connect to immediately. The
+/// authoritative, self-refreshing source is still the downloaded
+/// server.met (see default_ed2k_server_list_url/ed2k_update_server_list):
+/// a server here going offline or changing address is expected and gets
+/// corrected the next time that list updates, exactly like aMule's own
+/// Ed2kServersUrl-driven server.met refresh.
+fn default_ed2k_servers() -> Vec<String> {
+    [
+        "176.123.5.89:4725",
+        "91.208.162.87:4232",
+        "77.42.68.79:4232",
+        "85.17.116.222:6082",
+        "91.208.162.182:4232",
+        "213.141.198.207:4232",
+        "212.95.35.240:4232",
+        "57.131.35.107:4232",
+        "141.227.165.99:4232",
+        "193.187.90.12:4661",
+        "85.121.5.137:4232",
+        "91.208.162.55:4235",
+        "212.95.35.240:4323",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
+/// aMule 3.0.0's own documented default source for its server.met
+/// auto-update (`Ed2kServersUrl` in its config), reused here for the same
+/// purpose: aria2-next's --ed2k-server-list only accepts a local file path
+/// (confirmed against its own docs), so this URL is downloaded to a local
+/// file first and that file's path is what actually gets applied.
+fn default_ed2k_server_list_url() -> String {
+    "https://upd.emule-security.org/server.met".to_owned()
+}
+
 fn tray_labels(language: &str) -> (&'static str, &'static str) {
     match language {
         "pt-BR" => ("Mostrar Apocalipse", "Sair"),
@@ -409,7 +449,8 @@ impl Default for UserSettings {
             qjs_path: None,
             n_m3u8dl_re_path: None,
             aria2_path: None,
-            ed2k_servers: Vec::new(),
+            ed2k_servers: default_ed2k_servers(),
+            ed2k_server_list_url: default_ed2k_server_list_url(),
             extractor_path: None,
             aria2_rpc_enabled: true,
             aria2_rpc_auto_start: true,
@@ -1049,12 +1090,95 @@ fn ed2k_remove_server(state: State<'_, AppState>, server: String) -> Result<Vec<
     Ok(servers)
 }
 
+fn ed2k_server_list_path(state: &AppState) -> PathBuf {
+    state
+        .queue_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("ed2k")
+        .join("server.met")
+}
+
+#[tauri::command]
+fn ed2k_get_server_list_url(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .ed2k_server_list_url
+        .clone())
+}
+
+#[tauri::command]
+fn ed2k_set_server_list_url(state: State<'_, AppState>, url: String) -> Result<(), String> {
+    let url = url.trim();
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err("ed2k_server_list_url_invalid".to_owned());
+    }
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.ed2k_server_list_url = url.to_owned();
+    save_settings(&state, &settings)
+}
+
+/// Downloads server.met from the configured URL (aMule 3.0.0's own
+/// documented default, upd.emule-security.org, mirrors the same idea as
+/// its Ed2kServersUrl auto-update setting) and applies it to the shared
+/// aria2next runtime. aria2-next's --ed2k-server-list only takes a local
+/// file path, so the file is cached under this app's own data directory
+/// and that path is what's actually handed to the engine.
+#[tauri::command]
+async fn ed2k_update_server_list(state: State<'_, AppState>) -> Result<u64, String> {
+    let url = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .ed2k_server_list_url
+        .clone();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let bytes = client
+        .get(&url)
+        .header(reqwest::header::USER_AGENT, "Apocalipse-Download-Manager")
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?
+        .bytes()
+        .await
+        .map_err(|error| error.to_string())?;
+    if bytes.len() < 16 {
+        return Err("ed2k_server_list_payload_too_small".to_owned());
+    }
+    let path = ed2k_server_list_path(&state);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::write(&path, &bytes).map_err(|error| error.to_string())?;
+    let endpoint = aria2_endpoint(&state, true).await?;
+    endpoint.set_ed2k_server_list_file(&path).await?;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "ed2k.server_list_updated",
+        &format!("url={url} bytes={}", bytes.len()),
+    );
+    Ok(bytes.len() as u64)
+}
+
 /// Applies the saved eD2K server list to the shared aria2next runtime (the
 /// same singleton HTTP and BitTorrent downloads already use - this never
 /// spawns a second engine process). aria2-next documents no explicit
 /// connect/disconnect RPC verb for eD2K, only the server configuration
 /// itself, so this is a best-effort "apply and hope a server answers" rather
 /// than a verified connection state; the UI must not claim more than that.
+/// Also refreshes server.met from the configured URL first (matching
+/// aMule's own "update server list at startup" behavior); a failed refresh
+/// falls back to whatever was already cached locally, or to aria2-next's
+/// own built-in bootstrap servers if nothing has ever been cached, instead
+/// of blocking the connect attempt entirely.
 #[tauri::command]
 async fn ed2k_connect(state: State<'_, AppState>) -> Result<(), String> {
     let servers = state
@@ -1063,11 +1187,38 @@ async fn ed2k_connect(state: State<'_, AppState>) -> Result<(), String> {
         .map_err(|error| error.to_string())?
         .ed2k_servers
         .clone();
-    if servers.is_empty() {
-        return Err("ed2k_no_servers_configured".to_owned());
-    }
     let endpoint = aria2_endpoint(&state, true).await?;
-    endpoint.set_ed2k_servers(&servers).await?;
+    if !servers.is_empty() {
+        endpoint.set_ed2k_servers(&servers).await?;
+    }
+    match ed2k_update_server_list(state.clone()).await {
+        Ok(bytes) => diagnostic_log(
+            &state,
+            "INFO",
+            "ed2k.connect_server_list_refreshed",
+            &format!("bytes={bytes}"),
+        ),
+        Err(error) => {
+            let cached = ed2k_server_list_path(&state);
+            if cached.is_file() {
+                let _ = endpoint.set_ed2k_server_list_file(&cached).await;
+            }
+            diagnostic_log(
+                &state,
+                "WARN",
+                "ed2k.connect_server_list_refresh_failed",
+                &format!("error={error} using_cached={}", cached.is_file()),
+            );
+        }
+    }
+    if servers.is_empty() && !ed2k_server_list_path(&state).is_file() {
+        diagnostic_log(
+            &state,
+            "INFO",
+            "ed2k.connect_no_configured_sources",
+            "falling back to aria2-next built-in bootstrap servers",
+        );
+    }
     diagnostic_log(
         &state,
         "INFO",
@@ -13462,6 +13613,9 @@ fn main() {
             ed2k_list_servers,
             ed2k_add_server,
             ed2k_remove_server,
+            ed2k_get_server_list_url,
+            ed2k_set_server_list_url,
+            ed2k_update_server_list,
             ed2k_connect,
             ed2k_disconnect,
             ed2k_search,

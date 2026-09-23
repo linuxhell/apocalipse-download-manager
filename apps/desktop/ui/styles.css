@@ -1537,6 +1537,18 @@ body.ed2k-window .ed2k-search-form input {
 }
 body.ed2k-window .ed2k-server-add input#ed2k-server-host { flex: 1; }
 body.ed2k-window .ed2k-server-add input#ed2k-server-port { width: 100px; }
+body.ed2k-window .ed2k-server-list-source {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+body.ed2k-window .ed2k-server-list-source label {
+  font-size: 12px;
+  color: var(--muted);
+}
+body.ed2k-window .ed2k-server-list-source input#ed2k-server-list-url { flex: 1; }
 body.ed2k-window .ed2k-link-bar input,
 body.ed2k-window .ed2k-server-add input,
 body.ed2k-window .ed2k-search-form input {

@@ -40,6 +40,15 @@
       </section>
 
       <section id="ed2k-panel-servers" class="ed2k-panel" hidden>
+        <div class="ed2k-server-list-source">
+          <label for="ed2k-server-list-url" data-i18n="ed2kServerListUrl">server.met auto-update URL</label>
+          <div class="ed2k-server-add">
+            <input id="ed2k-server-list-url" type="text" />
+            <button id="ed2k-server-list-save" type="button" data-i18n="ed2kSave">Save</button>
+            <button id="ed2k-server-list-update" type="button" class="primary" data-i18n="ed2kUpdateNow">Update now</button>
+          </div>
+          <small id="ed2k-server-list-status" class="ed2k-empty"></small>
+        </div>
         <div class="ed2k-server-add">
           <input id="ed2k-server-host" type="text" placeholder="server.example.org" data-i18n-placeholder="ed2kServerHost" />
           <input id="ed2k-server-port" type="text" placeholder="4661" />

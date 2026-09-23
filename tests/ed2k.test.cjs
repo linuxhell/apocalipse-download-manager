@@ -65,3 +65,30 @@ test("ed2k link download extracts its filename from the pipe-delimited link, not
   assert.match(main, /classify_url\(source\) == Some\(DownloadKind::Ed2k\)/);
   assert.match(main, /source\.split\('\|'\)\.nth\(2\)/);
 });
+
+test("ED2K server list auto-updates from a configurable server.met URL, mirroring aMule's own Ed2kServersUrl default", () => {
+  // aria2-next's --ed2k-server-list only accepts a local file path (its own
+  // docs confirm this, not a remote URL), so the configured URL must be
+  // downloaded to a local file first and that file's path applied via RPC.
+  assert.match(main, /fn default_ed2k_server_list_url\(\) -> String \{\s*\n\s*"https:\/\/upd\.emule-security\.org\/server\.met"\.to_owned\(\)/);
+  assert.match(main, /ed2k_server_list_url: String,/);
+  assert.match(main, /async fn ed2k_update_server_list\(/);
+  assert.match(main, /fs::write\(&path, &bytes\)/);
+  assert.match(aria2, /pub async fn set_ed2k_server_list_file/);
+  assert.match(aria2, /"ed2k-server-list"\.into\(\)/);
+  // Connect refreshes server.met first, matching aMule's "update at
+  // startup" behavior, but falls back to whatever's already cached (or to
+  // aria2-next's own built-in bootstrap servers) instead of hard-failing
+  // when the network fetch itself fails.
+  const connectBlock = main.slice(main.indexOf("async fn ed2k_connect("), main.indexOf("async fn ed2k_disconnect("));
+  assert.match(connectBlock, /ed2k_update_server_list\(state\.clone\(\)\)\.await/);
+  assert.match(connectBlock, /set_ed2k_server_list_file\(&cached\)/);
+  // Backend and UI both expose the URL as editable, not hardcoded only.
+  assert.match(main, /fn ed2k_get_server_list_url/);
+  assert.match(main, /fn ed2k_set_server_list_url/);
+  const ed2kJs = fs.readFileSync(path.join(root, "apps/desktop/ui/ed2k.js"), "utf8");
+  assert.match(ed2kJs, /invoke\("ed2k_get_server_list_url"\)/);
+  assert.match(ed2kJs, /invoke\("ed2k_update_server_list"\)/);
+  const ed2kHtml = fs.readFileSync(path.join(root, "apps/desktop/ui/ed2k.html"), "utf8");
+  assert.match(ed2kHtml, /id="ed2k-server-list-url"/);
+});

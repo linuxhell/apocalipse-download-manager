@@ -818,6 +818,21 @@ impl Endpoint {
             .map(|_| ())
     }
 
+    /// aria2-next's --ed2k-server-list only accepts a local file path (its
+    /// own docs confirm this, not a remote URL), so the caller downloads a
+    /// server.met first (e.g. from aMule's own documented default,
+    /// upd.emule-security.org) and passes the local path here.
+    pub async fn set_ed2k_server_list_file(&self, path: &Path) -> Result<(), String> {
+        let mut options = Map::new();
+        options.insert(
+            "ed2k-server-list".into(),
+            Value::String(path.to_string_lossy().into_owned()),
+        );
+        self.call("aria2.changeGlobalOption", vec![Value::Object(options)])
+            .await
+            .map(|_| ())
+    }
+
     /// Starts an ED2K/eMule keyword search, returning the search task's GID.
     /// Results are read back with `ed2k_search_results`.
     pub async fn ed2k_search(&self, keyword: &str) -> Result<String, String> {
