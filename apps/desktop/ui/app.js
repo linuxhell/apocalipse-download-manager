@@ -60,6 +60,7 @@ const catalogs = {
     cancel: "Cancel",
     analyze: "Analyze",
     torrentMetadataSeeking: "Finding peers and receiving torrent metadata",
+    torrentMetadataTimeout: "No peers responded with metadata for this torrent/magnet in time. Trackers or DHT may be slow or the swarm may have no active seeds. You can try again, or check the link.",
     saveTo: "Save to",
     fileName: "File name",
     queued: "Queued",
@@ -304,6 +305,7 @@ const catalogs = {
     cancel: "Cancelar",
     analyze: "Analisar",
     torrentMetadataSeeking: "Procurando pares e recebendo metadados do torrent",
+    torrentMetadataTimeout: "Nenhum par respondeu com os metadados deste torrent/magnet a tempo. Os trackers ou o DHT podem estar lentos, ou a rede pode não ter seeds ativos no momento. Você pode tentar novamente ou verificar o link.",
     saveTo: "Salvar em",
     fileName: "Nome do arquivo",
     queued: "Na fila",
@@ -547,6 +549,8 @@ const catalogs = {
     sourceUrl: "来源网址",
     cancel: "取消",
     analyze: "分析",
+    torrentMetadataSeeking: "正在查找节点并接收种子元数据",
+    torrentMetadataTimeout: "没有节点及时返回这个种子/磁力链接的元数据。Tracker 或 DHT 可能响应缓慢，或者该网络目前没有活跃的做种者。您可以重试，或检查链接是否正确。",
     saveTo: "保存到",
     fileName: "文件名",
     queued: "已排队",
@@ -2724,7 +2728,8 @@ document.querySelector("#analyze").onclick = async () => {
     document.querySelector("#analyze").hidden = true;
     document.querySelector("#enqueue").hidden = false;
   } catch (error) {
-    box.textContent = String(error);
+    const message = String(error);
+    box.textContent = /timed? ?out|timeout/i.test(message) ? t("torrentMetadataTimeout") : message;
   } finally {
     if (metadataTimer) window.clearInterval(metadataTimer);
     analyzeButton.disabled = false;

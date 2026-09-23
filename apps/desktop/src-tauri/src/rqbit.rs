@@ -273,6 +273,15 @@ impl Endpoint {
                 .collect::<Vec<_>>();
             request = request.query(&pairs);
         }
+        if list_only {
+            // Previewing a magnet's metadata blocks on rqbit finding at
+            // least one peer willing to send it over DHT/trackers, which
+            // can legitimately take much longer than an ordinary local API
+            // call. The client's default timeout (tuned for fast, local
+            // calls like stats/pause/resume) is too short for this one, so
+            // give it more room instead of failing on a slow swarm.
+            request = request.timeout(Duration::from_secs(90));
+        }
         let response = request
             .header("Content-Type", "application/octet-stream")
             .body(body)

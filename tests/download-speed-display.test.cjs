@@ -290,3 +290,12 @@ test("rqbit downloads torrents sequentially so playback can start before the dow
   assert.match(desktop, /"sequentialDownload": true/);
   assert.match(desktop, /streamingEndpoint/);
 });
+
+test("previewing magnet/torrent metadata gets a longer timeout than the client's default", () => {
+  assert.match(rqbit, /\.timeout\(Duration::from_secs\(15\)\)/);
+  assert.match(rqbit, /if list_only \{/);
+  assert.match(rqbit, /request = request\.timeout\(Duration::from_secs\(90\)\);/);
+  const app = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8");
+  assert.match(app, /torrentMetadataTimeout:/);
+  assert.ok(app.includes('t("torrentMetadataTimeout")'));
+});
