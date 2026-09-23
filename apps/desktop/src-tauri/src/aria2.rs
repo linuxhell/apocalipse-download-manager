@@ -838,11 +838,7 @@ impl Endpoint {
         })
     }
 
-    pub async fn set_selected_files(
-        &self,
-        gid: &str,
-        selected: &[usize],
-    ) -> Result<(), String> {
+    pub async fn set_selected_files(&self, gid: &str, selected: &[usize]) -> Result<(), String> {
         if selected.is_empty() {
             return Err("aria2_select_file_required".to_owned());
         }
