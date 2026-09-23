@@ -335,7 +335,7 @@ test("a magnet metadata timeout reports peers/seeders seen so far, and aria2 log
   assert.match(aria2, /mut on_progress: impl FnMut\(u64, i64, i64, i64, i64, Option<&str>\)/);
   assert.match(aria2, /"connections"/);
   assert.match(aria2, /"numSeeders"/);
-  assert.match(aria2, /aria2_metadata_timeout:connections=\{peak_connections\}:seeders=\{peak_seeders\}/);
+  assert.match(aria2, /aria2_metadata_timeout:bt_listen_port=\{\}:connections=\{peak_connections\}:seeders=\{peak_seeders\}/);
   assert.match(aria2, /--log-level=debug/);
   const main = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
   assert.match(main, /preview_magnet_metadata\(\s*\n\s*&source,\s*\n\s*&workspace,/);
@@ -355,7 +355,8 @@ test("magnet metadata preview prefers aria2-next same-GID files and keeps follow
   assert.match(block, /has_bittorrent_info && has_real_files/);
   assert.match(block, /Compatibility fallback for legacy aria2 behavior/);
   assert.match(block, /"followedBy"/);
-  assert.match(block, /removeDownloadResult/);
+  assert.match(block, /cleanup_temporary_magnet_preview/);
+  assert.match(aria2, /"aria2\.removeDownloadResult"/);
   const main = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
   assert.match(main, /aria2\.metadata_preview_followed_unexpectedly/);
 });
