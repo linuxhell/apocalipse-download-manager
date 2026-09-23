@@ -541,15 +541,15 @@ impl Endpoint {
             "dir".into(),
             Value::String(workspace.to_string_lossy().into_owned()),
         );
-        // bt-metadata-only=true leaves tellStatus(files) pointing at aria2's
-        // synthetic [METADATA] object (the .torrent/BEP 9 blob), not at the
-        // files described by the torrent. Let aria2 create its normal content
-        // GID instead, but pause that child immediately so no payload bytes
-        // are downloaded during this preview.
-        options.insert("bt-metadata-only".into(), Value::String("false".into()));
+        // aria2-next deliberately differs from legacy aria2 here. A Magnet
+        // keeps the SAME GID from BEP 9 metadata discovery through file
+        // selection and payload transfer. pause-metadata=true pauses that GID
+        // as soon as the real torrent file list is available, before payload
+        // bytes are requested. Do not send the retired bt-metadata-only alias:
+        // aria2-next normalizes it to pause-metadata, and mixing both contracts
+        // can make the preview wait for a child GID that aria2-next never needs.
         options.insert("bt-save-metadata".into(), Value::String("false".into()));
         options.insert("pause-metadata".into(), Value::String("true".into()));
-        options.insert("follow-torrent".into(), Value::String("mem".into()));
         let gid = self
             .call(
                 "aria2.addUri",
@@ -573,9 +573,10 @@ impl Endpoint {
         ]);
         // Metadata arrives once at least one connected peer answers the BEP
         // 9 exchange. A cold DHT routing table can need time to bootstrap, so
-        // keep the existing 150-second ceiling. Once the metadata GID finishes
-        // it should expose a followedBy content GID; pause-metadata keeps that
-        // content GID from downloading while we read bittorrent/files from it.
+        // keep the existing 150-second ceiling. On aria2-next the same GID
+        // becomes paused with bittorrent.fileSelectionState=awaiting and its
+        // files array already describes the real torrent payload. followedBy
+        // is retained only as a compatibility fallback for older aria2 builds.
         let deadline = tokio::time::Instant::now() + Duration::from_secs(150);
         let start = tokio::time::Instant::now();
         let mut last_report = start;
@@ -625,12 +626,29 @@ impl Endpoint {
                 );
             }
 
+            let file_selection_state = value
+                .get("bittorrent")
+                .and_then(|bt| bt.get("fileSelectionState"))
+                .and_then(Value::as_str);
+            let has_bittorrent_info = value
+                .get("bittorrent")
+                .and_then(|bt| bt.get("info"))
+                .is_some();
+            let has_real_files = value
+                .get("files")
+                .and_then(Value::as_array)
+                .is_some_and(|files| !files.is_empty());
+            if file_selection_state == Some("awaiting") && has_bittorrent_info && has_real_files {
+                break Ok(value);
+            }
+
+            // Compatibility fallback for legacy aria2 behavior. aria2-next
+            // should not need this path because pause-metadata keeps one GID.
             if let Some(next_gid) = followed_by {
                 if followed_content_gid.as_deref() != Some(next_gid) {
                     followed_content_gid = Some(next_gid.to_owned());
                 }
             }
-
             if let Some(content_gid) = followed_content_gid.as_deref() {
                 let content_status = self
                     .call(
@@ -648,15 +666,15 @@ impl Endpoint {
                         ],
                     )
                     .await?;
-                let has_bittorrent_info = content_status
+                let child_has_bittorrent_info = content_status
                     .get("bittorrent")
                     .and_then(|bt| bt.get("info"))
                     .is_some();
-                let has_real_files = content_status
+                let child_has_real_files = content_status
                     .get("files")
                     .and_then(Value::as_array)
                     .is_some_and(|files| !files.is_empty());
-                if has_bittorrent_info && has_real_files {
+                if child_has_bittorrent_info && child_has_real_files {
                     break Ok(content_status);
                 }
                 if matches!(
@@ -673,6 +691,13 @@ impl Endpoint {
             }
 
             match value.get("status").and_then(Value::as_str) {
+                // Some builds expose the completed metadata and real files
+                // without the aria2-next fileSelectionState extension. Accept
+                // that only when bittorrent.info and a non-empty files list
+                // are already present on the same GID.
+                Some("paused" | "complete") if has_bittorrent_info && has_real_files => {
+                    break Ok(value);
+                }
                 Some("complete") => {
                     if metadata_completed_at.is_none() {
                         metadata_completed_at = Some(now);
@@ -682,7 +707,7 @@ impl Endpoint {
                             .as_ref()
                             .is_some_and(|at| now.duration_since(*at) >= Duration::from_secs(5))
                     {
-                        break Err("aria2_metadata_followup_missing".to_owned());
+                        break Err("aria2_metadata_files_missing".to_owned());
                     }
                 }
                 Some("error" | "removed") => {
@@ -703,7 +728,6 @@ impl Endpoint {
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
         };
-
         let _ = self
             .call("aria2.forceRemove", vec![Value::String(gid.clone())])
             .await;
