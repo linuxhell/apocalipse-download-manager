@@ -414,3 +414,23 @@ test("a torrent using WebSeeding (BEP 19) shows its HTTP mirror count alongside 
   assert.match(ui, /webSeedStats/);
   assert.match(ui, /webMirror: "HTTP mirror",/);
 });
+
+test("a new captured request supersedes a stale long analysis and restores Analyze immediately", () => {
+  const app = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8");
+  assert.match(app, /let analysisGeneration = 0/);
+  assert.match(app, /function resetAnalysisForNewRequest\(\)/);
+  assert.match(app, /const analysisIsCurrent = \(generation\) => generation === analysisGeneration/);
+  assert.match(app, /const generation = \+\+analysisGeneration/);
+  assert.match(app, /if \(!current\(\)\) return/);
+  assert.match(app, /resetAnalysisForNewRequest\(\);[\s\S]{0,900}take_bridge_download/);
+});
+
+test("torrent preview size is carried into the task so a short false-100% result is rejected", () => {
+  const app = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8");
+  assert.match(app, /input\.dataset\.torrentSize = Number\(file\.size\) \|\| 0/);
+  assert.match(app, /const torrentExpectedSize = torrentInputs/);
+  assert.match(app, /expectedSize: torrentExpectedSize \|\| pendingExpectedSize/);
+  assert.match(desktop, /aria2\.torrent_expected_size_mismatch/);
+  assert.match(desktop, /status\.total < expected/);
+});
+
