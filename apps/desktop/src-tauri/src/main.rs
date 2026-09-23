@@ -2438,6 +2438,81 @@ async fn download_remote_link_file(
     .map_err(|error| error.to_string())?
 }
 
+/// Fills a queued/paused/failed task's destination directly from a file
+/// already found on a paired Apocalipse Link peer, instead of downloading
+/// it over the internet - useful when the exact file already sits on
+/// another of the user's own machines. This is a plain one-shot copy (no
+/// partial-resume bookkeeping): it always writes the destination from
+/// scratch, matching how a fresh Link download already behaves.
+#[tauri::command]
+async fn use_remote_link_file_for_download(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    task_id: DownloadId,
+    id: String,
+    password: String,
+    path: String,
+    transfer_id: Option<String>,
+) -> Result<(), String> {
+    let destination = {
+        let queue = state.queue.lock().map_err(|error| error.to_string())?;
+        let task = queue
+            .iter()
+            .find(|task| task.id == task_id)
+            .ok_or_else(|| "download_not_found".to_owned())?;
+        if !matches!(
+            task.state,
+            DownloadState::Queued | DownloadState::Paused | DownloadState::Failed { .. }
+        ) {
+            return Err("download_not_resumable".to_owned());
+        }
+        if matches!(
+            classify_url(&task.source),
+            Some(DownloadKind::Torrent | DownloadKind::Magnet)
+        ) {
+            return Err("torrent_relocate_unsupported".to_owned());
+        }
+        task.destination.clone()
+    };
+    let transfer_id = transfer_id.unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
+    let app_for_task = app.clone();
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut reporter = LinkTransferReporter::new(app.clone(), transfer_id, "download", 0);
+        reporter.checkpoint()?;
+        download_link_file_to(&state, &id, &password, &path, &destination, &mut reporter)?;
+        reporter.finish();
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let state = app_for_task.state::<AppState>();
+    let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
+    let task = queue
+        .iter_mut()
+        .find(|task| task.id == task_id)
+        .ok_or_else(|| "download_not_found".to_owned())?;
+    let received = fs::metadata(&task.destination)
+        .map(|metadata| metadata.len())
+        .unwrap_or(task.total.unwrap_or(0));
+    task.state = DownloadState::Completed;
+    task.received = received;
+    task.total = Some(received);
+    task.progress_percent = Some(100.0);
+    task.download_speed = Some(0);
+    task.upload_speed = Some(0);
+    task.completed_at = Some(epoch_seconds());
+    save_queue(&state, &queue)?;
+    drop(queue);
+    diagnostic_log(
+        &state,
+        "INFO",
+        "task.filled_from_link",
+        &format!("task={task_id} bytes={received}"),
+    );
+    Ok(())
+}
+
 fn remote_link_join(parent: &str, child: &str) -> String {
     let separator = if parent.contains('\\') && !parent.contains('/') {
         '\\'
@@ -13058,6 +13133,7 @@ fn main() {
             list_remote_link_files,
             get_remote_link_capabilities,
             download_remote_link_file,
+            use_remote_link_file_for_download,
             upload_remote_link_file,
             delete_local_link_item,
             delete_remote_link_item,

@@ -104,6 +104,9 @@ const catalogs = {
     linkShareNotice: "Share a file, folder or mapped drive here. Windows and Linux SMB shared folders are also discovered automatically.",
     linkRemoteShareNotice: "Only files, folders and drives shared by the other user appear below.",
     linkNoShares: "No shared files, folders or drives yet. Share an item above to make it appear here.",
+    linkUseForDownload: "Use for download",
+    linkUseForDownloadHint: "This matches your paused/failed download “{name}”. Fill it from here instead of downloading over the internet.",
+    linkUseForDownloadCompleted: "“{name}” filled from Apocalipse Link.",
     linkRemoteUsername: "Operating-system username",
     linkRemoteSystemPassword: "System account password",
     linkCredentialsRequired: "Enter the remote IP/host, operating-system username and account password.",
@@ -338,6 +341,9 @@ const catalogs = {
     linkShareNotice: "Compartilhe um arquivo, pasta ou unidade por aqui. Pastas compartilhadas pelo Windows ou Linux via SMB também aparecem automaticamente.",
     linkRemoteShareNotice: "Abaixo aparecem somente arquivos, pastas e unidades compartilhados pelo outro usuário.",
     linkNoShares: "Nenhum arquivo, pasta ou unidade foi compartilhado. Compartilhe um item acima para ele aparecer aqui.",
+    linkUseForDownload: "Usar para download",
+    linkUseForDownloadHint: "Este arquivo corresponde ao seu download pausado/com falha “{name}”. Preencha a partir daqui em vez de baixar pela internet.",
+    linkUseForDownloadCompleted: "“{name}” preenchido pelo Apocalipse Link.",
     linkRemoteUsername: "Usuário do sistema operacional",
     linkRemoteSystemPassword: "Senha da conta do sistema",
     linkCredentialsRequired: "Informe o IP/host remoto, o usuário do sistema operacional e a senha da conta.",
@@ -572,6 +578,9 @@ const catalogs = {
     linkShareNotice: "可在此共享文件、文件夹或映射驱动器；Windows 和 Linux 的 SMB 共享文件夹也会自动显示。",
     linkRemoteShareNotice: "下方仅显示对方用户共享的文件、文件夹和驱动器。",
     linkNoShares: "尚未共享文件、文件夹或驱动器。请先在上方共享项目。",
+    linkUseForDownload: "用于此下载",
+    linkUseForDownloadHint: "此文件与您暂停/失败的下载“{name}”匹配。可从这里直接填充，而不必通过互联网下载。",
+    linkUseForDownloadCompleted: "“{name}”已通过 Apocalipse Link 填充完成。",
     linkRemoteUsername: "操作系统用户名",
     linkRemoteSystemPassword: "系统账户密码",
     linkCredentialsRequired: "请输入远程 IP/主机、操作系统用户名和账户密码。",
@@ -1521,6 +1530,19 @@ let linkLocalAccountSession = false;
 let linkSelectedLocal = null;
 let linkSelectedRemote = null;
 let linkRemoteAllowWrite = false;
+// Lets a remote file listed here stand in for a local paused/failed/queued
+// download with the same file name, so the user can fill it from a paired
+// Link peer instead of waiting on the internet.
+function linkMatchingDownload(fileName) {
+  const lower = String(fileName || "").toLowerCase();
+  if (!lower) return null;
+  return downloads.find((task) => {
+    const key = typeof task.state === "string" ? task.state : Object.keys(task.state || {})[0];
+    if (!["paused", "failed", "queued"].includes(key) || isTorrent(task)) return false;
+    const base = String(task.destination || "").split(/[\\/]/).pop();
+    return base && base.toLowerCase() === lower;
+  }) || null;
+}
 const linkParent = (path) => /^[A-Za-z]:[\\/]?$/.test(path) || /^\/shares\/[^/]+\/?$/.test(path) ? "" : path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
 function linkHost(value) {
   const authority = String(value || "").trim().replace(/^https?:\/\//i, "").split(/[/?#]/)[0];
@@ -1553,7 +1575,7 @@ function disconnectLink() {
   document.querySelector("#link-status").textContent = t("linkDisconnected");
   updateLinkTransferButtons();
 }
-function renderLinkFiles(target, entries, open, select) {
+function renderLinkFiles(target, entries, open, select, matchDownloads = false) {
   const root = document.querySelector(target);
   root.replaceChildren();
   if (!entries.length) {
@@ -1564,9 +1586,10 @@ function renderLinkFiles(target, entries, open, select) {
     return;
   }
   for (const entry of entries) {
-    const row = document.createElement("button");
-    row.type = "button";
+    const row = document.createElement("div");
     row.className = "link-file";
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
     row.append(
       Object.assign(document.createElement("span"), { textContent: entry.directory ? "📁" : "📄" }),
       Object.assign(document.createElement("span"), { textContent: entry.name }),
@@ -1578,6 +1601,43 @@ function renderLinkFiles(target, entries, open, select) {
       row.classList.add("selected");
       select?.(entry);
     };
+    row.onkeydown = (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        row.onclick();
+      }
+    };
+    if (matchDownloads && !entry.directory) {
+      const match = linkMatchingDownload(entry.name);
+      if (match) {
+        const useButton = document.createElement("button");
+        useButton.type = "button";
+        useButton.className = "link-file-use-for-download";
+        useButton.textContent = t("linkUseForDownload");
+        useButton.title = tf("linkUseForDownloadHint", { name: match.display_title || entry.name });
+        useButton.onclick = async (event) => {
+          event.stopPropagation();
+          useButton.disabled = true;
+          const status = document.querySelector("#link-status");
+          status.textContent = t("linkTransferring");
+          try {
+            await invoke("use_remote_link_file_for_download", {
+              taskId: match.id,
+              id: linkRemoteId,
+              password: linkRemoteTransportToken,
+              path: entry.path,
+            });
+            status.textContent = tf("linkUseForDownloadCompleted", { name: match.display_title || entry.name });
+            await refreshDownloads();
+            renderLinkFiles(target, entries, open, select, matchDownloads);
+          } catch (error) {
+            if (`${error}` !== "cancelled") status.textContent = `${t("linkTransferFailed")}: ${error}`;
+            useButton.disabled = false;
+          }
+        };
+        row.append(useButton);
+      }
+    }
     root.append(row);
   }
 }
@@ -1607,7 +1667,7 @@ async function openRemoteLink(path = "") {
   renderLinkFiles("#link-remote-files", entries, openRemoteLink, (entry) => {
     linkSelectedRemote = entry;
     updateLinkTransferButtons();
-  });
+  }, !linkLocalAccountSession);
 }
 async function loadLinkIdentity() {
   const identity = await invoke("get_link_identity");

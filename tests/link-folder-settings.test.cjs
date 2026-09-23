@@ -338,3 +338,24 @@ test("Linux validation covers Debian Fedora Arch and publishes an AppImage", () 
   assert.match(workflow, /apocalipse-download-manager-linux-x64\.AppImage/);
   assert.match(workflow, /ubuntu-22\.04/);
 });
+
+test("a remote Link file matching a paused/failed download can fill it instead of downloading over the internet", () => {
+  const start = rust.indexOf("async fn use_remote_link_file_for_download(");
+  const end = rust.indexOf("\n}", start);
+  assert.ok(start >= 0 && end > start);
+  const block = rust.slice(start, end);
+  assert.match(block, /DownloadState::Queued \| DownloadState::Paused \| DownloadState::Failed \{ \.\. \}/);
+  assert.match(block, /torrent_relocate_unsupported/);
+  assert.match(block, /download_link_file_to\(&state, &id, &password, &path, &destination, &mut reporter\)/);
+  assert.match(block, /task\.state = DownloadState::Completed;/);
+  assert.match(rust, /\n\s*use_remote_link_file_for_download,\s*\n\s*upload_remote_link_file,/);
+  for (const ui of [app, linkJs]) {
+    assert.match(ui, /function linkMatchingDownload\(fileName\)/);
+    assert.match(ui, /invoke\("use_remote_link_file_for_download", \{/);
+    assert.match(ui, /linkUseForDownload: "Use for download",/);
+    // The use-for-download button must not be nested inside another
+    // <button> (invalid HTML that breaks click handling): the row it's
+    // appended to has to be a plain div.
+    assert.match(ui, /const row = document\.createElement\("div"\);\s*\n\s*row\.className = "link-file";/);
+  }
+});

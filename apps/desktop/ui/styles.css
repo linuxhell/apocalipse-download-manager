@@ -929,6 +929,10 @@ footer .bridge-connected i {
 .link-file:hover { background:var(--surface-2); }
 .link-file.selected { background:color-mix(in srgb, var(--accent) 22%, var(--surface-2)); outline:1px solid var(--accent); }
 .link-file small { color:var(--muted); }
+.link-file:has(.link-file-use-for-download) { grid-template-columns:24px minmax(0,1fr) auto auto; }
+.link-file-use-for-download { justify-self:end; padding:4px 10px; font-size:12px; border-radius:6px; border:1px solid var(--accent); color:var(--accent); background:transparent; white-space:nowrap; }
+.link-file-use-for-download:hover { background:var(--accent); color:#fff; }
+.link-file-use-for-download:disabled { opacity:.5; cursor:default; }
 .bandwidth-input { display:grid; grid-template-columns:minmax(90px,1fr) auto auto; align-items:center; gap:8px; }
 .bandwidth-input input { min-width:0; }
 .bandwidth-input small { color:var(--muted); }
