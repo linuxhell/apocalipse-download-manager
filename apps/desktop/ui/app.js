@@ -2591,6 +2591,27 @@ function refreshAutoExtractOption() {
 }
 document.querySelector("#file-name").addEventListener("input", refreshAutoExtractOption);
 document.querySelector("#url").oninput = () => {
+  // Once the user edits the source manually, any browser/extension metadata
+  // belongs to the old URL and must not leak into the replacement request.
+  // In particular this prevents stale expected sizes, cookies, POST bodies,
+  // Referer/User-Agent values and browser-assisted local paths from being
+  // reused for an unrelated direct download.
+  pendingDiagnosticTrace = null;
+  pendingReferer = null;
+  pendingDuration = null;
+  pendingIsLive = false;
+  pendingTitle = null;
+  pendingThumbnail = null;
+  pendingAudioUrl = null;
+  pendingMediaKind = null;
+  pendingExpectedSize = null;
+  pendingCookieHeader = null;
+  pendingUserAgent = null;
+  pendingRequestMethod = null;
+  pendingRequestBody = null;
+  pendingRequestContentType = null;
+  pendingBrowserAssistedPath = null;
+  resetTaskConnections();
   resetAnalysisForNewRequest();
   document.querySelector("#auto-extract").checked = false;
   document.querySelector("#auto-extract-option").hidden = true;
