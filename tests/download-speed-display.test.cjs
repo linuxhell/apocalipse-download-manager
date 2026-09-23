@@ -422,7 +422,10 @@ test("a new captured request supersedes a stale long analysis and restores Analy
   assert.match(app, /const analysisIsCurrent = \(generation\) => generation === analysisGeneration/);
   assert.match(app, /const generation = \+\+analysisGeneration/);
   assert.match(app, /if \(!current\(\)\) return/);
-  assert.match(app, /resetAnalysisForNewRequest\(\);[\s\S]{0,900}take_bridge_download/);
+  const bridgeStart = app.indexOf("async function consumeBridgeDownload()");
+  const bridgeEnd = app.indexOf("setInterval(consumeBridgeDownload", bridgeStart);
+  assert.ok(bridgeStart >= 0 && bridgeEnd > bridgeStart);
+  assert.match(app.slice(bridgeStart, bridgeEnd), /take_bridge_download[\s\S]*resetAnalysisForNewRequest\(\)/);
 });
 
 test("torrent preview size is carried into the task so a short false-100% result is rejected", () => {
