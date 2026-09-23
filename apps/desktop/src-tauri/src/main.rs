@@ -3899,11 +3899,11 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
             ),
         );
     }
-    endpoint.wait_ready().await?;
-    endpoint
-        .set_global_download_limit(settings.global_bandwidth_limit)
-        .await?;
     if runtime_spawned {
+        endpoint.wait_ready().await?;
+        endpoint
+            .set_global_download_limit(settings.global_bandwidth_limit)
+            .await?;
         prune_orphan_aria2_torrents(state, &endpoint, "runtime_start").await?;
     }
     Ok(endpoint)
@@ -6286,9 +6286,10 @@ async fn run_aria2_download(
     kind: DownloadKind,
     mut cancellation: oneshot::Receiver<()>,
 ) {
+    let startup_started_at = Instant::now();
     let state = app.state::<AppState>();
     let is_bittorrent = matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet);
-    update_task(&app, id, true, |item| {
+    update_task(&app, id, false, |item| {
         item.state = DownloadState::Downloading;
         item.progress_percent = Some(0.0);
         item.resume_supported = Some(true);
@@ -6314,6 +6315,15 @@ async fn run_aria2_download(
             return;
         }
     };
+    diagnostic_log(
+        &state,
+        "INFO",
+        "aria2.endpoint_ready",
+        &format!(
+            "task={id} elapsed_ms={}",
+            startup_started_at.elapsed().as_millis()
+        ),
+    );
     let (context, connections, download_limit) = aria2_request_context(&state, &task);
     let bt_proxy = if is_bittorrent {
         let settings = state
@@ -6384,6 +6394,7 @@ async fn run_aria2_download(
         }
         None => {
             let is_http = matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp);
+            let add_uri_started_at = Instant::now();
             let added = if is_bittorrent {
                 // task.destination is what the rest of the app (disk cleanup,
                 // "remove from disk") treats as the torrent's own root
@@ -6457,6 +6468,16 @@ async fn run_aria2_download(
             };
             match added {
                 Ok(gid) => {
+                    diagnostic_log(
+                        &state,
+                        "INFO",
+                        "aria2.add_uri_returned",
+                        &format!(
+                            "task={id} gid={gid} add_ms={} total_startup_ms={}",
+                            add_uri_started_at.elapsed().as_millis(),
+                            startup_started_at.elapsed().as_millis()
+                        ),
+                    );
                     if let Ok(mut items) = state.aria2_tasks.lock() {
                         items.insert(id, gid.clone());
                     }
@@ -6511,7 +6532,7 @@ async fn run_aria2_download(
     );
 
     let mut last_at = Instant::now();
-    let transfer_started_at = Instant::now();
+    let transfer_started_at = startup_started_at;
     let mut last_downloaded = 0_u64;
     let mut first_payload_logged = false;
     let mut workers_2_logged = false;
