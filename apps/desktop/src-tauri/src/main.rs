@@ -7078,7 +7078,10 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
     if let Some(bytes) = read_sanitized_log_tail(&aria2_log, 1024 * 1024) {
         entries.push(("engines/aria2-runtime.log".to_owned(), bytes));
     }
-    let metadata_attempt_log = runtime_root.join("logs").join("engines").join("aria2-metadata-attempt.log");
+    let metadata_attempt_log = runtime_root
+        .join("logs")
+        .join("engines")
+        .join("aria2-metadata-attempt.log");
     if let Some(bytes) = read_sanitized_log_tail(&metadata_attempt_log, 33 * 1024 * 1024) {
         entries.push(("engines/aria2-metadata-attempt.log".to_owned(), bytes));
     }
@@ -9370,7 +9373,12 @@ async fn inspect_torrent_metadata(
     let aria2_log = runtime_root.join("aria2-rpc").join("aria2.log");
     let log_start = fs::metadata(&aria2_log).map(|info| info.len()).unwrap_or(0);
     let attempt_started = Instant::now();
-    diagnostic_log(&state, "INFO", "aria2.metadata_attempt_started", &format!("log_offset={log_start}"));
+    diagnostic_log(
+        &state,
+        "INFO",
+        "aria2.metadata_attempt_started",
+        &format!("log_offset={log_start}"),
+    );
     let metadata = endpoint
         .preview_magnet_metadata(
             &source,
@@ -9405,7 +9413,10 @@ async fn inspect_torrent_metadata(
     // Capture the exact aria2 log interval while the attempt is still recent.
     // Later DHT debug traffic must not evict its BEP 9 handshake from the ZIP.
     let log_end = fs::metadata(&aria2_log).map(|info| info.len()).unwrap_or(0);
-    let snapshot = runtime_root.join("logs").join("engines").join("aria2-metadata-attempt.log");
+    let snapshot = runtime_root
+        .join("logs")
+        .join("engines")
+        .join("aria2-metadata-attempt.log");
     let max_capture = 32 * 1024 * 1024_u64;
     let rotated = log_end < log_start;
     let start = if rotated { 0 } else { log_start };
@@ -9425,7 +9436,11 @@ async fn inspect_torrent_metadata(
                     log_start, log_end, capture_start, rotated, truncated
                 );
                 let body = String::from_utf8_lossy(&raw);
-                let sanitized = body.lines().map(sanitize_log_detail).collect::<Vec<_>>().join("\n");
+                let sanitized = body
+                    .lines()
+                    .map(sanitize_log_detail)
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 if let Some(parent) = snapshot.parent() {
                     let _ = fs::create_dir_all(parent);
                 }
