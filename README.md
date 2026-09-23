@@ -44,6 +44,7 @@ Apocalipse combines fast resumable downloads, media discovery, streaming capture
 - Media discovery for video, audio and images through Chrome, Edge and Firefox extensions
 - Resumable HTTP/HTTPS downloads, HLS capture, yt-dlp, FFmpeg and torrent workflows
 - Native interface and browser extension available in English, Brazilian Portuguese and Simplified Chinese
+- Apocalipse AI: a fully local, offline assistant that reads your logs, explains failures and proposes reversible fixes for your confirmation, fluent in English, Brazilian Portuguese and Simplified Chinese slang and abbreviations
 - Open source, privacy-conscious and built in Rust
 
 ## Version 0.4 highlights
@@ -54,6 +55,7 @@ Apocalipse combines fast resumable downloads, media discovery, streaming capture
 - Authenticated mobile dashboard at `http://YOUR-PC-IP:17655/mobile`
 - Progressive browser recording with later format/codec export
 - Versioned, reviewable per-site compatibility rules
+- Apocalipse AI: local diagnostics assistant that explains what happened, proposes confirmable fixes for known failure patterns and answers in your selected language
 
 ## Planned capabilities
 
@@ -135,6 +137,7 @@ O Apocalipse é um gerenciador de downloads livre para Windows, Linux e macOS. E
 - Pausa, retomada, filas, temas, proxy e DNS personalizado
 - Fila inteligente, pesquisa no histórico, importação de listas, espelhos e verificação SHA-256
 - Agendamento local, conexões adaptativas e painel móvel autenticado em `http://IP-DO-PC:17655/mobile`
+- Apocalipse AI: assistente 100% local e offline que lê os registros, explica falhas e sugere correções reversíveis mediante sua confirmação, entendendo gírias e abreviações em português
 
 Se o Apocalipse for útil para você, [faça uma doação pelo PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL) e ajude a manter o desenvolvimento.
 
@@ -148,6 +151,7 @@ Apocalipse 是一款适用于 Windows、Linux 和 macOS 的自由开源下载管
 - 支持暂停、继续、队列、主题、代理和自定义 DNS
 - 智能优先级队列、历史搜索、网址列表导入、镜像故障转移和 SHA-256 验证
 - 本地时间计划、自适应连接和经过身份验证的移动面板 `http://电脑IP:17655/mobile`
+- Apocalipse AI：完全本地离线的助手，能读取日志、解释故障原因，并在您确认后提出可撤销的修复建议，理解中文常见口语和缩写
 
 如果 Apocalipse 对您有帮助，请[通过 PayPal 捐赠](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL)，支持项目继续开发。
 
