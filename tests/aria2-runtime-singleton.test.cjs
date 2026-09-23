@@ -44,3 +44,22 @@ test('the old upstream aria2 static-build sources are fully gone, replaced by An
   assert.match(main, /AnInsomniacy\/aria2-next/g);
   assert.match(aria2, /aria2-next/);
 });
+
+test('aria2-next persistent state stays inside the ADM portable data directory', () => {
+  assert.match(aria2, /runtime_root\.join\("state"\)/);
+  assert.match(aria2, /--state-dir=\{\}/);
+  assert.match(aria2, /state_dir\.display\(\)/);
+  assert.match(aria2, /--state-save-interval=30/);
+});
+
+test('aria2-next receives global and per-download bandwidth limits, including live changes', () => {
+  assert.match(aria2, /"max-overall-download-limit"\.into\(\)/);
+  assert.match(aria2, /"max-download-limit"\.into\(\)/);
+  assert.match(aria2, /pub async fn set_global_download_limit/);
+  assert.match(aria2, /pub async fn set_download_limit/);
+  assert.match(main, /async fn set_transfer_limits\(/);
+  assert.match(main, /set_global_download_limit\(result\.global_bandwidth_limit\)/);
+  assert.match(main, /async fn set_download_bandwidth_limit\(/);
+  assert.match(main, /endpoint\.set_download_limit\(&gid, limit\)\.await/);
+});
+
