@@ -6357,6 +6357,7 @@ async fn run_aria2_download(
         .lock()
         .ok()
         .and_then(|items| items.get(&id).cloned());
+    let had_existing_task = existing_task.is_some();
     let existing_task = match existing_task {
         Some(gid) => match endpoint.status(&gid).await {
             Ok(status) => Some((gid, status.status)),
@@ -6490,6 +6491,8 @@ async fn run_aria2_download(
             }
         }
     };
+    let mut preview_warmup_pending = is_bittorrent && !had_existing_task;
+    let preview_warmup_bytes = 64_u64 * 1024 * 1024;
     diagnostic_log(
         &state,
         "INFO",
@@ -6528,7 +6531,10 @@ async fn run_aria2_download(
     let mut workers_4_logged = false;
     let mut workers_8_logged = false;
     let mut workers_16_logged = false;
-    let mut interval = tokio::time::interval(Duration::from_millis(350));
+    // Poll faster only during startup so the UI can reflect real payload
+    // almost immediately without keeping the RPC hot for the entire transfer.
+    let mut startup_fast_polling = true;
+    let mut interval = tokio::time::interval(Duration::from_millis(100));
     let mut terminal = false;
     loop {
         tokio::select! {
@@ -6613,6 +6619,27 @@ async fn run_aria2_download(
                     continue;
                 }
 
+                if preview_warmup_pending && status.downloaded >= preview_warmup_bytes {
+                    preview_warmup_pending = false;
+                    match endpoint.set_bittorrent_sequential(&gid, false).await {
+                        Ok(()) => diagnostic_log(
+                            &state,
+                            "INFO",
+                            "torrent.preview_window_ready",
+                            &format!(
+                                "task={id} gid={gid} received={} warmup_bytes={} sequential=false",
+                                status.downloaded, preview_warmup_bytes
+                            ),
+                        ),
+                        Err(error) => diagnostic_log(
+                            &state,
+                            "WARN",
+                            "torrent.preview_warmup_release_failed",
+                            &format!("task={id} gid={gid} error={error}"),
+                        ),
+                    }
+                }
+
                 // Compatibility fallback for legacy aria2-style followedBy
                 // handoffs. aria2-next Magnet downloads should stay on one GID.
                 if let Some(next_gid) = status.followed_by {
@@ -6664,6 +6691,13 @@ async fn run_aria2_download(
                         );
                     }
                 }
+                if startup_fast_polling
+                    && (first_payload_logged
+                        || transfer_started_at.elapsed() >= Duration::from_secs(2))
+                {
+                    startup_fast_polling = false;
+                    interval = tokio::time::interval(Duration::from_millis(350));
+                }
                 let elapsed = now.duration_since(last_at).as_secs_f64().max(0.001);
                 let raw_speed = if status.downloaded >= last_downloaded {
                     ((status.downloaded - last_downloaded) as f64 / elapsed) as u64
@@ -6709,7 +6743,7 @@ async fn run_aria2_download(
                         "progressPercent": percent,
                         "activeConnections": status.connections,
                         "livePeers": status.seeders,
-                        "sampleWindowMs": 350
+                        "sampleWindowMs": (elapsed * 1000.0).round() as u64
                     }),
                 );
                 match status.status.as_str() {
