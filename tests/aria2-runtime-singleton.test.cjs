@@ -80,3 +80,55 @@ test('custom DNS and proxy schemes unsupported by aria2 HTTP route fall back to 
   assert.match(main, /\|\| !aria2_http_network_compatible/);
 });
 
+
+
+test('aria2-next GIDs survive ADM restart and stale restored GIDs fall back to recreation', () => {
+  const model = readFileSync(join(root, 'crates/apocalipse-core/src/model.rs'), 'utf8');
+  assert.match(model, /pub aria2_gid: Option<String>/);
+  assert.match(main, /fn restored_aria2_task_map\(queue: &\[DownloadTask\]\)/);
+  assert.match(main, /aria2_tasks: Mutex::new\(initial_aria2_tasks\)/);
+  assert.match(main, /aria2\.restored_gid_stale/);
+  assert.match(main, /item\.aria2_gid = Some\(gid\.clone\(\)\)/);
+  assert.match(main, /item\.aria2_gid = None/);
+});
+
+test('transient queue states become paused after process restart instead of appearing active without a worker', () => {
+  const start = main.indexOf('fn load_queue(path: &Path)');
+  const end = main.indexOf('\nfn copy_directory_if_missing', start);
+  assert.ok(start >= 0 && end > start);
+  const block = main.slice(start, end);
+  assert.match(block, /DownloadState::Downloading \| DownloadState::Inspecting \| DownloadState::Verifying/);
+  assert.match(block, /task\.state = DownloadState::Paused/);
+  assert.match(block, /task\.download_speed = Some\(0\)/);
+  assert.match(block, /fs::write\(path, data\)/);
+});
+
+test('network runtime restart preserves task to GID mappings for aria2-next session recovery', () => {
+  const start = main.indexOf('fn reconnect_active_downloads_after_network_change');
+  const end = main.indexOf('\nfn run_network_change_monitor', start);
+  assert.ok(start >= 0 && end > start);
+  const block = main.slice(start, end);
+  assert.match(block, /stop_aria2_runtime\(&state\)/);
+  assert.doesNotMatch(block, /aria2_tasks\.clear\(\)/);
+});
+
+test('redownload preserves torrent selection and transfer options while allocating a fresh GID', () => {
+  const start = main.indexOf('fn redownload_downloads(');
+  const end = main.indexOf('\n\#\[tauri::command\]\nfn get_clipboard_monitor', start);
+  assert.ok(start >= 0 && end > start);
+  const block = main.slice(start, end);
+  for (const field of [
+    'torrent_selection',
+    'companion_audio_url',
+    'mirrors',
+    'priority',
+    'bandwidth_limit',
+    'connections_override',
+    'expected_size',
+    'sha256',
+    'auto_extract',
+  ]) {
+    assert.match(block, new RegExp(`task\\.${field} = original\\.${field}`));
+  }
+  assert.doesNotMatch(block, /task\.aria2_gid = original\.aria2_gid/);
+});
