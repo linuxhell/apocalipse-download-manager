@@ -6115,11 +6115,14 @@ async fn run_rqbit_download(
             torrent_id
         }
         None => {
-            let output_folder = task
-                .destination
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf();
+            // task.destination is the folder the rest of the app (disk
+            // cleanup, "remove from disk") treats as the torrent's own
+            // root: it deletes task.destination itself as a directory for
+            // Torrent/Magnet tasks (see download_paths/torrent_root
+            // below). rqbit writes files straight into output_folder with
+            // no auto-generated subfolder of its own, so that must be
+            // task.destination itself, not its parent.
+            let output_folder = task.destination.clone();
             let added = endpoint
                 .add_torrent(&task.source, &output_folder, &task.torrent_selection, false)
                 .await
