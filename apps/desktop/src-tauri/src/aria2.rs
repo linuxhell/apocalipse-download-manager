@@ -28,6 +28,10 @@ pub struct RequestContext {
     pub method: String,
     pub headers: HashMap<String, String>,
     pub body: String,
+    /// aria2-next's HTTP(S)/FTP proxy options accept an HTTP proxy URI.
+    pub proxy_url: Option<String>,
+    pub proxy_username: Option<String>,
+    pub proxy_password: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -344,6 +348,23 @@ impl Endpoint {
         );
         options.insert("continue".into(), Value::String("true".into()));
         options.insert("file-allocation".into(), Value::String("none".into()));
+        if let Some(proxy) = context.proxy_url.as_ref() {
+            options.insert("all-proxy".into(), Value::String(proxy.clone()));
+            if let Some(username) = context
+                .proxy_username
+                .as_ref()
+                .filter(|value| !value.is_empty())
+            {
+                options.insert("all-proxy-user".into(), Value::String(username.clone()));
+            }
+            if let Some(password) = context
+                .proxy_password
+                .as_ref()
+                .filter(|value| !value.is_empty())
+            {
+                options.insert("all-proxy-passwd".into(), Value::String(password.clone()));
+            }
+        }
         if download_limit > 0 {
             options.insert(
                 "max-download-limit".into(),
@@ -551,6 +572,7 @@ impl Endpoint {
         destination_dir: &Path,
         only_files: &[usize],
         download_limit: u64,
+        bt_proxy: Option<&str>,
     ) -> Result<String, String> {
         let mut options = Map::new();
         options.insert(
@@ -564,6 +586,9 @@ impl Endpoint {
                 "max-download-limit".into(),
                 Value::String(download_limit.to_string()),
             );
+        }
+        if let Some(proxy) = bt_proxy {
+            options.insert("bt-proxy".into(), Value::String(proxy.to_owned()));
         }
         // For Magnet links use aria2-next's native metadata transaction:
         // metadata is validated on the same GID, then the GID pauses before
@@ -622,6 +647,7 @@ impl Endpoint {
         &self,
         magnet: &str,
         workspace: &Path,
+        bt_proxy: Option<&str>,
         mut on_progress: impl FnMut(u64, i64, i64, i64, i64, Option<&str>),
     ) -> Result<TorrentMetadata, String> {
         let mut options = Map::new();
@@ -638,6 +664,9 @@ impl Endpoint {
         // can make the preview wait for a child GID that aria2-next never needs.
         options.insert("bt-save-metadata".into(), Value::String("false".into()));
         options.insert("pause-metadata".into(), Value::String("true".into()));
+        if let Some(proxy) = bt_proxy {
+            options.insert("bt-proxy".into(), Value::String(proxy.to_owned()));
+        }
         let gid = self
             .call(
                 "aria2.addUri",
