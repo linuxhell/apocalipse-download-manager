@@ -9491,7 +9491,11 @@ async fn inspect_torrent_metadata(
             metadata.name,
             metadata.files.len(),
             metadata.total_size,
-            metadata.files.iter().map(|file| file.length).collect::<Vec<_>>()
+            metadata
+                .files
+                .iter()
+                .map(|file| file.length)
+                .collect::<Vec<_>>()
         ),
     );
     Ok(TorrentInspection {
