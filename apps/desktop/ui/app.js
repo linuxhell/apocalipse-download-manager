@@ -908,9 +908,10 @@ function updateSpeeds(tasks) {
   }
 }
 
+const isTorrent = (task) => /^(?:magnet:)|\.torrent(?:$|[?#])/i.test(task.source);
+
 function visibleDownloads() {
   const isRecording = (task) => /\.recording\.webm$/i.test(`${task.source} ${task.destination}`);
-  const isTorrent = (task) => /^(?:magnet:)|\.torrent(?:$|[?#])/i.test(task.source);
   let visible = activePage === "recordings"
     ? downloads.filter(isRecording)
     : activePage === "torrents"
