@@ -30,6 +30,8 @@
       socialMissing: "The structured social debugger found {count} visible player(s) without a live overlay on {site}. The latest confirmed reason is “{reason}” for player {player}. This conclusion comes from player-decision telemetry, not a guess.",
       socialSummary: "Social debugger for {site}: {visible} visible player(s), {eligible} eligible, {overlays} overlay(s), {missing} missing, {sponsored} sponsored, {inactive} inactive and {noAction} without a supported action.",
       genericFailure: "The latest related failure was: {detail}",
+      redactedDetail: "a technical detail that contained something sensitive-looking (like a signed URL, token or password), so the diagnostic log redacted it for your safety. It does not change the underlying cause.",
+      clarifyPreviousAnswer: "I mean: {previous}",
       proactiveAlert: "I noticed the download for {site} just failed and found something relevant in the records:",
       rateLimitFixName: "Limit {site} to 1 connection",
       proposedFixPrompt: "Want me to apply this now — {name}? Reply yes to try it, or no to skip.",
@@ -54,6 +56,7 @@
       performanceNeedDiagnostics: "I do not have structured transfer telemetry for this download yet. Enable Advanced diagnostics while reproducing the slow transfer so I can measure connections, mirrors, resume decisions and throughput.",
       performanceNoSamples: "I found transfer-engine decisions, but there are not enough throughput samples yet to measure the slowdown. Keep Advanced diagnostics active during the transfer and ask me again.",
       performanceSingleConnection: "Only one connection was observed. If this server limits each connection, additional safe ranges could improve throughput; the current evidence does not confirm that yet.",
+      performanceLowPeers: "Only {peers} peer(s) are currently connected. A small swarm limits how much a torrent can accelerate, regardless of connection settings.",
       performanceManyConnections: "The engine is already using {connections} connections. Without evidence of unused bandwidth, increasing the count further is not the first change to test.",
       performanceDrop: "Observed throughput fell to about {ratio}% of the recorded peak. This confirms a slowdown occurred, but does not by itself prove server throttling.",
       performanceStable: "The latest sample is close to the recorded peak, so the current telemetry does not show a large throughput collapse.",
@@ -120,6 +123,8 @@
       socialMissing: "O debugger social estruturado encontrou {count} player(s) visível(is) sem overlay ativo no {site}. O motivo confirmado mais recente é “{reason}” no player {player}. Essa conclusão vem da telemetria de decisão do player, não de uma suposição.",
       socialSummary: "Debugger social do {site}: {visible} player(s) visível(is), {eligible} elegível(is), {overlays} overlay(s), {missing} faltando, {sponsored} patrocinado(s), {inactive} inativo(s) e {noAction} sem ação suportada.",
       genericFailure: "A última falha relacionada foi: {detail}",
+      redactedDetail: "um detalhe técnico que continha algo com aparência sensível (como uma URL assinada, token ou senha), então o registro de diagnóstico o ocultou por segurança. Isso não muda a causa real do problema.",
+      clarifyPreviousAnswer: "Quero dizer: {previous}",
       proactiveAlert: "Percebi que o download de {site} acabou de falhar e encontrei algo relevante nos registros:",
       rateLimitFixName: "Limitar {site} a 1 conexão",
       proposedFixPrompt: "Quer que eu aplique agora — {name}? Responda sim para tentar, ou não para pular.",
@@ -144,6 +149,7 @@
       performanceNeedDiagnostics: "Ainda não tenho telemetria estruturada do motor para esse download. Ative o Diagnóstico avançado enquanto reproduz a lentidão para eu medir conexões, mirrors, decisões de retomada e velocidade.",
       performanceNoSamples: "Encontrei decisões do motor, mas ainda não há amostras de velocidade suficientes para medir a lentidão. Mantenha o Diagnóstico avançado ativo durante a transferência e me pergunte novamente.",
       performanceSingleConnection: "Foi observada apenas uma conexão. Se o servidor limitar a velocidade por conexão, faixas adicionais seguras podem aumentar o desempenho; os registros atuais ainda não confirmam isso.",
+      performanceLowPeers: "Apenas {peers} par(es) conectado(s) no momento. Uma rede pequena limita o quanto o torrent consegue acelerar, independente das conexões configuradas.",
       performanceManyConnections: "O motor já está usando {connections} conexões. Sem evidência de banda ociosa, aumentar ainda mais esse número não é a primeira mudança a testar.",
       performanceDrop: "A velocidade observada caiu para cerca de {ratio}% do pico registrado. Isso confirma que houve lentidão, mas sozinho não prova que o servidor aplicou throttling.",
       performanceStable: "A amostra mais recente está próxima do pico registrado, portanto a telemetria atual não mostra uma grande queda de velocidade.",
@@ -210,6 +216,8 @@
       socialMissing: "结构化社交媒体调试器在 {site} 上发现 {count} 个可见播放器没有活动覆盖按钮。最近确认的原因是播放器 {player} 的“{reason}”。这个结论直接来自播放器决策遥测，而不是猜测。",
       socialSummary: "{site} 社交调试摘要：{visible} 个可见播放器，{eligible} 个可处理，{overlays} 个覆盖按钮，{missing} 个缺失，{sponsored} 个赞助内容，{inactive} 个非活动播放器，{noAction} 个没有受支持操作。",
       genericFailure: "最近一次相关故障是：{detail}",
+      redactedDetail: "一个看起来包含敏感信息的技术细节（例如签名链接、令牌或密码），因此诊断日志出于安全考虑将其隐藏了。这不影响问题的真正原因。",
+      clarifyPreviousAnswer: "我的意思是：{previous}",
       proactiveAlert: "我注意到 {site} 的下载刚刚失败了，并在记录中发现了一些相关信息：",
       rateLimitFixName: "将 {site} 限制为 1 个连接",
       proposedFixPrompt: "需要我现在应用吗——{name}？回复“是”尝试，或“否”跳过。",
@@ -233,6 +241,7 @@
       performanceNeedDiagnostics: "目前还没有这个下载的结构化传输遥测。请在重现下载缓慢时开启“高级诊断”，这样我才能测量连接数、镜像、续传决策和吞吐量。",
       performanceNoSamples: "我找到了传输引擎的决策记录，但还没有足够的速度样本来衡量降速。请在传输期间保持“高级诊断”开启，然后再让我分析。",
       performanceSingleConnection: "目前只观察到一个连接。如果服务器按单连接限速，增加安全的分段连接可能提高速度；现有证据还不能确认这一点。",
+      performanceLowPeers: "目前只连接到 {peers} 个节点。种子网络较小会限制加速效果，无论连接数设置如何。",
       performanceManyConnections: "引擎已经在使用 {connections} 个连接。在没有发现带宽未被利用的证据前，不应首先继续增加连接数。",
       performanceDrop: "观察到的速度已降至本次记录峰值的大约 {ratio}%。这能确认发生了降速，但仅凭这一点不能证明服务器进行了限速。",
       performanceStable: "最新速度样本接近本次记录峰值，因此当前遥测没有显示明显的吞吐量崩塌。",
@@ -320,7 +329,11 @@
     .replace(/咋/g, "怎么")
     .replace(/啥/g, "什么")
     .replace(/\s+/g, " ").trim();
-  const safeDetail = value => detailText(value).replace(/([?&](?:token|sig|key|auth|password|cookie)=[^\s&]+)/gi, " [protected]").slice(0, 360);
+  const safeDetail = (value, locale) => {
+    const text = detailText(value);
+    if (text.includes("<redacted-sensitive-line>")) return say(locale, "redactedDetail");
+    return text.replace(/([?&](?:token|sig|key|auth|password|cookie)=[^\s&]+)/gi, " [protected]").slice(0, 360);
+  };
   const detailText = value => typeof value === "string" ? value : value && typeof value === "object" ? JSON.stringify(value) : String(value || "");
   const eventText = event => fold(`${event?.event || ""} ${detailText(event?.detail)} ${event?.raw || ""} ${event?.source || ""}`);
 
@@ -388,6 +401,20 @@
     return subject ? `${q} ${subject}` : q;
   }
 
+  // A short "what is that?" with nothing else asks the assistant to expand
+  // on ITS OWN last message, not to start a brand-new diagnosis. Left
+  // unhandled, this fell through to diagnose(), which only ever looks at
+  // the user's earlier questions (previousSubject), so it could land on a
+  // completely unrelated topic instead of clarifying what was just said.
+  const pureClarificationFollowup = /^(?:e |and )?(?:o que e isso|o que e isto|isso e o que|isto e o que|que e isso|what(?:'?s| is| was) (?:that|this|it)|这是什么|那是什么|是什么意思)\??$/;
+
+  function clarifyPreviousAnswer(question, messages, locale) {
+    if (!pureClarificationFollowup.test(normalizeQuestion(question))) return null;
+    const lastAssistant = [...(messages || [])].reverse().find(message => message.role === "assistant");
+    if (!lastAssistant?.text) return null;
+    return say(locale, "clarifyPreviousAnswer", { previous: lastAssistant.text });
+  }
+
   function formatRate(bytesPerSecond) {
     const value = Number(bytesPerSecond || 0);
     if (!Number.isFinite(value) || value <= 0) return "0 MB/s";
@@ -395,34 +422,40 @@
     return `${mib >= 100 ? mib.toFixed(0) : mib.toFixed(1)} MB/s`;
   }
 
-  function performanceDiagnosis(context, locale) {
+  function performanceDiagnosis(context, locale, taskId) {
     const events = parseEvents(context.engineEvents || [])
-      .filter(event => /^http\.(?:engine_|performance_|segment_|resume_|transfer_|transport_|range_|remote_|integrity_)/.test(String(event?.event || "")));
+      .filter(event => /^(?:http|torrent)\.(?:engine_|performance_|segment_|resume_|transfer_|transport_|range_|remote_|integrity_)/.test(String(event?.event || "")))
+      .filter(event => !taskId || event?.taskId === taskId);
     if (!events.length) return say(locale, "performanceNeedDiagnostics");
 
-    const samples = events.filter(event => event.event === "http.performance_sample"
+    const samples = events.filter(event => (event.event === "http.performance_sample" || event.event === "torrent.performance_sample")
       && Number(event?.detail?.bytesPerSecond) >= 0);
     if (!samples.length) return say(locale, "performanceNoSamples");
 
+    const isBittorrent = samples.at(-1)?.event === "torrent.performance_sample";
     const latest = samples.at(-1);
     const current = Number(latest.detail.bytesPerSecond || 0);
     const peak = Math.max(...samples.map(event => Number(event.detail.bytesPerSecond || 0)));
     const plan = [...events].reverse().find(event => event.event === "http.engine_plan"
-      || event.event === "http.transfer_started");
+      || event.event === "http.transfer_started" || event.event === "torrent.engine_selected");
     const segments = events.filter(event => event.event === "http.segment_completed");
     const latestSegment = segments.at(-1);
     const connections = Number(latest?.detail?.activeConnections
-      || plan?.detail?.activeConnections || 1);
+      || plan?.detail?.activeConnections || plan?.detail?.connections || 1);
     const sources = Number(plan?.detail?.sourceCount
       || latestSegment?.detail?.sourceCount || 1);
-    const protocol = String(latestSegment?.detail?.transport || say(locale, "performanceProtocolUnknown"));
+    const protocol = String(latestSegment?.detail?.transport
+      || (isBittorrent ? "BitTorrent" : say(locale, "performanceProtocolUnknown")));
     const ratio = peak > 0 ? Math.round((current / peak) * 100) : 100;
 
     const findings = [];
     findings.push(ratio < 70
       ? say(locale, "performanceDrop", { ratio })
       : say(locale, "performanceStable"));
-    if (connections <= 1) findings.push(say(locale, "performanceSingleConnection"));
+    if (isBittorrent) {
+      const peers = Number(latest?.detail?.livePeers || 0);
+      if (peers <= 2) findings.push(say(locale, "performanceLowPeers", { peers }));
+    } else if (connections <= 1) findings.push(say(locale, "performanceSingleConnection"));
     else if (connections >= 16) findings.push(say(locale, "performanceManyConnections", { connections }));
 
     const mirrorFallbacks = segments.filter(event => Number(event?.detail?.attempts || 1) > 1).length;
@@ -519,7 +552,7 @@
     return say(locale, "domainEvidence", {
       domain: domain.name,
       event: latest?.event || "unknown",
-      detail: safeDetail(latest?.detail || latest?.raw || latest?.event || "unknown"),
+      detail: safeDetail(latest?.detail || latest?.raw || latest?.event || "unknown", locale),
     });
   }
 
@@ -579,12 +612,12 @@
     if (site && /(?:log|registro|diagnost|record|日志|诊断)/.test(q)) {
       const latest = scoped.at(-1);
       return latest
-        ? say(locale, "siteLogFound", { site, count: scoped.length, detail: safeDetail(latest.detail || latest.raw || latest.event) })
+        ? say(locale, "siteLogFound", { site, count: scoped.length, detail: safeDetail(latest.detail || latest.raw || latest.event, locale) })
         : say(locale, "siteLogEmpty", { site });
     }
     if (/(como (?:esta|estao).*(?:log|registro)|(?:log|registro).*(?:erro|falha|estado)|log status|errors? in (?:the )?logs?|日志.*(?:错误|状态)|(?:错误|状态).*日志)/.test(q)) {
       return failures.length
-        ? say(locale, "errors", { count: failures.length, detail: safeDetail(failures.at(-1)?.detail || failures.at(-1)?.raw || failures.at(-1)?.event) })
+        ? say(locale, "errors", { count: failures.length, detail: safeDetail(failures.at(-1)?.detail || failures.at(-1)?.raw || failures.at(-1)?.event, locale) })
         : say(locale, "noErrors");
     }
 
@@ -598,7 +631,7 @@
       const count = key => tasks.filter(task => stateKey(task).includes(key)).length;
       const summary = say(locale, "taskSummary", { total: tasks.length, active: count("download"), paused: count("paus"), failed: count("fail") || count("falh"), completed: count("complete") || count("conclu") });
       const errLine = failures.length
-        ? say(locale, "genericFailure", { detail: safeDetail(failures.at(-1)?.detail || failures.at(-1)?.raw || failures.at(-1)?.event) })
+        ? say(locale, "genericFailure", { detail: safeDetail(failures.at(-1)?.detail || failures.at(-1)?.raw || failures.at(-1)?.event, locale) })
         : say(locale, "noErrors");
       return `${say(locale, "statusReportIntro")} ${summary} ${errLine}`;
     }
@@ -638,7 +671,7 @@
     if (/(agend|hor[aá]rio.*download|schedule|scheduled download|计划|定时|定时下载)/.test(q)) return say(locale, "schedulerHelp");
     if (/(tema|cor da interface|apar[eê]ncia|theme|color scheme|appearance|主题|外观|界面颜色)/.test(q)) return say(locale, "themesHelp");
     if (/(privacidade|dados pessoais|privacy|personal data|modelo externo|external model|隐私|个人数据|外部模型)/.test(q)) return say(locale, "privacyHelp");
-    if (failures.length) return say(locale, "genericFailure", { detail: safeDetail(failures.at(-1)?.detail || failures.at(-1)?.raw || failures.at(-1)?.event) });
+    if (failures.length) return say(locale, "genericFailure", { detail: safeDetail(failures.at(-1)?.detail || failures.at(-1)?.raw || failures.at(-1)?.event, locale) });
     if (/(bug|erro|falha|error|issue|glitch|falh|problem|trouble|问题|错误|故障)/.test(q)) return say(locale, scoped.length ? "noErrors" : "noEvidence");
     return null;
   }
@@ -793,11 +826,14 @@
     if (/(nao funcion|falhou|deu (?:erro|problema)|parou de funcionar|quebrou|did not work|didn't work|not working|failed|broke|broken|problem|没有用|不管用|失败|坏了|问题)/.test(q) && !/(download|baix|visuali|preview|gravar|record|torrent|ed2k|link|下载|预览|录制)/.test(q) && !previousSubject(context.messages)) {
       return { text: say(locale, "clarifyAction"), intent: "clarification", confidence: 0.4 };
     }
+    const clarification = clarifyPreviousAnswer(input, context.messages, locale);
+    if (clarification) return { text: clarification, intent: "clarification_repeat" };
+
     const diagnosis = diagnose(input, context, locale);
     return diagnosis
       ? { text: diagnosis, prelude: say(locale, "analyzing"), intent: "diagnosis" }
       : { text: say(locale, "offTopic"), intent: "unknown" };
   }
 
-  return { contextualQuestion, copy, debuggerDomainDiagnosis, diagnose, findRelevantConfirmedCorrection, fold, formatRate, localeOf, normalizeQuestion, parseCorrectionTeachCommand, parseCredentialCommand, parseEvents, performanceDiagnosis, previousSubject, proactiveFailureDiagnosis, redactCredentialCommand, respond, say, siteFrom, socialDiagnosis };
+  return { clarifyPreviousAnswer, contextualQuestion, copy, debuggerDomainDiagnosis, diagnose, findRelevantConfirmedCorrection, fold, formatRate, localeOf, normalizeQuestion, parseCorrectionTeachCommand, parseCredentialCommand, parseEvents, performanceDiagnosis, previousSubject, proactiveFailureDiagnosis, redactCredentialCommand, respond, say, siteFrom, socialDiagnosis };
 });

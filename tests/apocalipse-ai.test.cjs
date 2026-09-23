@@ -605,3 +605,41 @@ test('a broad status request reports task counts and recent errors in the select
     assert.match(answer, new RegExp(marker));
   }
 });
+
+test('performanceDiagnosis is scoped per task and understands aria2-routed BitTorrent telemetry', () => {
+  const engineEvents = [
+    { taskId: 't1', event: 'http.performance_sample', detail: { bytesPerSecond: 110 * 1024 * 1024, activeConnections: 1 } },
+    { taskId: 't1', event: 'http.performance_sample', detail: { bytesPerSecond: 55 * 1024 * 1024, activeConnections: 1 } },
+    { taskId: 't2', event: 'torrent.performance_sample', detail: { bytesPerSecond: 2 * 1024 * 1024, activeConnections: 2, livePeers: 1 } },
+  ];
+  const http = AI.performanceDiagnosis({ engineEvents }, 'pt-BR', 't1');
+  assert.match(http, /apenas uma conexão/i);
+  assert.doesNotMatch(http, /par\(es\) conectado/i);
+  const bt = AI.performanceDiagnosis({ engineEvents }, 'pt-BR', 't2');
+  assert.match(bt, /par\(es\) conectado/i);
+  assert.match(bt, /BitTorrent/);
+  assert.doesNotMatch(bt, /apenas uma conexão/i);
+});
+
+test('a question about the assistant\'s own last answer re-explains it instead of drifting to an unrelated diagnosis', () => {
+  const events = JSON.stringify({ level: 'ERROR', event: 'http.failed', detail: 'url=https://example.test/dl?token=SECRET&x=1 failed' });
+  const first = AI.respond('por que meu download falhou?', { locale: 'pt-BR', events });
+  assert.doesNotMatch(first.text, /SECRET/);
+  const messages = [
+    { role: 'user', text: 'por que meu download falhou?' },
+    { role: 'assistant', text: first.text },
+  ];
+  for (const question of ['e o que é isso?', 'o que é isso?', 'isso é o que?']) {
+    const follow = AI.respond(question, { locale: 'pt-BR', events, messages });
+    assert.equal(follow.intent, 'clarification_repeat');
+    assert.match(follow.text, /Quero dizer:/);
+    assert.match(follow.text, /última falha relacionada foi/);
+  }
+});
+
+test('a redacted log placeholder is explained in plain language instead of echoed verbatim', () => {
+  const events = JSON.stringify({ level: 'ERROR', event: 'http.failed', detail: '<redacted-sensitive-line>' });
+  const answer = AI.respond('por que meu download falhou?', { locale: 'pt-BR', events }).text;
+  assert.doesNotMatch(answer, /<redacted-sensitive-line>/);
+  assert.match(answer, /detalhe técnico/);
+});

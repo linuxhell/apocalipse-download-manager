@@ -40,6 +40,7 @@ const catalogs = {
     addDownload: "Add download",
     downloadSpeed: "DOWNLOAD SPEED",
     uploadSpeed: "UPLOAD SPEED",
+    whySlow: "Why is this slow?",
     completed: "COMPLETED",
     queue: "IN QUEUE",
     all: "All",
@@ -270,6 +271,7 @@ const catalogs = {
     addDownload: "Adicionar download",
     downloadSpeed: "VELOCIDADE DE DOWNLOAD",
     uploadSpeed: "VELOCIDADE DE ENVIO",
+    whySlow: "Por que está lento?",
     completed: "CONCLUÍDOS",
     queue: "NA FILA",
     all: "Todos",
@@ -500,6 +502,7 @@ const catalogs = {
     addDownload: "添加下载",
     downloadSpeed: "下载速度",
     uploadSpeed: "上传速度",
+    whySlow: "为什么这么慢？",
     completed: "已完成",
     queue: "队列中",
     all: "全部",
@@ -1098,6 +1101,31 @@ function renderDownloads(force = false) {
         : `${progressText}${torrentStats}`;
     progress.append(bar);
     info.append(progress, details);
+    if (task.state === "downloading") {
+      const whySlowLink = document.createElement("a");
+      whySlowLink.href = "#";
+      whySlowLink.className = "why-slow-link";
+      whySlowLink.textContent = t("whySlow");
+      const explanation = document.createElement("small");
+      explanation.className = "why-slow-explanation";
+      explanation.hidden = true;
+      whySlowLink.onclick = async (event) => {
+        event.preventDefault();
+        if (!explanation.hidden) {
+          explanation.hidden = true;
+          return;
+        }
+        explanation.hidden = false;
+        explanation.textContent = "…";
+        try {
+          const engineEvents = await invoke("read_ai_diagnostics");
+          explanation.textContent = window.ApocalipseAI.performanceDiagnosis({ engineEvents }, locale, task.id);
+        } catch (error) {
+          explanation.textContent = String(error);
+        }
+      };
+      info.append(whySlowLink, explanation);
+    }
     const resumeCapability = document.createElement("strong");
     resumeCapability.className = "resume-capability";
     const resumeValue = task.resume_supported === true
