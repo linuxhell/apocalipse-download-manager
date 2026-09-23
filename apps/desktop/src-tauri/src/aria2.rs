@@ -444,13 +444,9 @@ impl Endpoint {
             seeders: value
                 .get("numSeeders")
                 .map(|_| number(value.get("numSeeders"))),
-            // A magnet link is added as a metadata-only download first (BEP
-            // 9); once its small metadata blob finishes, aria2 (with
-            // follow-torrent=true, set globally in Runtime::spawn)
-            // automatically starts the REAL content download under a new
-            // GID, reachable only through this field. The caller must
-            // switch to tracking that GID instead of treating the metadata
-            // phase's "complete" status as the download being done.
+            // aria2-next normally keeps Magnet metadata and payload on
+            // the same GID. followedBy is retained only for compatibility
+            // with older aria2-style handoffs or downloaded .torrent flows.
             followed_by: value
                 .get("followedBy")
                 .and_then(Value::as_array)
