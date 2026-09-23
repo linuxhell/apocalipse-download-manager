@@ -335,7 +335,7 @@ test("a magnet metadata timeout reports peers/seeders seen so far, and aria2 log
   assert.match(aria2, /"connections"/);
   assert.match(aria2, /"numSeeders"/);
   assert.match(aria2, /aria2_metadata_timeout:connections=\{peak_connections\}:seeders=\{peak_seeders\}/);
-  assert.match(aria2, /--log-level=info/);
+  assert.match(aria2, /--log-level=debug/);
   const main = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
   assert.match(main, /preview_magnet_metadata\(\s*\n\s*&source,\s*\n\s*&workspace,/);
   assert.match(main, /aria2\.metadata_preview_progress/);

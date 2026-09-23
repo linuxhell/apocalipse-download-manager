@@ -150,13 +150,20 @@ impl Runtime {
             .arg("--max-concurrent-downloads=20")
             .arg("--summary-interval=0")
             .arg("--console-log-level=warn")
-            // "info" (rather than the default "notice") makes aria2 write
-            // DHT bootstrap and tracker/peer activity into aria2.log, which
-            // is otherwise the only way to tell "no peers reachable at all"
-            // (network/firewall) apart from "peers connected but a specific
-            // exchange is stuck" (an aria2/config bug) when a magnet's
-            // metadata never resolves.
-            .arg("--log-level=info")
+            // "debug" (rather than "notice") makes aria2 write DHT
+            // bootstrap, tracker/peer activity, and per-peer BitTorrent
+            // wire-protocol events (extended handshake, ut_metadata piece
+            // requests/responses) into aria2.log. A user's diagnostic
+            // bundle proved "info" wasn't enough: it showed 40 peer
+            // connections and a known metadata size (via the ut_metadata
+            // handshake) but zero metadata bytes ever received across two
+            // full 150s attempts - a stall inside the piece exchange itself
+            // that "info"-level logging can't explain. This is the only way
+            // to tell "no peers reachable" (network/firewall), "a
+            // config/state bug on our side" (e.g. followed into a real
+            // download), and "peers connected but none actually serve the
+            // metadata piece" (a dead/poisoned swarm) apart from each other.
+            .arg("--log-level=debug")
             .arg(format!("--log={}", log.display()))
             .arg("--download-result=hide")
             .arg(format!("--input-file={}", session.display()))
