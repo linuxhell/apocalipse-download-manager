@@ -507,3 +507,29 @@ test("duplicate direct-download handoffs do not reopen and reset the save dialog
   assert.ok(duplicate >= 0 && pending > duplicate);
 });
 
+
+
+test('live speed display uses each engine as the source of truth', () => {
+  const main = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
+  const ariaStart = main.indexOf("async fn run_aria2_download(");
+  const ariaEnd = main.indexOf("\nasync fn run_external_download(", ariaStart);
+  assert.ok(ariaStart >= 0 && ariaEnd > ariaStart);
+  const ariaBlock = main.slice(ariaStart, ariaEnd);
+  assert.match(ariaBlock, /item\.download_speed = Some\(status\.speed\)/);
+  assert.doesNotMatch(ariaBlock, /status\.speed\.max\(raw_speed\)/);
+  assert.match(ariaBlock, /"speedSource": "aria2-next"/);
+
+  const nativeStart = main.indexOf("async fn run_download(");
+  const nativeEnd = main.indexOf("\nasync fn download_with_mirrors(", nativeStart);
+  assert.ok(nativeStart >= 0 && nativeEnd > nativeStart);
+  const nativeBlock = main.slice(nativeStart, nativeEnd);
+  assert.match(nativeBlock, /Duration::from_millis\(350\)/);
+  assert.match(nativeBlock, /task\.download_speed = Some\(bytes_per_second\)/);
+  assert.doesNotMatch(nativeBlock, /display_rate_ewma/);
+
+  assert.match(main, /--progress-delta"[\s\S]{0,80}"0\.5"/);
+  assert.match(main, /fn parse_external_download_speed\(/);
+  assert.match(main, /strip_suffix\("MBps"\)/);
+  assert.match(main, /strip_suffix\("KBps"\)/);
+  assert.match(main, /task\.download_speed = Some\(speed\)/);
+});
