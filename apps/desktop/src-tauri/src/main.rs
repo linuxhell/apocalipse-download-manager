@@ -1165,16 +1165,33 @@ fn validate_ed2k_server_met(bytes: &[u8]) -> Result<u32, String> {
 
 #[tauri::command]
 async fn ed2k_update_server_list(state: State<'_, AppState>) -> Result<u64, String> {
-    let url = state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .ed2k_server_list_url
-        .clone();
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|error| error.to_string())?;
+    let (url, proxy_url, proxy_username, proxy_password, dns_servers) = {
+        let settings = state.settings.lock().map_err(|error| error.to_string())?;
+        (
+            settings.ed2k_server_list_url.clone(),
+            settings
+                .proxy_enabled
+                .then(|| settings.proxy_url.clone())
+                .flatten(),
+            settings.proxy_username.clone(),
+            settings.proxy_password.clone(),
+            if settings.dns_enabled {
+                settings.dns_servers.clone()
+            } else {
+                Vec::new()
+            },
+        )
+    };
+    let client = DownloadEngine::network_client_builder(
+        proxy_url.as_deref(),
+        proxy_username.as_deref(),
+        proxy_password.as_deref(),
+        &dns_servers,
+    )
+    .map_err(|error| error.to_string())?
+    .timeout(Duration::from_secs(20))
+    .build()
+    .map_err(|error| error.to_string())?;
     let bytes = client
         .get(&url)
         .header(reqwest::header::USER_AGENT, "Apocalipse-Download-Manager")
