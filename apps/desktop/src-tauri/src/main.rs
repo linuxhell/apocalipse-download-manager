@@ -6032,6 +6032,27 @@ async fn run_aria2_download(
                 );
                 match status.status.as_str() {
                     "complete" => {
+                        if is_bittorrent && status.selected_file_bytes > status.total {
+                            diagnostic_log(
+                                &state,
+                                "ERROR",
+                                "aria2.torrent_size_mismatch",
+                                &format!(
+                                    "task={id} gid={gid} reported_total={} selected_file_bytes={}",
+                                    status.total, status.selected_file_bytes
+                                ),
+                            );
+                            update_task(&app, id, true, |item| {
+                                item.state = DownloadState::Failed {
+                                    message: "aria2_torrent_size_mismatch".to_owned(),
+                                };
+                            });
+                            if let Ok(mut items) = state.aria2_tasks.lock() {
+                                items.remove(&id);
+                            }
+                            terminal = true;
+                            break;
+                        }
                         update_task(&app, id, true, |item| {
                             item.received = status.total.max(status.downloaded);
                             item.total = Some(status.total.max(status.downloaded));
@@ -9465,7 +9486,13 @@ async fn inspect_torrent_metadata(
         &state,
         "INFO",
         "aria2.metadata_previewed",
-        &format!("name={} files={}", metadata.name, metadata.files.len()),
+        &format!(
+            "name={} files={} total_size={} file_lengths={:?}",
+            metadata.name,
+            metadata.files.len(),
+            metadata.total_size,
+            metadata.files.iter().map(|file| file.length).collect::<Vec<_>>()
+        ),
     );
     Ok(TorrentInspection {
         name: metadata.name,
