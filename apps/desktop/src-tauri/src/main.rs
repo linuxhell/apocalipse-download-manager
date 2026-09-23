@@ -10177,10 +10177,7 @@ async fn inspect_torrent_metadata(
     })
 }
 
-async fn fetch_torrent_file_bytes(
-    state: &AppState,
-    source: &str,
-) -> Result<Vec<u8>, String> {
+async fn fetch_torrent_file_bytes(state: &AppState, source: &str) -> Result<Vec<u8>, String> {
     let (proxy_url, proxy_username, proxy_password, dns_servers) = state
         .settings
         .lock()
@@ -10764,8 +10761,8 @@ fn start_download(
                         .as_deref()
                         .is_some_and(|body| !body.is_empty())
             });
-    let aria2_http_network_compatible = !limits.dns_enabled
-        && (!limits.proxy_enabled || aria2_http_proxy_url(&limits).is_some());
+    let aria2_http_network_compatible =
+        !limits.dns_enabled && (!limits.proxy_enabled || aria2_http_proxy_url(&limits).is_some());
     let native_http_compatibility = kind == DownloadKind::Http
         && (requires_native_http_compatibility(&task.source)
             || special_http_request
