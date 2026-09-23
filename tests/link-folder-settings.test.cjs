@@ -239,7 +239,10 @@ test("About page is localized, sits immediately below PayPal and keeps the main 
   assert.match(app, /aboutAudio\.pause\(\)/);
   assert.match(app, /aboutAudio\.currentTime = 0/);
   assert.match(app, /aboutAudio\.play\(\)/);
+  assert.match(app, /invoke\("get_about_background"\)/);
+  assert.match(app, /document\.querySelector\("\.about-scene"\)\.style\.backgroundImage/);
   assert.match(app, /invoke\("get_about_media"\)/);
+  assert.match(rust, /fn get_about_background\(\) -> String/);
   assert.doesNotMatch(app, /invoke\("select_about_photo"\)/);
   assert.doesNotMatch(app, /invoke\("select_about_audio"\)/);
   assert.match(rust, /fn about_media_snapshot/);
