@@ -429,6 +429,36 @@ test("a new captured request supersedes a stale long analysis and restores Analy
   assert.match(app.slice(bridgeStart, bridgeEnd), /take_bridge_download[\s\S]*resetAnalysisForNewRequest\(\)/);
 });
 
+test("manual URL editing clears captured request metadata before a new analysis", () => {
+  const start = app.indexOf('document.querySelector("#url").oninput = () => {');
+  const end = app.indexOf("\n};", start);
+  assert.ok(start >= 0 && end > start);
+  const block = app.slice(start, end);
+  for (const field of [
+    "pendingDiagnosticTrace",
+    "pendingReferer",
+    "pendingDuration",
+    "pendingTitle",
+    "pendingThumbnail",
+    "pendingAudioUrl",
+    "pendingMediaKind",
+    "pendingExpectedSize",
+    "pendingCookieHeader",
+    "pendingUserAgent",
+    "pendingRequestMethod",
+    "pendingRequestBody",
+    "pendingRequestContentType",
+    "pendingBrowserAssistedPath",
+  ]) {
+    assert.match(block, new RegExp(`${field} = null`));
+  }
+  assert.match(block, /pendingIsLive = false/);
+  assert.match(block, /resetTaskConnections\(\)/);
+  assert.match(block, /resetAnalysisForNewRequest\(\)/);
+  assert.match(block, /resetMediaInspection\(\)/);
+});
+
+
 test("torrent preview size is carried into the task so a short false-100% result is rejected", () => {
   const app = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8");
   assert.match(app, /input\.dataset\.torrentSize = Number\(file\.size\) \|\| 0/);
