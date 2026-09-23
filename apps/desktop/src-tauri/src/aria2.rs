@@ -500,6 +500,54 @@ impl Endpoint {
     /// Torrent/Magnet task's destination as a directory to clean up as a
     /// whole), and `only_files` is a 1-based file-index selection, matching
     /// aria2's own `select-file` convention (empty means "all files").
+    pub async fn add_ed2k_download(
+        &self,
+        source: &str,
+        destination: &Path,
+        servers: &[String],
+        server_list: Option<&Path>,
+        download_limit: u64,
+    ) -> Result<String, String> {
+        let directory = destination.parent().unwrap_or_else(|| Path::new("."));
+        let out = destination
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| "destination_has_no_filename".to_owned())?;
+        let mut options = Map::new();
+        options.insert(
+            "dir".into(),
+            Value::String(directory.to_string_lossy().into_owned()),
+        );
+        options.insert("out".into(), Value::String(out.to_owned()));
+        options.insert("continue".into(), Value::String("true".into()));
+        options.insert("file-allocation".into(), Value::String("none".into()));
+        if download_limit > 0 {
+            options.insert(
+                "max-download-limit".into(),
+                Value::String(download_limit.to_string()),
+            );
+        }
+        if !servers.is_empty() {
+            options.insert("ed2k-server".into(), Value::String(servers.join(",")));
+        }
+        if let Some(path) = server_list.filter(|path| path.is_file()) {
+            options.insert(
+                "ed2k-server-list".into(),
+                Value::String(path.to_string_lossy().into_owned()),
+            );
+        }
+        let value = self
+            .call(
+                "aria2.addUri",
+                vec![json!([source]), Value::Object(options)],
+            )
+            .await?;
+        value
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "aria2_gid_missing".to_owned())
+    }
+
     pub async fn add_bittorrent(
         &self,
         source: &str,
@@ -916,40 +964,31 @@ impl Endpoint {
         .map(|_| ())
     }
 
-    /// Applies the eD2K server list to the already-running engine via
-    /// `changeGlobalOption`, so "Connect" in the ED2K window doesn't need to
-    /// restart the shared aria2next runtime that HTTP and BitTorrent
-    /// downloads are also using. An empty list clears it (best-effort
-    /// "disconnect": aria2-next documents no explicit connect/disconnect RPC
-    /// verb, only the server configuration itself).
-    pub async fn set_ed2k_servers(&self, servers: &[String]) -> Result<(), String> {
+    /// Starts an ED2K/eMule keyword search with the configured server sources.
+    /// aria2-next marks ed2k-server and ed2k-server-list as initial/reserved
+    /// request options, not changeGlobalOption values, so they must travel with
+    /// each search/download request rather than being "applied" globally.
+    pub async fn ed2k_search(
+        &self,
+        keyword: &str,
+        servers: &[String],
+        server_list: Option<&Path>,
+    ) -> Result<String, String> {
         let mut options = Map::new();
-        options.insert("ed2k-server".into(), Value::String(servers.join(",")));
-        self.call("aria2.changeGlobalOption", vec![Value::Object(options)])
-            .await
-            .map(|_| ())
-    }
-
-    /// aria2-next's --ed2k-server-list only accepts a local file path (its
-    /// own docs confirm this, not a remote URL), so the caller downloads a
-    /// server.met first (e.g. from aMule's own documented default,
-    /// upd.emule-security.org) and passes the local path here.
-    pub async fn set_ed2k_server_list_file(&self, path: &Path) -> Result<(), String> {
-        let mut options = Map::new();
-        options.insert(
-            "ed2k-server-list".into(),
-            Value::String(path.to_string_lossy().into_owned()),
-        );
-        self.call("aria2.changeGlobalOption", vec![Value::Object(options)])
-            .await
-            .map(|_| ())
-    }
-
-    /// Starts an ED2K/eMule keyword search, returning the search task's GID.
-    /// Results are read back with `ed2k_search_results`.
-    pub async fn ed2k_search(&self, keyword: &str) -> Result<String, String> {
+        if !servers.is_empty() {
+            options.insert("ed2k-server".into(), Value::String(servers.join(",")));
+        }
+        if let Some(path) = server_list.filter(|path| path.is_file()) {
+            options.insert(
+                "ed2k-server-list".into(),
+                Value::String(path.to_string_lossy().into_owned()),
+            );
+        }
         let value = self
-            .call("aria2.ed2kSearch", vec![Value::String(keyword.to_owned())])
+            .call(
+                "aria2.ed2kSearch",
+                vec![Value::String(keyword.to_owned()), Value::Object(options)],
+            )
             .await?;
         value
             .as_str()
