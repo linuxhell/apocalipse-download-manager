@@ -5842,7 +5842,6 @@ async fn run_download(
         });
     let request_host = host_from_url(&request.url);
     let mut previous_perf_rate: Option<u64> = None;
-    let mut display_rate_ewma = 0_f64;
     let mut sustainable_peak = 0_u64;
     let mut completed_ok = false;
     let engine_result = match network {
@@ -5937,7 +5936,7 @@ async fn run_download(
                         task.total = total;
                     });
                     let elapsed = perf_last_at.elapsed();
-                    if elapsed >= Duration::from_secs(2) {
+                    if elapsed >= Duration::from_millis(350) {
                         let elapsed_ms = elapsed.as_millis() as u64;
                         let interval_bytes = received.saturating_sub(perf_last_bytes);
                         let bytes_per_second = if elapsed_ms > 0 {
@@ -5949,20 +5948,8 @@ async fn run_download(
                             sustainable_peak = sustainable_peak.max(previous.min(bytes_per_second));
                         }
                         previous_perf_rate = Some(bytes_per_second);
-                        let display_alpha = if bytes_per_second as f64 >= display_rate_ewma {
-                            0.80
-                        } else {
-                            0.35
-                        };
-                        display_rate_ewma = if display_rate_ewma > 0.0 {
-                            bytes_per_second as f64 * display_alpha
-                                + display_rate_ewma * (1.0 - display_alpha)
-                        } else {
-                            bytes_per_second as f64
-                        };
-                        let smoothed_bytes_per_second = display_rate_ewma as u64;
                         update_task(&app, id, false, |task| {
-                            task.download_speed = Some(smoothed_bytes_per_second);
+                            task.download_speed = Some(bytes_per_second);
                         });
                         app.state::<AppState>().diagnostics.record(
                             "http.performance_sample",
@@ -5975,8 +5962,8 @@ async fn run_download(
                                 "intervalBytes": interval_bytes,
                                 "intervalMs": elapsed_ms,
                                 "bytesPerSecond": bytes_per_second,
-                                "smoothedBytesPerSecond": smoothed_bytes_per_second,
-                                "displayAlpha": display_alpha,
+                                "displayBytesPerSecond": bytes_per_second,
+                                "speedSource": "native-http",
                                 "activeConnections": active_connections
                             }),
                         );
@@ -6720,7 +6707,7 @@ async fn run_aria2_download(
                     item.received = status.downloaded;
                     item.total = (status.total > 0).then_some(status.total);
                     item.progress_percent = percent;
-                    item.download_speed = Some(status.speed.max(raw_speed));
+                    item.download_speed = Some(status.speed);
                     item.upload_speed = Some(status.upload_speed);
                     if is_bittorrent {
                         item.torrent_leechers = None;
@@ -6736,8 +6723,10 @@ async fn run_aria2_download(
                     Some(&id.to_string()),
                     serde_json::json!({
                         "engine": "aria2-rpc",
-                        "bytesPerSecond": raw_speed,
+                        "bytesPerSecond": status.speed,
                         "reportedBytesPerSecond": status.speed,
+                        "computedDeltaBytesPerSecond": raw_speed,
+                        "speedSource": "aria2-next",
                         "receivedBytes": status.downloaded,
                         "totalBytes": status.total,
                         "progressPercent": percent,
@@ -7049,6 +7038,8 @@ async fn run_external_download(
                 "--no-playlist",
                 "--newline",
                 "--verbose",
+                "--progress-delta",
+                "0.5",
                 "--progress-template",
                 "download:ADM_PROGRESS|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress._percent_str)s",
             ]);
@@ -8143,11 +8134,22 @@ async fn read_process_tail(
                                 );
                             });
                         }
-                    } else if let Some(percent) = parse_external_progress(&progress_buffer) {
-                        update_task(app, *id, false, |task| {
-                            task.progress_percent =
-                                Some(task.progress_percent.unwrap_or(0.0).max(percent));
-                        });
+                    } else {
+                        let percent = parse_external_progress(&progress_buffer);
+                        let speed = (*kind == DownloadKind::Hls)
+                            .then(|| parse_external_download_speed(&progress_buffer))
+                            .flatten();
+                        if percent.is_some() || speed.is_some() {
+                            update_task(app, *id, false, |task| {
+                                if let Some(percent) = percent {
+                                    task.progress_percent =
+                                        Some(task.progress_percent.unwrap_or(0.0).max(percent));
+                                }
+                                if let Some(speed) = speed {
+                                    task.download_speed = Some(speed);
+                                }
+                            });
+                        }
                     }
                 }
                 tail.extend_from_slice(&chunk[..count]);
@@ -8173,6 +8175,35 @@ fn parse_external_progress(text: &str) -> Option<f64> {
             prefix[start..].parse::<f64>().ok()
         })
         .rfind(|value| (0.0..=100.0).contains(value))
+}
+
+fn parse_external_download_speed(text: &str) -> Option<u64> {
+    let mut latest = None;
+    for token in text.split_whitespace() {
+        let token = token.trim_matches(|character: char| {
+            !character.is_ascii_alphanumeric() && character != '.'
+        });
+        let (number, multiplier) = if let Some(value) = token.strip_suffix("GBps") {
+            (value, 1024_u64.pow(3))
+        } else if let Some(value) = token.strip_suffix("MBps") {
+            (value, 1024_u64.pow(2))
+        } else if let Some(value) = token.strip_suffix("KBps") {
+            (value, 1024_u64)
+        } else if let Some(value) = token.strip_suffix("Bps") {
+            (value, 1_u64)
+        } else {
+            continue;
+        };
+        let Some(value) = number
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite() && *value >= 0.0)
+        else {
+            continue;
+        };
+        latest = Some((value * multiplier as f64) as u64);
+    }
+    latest
 }
 
 fn parse_yt_dlp_number(value: &str) -> Option<u64> {
@@ -14995,6 +15026,20 @@ mod tests {
     fn uses_latest_valid_percentage_in_a_progress_chunk() {
         assert_eq!(parse_external_progress("Vid: 42% Aud: 41%"), Some(41.0));
         assert_eq!(parse_external_progress("HTTP 403%"), None);
+    }
+
+    #[test]
+    fn parses_native_n_m3u8dl_download_speed_without_confusing_bits_or_ffmpeg_rate() {
+        assert_eq!(
+            parse_external_download_speed("VID 23.50% 12.34MBps"),
+            Some((12.34_f64 * 1024.0 * 1024.0) as u64)
+        );
+        assert_eq!(
+            parse_external_download_speed("Audio 980.00KBps"),
+            Some((980.0_f64 * 1024.0) as u64)
+        );
+        assert_eq!(parse_external_download_speed("limit 15Mbps"), None);
+        assert_eq!(parse_external_download_speed("speed=1.25x"), None);
     }
 
     #[test]
