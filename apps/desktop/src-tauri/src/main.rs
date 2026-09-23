@@ -11067,8 +11067,7 @@ async fn set_transfer_limits(
         settings.max_active_downloads = max_active_downloads.clamp(1, 20);
         settings.connections_per_download = connections_per_download.clamp(1, 32);
         settings.adaptive_efficiency = adaptive_efficiency;
-        settings.global_bandwidth_limit =
-            global_bandwidth_limit.min(10 * 1024 * 1024 * 1024);
+        settings.global_bandwidth_limit = global_bandwidth_limit.min(10 * 1024 * 1024 * 1024);
         state
             .global_bandwidth_limiter
             .set_limit(settings.global_bandwidth_limit);
