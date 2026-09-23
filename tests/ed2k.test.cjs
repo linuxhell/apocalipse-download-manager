@@ -40,12 +40,14 @@ test("Apocalipse ED2K replaces Apocalipse AI's nav slot and opens its own themed
   assert.match(ed2kJs, /listen\?\.\("theme-changed",/);
 });
 
-test("ed2k:// links classify to their own DownloadKind and route through the shared aria2next engine, not a second instance", () => {
+test("ed2k:// links classify and actually dispatch through the shared aria2next engine", () => {
   assert.match(classifier, /Ed2k,?\s*\n?\s*}/s);
   assert.match(classifier, /input\.starts_with\("ed2k:\/\/"\)/);
   assert.match(strategy, /DownloadKind::Torrent \| DownloadKind::Magnet \| DownloadKind::Ed2k/);
-  // Every ED2K command reuses aria2_endpoint(), the same singleton HTTP and
-  // BitTorrent downloads already share - never a second spawned runtime.
+  // Regression: the original ED2K commit claimed this route existed, but the
+  // real dispatcher only matched HTTP/AcceleratedHttp/FTP. Keep Ed2k in the
+  // actual run_aria2_download branch.
+  assert.match(main, /DownloadKind::Ftp\s*\n\s*\| DownloadKind::Ed2k/);
   const ed2kCommandsBlock = main.slice(main.indexOf("fn ed2k_connect"), main.indexOf("fn ed2k_search_results") + 500);
   assert.match(ed2kCommandsBlock, /aria2_endpoint\(&state,/g);
   assert.doesNotMatch(ed2kCommandsBlock, /aria2::Runtime::spawn/);
@@ -66,6 +68,13 @@ test("ed2k link download extracts its filename from the pipe-delimited link, not
   assert.match(main, /source\.split\('\|'\)\.nth\(2\)/);
 });
 
+test("ed2k: system association is available in settings and platform handlers", () => {
+  assert.match(main, /ASSOCIATION_IDS: \[&str; 6\] = \["m3u8", "torrent", "magnet", "ed2k", "ftp", "sftp"\]/);
+  assert.match(main, /lower\.starts_with\("ed2k:"\)/);
+  assert.match(main, /\("ed2k", "x-scheme-handler\/ed2k"\)/);
+  assert.match(html, /data-association="ed2k"/);
+});
+
 test("ED2K server list auto-updates from a configurable server.met URL, mirroring aMule's own Ed2kServersUrl default", () => {
   // aria2-next's --ed2k-server-list only accepts a local file path (its own
   // docs confirm this, not a remote URL), so the configured URL must be
@@ -73,7 +82,11 @@ test("ED2K server list auto-updates from a configurable server.met URL, mirrorin
   assert.match(main, /fn default_ed2k_server_list_url\(\) -> String \{\s*\n\s*"https:\/\/upd\.emule-security\.org\/server\.met"\.to_owned\(\)/);
   assert.match(main, /ed2k_server_list_url: String,/);
   assert.match(main, /async fn ed2k_update_server_list\(/);
-  assert.match(main, /fs::write\(&path, &bytes\)/);
+  assert.match(main, /fs::write\(&staged, &bytes\)/);
+  assert.match(main, /ed2k_server_list_payload_too_large/);
+  assert.match(main, /endpoint\.set_ed2k_server_list_file\(&staged\)\.await/);
+  assert.match(main, /met\.backup/);
+  assert.match(main, /ed2k_server_list_apply_failed/);
   assert.match(aria2, /pub async fn set_ed2k_server_list_file/);
   assert.match(aria2, /"ed2k-server-list"\.into\(\)/);
   // Connect refreshes server.met first, matching aMule's "update at
