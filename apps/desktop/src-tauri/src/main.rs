@@ -3868,10 +3868,11 @@ fn stop_aria2_runtime(state: &AppState) {
 
 fn running_aria2_endpoint(state: &AppState) -> Option<aria2::Endpoint> {
     let mut runtime = state.aria2_runtime.lock().ok()?;
-    runtime
-        .as_mut()
-        .filter(|runtime| runtime.is_running())
-        .map(|runtime| runtime.endpoint())
+    let runtime = runtime.as_mut()?;
+    if !runtime.is_running() {
+        return None;
+    }
+    Some(runtime.endpoint())
 }
 
 fn http_origin(url: &str) -> Option<&str> {
