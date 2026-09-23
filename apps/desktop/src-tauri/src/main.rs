@@ -5818,7 +5818,9 @@ async fn run_download(
     );
     log_network_route(&app.state::<AppState>(), &id.to_string(), "NativeHttp").await;
     update_task(&app, id, true, |task| {
-        task.state = DownloadState::Inspecting
+        task.state = DownloadState::Inspecting;
+        task.download_speed = Some(0);
+        task.upload_speed = Some(0);
     });
     let network = app
         .state::<AppState>()
@@ -5893,13 +5895,19 @@ async fn run_download(
                         diagnostic_log(&app.state::<AppState>(), "INFO", "http.completed", &format!("task={id}"));
                         update_task(&app, id, true, |task| {
                             task.state = DownloadState::Completed;
+                            task.download_speed = Some(0);
+                            task.upload_speed = Some(0);
                             task.completed_at = Some(epoch_seconds());
                         });
                         maybe_auto_extract_completed(&app, id);
                     },
                     Err(error) => {
                         diagnostic_log(&app.state::<AppState>(), "ERROR", "http.failed", &format!("task={id} error={error}"));
-                        update_task(&app, id, true, |task| task.state = DownloadState::Failed { message: error.to_string() });
+                        update_task(&app, id, true, |task| {
+                            task.state = DownloadState::Failed { message: error.to_string() };
+                            task.download_speed = Some(0);
+                            task.upload_speed = Some(0);
+                        });
                     },
                 }
                 break;
@@ -5927,6 +5935,8 @@ async fn run_download(
                         task.state = DownloadState::Downloading;
                         task.received = resumed_at;
                         task.total = total;
+                        task.download_speed = Some(0);
+                        task.upload_speed = Some(0);
                         task.resume_supported = Some(resume_supported);
                     });
                 },
@@ -5991,6 +6001,8 @@ async fn run_download(
                 Some(DownloadEvent::Completed { bytes }) => update_task(&app, id, true, |task| {
                     task.received = bytes;
                     task.total = Some(bytes);
+                    task.download_speed = Some(0);
+                    task.upload_speed = Some(0);
                     task.state = DownloadState::Completed;
                     task.completed_at = Some(epoch_seconds());
                 }),
@@ -6292,6 +6304,8 @@ async fn run_aria2_download(
     update_task(&app, id, false, |item| {
         item.state = DownloadState::Downloading;
         item.progress_percent = Some(0.0);
+        item.download_speed = Some(0);
+        item.upload_speed = Some(0);
         item.resume_supported = Some(true);
     });
     let route_app = app.clone();
@@ -6815,6 +6829,8 @@ async fn run_aria2_download(
                             item.upload_speed = Some(0);
                             item.state = DownloadState::Completed;
                             item.completed_at = Some(epoch_seconds());
+                            item.download_speed = Some(0);
+                            item.upload_speed = Some(0);
                             item.aria2_gid = None;
                         });
                         maybe_auto_extract_completed(&app, id);
@@ -6887,6 +6903,8 @@ async fn run_external_download(
     update_task(&app, id, true, |item| {
         item.state = DownloadState::Downloading;
         item.progress_percent = Some(0.0);
+        item.download_speed = Some(0);
+        item.upload_speed = Some(0);
         item.resume_supported = Some(match kind {
             DownloadKind::Torrent
             | DownloadKind::Magnet
@@ -7427,6 +7445,8 @@ async fn run_external_download(
             );
             update_task(&app, id, true, |item| {
                 item.progress_percent = Some(100.0);
+                item.download_speed = Some(0);
+                item.upload_speed = Some(0);
                 item.state = DownloadState::Completed;
                 item.completed_at = Some(epoch_seconds());
             });
@@ -7441,6 +7461,8 @@ async fn run_external_download(
             );
             update_task(&app, id, true, |item| {
                 item.progress_percent = None;
+                item.download_speed = Some(0);
+                item.upload_speed = Some(0);
                 item.state = DownloadState::Failed { message }
             });
         }
