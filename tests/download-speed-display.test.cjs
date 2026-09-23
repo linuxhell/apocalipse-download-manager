@@ -430,6 +430,7 @@ test("a new captured request supersedes a stale long analysis and restores Analy
 });
 
 test("manual URL editing clears captured request metadata before a new analysis", () => {
+  const app = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8");
   const start = app.indexOf('document.querySelector("#url").oninput = () => {');
   const end = app.indexOf("\n};", start);
   assert.ok(start >= 0 && end > start);
