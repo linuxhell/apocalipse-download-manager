@@ -489,3 +489,20 @@ test("magnet metadata preview uses aria2-next pause-metadata without the retired
   assert.doesNotMatch(block, /bt-save-metadata/);
 });
 
+test("duplicate direct-download handoffs do not reopen and reset the save dialog", () => {
+  assert.match(desktop, /bridge_recent_prompts: Mutex<HashMap<String, Instant>>/);
+  assert.match(desktop, /fn duplicate_bridge_prompt\(/);
+  assert.match(desktop, /Sha256::digest\(request\.url\.as_bytes\(\)\)/);
+  assert.match(desktop, /Duration::from_secs\(2\)/);
+  const start = desktop.indexOf("fn queue_from_bridge(");
+  const end = desktop.indexOf("\nfn register_browser_download", start);
+  assert.ok(start >= 0 && end > start);
+  const block = desktop.slice(start, end);
+  assert.match(block, /if duplicate_bridge_prompt\(&state, &request\)/);
+  assert.match(block, /bridge\.duplicate_prompt_suppressed/);
+  assert.match(block, /return Ok\(None\)/);
+  const duplicate = block.indexOf("if duplicate_bridge_prompt(&state, &request)");
+  const pending = block.indexOf(".bridge_pending");
+  assert.ok(duplicate >= 0 && pending > duplicate);
+});
+
