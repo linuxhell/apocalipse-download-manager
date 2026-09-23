@@ -3,6 +3,7 @@
 /node_modules
 /.idea
 /.vscode
+/apps/desktop/src-tauri/gen/
 *.part
 *.aria2
 .DS_Store
