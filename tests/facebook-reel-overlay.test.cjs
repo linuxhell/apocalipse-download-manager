@@ -298,3 +298,21 @@ test('normal Facebook srcObject Reels resolve Download before any recording fall
   assert.ok(immediate >= 0 && reveal > immediate, 'normal Facebook stream must attempt permalink discovery');
   assert.ok(fallback > reveal, 'recording fallback must happen only after permalink resolution fails');
 });
+
+test('generic video-feed pages (3+ visible videos) only overlay the one nearest the viewport center', () => {
+  assert.match(script, /let activeGenericFeedVideo = null;/);
+  assert.match(script, /socialPlatform\(\) === "generic" && !isFacebookReelsPage && !isInstagramReelsPage && !isTikTokPage/);
+  assert.match(script, /if \(visibleVideos\.length >= 3\) \{/);
+  assert.match(script, /if \(activeGenericFeedVideo && element\.tagName === "VIDEO" && element !== activeGenericFeedVideo\) \{/);
+  assert.match(script, /overlay_skipped_feed_preview/);
+});
+
+test('generic feed suppression never engages on Facebook, Instagram or TikTok, whose own reel logic is unchanged', () => {
+  const start = script.indexOf('let activeGenericFeedVideo = null;');
+  const end = script.indexOf('document.querySelectorAll("video,audio").forEach', start);
+  assert.ok(start >= 0 && end > start);
+  const block = script.slice(start, end);
+  assert.match(block, /!isFacebookReelsPage/);
+  assert.match(block, /!isInstagramReelsPage/);
+  assert.match(block, /!isTikTokPage/);
+});

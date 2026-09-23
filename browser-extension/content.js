@@ -1276,6 +1276,29 @@
         if (overlay.element?.tagName === "VIDEO" && overlay.element !== activeTikTokVideo) overlay.cleanup();
       }
     }
+    // Non-social pages can still be built as a swipeable video feed (a main
+    // player plus several other full-size preview videos simultaneously in
+    // the DOM, e.g. "related videos" carousels). Three or more similarly
+    // visible videos at once is the same signature the named-platform reel
+    // feeds above have, so reuse their "one active player" rule generically
+    // instead of a per-site allowlist. A page with one or two deliberately
+    // embedded videos (an article, a gallery) is left untouched.
+    let activeGenericFeedVideo = null;
+    if (socialPlatform() === "generic" && !isFacebookReelsPage && !isInstagramReelsPage && !isTikTokPage) {
+      const viewportCenter = innerHeight / 2;
+      const visibleVideos = [...document.querySelectorAll("video")]
+        .map((video) => ({ video, rect: video.getBoundingClientRect() }))
+        .filter(({ rect }) => rect.width >= 100 && rect.height >= 55 && rect.bottom > 0 && rect.top < innerHeight);
+      if (visibleVideos.length >= 3) {
+        activeGenericFeedVideo = visibleVideos
+          .sort((left, right) =>
+            Math.abs((left.rect.top + left.rect.bottom) / 2 - viewportCenter)
+            - Math.abs((right.rect.top + right.rect.bottom) / 2 - viewportCenter))[0]?.video || null;
+        for (const overlay of [...activeOverlays.values()]) {
+          if (overlay.element?.tagName === "VIDEO" && overlay.element !== activeGenericFeedVideo) overlay.cleanup();
+        }
+      }
+    }
 
     document.querySelectorAll("video,audio").forEach((element) => {
       const facebookPage = /(^|\.)facebook\.com$/i.test(location.hostname);
@@ -1330,6 +1353,10 @@
       if (isTikTokPage && element.tagName === "VIDEO" && element !== activeTikTokVideo) {
         socialSummary.inactive += 1;
         emitSocialDecision(element, "skip_inactive_player", { reason: "not_active_tiktok_player" });
+        return;
+      }
+      if (activeGenericFeedVideo && element.tagName === "VIDEO" && element !== activeGenericFeedVideo) {
+        trace("overlay_skipped_feed_preview", "overlay", { reason: "not_active_generic_feed_video" });
         return;
       }
       const tikTokUrl = element.tagName === "VIDEO" ? tikTokUrlFor(element) : null;
