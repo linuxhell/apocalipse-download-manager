@@ -530,3 +530,47 @@ test('live speed display uses each engine as the source of truth', () => {
   assert.match(main, /strip_suffix\("KBps"\)/);
   assert.match(main, /task\.download_speed = Some\(speed\)/);
 });
+
+
+test("engine speed is zeroed at transfer lifecycle boundaries", () => {
+  const ariaStart = desktop.indexOf("async fn run_aria2_download(");
+  const ariaEnd = desktop.indexOf("\nasync fn run_external_download(", ariaStart);
+  assert.ok(ariaStart >= 0 && ariaEnd > ariaStart);
+  const ariaBlock = desktop.slice(ariaStart, ariaEnd);
+  assert.match(
+    ariaBlock,
+    /item\.state = DownloadState::Downloading;[\s\S]{0,220}item\.download_speed = Some\(0\);[\s\S]{0,120}item\.upload_speed = Some\(0\);/,
+  );
+  assert.match(
+    ariaBlock,
+    /"complete"[\s\S]{0,1600}item\.download_speed = Some\(0\);[\s\S]{0,120}item\.upload_speed = Some\(0\);[\s\S]{0,220}item\.state = DownloadState::Completed;/,
+  );
+  assert.match(
+    ariaBlock,
+    /"error" \| "removed"[\s\S]{0,1200}item\.download_speed = Some\(0\);[\s\S]{0,120}item\.upload_speed = Some\(0\);/,
+  );
+
+  const externalStart = desktop.indexOf("async fn run_external_download(");
+  const externalEnd = desktop.indexOf("\n#[cfg(target_os = \"windows\")]", externalStart);
+  assert.ok(externalStart >= 0 && externalEnd > externalStart);
+  const externalBlock = desktop.slice(externalStart, externalEnd);
+  assert.match(
+    externalBlock,
+    /item\.state = DownloadState::Downloading;[\s\S]{0,220}item\.download_speed = Some\(0\);[\s\S]{0,120}item\.upload_speed = Some\(0\);/,
+  );
+  assert.match(
+    externalBlock,
+    /"external\.completed"[\s\S]{0,900}item\.download_speed = Some\(0\);[\s\S]{0,120}item\.upload_speed = Some\(0\);/,
+  );
+  assert.match(
+    externalBlock,
+    /"external\.failed"[\s\S]{0,900}item\.download_speed = Some\(0\);[\s\S]{0,120}item\.upload_speed = Some\(0\);/,
+  );
+
+  const nativeStart = desktop.indexOf("async fn run_download(");
+  const nativeEnd = desktop.indexOf("\nasync fn download_with_mirrors(", nativeStart);
+  assert.ok(nativeStart >= 0 && nativeEnd > nativeStart);
+  const nativeBlock = desktop.slice(nativeStart, nativeEnd);
+  assert.match(nativeBlock, /task\.state = DownloadState::Inspecting;[\s\S]{0,180}task\.download_speed = Some\(0\)/);
+  assert.match(nativeBlock, /task\.state = DownloadState::Completed;[\s\S]{0,180}task\.download_speed = Some\(0\)/);
+});
