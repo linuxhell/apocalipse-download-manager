@@ -47,6 +47,8 @@ pub struct RuntimeStatus {
     // alongside the BT swarm for this download (0 for a plain HTTP/FTP
     // task, where every file only ever has its own source URI "in use").
     pub web_seeds: u64,
+    /// Sum of aria2-reported lengths for selected torrent files.
+    pub selected_file_bytes: u64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -397,6 +399,17 @@ impl Endpoint {
                 .to_owned(),
             total: number(value.get("totalLength")),
             downloaded: number(value.get("completedLength")),
+            selected_file_bytes: value
+                .get("files")
+                .and_then(Value::as_array)
+                .map(|files| {
+                    files
+                        .iter()
+                        .filter(|file| file.get("selected").and_then(Value::as_str) == Some("true"))
+                        .map(|file| number(file.get("length")))
+                        .sum()
+                })
+                .unwrap_or(0),
             speed: number(value.get("downloadSpeed")),
             upload_speed: number(value.get("uploadSpeed")),
             connections: number(value.get("connections")),
