@@ -9900,6 +9900,8 @@ fn enqueue_download_impl(
     task.auto_extract = auto_extract.unwrap_or(false) && is_archive_file_name(&file_name);
     task.expected_size = expected_size.filter(|value| *value > 0);
     if let Some(context) = context {
+        task.torrent_metadata_path =
+            validated_torrent_metadata_path(state, context.torrent_metadata_path);
         if task.expected_size.is_none() {
             task.expected_size = context.expected_size.filter(|value| *value > 0);
         }
