@@ -533,6 +533,7 @@ struct TorrentInspection {
     name: String,
     files: Vec<TorrentFileInfo>,
     total_size: u64,
+    torrent_path: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -2737,7 +2738,96 @@ fn inspect_torrent_bytes(data: &[u8]) -> Result<TorrentInspection, String> {
         total_size: files.iter().map(|file| file.size).sum(),
         name,
         files,
+        torrent_path: None,
     })
+}
+
+fn torrent_store_directory(state: &AppState) -> Result<PathBuf, String> {
+    let runtime_root = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
+    let directory = runtime_root.join("torrents");
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok(directory)
+}
+
+fn persist_torrent_bytes(state: &AppState, bytes: &[u8]) -> Result<PathBuf, String> {
+    // Validate before writing anything into the persistent torrent store.
+    inspect_torrent_bytes(bytes)?;
+    let directory = torrent_store_directory(state)?;
+    let digest = format!("{:x}", Sha256::digest(bytes));
+    let path = directory.join(format!("{digest}.torrent"));
+    if !path.is_file() {
+        fs::write(&path, bytes).map_err(|error| error.to_string())?;
+    }
+    Ok(path)
+}
+
+fn validated_torrent_metadata_path(state: &AppState, value: Option<String>) -> Option<PathBuf> {
+    let value = value?;
+    let path = PathBuf::from(value);
+    let directory = torrent_store_directory(state).ok()?;
+    let valid_extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("torrent"));
+    (valid_extension && path.is_file() && path.parent() == Some(directory.as_path())).then_some(path)
+}
+
+async fn materialize_torrent_metadata_file(
+    state: &AppState,
+    endpoint: &aria2::Endpoint,
+    source: &str,
+) -> Result<PathBuf, String> {
+    let local = PathBuf::from(source);
+    if local.is_file() {
+        let bytes = fs::read(&local).map_err(|error| error.to_string())?;
+        return persist_torrent_bytes(state, &bytes);
+    }
+
+    if (source.starts_with("http://") || source.starts_with("https://"))
+        && source
+            .split(['?', '#'])
+            .next()
+            .is_some_and(|value| value.to_ascii_lowercase().ends_with(".torrent"))
+    {
+        let bytes = fetch_torrent_file_bytes(state, source).await?;
+        return persist_torrent_bytes(state, &bytes);
+    }
+
+    if !source.starts_with("magnet:") {
+        return Err("not_a_torrent".to_owned());
+    }
+
+    let directory = torrent_store_directory(state)?;
+    diagnostic_log(
+        state,
+        "INFO",
+        "aria2.metadata_save_started",
+        &format!("directory={}", directory.display()),
+    );
+    let path = endpoint
+        .save_magnet_metadata(
+            source,
+            &directory,
+            |elapsed, status, connections, seeders, total, completed, info_hash| {
+                diagnostic_log(
+                    state,
+                    "INFO",
+                    "aria2.metadata_save_progress",
+                    &format!(
+                        "elapsed={elapsed}s status={status} connections={connections} seeders={seeders} total={total} completed={completed} info_hash={}",
+                        info_hash.unwrap_or("none")
+                    ),
+                );
+            },
+        )
+        .await?;
+    diagnostic_log(
+        state,
+        "INFO",
+        "aria2.metadata_saved",
+        &format!("path={} bytes={}", path.display(), fs::metadata(&path).map(|m| m.len()).unwrap_or(0)),
+    );
+    Ok(path)
 }
 
 #[derive(Serialize)]
@@ -3744,6 +3834,8 @@ struct DownloadContext {
     request_method: Option<String>,
     request_body: Option<String>,
     request_content_type: Option<String>,
+    #[serde(default)]
+    torrent_metadata_path: Option<String>,
 }
 
 #[derive(Clone)]
