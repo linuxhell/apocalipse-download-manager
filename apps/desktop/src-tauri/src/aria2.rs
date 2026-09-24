@@ -783,7 +783,8 @@ impl Endpoint {
                     .to_owned());
             }
             if let Some(completed_at) = metadata_complete_at {
-                if followed.is_none() && now.duration_since(completed_at) >= Duration::from_secs(3) {
+                if followed.is_none() && now.duration_since(completed_at) >= Duration::from_secs(3)
+                {
                     break Err(format!(
                         "torrent_metadata_complete_without_followed_by:gid={gid}:connections={pc}:seeders={ps}:total={pt}:completed={pd}"
                     ));
