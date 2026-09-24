@@ -120,6 +120,242 @@ jobs:
           print(selected["id"], checksum["id"], selected["name"], checksum_name)
           PY
           )
+          checksum_name="${checksum_name%          curl --fail --location --retry 3 \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/assets/$asset_id" \
+            --output "dist/aria2-backend/$ARIA2_BINARY"
+          curl --fail --location --retry 3 \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/assets/$checksum_id" \
+            --output "$RUNNER_TEMP/$checksum_name"
+          python3 - "dist/aria2-backend/$ARIA2_BINARY" "$RUNNER_TEMP/$checksum_name" "$asset_name" <<'PY'
+          import hashlib
+          import pathlib
+          import sys
+
+          binary = pathlib.Path(sys.argv[1]).read_bytes()
+          checksum_text = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
+          expected = checksum_text.split()[0].lower()
+          actual = hashlib.sha256(binary).hexdigest()
+          if actual != expected:
+              raise SystemExit(
+                  f"aria2 checksum mismatch for {sys.argv[3]}: expected={expected} actual={actual}"
+              )
+          print(f"aria2 checksum verified: {actual}")
+          PY
+          chmod 755 "dist/aria2-backend/$ARIA2_BINARY"
+
+      - name: Stage Windows portable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $package = "dist/Apocalipse Download Manager"
+          New-Item -ItemType Directory -Force $package | Out-Null
+          Copy-Item "target/release/apocalipse-desktop.exe" "$package/Apocalipse Download Manager.exe"
+          New-Item -ItemType Directory -Force "$package/data/tools/aria2" | Out-Null
+          Copy-Item "dist/aria2-backend/aria2c.exe" "$package/data/tools/aria2/aria2c.exe"
+          Copy-Item "README.md","LICENSE" $package
+          Compress-Archive -Path $package -DestinationPath "dist/${{ matrix.output }}" -Force
+
+      - name: Stage Linux portable
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          package="dist/Apocalipse Download Manager"
+          mkdir -p "$package/data/tools/aria2"
+          install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
+          install -m 755 dist/aria2-backend/aria2c "$package/data/tools/aria2/aria2c"
+          cp README.md LICENSE "$package/"
+          appimage="$(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "$appimage"
+          install -m 755 "$appimage" "dist/apocalipse-download-manager-linux-x64.AppImage"
+          tar -C dist -czf "dist/${{ matrix.output }}" "Apocalipse Download Manager"
+
+      - name: Stage macOS portable
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app="dist/Apocalipse Download Manager.app"
+          mkdir -p "$app/Contents/MacOS/data/tools/aria2" "$app/Contents/Resources"
+          cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
+          chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
+          install -m 755 dist/aria2-backend/aria2c "$app/Contents/MacOS/data/tools/aria2/aria2c"
+          cp packaging/macos/Info.plist "$app/Contents/Info.plist"
+          python3 - "$app/Contents/Info.plist" <<'PYMAC'
+          import plistlib
+          import sys
+          import tomllib
+
+          with open("Cargo.toml", "rb") as stream:
+              version = tomllib.load(stream)["workspace"]["package"]["version"]
+          version = version.split("-", 1)[0].split("+", 1)[0]
+          path = sys.argv[1]
+          with open(path, "rb") as stream:
+              info = plistlib.load(stream)
+          info["CFBundleShortVersionString"] = version
+          info["CFBundleVersion"] = version
+          with open(path, "wb") as stream:
+              plistlib.dump(info, stream, sort_keys=False)
+          PYMAC
+          cp README.md LICENSE "$app/Contents/Resources/"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "dist/${{ matrix.output }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.output }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: apocalipse-download-manager-linux-x64-appimage
+          path: dist/apocalipse-download-manager-linux-x64.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish clean release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate extension handoffs before publication
+        run: |
+          node --check browser-extension/background.js
+          node --check browser-extension/popup.js
+          node --test tests/*.test.cjs
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Package current browser extensions
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 -c "import json; print(json.load(open('browser-extension/manifest.json'))['version'])")
+          stage=$(mktemp -d)
+          cp -R browser-extension "$stage/chromium"
+          (cd "$stage/chromium" && zip -qr "$GITHUB_WORKSPACE/dist/apocalipse-chrome-${version}.zip" .)
+          cp "$GITHUB_WORKSPACE/dist/apocalipse-chrome-${version}.zip" "$GITHUB_WORKSPACE/dist/apocalipse-edge-${version}.zip"
+
+          signed="packaging/firefox/apocalipse-firefox-${version}.xpi"
+          shopt -s nullglob
+          signed_parts=(packaging/firefox/apocalipse-firefox-${version}.xpi.b64.part*)
+          if [[ ! -f "$signed" && ${#signed_parts[@]} -gt 0 ]]; then
+            cat "${signed_parts[@]}" | base64 --decode > "$signed"
+          fi
+          if [[ -f "$signed" ]]; then
+            cp "$signed" "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
+          else
+            cp -R browser-extension "$stage/firefox"
+            python3 - "$stage/firefox/manifest.json" <<'PY'
+          import json
+          import sys
+
+          path = sys.argv[1]
+          with open(path, encoding="utf-8") as stream:
+              manifest = json.load(stream)
+          worker = manifest.pop("background", {}).get("service_worker")
+          if not worker:
+              raise SystemExit("Chromium background service worker is missing")
+          manifest["background"] = {"scripts": [worker]}
+          manifest["browser_specific_settings"] = {
+              "gecko": {
+                  "id": "apocalipse-download-manager@linuxhell",
+                  "strict_min_version": "140.0",
+                  "data_collection_permissions": {
+                      "required": [
+                          "authenticationInfo",
+                          "browsingActivity",
+                          "websiteContent"
+                      ]
+                  }
+              }
+          }
+          with open(path, "w", encoding="utf-8") as stream:
+              json.dump(manifest, stream, ensure_ascii=False, indent=2)
+              stream.write("\n")
+          PY
+            (cd "$stage/firefox" && zip -qr "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}-unsigned.xpi" .)
+          fi
+
+      - name: Publish validated release without replacing another commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")
+          tag="v${version}"
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "$tag" ]]; then
+            echo "::error::Release tag must match Cargo version: $tag"
+            exit 1
+          fi
+
+          # Keep an existing version tag fixed. Reusing it is allowed only when
+          # every change since the tagged product commit is release packaging.
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            git fetch --no-tags origin "refs/tags/$tag"
+            tagged_commit=$(git rev-parse 'FETCH_HEAD^{commit}')
+            if [[ "$tagged_commit" != "$GITHUB_SHA" ]]; then
+              changed_paths=$(git diff --name-only "$tagged_commit..$GITHUB_SHA")
+              invalid_paths=$(printf '%s\n' "$changed_paths" | grep -Ev '^(\.github/workflows/release\.yml|packaging/firefox/apocalipse-firefox-0\.3\.167\.xpi|packaging/release-trigger-0\.4\.71\.txt)$' || true)
+              if [[ -n "$invalid_paths" ]]; then
+                echo "::error::$tag belongs to another product commit. Only release packaging changes may reuse the existing tag."
+                printf '%s\n' "$invalid_paths"
+                exit 1
+              fi
+              echo "::notice::Recreating assets for existing $tag without moving the tag."
+            fi
+          else
+            status=$?
+            if [[ "$status" -ne 2 ]]; then
+              echo "::error::Could not check the remote release tag."
+              exit "$status"
+            fi
+            git tag "$tag" "$GITHUB_SHA"
+            git push origin "refs/tags/$tag"
+          fi
+
+          if is_draft=$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null); then
+            if [[ "$is_draft" != true ]]; then
+              echo "::notice::$tag already exists; replacing its assets."
+            fi
+          else
+            prerelease=()
+            if [[ "$version" == *-* ]]; then
+              prerelease=(--prerelease)
+            fi
+            gh release create "$tag" --verify-tag --notes-file "packaging/release-notes-v${version}.md" --draft "${prerelease[@]}"
+          fi
+
+          (cd dist && sha256sum apocalipse-*) > dist/SHA256SUMS.txt
+          gh release upload "$tag" dist/* --clobber
+          gh release edit "$tag" --notes-file "packaging/release-notes-v${version}.md" --draft=false
+
+          # Remove the explicitly superseded public release only after the new
+          # release has been fully uploaded and published.
+          old_tag="v0.4.32"
+          if [[ "$old_tag" != "$tag" ]] && gh release view "$old_tag" >/dev/null 2>&1; then
+            gh release delete "$old_tag" --cleanup-tag --yes
+          fi
+
+\r'}"
           mkdir -p dist/aria2-backend
           curl --fail --location --retry 3 \
             --header "Authorization: Bearer $GITHUB_TOKEN" \
