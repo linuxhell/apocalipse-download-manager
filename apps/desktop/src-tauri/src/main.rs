@@ -6026,7 +6026,7 @@ async fn run_aria2_download(
         },
         None => None,
     };
-    let mut gid = match existing_task {
+    let gid = match existing_task {
         Some((gid, status)) => {
             if status == "paused" {
                 if let Err(error) = endpoint.resume(&gid).await {
@@ -6050,38 +6050,42 @@ async fn run_aria2_download(
             let added = if is_bittorrent && context.proxy_required {
                 Err("aria2_bittorrent_proxy_unsupported".to_owned())
             } else if is_bittorrent {
-                // task.destination is what the rest of the app (disk cleanup,
-                // "remove from disk") treats as the torrent's own root
-                // directory for Torrent/Magnet tasks: it recursively deletes
-                // task.destination itself. Point aria2's "dir" at it directly
-                // (not its parent) so every file it writes, and every
-                // .aria2 control-file sidecar it keeps while paused, lands
-                // inside that folder instead of loose in the download
-                // directory.
-                let local_file = PathBuf::from(&task.source);
-                let torrent_bytes = if local_file.is_file() {
-                    fs::read(&local_file)
-                        .map(Some)
-                        .map_err(|error| error.to_string())
-                } else if task.source.starts_with("http://") || task.source.starts_with("https://")
+                // Every Torrent/Magnet task is started from a real .torrent
+                // persisted under data/torrents. This keeps metadata discovery
+                // separate from payload transfer and makes select-file deterministic.
+                let torrent_path = match task
+                    .torrent_metadata_path
+                    .as_ref()
+                    .filter(|path| path.is_file())
+                    .cloned()
                 {
-                    fetch_torrent_file_bytes(&state, &task.source)
-                        .await
-                        .map(Some)
-                } else {
-                    Ok(None)
+                    Some(path) => Ok(path),
+                    None => materialize_torrent_metadata_file(
+                        &state,
+                        Some(&endpoint),
+                        &task.source,
+                    )
+                    .await,
                 };
-                match torrent_bytes {
-                    Ok(bytes) => {
-                        endpoint
-                            .add_bittorrent(
-                                &task.source,
-                                bytes.as_deref(),
-                                &task.destination,
-                                &task.torrent_selection,
-                                download_limit,
-                            )
-                            .await
+                match torrent_path {
+                    Ok(path) => {
+                        update_task(&app, id, true, |item| {
+                            item.torrent_metadata_path = Some(path.clone())
+                        });
+                        match fs::read(&path) {
+                            Ok(bytes) => {
+                                endpoint
+                                    .add_bittorrent(
+                                        &task.source,
+                                        Some(&bytes),
+                                        &task.destination,
+                                        &task.torrent_selection,
+                                        download_limit,
+                                    )
+                                    .await
+                            }
+                            Err(error) => Err(error.to_string()),
+                        }
                     }
                     Err(error) => Err(error),
                 }
@@ -6164,23 +6168,6 @@ async fn run_aria2_download(
                         continue;
                     }
                 };
-                // Follow the classic aria2 metadata-to-content GID handoff.
-                if let Some(next_gid) = status.followed_by {
-                    diagnostic_log(
-                        &state,
-                        "INFO",
-                        "aria2.metadata_followed",
-                        &format!("task={id} metadata_gid={gid} content_gid={next_gid}"),
-                    );
-                    gid = next_gid;
-                    if let Ok(mut items) = state.aria2_tasks.lock() {
-                        items.insert(id, gid.clone());
-                    }
-                    update_task(&app, id, true, |item| item.aria2_gid = Some(gid.clone()));
-                    last_at = Instant::now();
-                    last_downloaded = 0;
-                    continue;
-                }
                 let now = Instant::now();
                 let startup_ms = transfer_started_at.elapsed().as_millis();
                 if !first_payload_logged && status.downloaded > 0 {
