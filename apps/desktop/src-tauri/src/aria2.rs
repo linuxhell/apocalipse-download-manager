@@ -586,60 +586,61 @@ impl Endpoint {
                     followed.as_deref(),
                 );
             }
-            if let Some(inspect) = followed.as_deref() {\n                let inspect = followed.as_deref().unwrap_or(&gid);
-            if let Ok(fv) = self
-                .call("aria2.getFiles", vec![Value::String(inspect.to_owned())])
-                .await
-            {
-                let mut files = Vec::new();
-                if let Some(es) = fv.as_array() {
-                    for f in es {
-                        let p = f.get("path").and_then(Value::as_str).unwrap_or_default();
-                        let len = number(f.get("length"));
-                        let nm = Path::new(p)
-                            .file_name()
-                            .and_then(|x| x.to_str())
-                            .unwrap_or(p);
-                        if len == 0 || nm.to_ascii_uppercase().starts_with("[METADATA]") {
-                            continue;
+            if let Some(inspect) = followed.as_deref() {
+                if let Ok(fv) = self
+                    .call("aria2.getFiles", vec![Value::String(inspect.to_owned())])
+                    .await
+                {
+                    let mut files = Vec::new();
+                    if let Some(es) = fv.as_array() {
+                        for f in es {
+                            let p = f.get("path").and_then(Value::as_str).unwrap_or_default();
+                            let len = number(f.get("length"));
+                            let nm = Path::new(p)
+                                .file_name()
+                                .and_then(|x| x.to_str())
+                                .unwrap_or(p);
+                            if len == 0 || nm.to_ascii_uppercase().starts_with("[METADATA]") {
+                                continue;
+                            }
+                            let idx = f
+                                .get("index")
+                                .and_then(Value::as_str)
+                                .and_then(|x| x.parse::<usize>().ok())
+                                .unwrap_or(files.len() + 1);
+                            files.push(TorrentFile {
+                                index: idx,
+                                path: p.to_owned(),
+                                length: len,
+                            });
                         }
-                        let idx = f
-                            .get("index")
+                    }
+                    if !files.is_empty() {
+                        let total_size = files.iter().map(|f| f.length).sum();
+                        let name = v
+                            .get("bittorrent")
+                            .and_then(|x| x.get("info"))
+                            .and_then(|x| x.get("name"))
                             .and_then(Value::as_str)
-                            .and_then(|x| x.parse::<usize>().ok())
-                            .unwrap_or(files.len() + 1);
-                        files.push(TorrentFile {
-                            index: idx,
-                            path: p.to_owned(),
-                            length: len,
+                            .map(str::to_owned)
+                            .or_else(|| {
+                                files.first().and_then(|f| {
+                                    Path::new(&f.path)
+                                        .file_name()
+                                        .and_then(|x| x.to_str())
+                                        .map(str::to_owned)
+                                })
+                            })
+                            .unwrap_or_else(|| "torrent".to_owned());
+                        break Ok(TorrentMetadata {
+                            name,
+                            files,
+                            total_size,
                         });
                     }
                 }
-                if !files.is_empty() {
-                    let total_size = files.iter().map(|f| f.length).sum();
-                    let name = v
-                        .get("bittorrent")
-                        .and_then(|x| x.get("info"))
-                        .and_then(|x| x.get("name"))
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                        .or_else(|| {
-                            files.first().and_then(|f| {
-                                Path::new(&f.path)
-                                    .file_name()
-                                    .and_then(|x| x.to_str())
-                                    .map(str::to_owned)
-                            })
-                        })
-                        .unwrap_or_else(|| "torrent".to_owned());
-                    break Ok(TorrentMetadata {
-                        name,
-                        files,
-                        total_size,
-                    });
-                }
             }
-\n            }\n            if matches!(
+            if matches!(
                 v.get("status").and_then(Value::as_str),
                 Some("error" | "removed")
             ) {
