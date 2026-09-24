@@ -2774,7 +2774,7 @@ fn validated_torrent_metadata_path(state: &AppState, value: Option<String>) -> O
 
 async fn materialize_torrent_metadata_file(
     state: &AppState,
-    endpoint: &aria2::Endpoint,
+    endpoint: Option<&aria2::Endpoint>,
     source: &str,
 ) -> Result<PathBuf, String> {
     let local = PathBuf::from(source);
@@ -2797,6 +2797,7 @@ async fn materialize_torrent_metadata_file(
         return Err("not_a_torrent".to_owned());
     }
 
+    let endpoint = endpoint.ok_or_else(|| "aria2_endpoint_required".to_owned())?;
     let directory = torrent_store_directory(state)?;
     diagnostic_log(
         state,
