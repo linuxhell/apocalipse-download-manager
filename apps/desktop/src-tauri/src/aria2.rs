@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     fs,
     net::TcpListener,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::Duration,
 };
@@ -47,49 +47,12 @@ pub struct RuntimeStatus {
     // BitTorrent-only: populated when tellStatus includes a "bittorrent"
     // object, absent for plain HTTP/FTP transfers.
     pub seeders: Option<u64>,
-    pub followed_by: Option<String>,
     // Number of HTTP/HTTPS webseed URIs aria2 is actively pulling from
     // alongside the BT swarm for this download (0 for a plain HTTP/FTP
     // task, where every file only ever has its own source URI "in use").
     pub web_seeds: u64,
     /// Sum of aria2-reported lengths for selected torrent files.
     pub selected_file_bytes: u64,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct TorrentFile {
-    // 1-based, matching aria2's own select-file convention.
-    pub index: usize,
-    pub path: String,
-    pub length: u64,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct TorrentMetadata {
-    pub name: String,
-    pub files: Vec<TorrentFile>,
-    pub total_size: u64,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct MetadataProbe {
-    pub elapsed_secs: u64,
-    pub metadata_gid: String,
-    pub status: String,
-    pub connections: i64,
-    pub seeders: i64,
-    pub total_length: i64,
-    pub completed_length: i64,
-    pub info_name_present: bool,
-    pub parent_file_count: usize,
-    pub parent_metadata_file_count: usize,
-    pub followed_by: Option<String>,
-    pub child_status: Option<String>,
-    pub child_file_count: usize,
-    pub child_real_file_count: usize,
-    pub child_total_length: u64,
-    pub child_completed_length: u64,
-    pub child_rpc_error: Option<String>,
 }
 
 fn number(value: Option<&Value>) -> u64 {
@@ -397,7 +360,6 @@ impl Endpoint {
             "connections",
             "errorMessage",
             "numSeeders",
-            "followedBy",
             "files"
         ]);
         let v = self
@@ -433,12 +395,6 @@ impl Endpoint {
                 .filter(|x| !x.is_empty())
                 .map(str::to_owned),
             seeders: v.get("numSeeders").map(|_| number(v.get("numSeeders"))),
-            followed_by: v
-                .get("followedBy")
-                .and_then(Value::as_array)
-                .and_then(|x| x.first())
-                .and_then(Value::as_str)
-                .map(str::to_owned),
             web_seeds: v
                 .get("files")
                 .and_then(Value::as_array)
@@ -519,44 +475,50 @@ impl Endpoint {
             .ok_or_else(|| "aria2_gid_missing".to_owned())
     }
 
-    /// Resolves a magnet link's metadata (name, file list, sizes) without
-    /// transferring torrent payload. Classic aria2 creates a child download
-    /// from Magnet metadata; pause-metadata keeps that child paused before any
-    /// selected file content starts, so the real file list can be inspected.
-    pub async fn preview_magnet_metadata(
+    /// Downloads only Magnet metadata and persists it as a real .torrent file.
+    /// No torrent payload is started here. The saved file is later parsed by ADM
+    /// and passed back to aria2 with the user's select-file indexes.
+    pub async fn save_magnet_metadata(
         &self,
         magnet: &str,
-        workspace: &Path,
-        mut on_progress: impl FnMut(&MetadataProbe),
-    ) -> Result<TorrentMetadata, String> {
-        let mut o = Map::new();
-        o.insert(
+        torrents_dir: &Path,
+        mut on_progress: impl FnMut(u64, &str, u64, u64, u64, u64, Option<&str>),
+    ) -> Result<PathBuf, String> {
+        fs::create_dir_all(torrents_dir).map_err(|error| error.to_string())?;
+        let mut options = Map::new();
+        options.insert(
             "dir".into(),
-            Value::String(workspace.to_string_lossy().into_owned()),
+            Value::String(torrents_dir.to_string_lossy().into_owned()),
         );
-        // Do not combine bt-metadata-only with a followedBy workflow:
-        // bt-metadata-only intentionally suppresses the content download that
-        // would otherwise be generated from the retrieved metadata.
-        o.insert("bt-save-metadata".into(), Value::String("false".into()));
-        o.insert("pause-metadata".into(), Value::String("true".into()));
-        o.insert("file-allocation".into(), Value::String("none".into()));
+        options.insert(
+            "bt-metadata-only".into(),
+            Value::String("true".into()),
+        );
+        options.insert(
+            "bt-save-metadata".into(),
+            Value::String("true".into()),
+        );
+        options.insert("file-allocation".into(), Value::String("none".into()));
+
         let gid = self
-            .call("aria2.addUri", vec![json!([magnet]), Value::Object(o)])
+            .call(
+                "aria2.addUri",
+                vec![json!([magnet]), Value::Object(options)],
+            )
             .await?
             .as_str()
             .map(str::to_owned)
             .ok_or_else(|| "aria2_gid_missing".to_owned())?;
 
-        let start = tokio::time::Instant::now();
-        let deadline = start + Duration::from_secs(150);
-        let mut last_report = start;
+        let started = tokio::time::Instant::now();
+        let deadline = started + Duration::from_secs(150);
+        let mut last_report = started;
         let mut last_status = String::new();
-        let mut metadata_complete_at: Option<tokio::time::Instant> = None;
-        let (mut pc, mut ps, mut pt, mut pd) = (0_i64, 0_i64, 0_i64, 0_i64);
-        let mut followed: Option<String> = None;
+        let (mut peak_connections, mut peak_seeders, mut peak_total, mut peak_completed) =
+            (0_u64, 0_u64, 0_u64, 0_u64);
 
         let result = loop {
-            let v = self
+            let value = self
                 .call(
                     "aria2.tellStatus",
                     vec![
@@ -564,246 +526,101 @@ impl Endpoint {
                         json!([
                             "status",
                             "errorMessage",
-                            "bittorrent",
                             "connections",
                             "numSeeders",
                             "totalLength",
                             "completedLength",
-                            "followedBy",
-                            "files"
+                            "infoHash"
                         ]),
                     ],
                 )
                 .await?;
 
-            let n = |k: &str| {
-                v.get(k)
-                    .and_then(Value::as_str)
-                    .and_then(|x| x.parse::<i64>().ok())
-                    .unwrap_or(0)
-            };
-            let status = v
+            let status = value
                 .get("status")
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_owned();
-            pc = pc.max(n("connections"));
-            ps = ps.max(n("numSeeders"));
-            pt = pt.max(n("totalLength"));
-            pd = pd.max(n("completedLength"));
-
-            let parent_files = v
-                .get("files")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            let parent_file_count = parent_files.len();
-            let parent_metadata_file_count = parent_files
-                .iter()
-                .filter(|f| {
-                    let p = f.get("path").and_then(Value::as_str).unwrap_or_default();
-                    Path::new(p)
-                        .file_name()
-                        .and_then(|x| x.to_str())
-                        .unwrap_or(p)
-                        .to_ascii_uppercase()
-                        .starts_with("[METADATA]")
-                })
-                .count();
-            let info_name_present = v
-                .get("bittorrent")
-                .and_then(|x| x.get("info"))
-                .and_then(|x| x.get("name"))
+            peak_connections = peak_connections.max(number(value.get("connections")));
+            peak_seeders = peak_seeders.max(number(value.get("numSeeders")));
+            peak_total = peak_total.max(number(value.get("totalLength")));
+            peak_completed = peak_completed.max(number(value.get("completedLength")));
+            let info_hash = value
+                .get("infoHash")
                 .and_then(Value::as_str)
-                .is_some_and(|x| !x.is_empty());
-
-            let mut followed_changed = false;
-            if followed.is_none() {
-                followed = v
-                    .get("followedBy")
-                    .and_then(Value::as_array)
-                    .and_then(|x| x.first())
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
-                if let Some(child_gid) = followed.as_deref() {
-                    followed_changed = true;
-                    // pause-metadata should already have paused the generated
-                    // child. Pause again defensively before reading its files.
-                    let _ = self.pause(child_gid).await;
-                }
-            }
-
-            let mut child_status = None;
-            let mut child_file_count = 0_usize;
-            let mut child_real_file_count = 0_usize;
-            let mut child_total_length = 0_u64;
-            let mut child_completed_length = 0_u64;
-            let mut child_rpc_error: Option<String> = None;
-            let mut ready_metadata: Option<TorrentMetadata> = None;
-
-            if let Some(inspect) = followed.as_deref() {
-                match self
-                    .call(
-                        "aria2.tellStatus",
-                        vec![
-                            Value::String(inspect.to_owned()),
-                            json!([
-                                "status",
-                                "totalLength",
-                                "completedLength",
-                                "bittorrent",
-                                "files"
-                            ]),
-                        ],
-                    )
-                    .await
-                {
-                    Ok(child) => {
-                        child_status = child
-                            .get("status")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned);
-                        child_total_length = number(child.get("totalLength"));
-                        child_completed_length = number(child.get("completedLength"));
-                        child_file_count = child
-                            .get("files")
-                            .and_then(Value::as_array)
-                            .map(Vec::len)
-                            .unwrap_or(0);
-                    }
-                    Err(error) => child_rpc_error = Some(format!("tellStatus:{error}")),
-                }
-
-                match self
-                    .call("aria2.getFiles", vec![Value::String(inspect.to_owned())])
-                    .await
-                {
-                    Ok(fv) => {
-                        let mut files = Vec::new();
-                        if let Some(es) = fv.as_array() {
-                            child_file_count = child_file_count.max(es.len());
-                            for f in es {
-                                let p = f.get("path").and_then(Value::as_str).unwrap_or_default();
-                                let len = number(f.get("length"));
-                                let nm = Path::new(p)
-                                    .file_name()
-                                    .and_then(|x| x.to_str())
-                                    .unwrap_or(p);
-                                if len == 0 || nm.to_ascii_uppercase().starts_with("[METADATA]") {
-                                    continue;
-                                }
-                                let idx = f
-                                    .get("index")
-                                    .and_then(Value::as_str)
-                                    .and_then(|x| x.parse::<usize>().ok())
-                                    .unwrap_or(files.len() + 1);
-                                files.push(TorrentFile {
-                                    index: idx,
-                                    path: p.to_owned(),
-                                    length: len,
-                                });
-                            }
-                        }
-                        child_real_file_count = files.len();
-                        if !files.is_empty() {
-                            let total_size = files.iter().map(|f| f.length).sum();
-                            let name = v
-                                .get("bittorrent")
-                                .and_then(|x| x.get("info"))
-                                .and_then(|x| x.get("name"))
-                                .and_then(Value::as_str)
-                                .map(str::to_owned)
-                                .or_else(|| {
-                                    files.first().and_then(|f| {
-                                        Path::new(&f.path)
-                                            .file_name()
-                                            .and_then(|x| x.to_str())
-                                            .map(str::to_owned)
-                                    })
-                                })
-                                .unwrap_or_else(|| "torrent".to_owned());
-                            ready_metadata = Some(TorrentMetadata {
-                                name,
-                                files,
-                                total_size,
-                            });
-                        }
-                    }
-                    Err(error) => {
-                        let next = format!("getFiles:{error}");
-                        child_rpc_error = Some(match child_rpc_error {
-                            Some(previous) => format!("{previous};{next}"),
-                            None => next,
-                        });
-                    }
-                }
-            }
+                .filter(|hash| !hash.is_empty());
 
             let now = tokio::time::Instant::now();
-            if status == "complete" && metadata_complete_at.is_none() {
-                metadata_complete_at = Some(now);
-            }
-            let status_changed = status != last_status;
-            if now.duration_since(last_report) >= Duration::from_secs(5)
-                || followed_changed
-                || status_changed
-                || ready_metadata.is_some()
+            if status != last_status
+                || now.duration_since(last_report) >= Duration::from_secs(5)
+                || status == "complete"
             {
-                last_report = now;
                 last_status = status.clone();
-                on_progress(&MetadataProbe {
-                    elapsed_secs: now.duration_since(start).as_secs(),
-                    metadata_gid: gid.clone(),
-                    status: status.clone(),
-                    connections: pc,
-                    seeders: ps,
-                    total_length: pt,
-                    completed_length: pd,
-                    info_name_present,
-                    parent_file_count,
-                    parent_metadata_file_count,
-                    followed_by: followed.clone(),
-                    child_status,
-                    child_file_count,
-                    child_real_file_count,
-                    child_total_length,
-                    child_completed_length,
-                    child_rpc_error,
-                });
+                last_report = now;
+                on_progress(
+                    now.duration_since(started).as_secs(),
+                    &status,
+                    peak_connections,
+                    peak_seeders,
+                    peak_total,
+                    peak_completed,
+                    info_hash,
+                );
             }
 
-            if let Some(metadata) = ready_metadata {
-                break Ok(metadata);
+            if status == "complete" {
+                let Some(info_hash) = info_hash else {
+                    break Err(format!(
+                        "torrent_metadata_saved_without_info_hash:connections={peak_connections}:seeders={peak_seeders}:total={peak_total}:completed={peak_completed}"
+                    ));
+                };
+                let direct = torrents_dir.join(format!("{}.torrent", info_hash.to_ascii_lowercase()));
+                let saved = if direct.is_file() {
+                    Some(direct)
+                } else {
+                    fs::read_dir(torrents_dir)
+                        .ok()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Result::ok)
+                        .map(|entry| entry.path())
+                        .find(|path| {
+                            path.extension()
+                                .and_then(|ext| ext.to_str())
+                                .is_some_and(|ext| ext.eq_ignore_ascii_case("torrent"))
+                                && path
+                                    .file_stem()
+                                    .and_then(|stem| stem.to_str())
+                                    .is_some_and(|stem| stem.eq_ignore_ascii_case(info_hash))
+                        })
+                };
+                if let Some(saved) = saved {
+                    break Ok(saved);
+                }
+                break Err(format!(
+                    "torrent_metadata_file_missing:info_hash={info_hash}:connections={peak_connections}:seeders={peak_seeders}:total={peak_total}:completed={peak_completed}"
+                ));
             }
+
             if matches!(status.as_str(), "error" | "removed") {
-                break Err(v
+                break Err(value
                     .get("errorMessage")
                     .and_then(Value::as_str)
+                    .filter(|message| !message.is_empty())
                     .unwrap_or("torrent_metadata_unavailable")
                     .to_owned());
             }
-            if let Some(completed_at) = metadata_complete_at {
-                if followed.is_none() && now.duration_since(completed_at) >= Duration::from_secs(3)
-                {
-                    break Err(format!(
-                        "torrent_metadata_complete_without_followed_by:gid={gid}:connections={pc}:seeders={ps}:total={pt}:completed={pd}"
-                    ));
-                }
-            }
             if now >= deadline {
                 break Err(format!(
-                    "torrent_metadata_unavailable:status={status}:followed={}:connections={pc}:seeders={ps}:total={pt}:completed={pd}",
-                    followed.as_deref().unwrap_or("none")
+                    "torrent_metadata_unavailable:status={status}:connections={peak_connections}:seeders={peak_seeders}:total={peak_total}:completed={peak_completed}"
                 ));
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         };
 
-        if let Some(child) = followed.as_deref() {
-            let _ = self.remove(child).await;
-            let _ = self.remove_result(child).await;
+        if result.is_err() {
+            let _ = self.remove(&gid).await;
         }
-        let _ = self.remove(&gid).await;
         let _ = self.remove_result(&gid).await;
         result
     }
