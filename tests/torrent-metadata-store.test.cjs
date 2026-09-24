@@ -40,3 +40,10 @@ test("pausing keeps the managed torrent copy so resume does not depend on the or
   assert.match(main, /task\s*\.torrent_metadata_path[\s\S]*add_bittorrent[\s\S]*&bytes/);
   assert.match(main, /persist_torrent_bytes\(state, &bytes\)/);
 });
+
+
+test("shared torrent metadata is preserved while another task still references it", () => {
+  assert.match(main, /retained_torrent_metadata_paths/);
+  assert.match(main, /torrent\.metadata_preserved_shared/);
+  assert.match(main, /deleted_torrent_metadata_paths\.insert\(path\.to_path_buf\(\)\)/);
+});
