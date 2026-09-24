@@ -499,10 +499,10 @@ impl Endpoint {
     }
 
     /// Resolves a magnet link's metadata (name, file list, sizes) without
-    /// downloading file content. aria2 keeps the same GID from BEP 9
-    /// metadata discovery through file selection and payload. With
-    /// `metadata-only=true` that GID pauses after metadata is validated so
-    /// the complete real file list can be inspected without payload transfer.
+    /// downloading file content. Classic aria2 creates a followedBy child GID
+    /// after BEP 9 metadata discovery. pause-metadata keeps that generated
+    /// payload download paused so the complete real file list can be inspected
+    /// before any selected content is transferred.
     pub async fn preview_magnet_metadata(
         &self,
         magnet: &str,
@@ -516,6 +516,9 @@ impl Endpoint {
         );
         o.insert("bt-metadata-only".into(), Value::String("true".into()));
         o.insert("bt-save-metadata".into(), Value::String("false".into()));
+        // Classic aria2 RPC option: pause the payload download generated from
+        // Magnet metadata before it can fetch even one torrent piece.
+        o.insert("pause-metadata".into(), Value::String("true".into()));
         o.insert("file-allocation".into(), Value::String("none".into()));
         let gid = self
             .call("aria2.addUri", vec![json!([magnet]), Value::Object(o)])
@@ -564,6 +567,12 @@ impl Endpoint {
                     .and_then(|x| x.first())
                     .and_then(Value::as_str)
                     .map(str::to_owned);
+                if let Some(child_gid) = followed.as_deref() {
+                    // pause-metadata should already have created this child in
+                    // paused state. Pause again defensively before inspection
+                    // so older/classic builds cannot race into payload.
+                    let _ = self.pause(child_gid).await;
+                }
             }
             let now = tokio::time::Instant::now();
             if now.duration_since(last) >= Duration::from_secs(5) || followed.is_some() {
@@ -577,7 +586,7 @@ impl Endpoint {
                     followed.as_deref(),
                 );
             }
-            let inspect = followed.as_deref().unwrap_or(&gid);
+            if let Some(inspect) = followed.as_deref() {\n                let inspect = followed.as_deref().unwrap_or(&gid);
             if let Ok(fv) = self
                 .call("aria2.getFiles", vec![Value::String(inspect.to_owned())])
                 .await
@@ -591,7 +600,7 @@ impl Endpoint {
                             .file_name()
                             .and_then(|x| x.to_str())
                             .unwrap_or(p);
-                        if len == 0 || nm.eq_ignore_ascii_case("[METADATA]") {
+                        if len == 0 || nm.to_ascii_uppercase().starts_with("[METADATA]") {
                             continue;
                         }
                         let idx = f
@@ -630,7 +639,7 @@ impl Endpoint {
                     });
                 }
             }
-            if matches!(
+\n            }\n            if matches!(
                 v.get("status").and_then(Value::as_str),
                 Some("error" | "removed")
             ) {
