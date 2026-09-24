@@ -1,6 +1,6 @@
 # Roadmap
 
-## Current usable baseline — v0.4.74
+## Current usable baseline — v0.4.75
 
 - Rust workspace and stable task domain model
 - HTTP/HTTPS downloads with queue, pause, resume and retry, including
@@ -52,9 +52,6 @@
 
 ## Later — expanded distribution
 
-- ARM64 builds for Windows and Linux and native Apple Silicon validation.
-  The release matrix currently only builds Windows x64, Linux x64 and
-  macOS x64 (Intel runner) portable builds.
 - Native installers (MSI, DMG, deb) beyond the AppImage already shipped
   for Linux — Windows and macOS still ship as portable/zipped builds only.
 - Direct internet connectivity through an encrypted resumable relay (no
