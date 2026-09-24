@@ -13244,10 +13244,12 @@ async fn remove_downloads(
     state: State<'_, AppState>,
     ids: Vec<DownloadId>,
     delete_files: bool,
+    delete_torrent_metadata: Option<bool>,
 ) -> Result<usize, String> {
+    let delete_torrent_metadata = delete_files && delete_torrent_metadata.unwrap_or(false);
     let removal_trace = uuid::Uuid::new_v4().to_string();
     state.diagnostics.record("task.removal_requested", "INFO", Some(&removal_trace), None,
-        serde_json::json!({"taskRefs":ids.iter().map(|id|id.to_string()).collect::<Vec<_>>(),"deleteFiles":delete_files}));
+        serde_json::json!({"taskRefs":ids.iter().map(|id|id.to_string()).collect::<Vec<_>>(),"deleteFiles":delete_files,"deleteTorrentMetadata":delete_torrent_metadata}));
     if ids.is_empty() {
         return Ok(0);
     }
@@ -13343,6 +13345,20 @@ async fn remove_downloads(
                 let hls_workspace = matches!(classify_url(&task.source), Some(DownloadKind::Hls))
                     && hls_workspace_path(task).as_ref() == Some(&path);
                 remove_path_with_retry(&path, torrent_root || hls_workspace).await?;
+            }
+            if delete_torrent_metadata {
+                if let Some(path) = task.torrent_metadata_path.as_deref() {
+                    if is_managed_torrent_metadata_path(&state, path) {
+                        remove_path_with_retry(path, false).await?;
+                        state.diagnostics.record(
+                            "torrent.metadata_deleted",
+                            "INFO",
+                            Some(&removal_trace),
+                            Some(&task.id.to_string()),
+                            serde_json::json!({"path": path.to_string_lossy()}),
+                        );
+                    }
+                }
             }
             if matches!(classify_url(&task.source), Some(DownloadKind::MediaPage)) {
                 if let Some(parent) = state.queue_path.parent() {
