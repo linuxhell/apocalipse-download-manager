@@ -2052,7 +2052,6 @@ async function removeSelectedDownloads(button, deleteFiles) {
       const task = downloads.find((item) => item.id === id);
       return task
         && isTorrent(task)
-        && stateKey(task.state) === "completed"
         && Boolean(task.torrent_metadata_path);
     });
   const deleteTorrentMetadata = shouldAskTorrentMetadata

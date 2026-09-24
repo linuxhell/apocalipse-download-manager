@@ -14,12 +14,16 @@ test("torrent metadata path persists with the task", () => {
   assert.match(main, /item\.torrent_metadata_path = Some\(path\.clone\(\)\)/);
 });
 
-test("completed torrent disk removal asks about saved torrent metadata", () => {
+test("torrent disk removal asks about saved torrent metadata regardless of task state", () => {
+  // Regression: this used to only fire for DownloadState::Completed, so
+  // pausing a torrent before removing it (a very ordinary sequence) skipped
+  // the prompt entirely and left the .torrent file behind in data/torrents.
   assert.match(ui, /activePage === "torrents"/);
-  assert.match(ui, /stateKey\(task\.state\) === "completed"/);
+  assert.doesNotMatch(ui, /stateKey\(task\.state\) === "completed"/);
   assert.match(ui, /window\.confirm\(t\("deleteTorrentMetadataConfirm"\)\)/);
   assert.match(ui, /deleteTorrentMetadata/);
-  assert.match(main, /delete_torrent_metadata && task\.state == DownloadState::Completed/);
+  assert.doesNotMatch(main, /delete_torrent_metadata && task\.state == DownloadState::Completed/);
+  assert.match(main, /if delete_torrent_metadata \{/);
 });
 
 test("torrent metadata deletion prompt is localized", () => {

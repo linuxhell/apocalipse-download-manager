@@ -13355,7 +13355,7 @@ async fn remove_downloads(
                     && hls_workspace_path(task).as_ref() == Some(&path);
                 remove_path_with_retry(&path, torrent_root || hls_workspace).await?;
             }
-            if delete_torrent_metadata && task.state == DownloadState::Completed {
+            if delete_torrent_metadata {
                 if let Some(path) = task.torrent_metadata_path.as_deref() {
                     if is_managed_torrent_metadata_path(&state, path) {
                         if retained_torrent_metadata_paths.contains(path) {
