@@ -11669,7 +11669,7 @@ fn parse_content_disposition_filename(value: &str) -> Option<String> {
 /// resolved page/media title, so this is strictly a last-resort lookup, not
 /// an extra request on the common path. Bounded to a short timeout so a slow
 /// or unresponsive server can never stall the caller for long.
-async fn probe_content_disposition_filename(url: &str) -> Option<String> {
+async fn probe_content_disposition_filename(url: &str) -> Result<String, String> {
     const PROBE_USER_AGENT: &str =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36";
     let client = reqwest::Client::builder()
@@ -11677,7 +11677,7 @@ async fn probe_content_disposition_filename(url: &str) -> Option<String> {
         .redirect(reqwest::redirect::Policy::limited(10))
         .user_agent(PROBE_USER_AGENT)
         .build()
-        .ok()?;
+        .map_err(|error| format!("client_build_failed:{error}"))?;
     let disposition_header = |response: &reqwest::Response| {
         response
             .headers()
@@ -11689,11 +11689,19 @@ async fn probe_content_disposition_filename(url: &str) -> Option<String> {
     // particular) only compute Content-Disposition while actually serving a
     // body, not on a bare HEAD — so a HEAD miss falls back to a ranged GET
     // that reads at most one byte, keeping the request just as cheap.
+    let mut last_status = None;
     let head_header = match client.head(url).send().await {
         Ok(response) if response.status().is_success() || response.status().is_redirection() => {
             disposition_header(&response)
         }
-        _ => None,
+        Ok(response) => {
+            last_status = Some(response.status());
+            None
+        }
+        Err(_) => {
+            last_status = None;
+            None
+        }
     };
     let header = if head_header.is_some() {
         head_header
@@ -11709,10 +11717,30 @@ async fn probe_content_disposition_filename(url: &str) -> Option<String> {
             {
                 disposition_header(&response)
             }
-            _ => None,
+            Ok(response) => {
+                last_status = Some(response.status());
+                None
+            }
+            Err(error) => {
+                return Err(format!(
+                    "get_request_failed:{error} (head_status={})",
+                    last_status
+                        .map(|status| status.to_string())
+                        .unwrap_or_else(|| "none".to_owned())
+                ));
+            }
         }
     };
-    header.and_then(|value| parse_content_disposition_filename(&value))
+    match header {
+        Some(value) => parse_content_disposition_filename(&value)
+            .ok_or_else(|| format!("header_unparseable:{value}")),
+        None => Err(format!(
+            "no_content_disposition_header (last_status={})",
+            last_status
+                .map(|status| status.to_string())
+                .unwrap_or_else(|| "none".to_owned())
+        )),
+    }
 }
 
 /// Mirrors the browser extension's own `genericDownloadStem` (background.js)
@@ -11771,16 +11799,30 @@ fn queue_from_bridge(
             .is_none_or(|value| value.trim().is_empty())
         && (request.url.starts_with("http://") || request.url.starts_with("https://"))
     {
-        if let Some(name) =
-            tauri::async_runtime::block_on(probe_content_disposition_filename(&request.url))
-        {
-            diagnostic_log(
-                &state,
-                "INFO",
-                "handoff.file_name_resolved_from_headers",
-                &format!("url={} file={name}", redact_url(&request.url)),
-            );
-            request.file_name = Some(name);
+        diagnostic_log(
+            &state,
+            "INFO",
+            "handoff.file_name_probe_started",
+            &format!("url={}", redact_url(&request.url)),
+        );
+        match tauri::async_runtime::block_on(probe_content_disposition_filename(&request.url)) {
+            Ok(name) => {
+                diagnostic_log(
+                    &state,
+                    "INFO",
+                    "handoff.file_name_resolved_from_headers",
+                    &format!("url={} file={name}", redact_url(&request.url)),
+                );
+                request.file_name = Some(name);
+            }
+            Err(reason) => {
+                diagnostic_log(
+                    &state,
+                    "INFO",
+                    "handoff.file_name_probe_failed",
+                    &format!("url={} reason={reason}", redact_url(&request.url)),
+                );
+            }
         }
     }
     state.diagnostics.record("handoff.desktop_received", "INFO", request.trace_id.as_deref(), None,

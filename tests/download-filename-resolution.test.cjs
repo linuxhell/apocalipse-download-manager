@@ -30,7 +30,7 @@ test("bridge downloads with neither a file name nor a title probe Content-Dispos
   // gopeed.com/api/download?tpl=... (no useful path, no query filename) was
   // always saved as the literal file "download" with no extension, because
   // nothing ever inspected the server's own Content-Disposition header.
-  assert.match(main, /async fn probe_content_disposition_filename\(url: &str\) -> Option<String>/);
+  assert.match(main, /async fn probe_content_disposition_filename\(url: &str\) -> Result<String, String>/);
   assert.match(main, /fn parse_content_disposition_filename\(value: &str\) -> Option<String>/);
   // Extended RFC 6266 form (filename*=UTF-8''...) must be preferred over the
   // plain filename= form, same precedence as the extension's own parser.
@@ -39,7 +39,7 @@ test("bridge downloads with neither a file name nor a title probe Content-Dispos
 
   const bridgeBody = main.slice(
     main.indexOf("fn queue_from_bridge("),
-    main.indexOf("fn queue_from_bridge(") + 1200,
+    main.indexOf("fn queue_from_bridge(") + 1800,
   );
   // Only probes when both a file name and a title are missing — never an
   // extra request on the common, already-working path — and only for real
@@ -48,8 +48,19 @@ test("bridge downloads with neither a file name nor a title probe Content-Dispos
   assert.match(bridgeBody, /is_generic_download_name\(value\.trim\(\)\)/);
   assert.match(bridgeBody, /request\s*\n\s*\.title\s*\n\s*\.as_deref\(\)/);
   assert.match(bridgeBody, /request\.url\.starts_with\("http:\/\/"\) \|\| request\.url\.starts_with\("https:\/\/"\)/);
+  // Logged unconditionally, before the (blocking) probe call, so a
+  // diagnostic export can prove the probe was even attempted — earlier
+  // exports showed the whole handoff completing in ~1ms, which is only
+  // possible if the gate never actually let the probe run.
+  assert.match(bridgeBody, /"handoff\.file_name_probe_started"/);
   assert.match(bridgeBody, /tauri::async_runtime::block_on\(probe_content_disposition_filename\(&request\.url\)\)/);
+  assert.match(bridgeBody, /Ok\(name\) => \{/);
   assert.match(bridgeBody, /request\.file_name = Some\(name\);/);
+  // A failed probe is logged with a reason instead of silently vanishing,
+  // so the next diagnostic export can actually say why it failed (client
+  // build error, network failure, no header, unparseable header, ...).
+  assert.match(bridgeBody, /Err\(reason\) => \{/);
+  assert.match(bridgeBody, /"handoff\.file_name_probe_failed"/);
 });
 
 test("the Content-Disposition probe runs on a plain OS thread, not inside the tokio runtime", () => {
@@ -70,7 +81,7 @@ test("the Content-Disposition probe falls back to a ranged GET with a real User-
   // added. A HEAD miss now retries with a minimal ranged GET.
   const probeBody = main.slice(
     main.indexOf("async fn probe_content_disposition_filename("),
-    main.indexOf("async fn probe_content_disposition_filename(") + 2000,
+    main.indexOf("async fn probe_content_disposition_filename(") + 3400,
   );
   assert.match(probeBody, /\.user_agent\(PROBE_USER_AGENT\)/);
   assert.match(probeBody, /client\s*\n\s*\.get\(url\)/);
