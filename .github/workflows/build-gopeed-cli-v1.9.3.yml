@@ -1,6 +1,9 @@
 name: Build Gopeed CLI v1.9.3
 
 on:
+  push:
+    branches:
+      - build-gopeed-cli-v1.9.3
   pull_request:
 
 permissions:
