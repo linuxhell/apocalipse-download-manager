@@ -3062,7 +3062,16 @@ fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(fallback))
 }
 
-fn configured_aria2(settings:&UserSettings)->PathBuf{configured_tool(&settings.aria2_path,if cfg!(windows){"aria2c.exe"}else{"aria2c"})}
+fn configured_aria2(settings: &UserSettings) -> PathBuf {
+    configured_tool(
+        &settings.aria2_path,
+        if cfg!(windows) {
+            "aria2c.exe"
+        } else {
+            "aria2c"
+        },
+    )
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExtractorKind {
@@ -5945,7 +5954,9 @@ async fn run_aria2_download(
         None => {
             let is_http = matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp);
             let add_uri_started_at = Instant::now();
-            let added = if is_bittorrent && context.proxy_required { Err("aria2_bittorrent_proxy_unsupported".to_owned()) } else if is_bittorrent {
+            let added = if is_bittorrent && context.proxy_required {
+                Err("aria2_bittorrent_proxy_unsupported".to_owned())
+            } else if is_bittorrent {
                 // task.destination is what the rest of the app (disk cleanup,
                 // "remove from disk") treats as the torrent's own root
                 // directory for Torrent/Magnet tasks: it recursively deletes
@@ -5970,7 +5981,13 @@ async fn run_aria2_download(
                 match torrent_bytes {
                     Ok(bytes) => {
                         endpoint
-                            .add_bittorrent(&task.source, bytes.as_deref(), &task.destination, &task.torrent_selection, download_limit)
+                            .add_bittorrent(
+                                &task.source,
+                                bytes.as_deref(),
+                                &task.destination,
+                                &task.torrent_selection,
+                                download_limit,
+                            )
                             .await
                     }
                     Err(error) => Err(error),
@@ -8630,7 +8647,17 @@ fn release_platform_architecture() -> Result<(&'static str, &'static str), Strin
 /// which this used to match by substring. Matching the exact suffix (minus
 /// the version, which changes every release) is both simpler and safer than
 /// substring markers here.
-fn aria2_asset_suffix()->Result<&'static str,String>{if cfg!(target_os="windows")&&cfg!(target_arch="x86_64"){Ok("windows-x64.exe")}else if cfg!(target_os="linux")&&cfg!(target_arch="x86_64"){Ok("linux-x64")}else if cfg!(target_os="macos")&&cfg!(target_arch="x86_64"){Ok("macos-x64")}else{Err("manual_update_required:aria2".to_owned())}}
+fn aria2_asset_suffix() -> Result<&'static str, String> {
+    if cfg!(target_os = "windows") && cfg!(target_arch = "x86_64") {
+        Ok("windows-x64.exe")
+    } else if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
+        Ok("linux-x64")
+    } else if cfg!(target_os = "macos") && cfg!(target_arch = "x86_64") {
+        Ok("macos-x64")
+    } else {
+        Err("manual_update_required:aria2".to_owned())
+    }
+}
 
 fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
     let mut best: Option<(u64, PathBuf)> = None;
@@ -8908,7 +8935,22 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             install_validated_executable(&bytes, &target, &["--version"])?;
             target
         }
-        "aria2" => {let release=github_latest_release(&client,"FerroDownload/aria2-static-builds").await?;let suffix=aria2_asset_suffix()?;let(_,url)=release_asset(&release,|name|name.starts_with("aria2c-")&&name.ends_with(suffix)&&!name.ends_with(".sha256"))?;let bytes=download_release_bytes(&client,&url).await?;let target=tool_dir.join(if cfg!(windows){"aria2c.exe"}else{"aria2c"});install_validated_executable(&bytes,&target,&["--version"])?;target}
+        "aria2" => {
+            let release =
+                github_latest_release(&client, "FerroDownload/aria2-static-builds").await?;
+            let suffix = aria2_asset_suffix()?;
+            let (_, url) = release_asset(&release, |name| {
+                name.starts_with("aria2c-") && name.ends_with(suffix) && !name.ends_with(".sha256")
+            })?;
+            let bytes = download_release_bytes(&client, &url).await?;
+            let target = tool_dir.join(if cfg!(windows) {
+                "aria2c.exe"
+            } else {
+                "aria2c"
+            });
+            install_validated_executable(&bytes, &target, &["--version"])?;
+            target
+        }
         "n-m3u8dl-re" => {
             let release = github_latest_release(&client, "nilaoda/N_m3u8DL-RE").await?;
             let (platform_marker, arch_marker) = match (platform, architecture) {
@@ -9233,7 +9275,16 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &[],
                 &["--version"],
             ),
-            "aria2" => ("FerroDownload/aria2-static-builds",if cfg!(windows){"aria2c.exe"}else{"aria2c"},std::slice::from_ref(&aria2_suffix),&["--version"]),
+            "aria2" => (
+                "FerroDownload/aria2-static-builds",
+                if cfg!(windows) {
+                    "aria2c.exe"
+                } else {
+                    "aria2c"
+                },
+                std::slice::from_ref(&aria2_suffix),
+                &["--version"],
+            ),
             "n-m3u8dl-re" => (
                 "nilaoda/N_m3u8DL-RE",
                 if cfg!(windows) {
@@ -9328,9 +9379,15 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                         }
                         _ => false,
                     },
-                    "aria2" => name.starts_with("aria2c-") && name.ends_with(aria2_suffix) && !name.ends_with(".sha256"),
+                    "aria2" => {
+                        name.starts_with("aria2c-")
+                            && name.ends_with(aria2_suffix)
+                            && !name.ends_with(".sha256")
+                    }
 
-                    _ => asset_markers.iter().all(|marker| name.contains(&marker.to_ascii_lowercase())),
+                    _ => asset_markers
+                        .iter()
+                        .all(|marker| name.contains(&marker.to_ascii_lowercase())),
                 }
             })
             .ok_or_else(|| format!("compatible_release_asset_not_found:{repository}:{tag}"))?;
@@ -9568,9 +9625,16 @@ async fn inspect_torrent_metadata(
     }
 
     // Only a bare Magnet reaches here: resolve metadata through classic aria2.
-    if state.settings.lock().map_err(|e|e.to_string())?.proxy_enabled{return Err("aria2_bittorrent_proxy_unsupported".to_owned());}
-    let endpoint=aria2_endpoint(&state,true).await?;
-    let runtime_root=state.queue_path.parent().unwrap_or_else(||Path::new("."));
+    if state
+        .settings
+        .lock()
+        .map_err(|e| e.to_string())?
+        .proxy_enabled
+    {
+        return Err("aria2_bittorrent_proxy_unsupported".to_owned());
+    }
+    let endpoint = aria2_endpoint(&state, true).await?;
+    let runtime_root = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
     let workspace = runtime_root
         .join("aria2-metadata-inspection")
         .join(uuid::Uuid::new_v4().simple().to_string());
@@ -9585,7 +9649,9 @@ async fn inspect_torrent_metadata(
         &format!("log_offset={log_start}"),
     );
     let metadata = endpoint
-        .preview_magnet_metadata(&source,&workspace,
+        .preview_magnet_metadata(
+            &source,
+            &workspace,
             |elapsed_secs, connections, seeders, total_length, completed_length, followed_by| {
                 if let Some(content_gid) = followed_by {
                     diagnostic_log(
@@ -10323,9 +10389,7 @@ fn start_download(
     if !native_http_compatibility
         && matches!(
             kind,
-            DownloadKind::Http
-                | DownloadKind::AcceleratedHttp
-                | DownloadKind::Ftp
+            DownloadKind::Http | DownloadKind::AcceleratedHttp | DownloadKind::Ftp
         )
     {
         diagnostic_log(
@@ -13405,11 +13469,8 @@ fn main() {
             if initial_settings.aria2_path.is_none() {
                 let aria2_dir = app_data.join("tools").join("aria2");
                 fs::create_dir_all(&aria2_dir)?;
-                initial_settings.aria2_path = Some(aria2_dir.join(if cfg!(windows) {
-                    "aria2c.exe"
-                } else {
-                    "aria2"
-                }));
+                initial_settings.aria2_path =
+                    Some(aria2_dir.join(if cfg!(windows) { "aria2c.exe" } else { "aria2" }));
                 write_settings(&settings_path, &initial_settings).map_err(std::io::Error::other)?;
             }
             let (show_label, quit_label) = tray_labels(&initial_settings.language);
