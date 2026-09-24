@@ -1980,6 +1980,7 @@ document.querySelectorAll("#add").forEach(
       pendingRequestMethod = null;
       pendingRequestBody = null;
       pendingRequestContentType = null;
+      pendingTorrentMetadataPath = null;
       resetTaskConnections();
       resetMediaInspection();
       invoke("default_download_directory")
@@ -2943,6 +2944,7 @@ setInterval(async () => {
     pendingRequestMethod = null;
     pendingRequestBody = null;
     pendingRequestContentType = null;
+    pendingTorrentMetadataPath = null;
     resetTaskConnections();
     const url = document.querySelector("#url");
     url.value = link;
