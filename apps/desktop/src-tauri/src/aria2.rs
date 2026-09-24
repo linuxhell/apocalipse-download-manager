@@ -266,6 +266,4 @@ impl Endpoint {
         .map(|_| ())
     }
 
-    /// request options, not changeGlobalOption values, so they must travel with
-    /// each search/download request rather than being "applied" globally.
-        }
+}
