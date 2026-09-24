@@ -7861,6 +7861,29 @@ fn suggested_name(source: &str) -> String {
         .collect()
 }
 
+/// Turns a resolved page/media title (e.g. a SoundCloud track name) into a
+/// safe file name stem. Used as a fallback when the caller has no explicit
+/// file name and the source URL itself carries no useful name (a signed CDN
+/// URL or a generic "/api/download" endpoint), which otherwise left the file
+/// named the literal fallback "download" with no extension.
+fn sanitize_title_for_filename(title: &str) -> String {
+    title
+        .chars()
+        .filter(|character| !character.is_control())
+        .map(|character| {
+            if "<>:\"/\\|?*".contains(character) {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect::<String>()
+        .trim()
+        .chars()
+        .take(180)
+        .collect()
+}
+
 fn suggested_download_name(source: &str) -> String {
     let name = suggested_name(source);
     if classify_url(source) == Some(DownloadKind::Hls) {
@@ -9877,7 +9900,14 @@ fn enqueue_download_impl(
         }
         None => configured_download_directory(&app, state)?,
     };
-    let proposed = file_name.unwrap_or_else(|| suggested_name(&url));
+    let title_based_name = context
+        .as_ref()
+        .and_then(|context| context.title.as_deref())
+        .map(sanitize_title_for_filename)
+        .filter(|name| !name.is_empty());
+    let proposed = file_name
+        .or(title_based_name)
+        .unwrap_or_else(|| suggested_name(&url));
     let file_name = validate_file_name(&append_source_extension(proposed, &url, kind))?;
     remember_download_directory(state, &download_dir)?;
     let mut task = DownloadTask::new(&url, download_dir.join(&file_name));
@@ -11606,6 +11636,57 @@ fn open_paypal_donation() -> Result<(), String> {
     result.map(|_| ()).map_err(|error| error.to_string())
 }
 
+/// Extracts a real file name from a `Content-Disposition` header value,
+/// following the same precedence as RFC 6266: the extended `filename*=`
+/// form first (percent-decoded), then quoted `filename="..."`, then a bare
+/// `filename=...`. Mirrors the equivalent parser already used by the
+/// browser extension (`dispositionFileName` in background.js) so both sides
+/// resolve a name from the same header the same way.
+fn parse_content_disposition_filename(value: &str) -> Option<String> {
+    if let Some(rest) = value
+        .split(';')
+        .map(str::trim)
+        .find_map(|part| part.strip_prefix("filename*=UTF-8''").or_else(|| part.strip_prefix("filename*=utf-8''")))
+    {
+        if let Ok(decoded) = percent_encoding::percent_decode_str(rest).decode_utf8() {
+            let decoded = decoded.trim().trim_matches('"');
+            if !decoded.is_empty() {
+                return Some(decoded.to_owned());
+            }
+        }
+    }
+    value
+        .split(';')
+        .map(str::trim)
+        .find_map(|part| part.strip_prefix("filename="))
+        .map(|value| value.trim().trim_matches('"').to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+/// Looks up the real file name for a URL whose path carries no useful name
+/// (a signed CDN link or a generic `/api/download`-style endpoint) by
+/// reading the `Content-Disposition` header from the server's own response.
+/// Only called when the caller supplied neither an explicit file name nor a
+/// resolved page/media title, so this is strictly a last-resort lookup, not
+/// an extra request on the common path. Bounded to a short timeout so a slow
+/// or unresponsive server can never stall the caller for long.
+async fn probe_content_disposition_filename(url: &str) -> Option<String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .ok()?;
+    let header = match client.head(url).send().await {
+        Ok(response) if response.status().is_success() || response.status().is_redirection() => response
+            .headers()
+            .get(reqwest::header::CONTENT_DISPOSITION)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned),
+        _ => None,
+    };
+    header.and_then(|value| parse_content_disposition_filename(&value))
+}
+
 fn duplicate_bridge_prompt(state: &AppState, request: &BridgeDownload) -> bool {
     if request.start_immediately {
         return false;
@@ -11632,6 +11713,25 @@ fn queue_from_bridge(
     mut request: BridgeDownload,
 ) -> Result<Option<DownloadId>, String> {
     let state = app.state::<AppState>();
+    if request
+        .file_name
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+        && request.title.as_deref().is_none_or(|value| value.trim().is_empty())
+        && (request.url.starts_with("http://") || request.url.starts_with("https://"))
+    {
+        if let Some(name) =
+            tauri::async_runtime::block_on(probe_content_disposition_filename(&request.url))
+        {
+            diagnostic_log(
+                &state,
+                "INFO",
+                "handoff.file_name_resolved_from_headers",
+                &format!("url={} file={name}", redact_url(&request.url)),
+            );
+            request.file_name = Some(name);
+        }
+    }
     state.diagnostics.record("handoff.desktop_received", "INFO", request.trace_id.as_deref(), None,
         serde_json::json!({"url":request.url,"mediaKind":request.media_kind,"immediate":request.start_immediately,"paired":request.audio_url.is_some(),"ambiguous":request.ambiguous_social_track}));
     if request.ambiguous_social_track && request.audio_url.is_none() {
