@@ -24,7 +24,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     fs::OpenOptions,
-    io::{Read, Seek, SeekFrom, Write},
+    io::{Read, Write},
     net::{IpAddr, TcpListener, TcpStream, UdpSocket},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -6081,8 +6081,7 @@ async fn run_aria2_download(
                             Ok(bytes) => {
                                 endpoint
                                     .add_bittorrent(
-                                        &task.source,
-                                        Some(&bytes),
+                                        &bytes,
                                         &task.destination,
                                         &task.torrent_selection,
                                         download_limit,
