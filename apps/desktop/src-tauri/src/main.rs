@@ -8821,6 +8821,22 @@ async fn download_release_bytes(client: &reqwest::Client, url: &str) -> Result<V
         .to_vec())
 }
 
+fn verify_release_sha256(checksum_text: &str, asset_name: &str, bytes: &[u8]) -> Result<(), String> {
+    let expected = checksum_text
+        .split_whitespace()
+        .next()
+        .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or_else(|| format!("checksum_invalid:{asset_name}"))?
+        .to_ascii_lowercase();
+    let actual = format!("{:x}", Sha256::digest(bytes));
+    if actual != expected {
+        return Err(format!(
+            "checksum_mismatch:{asset_name}:expected={expected}:actual={actual}"
+        ));
+    }
+    Ok(())
+}
+
 fn install_validated_executable(
     bytes: &[u8],
     target: &Path,
@@ -8939,10 +8955,16 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             let release =
                 github_latest_release(&client, "FerroDownload/aria2-static-builds").await?;
             let suffix = aria2_asset_suffix()?;
-            let (_, url) = release_asset(&release, |name| {
+            let (asset_name, url) = release_asset(&release, |name| {
                 name.starts_with("aria2c-") && name.ends_with(suffix) && !name.ends_with(".sha256")
             })?;
+            let checksum_name = format!("{asset_name}.sha256");
+            let (_, checksum_url) = release_asset(&release, |name| name == checksum_name)?;
             let bytes = download_release_bytes(&client, &url).await?;
+            let checksum_bytes = download_release_bytes(&client, &checksum_url).await?;
+            let checksum_text =
+                String::from_utf8(checksum_bytes).map_err(|error| error.to_string())?;
+            verify_release_sha256(&checksum_text, &asset_name, &bytes)?;
             let target = tool_dir.join(if cfg!(windows) {
                 "aria2c.exe"
             } else {
@@ -9410,6 +9432,31 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             .await
             .map_err(|error| error.to_string())?;
         let sha256 = format!("{:x}", Sha256::digest(&bytes));
+        if id == "aria2" {
+            let checksum_name = format!("{asset_name}.sha256");
+            let checksum_asset = assets
+                .iter()
+                .find(|candidate| {
+                    candidate.get("name").and_then(|value| value.as_str())
+                        == Some(checksum_name.as_str())
+                })
+                .ok_or_else(|| format!("checksum_asset_missing:{checksum_name}"))?;
+            let checksum_url = checksum_asset
+                .get("browser_download_url")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| "release_asset_url_missing".to_owned())?;
+            let checksum_text = client
+                .get(checksum_url)
+                .send()
+                .await
+                .map_err(|error| error.to_string())?
+                .error_for_status()
+                .map_err(|error| error.to_string())?
+                .text()
+                .await
+                .map_err(|error| error.to_string())?;
+            verify_release_sha256(&checksum_text, asset_name, &bytes)?;
+        }
         let temporary =
             std::env::temp_dir().join(format!("apocalipse-tool-update-{}", uuid::Uuid::new_v4()));
         let (replacement, ffprobe_replacement) =
@@ -13470,7 +13517,7 @@ fn main() {
                 let aria2_dir = app_data.join("tools").join("aria2");
                 fs::create_dir_all(&aria2_dir)?;
                 initial_settings.aria2_path =
-                    Some(aria2_dir.join(if cfg!(windows) { "aria2c.exe" } else { "aria2" }));
+                    Some(aria2_dir.join(if cfg!(windows) { "aria2c.exe" } else { "aria2c" }));
                 write_settings(&settings_path, &initial_settings).map_err(std::io::Error::other)?;
             }
             let (show_label, quit_label) = tray_labels(&initial_settings.language);
