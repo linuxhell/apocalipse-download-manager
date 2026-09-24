@@ -44,7 +44,7 @@ test("bridge downloads with neither a file name nor a title probe Content-Dispos
   // extra request on the common, already-working path — and only for real
   // http(s) URLs (never local file paths or magnet links).
   assert.match(bridgeBody, /request\s*\n\s*\.file_name/);
-  assert.match(bridgeBody, /request\.title\.as_deref\(\)\.is_none_or/);
+  assert.match(bridgeBody, /request\s*\n\s*\.title\s*\n\s*\.as_deref\(\)/);
   assert.match(bridgeBody, /request\.url\.starts_with\("http:\/\/"\) \|\| request\.url\.starts_with\("https:\/\/"\)/);
   assert.match(bridgeBody, /tauri::async_runtime::block_on\(probe_content_disposition_filename\(&request\.url\)\)/);
   assert.match(bridgeBody, /request\.file_name = Some\(name\);/);

@@ -11643,11 +11643,10 @@ fn open_paypal_donation() -> Result<(), String> {
 /// browser extension (`dispositionFileName` in background.js) so both sides
 /// resolve a name from the same header the same way.
 fn parse_content_disposition_filename(value: &str) -> Option<String> {
-    if let Some(rest) = value
-        .split(';')
-        .map(str::trim)
-        .find_map(|part| part.strip_prefix("filename*=UTF-8''").or_else(|| part.strip_prefix("filename*=utf-8''")))
-    {
+    if let Some(rest) = value.split(';').map(str::trim).find_map(|part| {
+        part.strip_prefix("filename*=UTF-8''")
+            .or_else(|| part.strip_prefix("filename*=utf-8''"))
+    }) {
         if let Ok(decoded) = percent_encoding::percent_decode_str(rest).decode_utf8() {
             let decoded = decoded.trim().trim_matches('"');
             if !decoded.is_empty() {
@@ -11677,11 +11676,13 @@ async fn probe_content_disposition_filename(url: &str) -> Option<String> {
         .build()
         .ok()?;
     let header = match client.head(url).send().await {
-        Ok(response) if response.status().is_success() || response.status().is_redirection() => response
-            .headers()
-            .get(reqwest::header::CONTENT_DISPOSITION)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned),
+        Ok(response) if response.status().is_success() || response.status().is_redirection() => {
+            response
+                .headers()
+                .get(reqwest::header::CONTENT_DISPOSITION)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned)
+        }
         _ => None,
     };
     header.and_then(|value| parse_content_disposition_filename(&value))
@@ -11717,7 +11718,10 @@ fn queue_from_bridge(
         .file_name
         .as_deref()
         .is_none_or(|value| value.trim().is_empty())
-        && request.title.as_deref().is_none_or(|value| value.trim().is_empty())
+        && request
+            .title
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
         && (request.url.starts_with("http://") || request.url.starts_with("https://"))
     {
         if let Some(name) =
