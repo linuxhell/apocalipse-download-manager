@@ -11715,6 +11715,26 @@ async fn probe_content_disposition_filename(url: &str) -> Option<String> {
     header.and_then(|value| parse_content_disposition_filename(&value))
 }
 
+/// Mirrors the browser extension's own `genericDownloadStem` (background.js)
+/// so both sides agree on what counts as "no real name". The extension
+/// already tries its own page-title fallback for a generic browser-resolved
+/// name (e.g. Chrome's own guess "download" for a bare `/api/download`
+/// link) and, when that fails too, still sends the generic name as-is
+/// rather than nothing — so the backend must treat it the same as empty to
+/// know a Content-Disposition probe is worth attempting.
+fn is_generic_download_name(name: &str) -> bool {
+    let stem = name
+        .rsplit_once('.')
+        .filter(|(_, extension)| (1..=10).contains(&extension.len()))
+        .map_or(name, |(stem, _)| stem)
+        .replace(['.', '_', '-'], " ");
+    let stem = stem.trim();
+    matches!(
+        stem.to_ascii_lowercase().as_str(),
+        "video" | "audio" | "media" | "midia" | "download" | "file" | "arquivo" | "videoplayback"
+    )
+}
+
 fn duplicate_bridge_prompt(state: &AppState, request: &BridgeDownload) -> bool {
     if request.start_immediately {
         return false;
@@ -11744,7 +11764,7 @@ fn queue_from_bridge(
     if request
         .file_name
         .as_deref()
-        .is_none_or(|value| value.trim().is_empty())
+        .is_none_or(|value| value.trim().is_empty() || is_generic_download_name(value.trim()))
         && request
             .title
             .as_deref()

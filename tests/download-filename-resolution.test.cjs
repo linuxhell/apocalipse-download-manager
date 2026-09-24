@@ -45,6 +45,7 @@ test("bridge downloads with neither a file name nor a title probe Content-Dispos
   // extra request on the common, already-working path — and only for real
   // http(s) URLs (never local file paths or magnet links).
   assert.match(bridgeBody, /request\s*\n\s*\.file_name/);
+  assert.match(bridgeBody, /is_generic_download_name\(value\.trim\(\)\)/);
   assert.match(bridgeBody, /request\s*\n\s*\.title\s*\n\s*\.as_deref\(\)/);
   assert.match(bridgeBody, /request\.url\.starts_with\("http:\/\/"\) \|\| request\.url\.starts_with\("https:\/\/"\)/);
   assert.match(bridgeBody, /tauri::async_runtime::block_on\(probe_content_disposition_filename\(&request\.url\)\)/);
@@ -74,6 +75,26 @@ test("the Content-Disposition probe falls back to a ranged GET with a real User-
   assert.match(probeBody, /\.user_agent\(PROBE_USER_AGENT\)/);
   assert.match(probeBody, /client\s*\n\s*\.get\(url\)/);
   assert.match(probeBody, /header\(reqwest::header::RANGE, "bytes=0-0"\)/);
+});
+
+test("a Content-Disposition probe also fires when the extension already sent a generic name, not just when it sent nothing", () => {
+  // Regression: even after the probe was added, gopeed.com/api/download
+  // still saved as "download" — because the extension's own
+  // resolveBrowserDownloadFileName already sends the browser's own generic
+  // guess ("download") as request.fileName when it can't do better (no
+  // usable page title), so the field was never actually empty. Confirmed
+  // live: handoff.desktop_received fired 0ms after the request arrived,
+  // meaning the probe's network call never ran at all. The backend must
+  // treat a generic name the same as no name, mirroring the extension's own
+  // genericDownloadStem list (background.js).
+  assert.match(main, /fn is_generic_download_name\(name: &str\) -> bool/);
+  const genericFnBody = main.slice(
+    main.indexOf("fn is_generic_download_name("),
+    main.indexOf("fn is_generic_download_name(") + 700,
+  );
+  for (const word of ["video", "audio", "media", "midia", "download", "file", "arquivo", "videoplayback"]) {
+    assert.match(genericFnBody, new RegExp(`"${word}"`));
+  }
 });
 
 test("a resolved audio title (not just video) fills the save-dialog file name for bridge downloads", () => {
