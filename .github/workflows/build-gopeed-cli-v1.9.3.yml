@@ -1,0 +1,69 @@
+name: Build Gopeed CLI v1.9.3
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Gopeed v1.9.3
+        uses: actions/checkout@v4
+        with:
+          repository: GopeedLab/gopeed
+          ref: v1.9.3
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.11'
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Build and smoke-test Linux CLI
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          go build -tags nosqlite -trimpath -ldflags="-s -w" -o gopeed-linux-amd64 ./cmd/gopeed
+          ./gopeed-linux-amd64 -h
+
+      - name: Build Windows x64 CLI
+        env:
+          CGO_ENABLED: '0'
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          go build -tags nosqlite -trimpath -ldflags="-s -w" -o gopeed.exe ./cmd/gopeed
+          sha256sum gopeed.exe | tee gopeed.exe.sha256
+          file gopeed.exe
+
+      - name: Package artifact
+        run: |
+          mkdir -p dist
+          cp gopeed.exe gopeed.exe.sha256 dist/
+          cat > dist/README.txt <<'EOF'
+          Gopeed CLI v1.9.3 - Windows x64 standalone
+          Source: https://github.com/GopeedLab/gopeed/tree/v1.9.3/cmd/gopeed
+
+          Test:
+            gopeed.exe -h
+
+          HTTP download with 16 connections:
+            gopeed.exe -C 16 "https://example.com/file.iso"
+
+          IMPORTANT on Windows CMD:
+            Keep URLs containing & inside double quotes.
+          EOF
+
+      - name: Upload Windows CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: gopeed-cli-v1.9.3-windows-amd64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
