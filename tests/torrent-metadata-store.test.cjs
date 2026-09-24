@@ -29,3 +29,14 @@ test("torrent metadata deletion prompt is localized", () => {
   assert.match(ui, /Also delete the saved \.torrent file\(s\)/);
   assert.match(ui, /是否同时删除保存在 data\/torrents 中的 \.torrent 文件/);
 });
+
+
+test("pausing keeps the managed torrent copy so resume does not depend on the original file", () => {
+  const pauseStart = main.indexOf("fn pause_download(");
+  const resumeStart = main.indexOf("fn resume_download(", pauseStart);
+  const pause = main.slice(pauseStart, resumeStart);
+  assert.ok(pauseStart >= 0 && resumeStart > pauseStart);
+  assert.doesNotMatch(pause, /torrent_metadata_path\s*=\s*None|remove_path_with_retry\([^\n]*torrent_metadata/i);
+  assert.match(main, /task\.torrent_metadata_path[\s\S]*add_bittorrent[\s\S]*&bytes/);
+  assert.match(main, /persist_torrent_bytes\(state, &bytes\)/);
+});
