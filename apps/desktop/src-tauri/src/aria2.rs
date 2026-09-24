@@ -415,36 +415,34 @@ impl Endpoint {
         })
     }
 
-    /// Adds a magnet link or a `.torrent` file as an active BitTorrent
-    /// download. Magnet file selection is deliberately deferred until
-    /// metadata-only exposes the real file list on the same aria2 GID.
+    /// Starts an active BitTorrent download from a validated .torrent payload.
+    /// Magnet links are materialized to data/torrents before this method is called.
     pub async fn add_bittorrent(
         &self,
-        source: &str,
-        torrent_bytes: Option<&[u8]>,
+        torrent_bytes: &[u8],
         destination_dir: &Path,
         only_files: &[usize],
         download_limit: u64,
     ) -> Result<String, String> {
-        let mut o = Map::new();
-        o.insert(
+        let mut options = Map::new();
+        options.insert(
             "dir".into(),
             Value::String(destination_dir.to_string_lossy().into_owned()),
         );
-        o.insert("continue".into(), Value::String("true".into()));
-        o.insert("file-allocation".into(), Value::String("none".into()));
-        o.insert(
+        options.insert("continue".into(), Value::String("true".into()));
+        options.insert("file-allocation".into(), Value::String("none".into()));
+        options.insert(
             "bt-prioritize-piece".into(),
             Value::String("head,tail".into()),
         );
         if download_limit > 0 {
-            o.insert(
+            options.insert(
                 "max-download-limit".into(),
                 Value::String(download_limit.to_string()),
             );
         }
         if !only_files.is_empty() {
-            o.insert(
+            options.insert(
                 "select-file".into(),
                 Value::String(
                     only_files
@@ -455,22 +453,19 @@ impl Endpoint {
                 ),
             );
         }
-        let v = if let Some(bytes) = torrent_bytes {
-            let enc = base64::engine::general_purpose::STANDARD.encode(bytes);
-            self.call(
+        let encoded = base64::engine::general_purpose::STANDARD.encode(torrent_bytes);
+        let value = self
+            .call(
                 "aria2.addTorrent",
                 vec![
-                    Value::String(enc),
+                    Value::String(encoded),
                     Value::Array(Vec::new()),
-                    Value::Object(o),
+                    Value::Object(options),
                 ],
             )
-            .await?
-        } else {
-            self.call("aria2.addUri", vec![json!([source]), Value::Object(o)])
-                .await?
-        };
-        v.as_str()
+            .await?;
+        value
+            .as_str()
             .map(str::to_owned)
             .ok_or_else(|| "aria2_gid_missing".to_owned())
     }
