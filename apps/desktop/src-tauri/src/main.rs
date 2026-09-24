@@ -6388,6 +6388,24 @@ async fn run_external_download(
         "external.start",
         &format!("task={id} engine={kind:?} url={}", redact_url(&task.source)),
     );
+    if kind == DownloadKind::Hls {
+        if let Some(expiry) = hls_signed_url_expiry(&task.source) {
+            if hls_signed_url_expired(&task.source) {
+                diagnostic_log(
+                    &app.state::<AppState>(),
+                    "WARN",
+                    "external.hls_signed_url_expired",
+                    &format!("task={id} expired_at={expiry}"),
+                );
+                update_task(&app, id, true, |item| {
+                    item.state = DownloadState::Failed {
+                        message: "signed_stream_url_expired".to_owned(),
+                    };
+                });
+                return;
+            }
+        }
+    }
     log_network_route(
         &app.state::<AppState>(),
         &id.to_string(),
@@ -7891,10 +7909,73 @@ fn suggested_download_name(source: &str) -> String {
             .file_stem()
             .and_then(|value| value.to_str())
             .unwrap_or("stream");
-        format!("{stem}.mp4")
+        // Not every HLS capture is video: an audio-only rendition (SoundCloud's
+        // aac_96k, for example) names itself that way right in the manifest
+        // path, so forcing .mp4 on every Hls URL silently mislabels audio as
+        // video. Fall back to .mp4 only when nothing in the URL says otherwise.
+        let lower = source.to_ascii_lowercase();
+        let extension = if ["aac", "m4a", "mp3", "opus", "audio"]
+            .iter()
+            .any(|hint| lower.contains(hint))
+        {
+            "m4a"
+        } else {
+            "mp4"
+        };
+        format!("{stem}.{extension}")
     } else {
         name
     }
+}
+
+/// Reads the expiry embedded in a CloudFront-signed HLS manifest URL, either
+/// the canned-policy `Expires` query param or the custom-policy `Policy`
+/// param (a URL-safe-base64 JSON document with
+/// `Statement[0].Condition.DateLessThan.AWS:EpochTime`). Returns `None` when
+/// the URL carries no recognizable signature, in which case no expiry check
+/// applies.
+fn hls_signed_url_expiry(url: &str) -> Option<i64> {
+    let parsed = url::Url::parse(url).ok()?;
+    for (name, value) in parsed.query_pairs() {
+        if name.eq_ignore_ascii_case("expires") {
+            if let Ok(expiry) = value.parse::<i64>() {
+                return Some(expiry);
+            }
+        }
+        if name.eq_ignore_ascii_case("policy") {
+            let normalized = value.replace('-', "+").replace('_', "=").replace('~', "/");
+            if let Ok(decoded) = BASE64.decode(normalized.as_bytes()) {
+                if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&decoded) {
+                    if let Some(expiry) = json
+                        .get("Statement")
+                        .and_then(|value| value.get(0))
+                        .and_then(|value| value.get("Condition"))
+                        .and_then(|value| value.get("DateLessThan"))
+                        .and_then(|value| value.get("AWS:EpochTime"))
+                        .and_then(serde_json::Value::as_i64)
+                    {
+                        return Some(expiry);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// A signed HLS URL that already expired is never going to succeed no matter
+/// how many times the engine retries it — confirmed against a real 403 case
+/// where the embedded policy had expired roughly 54 minutes before the
+/// engine's first attempt. Checking this up front turns 10 doomed retries
+/// into an immediate, clear failure.
+fn hls_signed_url_expired(url: &str) -> bool {
+    hls_signed_url_expiry(url).is_some_and(|expiry| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs() as i64)
+            .unwrap_or(0);
+        expiry <= now
+    })
 }
 
 /// Windows treats these device names as reserved regardless of case or
@@ -11789,14 +11870,22 @@ fn queue_from_bridge(
     mut request: BridgeDownload,
 ) -> Result<Option<DownloadId>, String> {
     let state = app.state::<AppState>();
+    // A page title is not a file name: for a plain "file" capture like
+    // gopeed.com/api/download?tpl=..., the extension sends the tab's title
+    // (e.g. "gopeed.com") alongside a generic file_name ("download"), which
+    // used to block this probe entirely even though Content-Disposition is
+    // the only source that can actually name that file. Recognized media
+    // captures (video/audio) are excluded here on purpose: their file name
+    // is resolved from the known media title by the save dialog instead, and
+    // an extra request against a short-lived signed CDN URL (e.g. SoundCloud)
+    // would only waste part of its narrow validity window.
     if request
         .file_name
         .as_deref()
         .is_none_or(|value| value.trim().is_empty() || is_generic_download_name(value.trim()))
-        && request
-            .title
-            .as_deref()
-            .is_none_or(|value| value.trim().is_empty())
+        && !request.media_kind.as_deref().is_some_and(|kind| {
+            kind.eq_ignore_ascii_case("video") || kind.eq_ignore_ascii_case("audio")
+        })
         && (request.url.starts_with("http://") || request.url.starts_with("https://"))
     {
         diagnostic_log(

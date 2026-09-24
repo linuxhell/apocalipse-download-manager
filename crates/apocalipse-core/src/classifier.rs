@@ -62,6 +62,9 @@ pub fn classify_url(input: &str) -> Option<DownloadKind> {
                 | "vt.tiktok.com"
                 | "instagram.com"
                 | "www.instagram.com"
+                | "soundcloud.com"
+                | "www.soundcloud.com"
+                | "m.soundcloud.com"
         )
     ) {
         Some(DownloadKind::MediaPage)
@@ -114,6 +117,10 @@ mod tests {
         );
         assert_eq!(
             classify_url("https://www.instagram.com/reel/example/"),
+            Some(DownloadKind::MediaPage)
+        );
+        assert_eq!(
+            classify_url("https://soundcloud.com/artist/track"),
             Some(DownloadKind::MediaPage)
         );
         assert_eq!(classify_url("file:///tmp/a"), None);

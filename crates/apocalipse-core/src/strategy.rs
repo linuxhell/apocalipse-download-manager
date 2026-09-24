@@ -42,13 +42,10 @@ pub fn contextual_media_page<'a>(
         || request_method.is_some_and(|method| {
             !method.eq_ignore_ascii_case("GET") && !method.eq_ignore_ascii_case("HEAD")
         })
-        || !matches!(
-            classify_url(resource_url),
-            Some(DownloadKind::Http | DownloadKind::AcceleratedHttp)
-        )
     {
         return None;
     }
+    let resource_kind = classify_url(resource_url);
     let page = page_url.and_then(|value| url::Url::parse(value).ok())?;
     if !matches!(page.scheme(), "http" | "https")
         || !page.username().is_empty()
@@ -58,6 +55,22 @@ pub fn contextual_media_page<'a>(
     }
     let host = page.host_str()?.to_ascii_lowercase();
     let host_is = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
+    // SoundCloud's browser capture is a signed, short-lived HLS manifest, not a
+    // plain file URL, so it needs the Hls kind allowed through. Every other
+    // recognized host only ever hands over a direct CDN file (or, for a live
+    // broadcast, an .m3u8 we deliberately still leave alone).
+    let allowed_kinds: &[DownloadKind] = if host_is("soundcloud.com") {
+        &[
+            DownloadKind::Http,
+            DownloadKind::AcceleratedHttp,
+            DownloadKind::Hls,
+        ]
+    } else {
+        &[DownloadKind::Http, DownloadKind::AcceleratedHttp]
+    };
+    if !resource_kind.is_some_and(|kind| allowed_kinds.contains(&kind)) {
+        return None;
+    }
     let path = page.path();
     let specific = if host_is("youtube.com") {
         path == "/watch" || path.starts_with("/shorts/") || path.starts_with("/live/")
@@ -94,6 +107,32 @@ pub fn contextual_media_page<'a>(
     } else if host_is("tiktok.com") {
         let lower = path.to_ascii_lowercase();
         lower.starts_with("/@") && lower.contains("/video/")
+    } else if host_is("soundcloud.com") {
+        const RESERVED: &[&str] = &[
+            "you",
+            "discover",
+            "charts",
+            "stream",
+            "search",
+            "upload",
+            "creators",
+            "pro",
+            "backstage",
+            "developers",
+            "jobs",
+            "legal",
+            "pages",
+            "settings",
+            "notifications",
+            "messages",
+            "signin",
+            "signup",
+        ];
+        let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
+        matches!(segments.as_slice(), [artist, track]
+            if !artist.is_empty()
+                && !track.is_empty()
+                && !RESERVED.contains(&artist.to_ascii_lowercase().as_str()))
     } else {
         false
     };
@@ -216,6 +255,38 @@ mod tests {
                 Some(page),
             );
         }
+    }
+
+    #[test]
+    fn soundcloud_hls_capture_routes_to_the_canonical_track_page() {
+        // A SoundCloud capture hands over a signed, short-lived
+        // playback.media-streaming.soundcloud.cloud/.../playlist.m3u8 manifest.
+        // That signature expires quickly, so the download must prefer the
+        // canonical track page (yt-dlp re-resolves a fresh signed URL) instead
+        // of reusing the stale one, unlike other hosts whose capture is
+        // already a durable, direct CDN file.
+        assert_eq!(
+            contextual_media_page(
+                "https://playback.media-streaming.soundcloud.cloud/media/x/aac_96k/playlist.m3u8",
+                Some("https://soundcloud.com/artist/track"),
+                Some("audio"),
+                false,
+                Some("GET"),
+            ),
+            Some("https://soundcloud.com/artist/track"),
+        );
+        // A SoundCloud user/collection page (not a single artist/track path)
+        // is not a specific-enough context to route to.
+        assert_eq!(
+            contextual_media_page(
+                "https://playback.media-streaming.soundcloud.cloud/media/x/aac_96k/playlist.m3u8",
+                Some("https://soundcloud.com/you/likes"),
+                Some("audio"),
+                false,
+                Some("GET"),
+            ),
+            None,
+        );
     }
 
     #[test]

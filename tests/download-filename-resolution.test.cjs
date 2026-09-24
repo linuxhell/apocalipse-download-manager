@@ -25,7 +25,7 @@ test("a resolved page/media title is used as the file name before falling back t
   assert.match(enqueueBody, /let proposed = file_name\s*\n\s*\.or\(title_based_name\)/);
 });
 
-test("bridge downloads with neither a file name nor a title probe Content-Disposition before falling back to a generic name", () => {
+test("bridge downloads with no real file name probe Content-Disposition, unless it's a recognized media capture", () => {
   // Regression: a direct bridge.download for a URL like
   // gopeed.com/api/download?tpl=... (no useful path, no query filename) was
   // always saved as the literal file "download" with no extension, because
@@ -39,14 +39,21 @@ test("bridge downloads with neither a file name nor a title probe Content-Dispos
 
   const bridgeBody = main.slice(
     main.indexOf("fn queue_from_bridge("),
-    main.indexOf("fn queue_from_bridge(") + 1800,
+    main.indexOf("fn queue_from_bridge(") + 2400,
   );
-  // Only probes when both a file name and a title are missing — never an
-  // extra request on the common, already-working path — and only for real
-  // http(s) URLs (never local file paths or magnet links).
+  // Regression #2: a page title is not a file name. The gate used to also
+  // require request.title to be empty, but the extension always sends the
+  // tab's title (e.g. "gopeed.com") alongside a generic file_name
+  // ("download"), so the probe never actually ran for that exact case —
+  // confirmed live: no handoff.file_name_probe_started event exists at all
+  // in a diagnostic export for a gopeed.com capture. The gate now only
+  // excludes recognized video/audio captures (whose name instead comes from
+  // the known media title, and which may carry a short-lived signed CDN URL
+  // not worth spending on an extra probe request) — never on title alone.
   assert.match(bridgeBody, /request\s*\n\s*\.file_name/);
   assert.match(bridgeBody, /is_generic_download_name\(value\.trim\(\)\)/);
-  assert.match(bridgeBody, /request\s*\n\s*\.title\s*\n\s*\.as_deref\(\)/);
+  assert.doesNotMatch(bridgeBody, /request\s*\n\s*\.title\s*\n\s*\.as_deref\(\)/);
+  assert.match(bridgeBody, /!request\.media_kind\.as_deref\(\)\.is_some_and\(\|kind\| \{\s*\n\s*kind\.eq_ignore_ascii_case\("video"\) \|\| kind\.eq_ignore_ascii_case\("audio"\)/);
   assert.match(bridgeBody, /request\.url\.starts_with\("http:\/\/"\) \|\| request\.url\.starts_with\("https:\/\/"\)/);
   // Logged unconditionally, before the (blocking) probe call, so a
   // diagnostic export can prove the probe was even attempted — earlier
@@ -117,4 +124,36 @@ test("a resolved audio title (not just video) fills the save-dialog file name fo
   assert.doesNotMatch(app, /pendingMediaKind === "video" && titleName/);
   assert.match(app, /\(pendingMediaKind === "video" \|\| pendingMediaKind === "audio"\) && titleName/);
   assert.match(app, /const titleExtension = pendingMediaKind === "audio" \? "m4a" : "mp4";/);
+});
+
+test("an HLS URL with an audio-only hint (aac/m4a/mp3/opus) is suggested with an audio extension, not .mp4", () => {
+  // Regression: suggested_download_name forced every DownloadKind::Hls URL
+  // to a .mp4 file name, even when the manifest path itself said otherwise
+  // (SoundCloud's aac_96k rendition, for example) — mislabeling audio as
+  // video for any site, not just SoundCloud.
+  const fnBody = main.slice(
+    main.indexOf("fn suggested_download_name("),
+    main.indexOf("fn suggested_download_name(") + 900,
+  );
+  assert.match(fnBody, /\["aac", "m4a", "mp3", "opus", "audio"\]/);
+  assert.match(fnBody, /"m4a"/);
+});
+
+test("a signed HLS URL that already expired fails immediately instead of retrying 10 times against a dead manifest", () => {
+  // Regression: a SoundCloud capture reused a CloudFront-signed
+  // playlist.m3u8 URL whose embedded policy had already expired ~54 minutes
+  // before N_m3u8DL-RE's first attempt, so it took 10 retries of a doomed
+  // request before giving up with a 403. Checking the embedded expiry up
+  // front turns that into an immediate, clear failure.
+  assert.match(main, /fn hls_signed_url_expiry\(url: &str\) -> Option<i64>/);
+  assert.match(main, /fn hls_signed_url_expired\(url: &str\) -> bool/);
+  assert.match(main, /"Statement"/);
+  assert.match(main, /"AWS:EpochTime"/);
+
+  const runBody = main.slice(
+    main.indexOf("async fn run_external_download("),
+    main.indexOf("async fn run_external_download(") + 1200,
+  );
+  assert.match(runBody, /hls_signed_url_expired\(&task\.source\)/);
+  assert.match(runBody, /"signed_stream_url_expired"/);
 });
