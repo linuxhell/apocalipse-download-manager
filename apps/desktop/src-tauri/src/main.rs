@@ -13278,14 +13278,20 @@ async fn remove_downloads(
     if cancelled_active {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
-    let removed = state
-        .queue
-        .lock()
-        .map_err(|error| error.to_string())?
-        .iter()
-        .filter(|task| ids.contains(&task.id))
-        .cloned()
-        .collect::<Vec<_>>();
+    let (removed, retained_torrent_metadata_paths) = {
+        let queue = state.queue.lock().map_err(|error| error.to_string())?;
+        let removed = queue
+            .iter()
+            .filter(|task| ids.contains(&task.id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let retained_torrent_metadata_paths = queue
+            .iter()
+            .filter(|task| !ids.contains(&task.id))
+            .filter_map(|task| task.torrent_metadata_path.clone())
+            .collect::<HashSet<_>>();
+        (removed, retained_torrent_metadata_paths)
+    };
 
     let aria2_targets = {
         let aria2_tasks = state
@@ -13335,6 +13341,7 @@ async fn remove_downloads(
         }
     }
     if delete_files {
+        let mut deleted_torrent_metadata_paths = HashSet::new();
         for task in &removed {
             cleanup_chunk_artifacts(&task.destination)
                 .await
@@ -13351,14 +13358,24 @@ async fn remove_downloads(
             if delete_torrent_metadata && task.state == DownloadState::Completed {
                 if let Some(path) = task.torrent_metadata_path.as_deref() {
                     if is_managed_torrent_metadata_path(&state, path) {
-                        remove_path_with_retry(path, false).await?;
-                        state.diagnostics.record(
-                            "torrent.metadata_deleted",
-                            "INFO",
-                            Some(&removal_trace),
-                            Some(&task.id.to_string()),
-                            serde_json::json!({"path": path.to_string_lossy()}),
-                        );
+                        if retained_torrent_metadata_paths.contains(path) {
+                            state.diagnostics.record(
+                                "torrent.metadata_preserved_shared",
+                                "INFO",
+                                Some(&removal_trace),
+                                Some(&task.id.to_string()),
+                                serde_json::json!({"path": path.to_string_lossy()}),
+                            );
+                        } else if deleted_torrent_metadata_paths.insert(path.to_path_buf()) {
+                            remove_path_with_retry(path, false).await?;
+                            state.diagnostics.record(
+                                "torrent.metadata_deleted",
+                                "INFO",
+                                Some(&removal_trace),
+                                Some(&task.id.to_string()),
+                                serde_json::json!({"path": path.to_string_lossy()}),
+                            );
+                        }
                     }
                 }
             }
