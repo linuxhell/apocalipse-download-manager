@@ -16,6 +16,8 @@ test("classic aria2 saves Magnet metadata as a real torrent file", () => {
   assert.match(metadata, /"bt-save-metadata"\.into\(\),\s*Value::String\("true"\.into\(\)\)/s);
   assert.match(metadata, /"infoHash"/);
   assert.match(metadata, /\.torrent/);
+  assert.match(metadata, /for _ in 0\.\.30/);
+  assert.match(metadata, /Duration::from_millis\(100\)/);
   assert.doesNotMatch(metadata, /pause-metadata|followedBy|aria2\.getFiles/);
 });
 
