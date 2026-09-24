@@ -2831,7 +2831,11 @@ async fn materialize_torrent_metadata_file(
         state,
         "INFO",
         "aria2.metadata_saved",
-        &format!("path={} bytes={}", path.display(), fs::metadata(&path).map(|m| m.len()).unwrap_or(0)),
+        &format!(
+            "path={} bytes={}",
+            path.display(),
+            fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
+        ),
     );
     Ok(path)
 }
@@ -6065,12 +6069,10 @@ async fn run_aria2_download(
                     .cloned()
                 {
                     Some(path) => Ok(path),
-                    None => materialize_torrent_metadata_file(
-                        &state,
-                        Some(&endpoint),
-                        &task.source,
-                    )
-                    .await,
+                    None => {
+                        materialize_torrent_metadata_file(&state, Some(&endpoint), &task.source)
+                            .await
+                    }
                 };
                 match torrent_path {
                     Ok(path) => {
