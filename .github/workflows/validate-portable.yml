@@ -208,6 +208,86 @@ jobs:
           print(selected["id"], checksum["id"], selected["name"], checksum_name)
           PY
           )
+          checksum_name="${checksum_name%          curl --fail --location --retry 3 \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/assets/$asset_id" \
+            --output "dist/aria2-backend/$ARIA2_BINARY"
+          curl --fail --location --retry 3 \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/assets/$checksum_id" \
+            --output "$RUNNER_TEMP/$checksum_name"
+          python3 - "dist/aria2-backend/$ARIA2_BINARY" "$RUNNER_TEMP/$checksum_name" "$asset_name" <<'PY'
+          import hashlib
+          import pathlib
+          import sys
+
+          binary = pathlib.Path(sys.argv[1]).read_bytes()
+          checksum_text = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
+          expected = checksum_text.split()[0].lower()
+          actual = hashlib.sha256(binary).hexdigest()
+          if actual != expected:
+              raise SystemExit(
+                  f"aria2 checksum mismatch for {sys.argv[3]}: expected={expected} actual={actual}"
+              )
+          print(f"aria2 checksum verified: {actual}")
+          PY
+          chmod 755 "dist/aria2-backend/$ARIA2_BINARY"
+
+      - name: Stage Windows portable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $package = 'dist/Apocalipse Download Manager'
+          New-Item -ItemType Directory -Force $package | Out-Null
+          Copy-Item 'target/release/apocalipse-desktop.exe' "$package/Apocalipse Download Manager.exe"
+          New-Item -ItemType Directory -Force "$package/data/tools/aria2" | Out-Null
+          Copy-Item 'dist/aria2-backend/aria2c.exe' "$package/data/tools/aria2/aria2c.exe"
+          Copy-Item 'README.md','LICENSE' $package
+          Compress-Archive -Path $package -DestinationPath 'dist/${{ matrix.output }}' -Force
+      - name: Stage Linux portable
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          package='dist/Apocalipse Download Manager'
+          mkdir -p "$package/data/tools/aria2"
+          install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
+          install -m 755 dist/aria2-backend/aria2c "$package/data/tools/aria2/aria2c"
+          cp README.md LICENSE "$package/"
+          appimage="$(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "$appimage"
+          install -m 755 "$appimage" 'dist/apocalipse-download-manager-linux-x64.AppImage'
+          tar -C dist -czf 'dist/${{ matrix.output }}' 'Apocalipse Download Manager'
+      - name: Stage macOS portable
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app='dist/Apocalipse Download Manager.app'
+          mkdir -p "$app/Contents/MacOS/data/tools/aria2" "$app/Contents/Resources"
+          cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
+          chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
+          install -m 755 dist/aria2-backend/aria2c "$app/Contents/MacOS/data/tools/aria2/aria2c"
+          cp packaging/macos/Info.plist "$app/Contents/Info.plist"
+          cp README.md LICENSE "$app/Contents/Resources/"
+          ditto -c -k --sequesterRsrc --keepParent "$app" 'dist/${{ matrix.output }}'
+      - name: Record candidate provenance
+        shell: bash
+        run: |
+          git rev-parse HEAD > dist/build-commit.txt
+          printf '%s\n' '${{ github.event.pull_request.head.sha || github.sha }}' >> dist/build-commit.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/${{ matrix.output }}
+            dist/apocalipse-download-manager-linux-x64.AppImage
+            dist/build-commit.txt
+          retention-days: 14
+          if-no-files-found: error
+\r'}"
           mkdir -p dist/aria2-backend
           curl --fail --location --retry 3 \
             --header "Authorization: Bearer $GITHUB_TOKEN" \
