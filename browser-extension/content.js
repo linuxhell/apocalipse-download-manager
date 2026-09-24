@@ -947,7 +947,7 @@
     return { record: "● Record", stop: "■ Stop and save", uploading: "Uploading…", done: "Recording saved", unavailable: "This video cannot be recorded by the browser" };
   };
   const overlayThemeColors = () => {
-    const accents = { inferno:"#ff6a20",toxic:"#82f23d",synthwave:"#ff4fca",royal:"#9c83ff",crimson:"#ff4775",arctic:"#65e8ff",obsidian:"#59e3d1",monochrome:"#f1f1f1",midnight:"#4e9dff",forest:"#55cf8a",graphite:"#b3c7d6",deepsea:"#22c7c9",eclipse:"#b86cff",hazard:"#fca311",cyberstorm:"#94d2bd",ultraviolet:"#d05cff",emeraldgold:"#51e79b",scarletice:"#ff496c",coppernavy:"#f4a261",solarizednight:"#e7b84b",pearlblue:"#258fd1",whiteaurora:"#18a7b8",goldenivory:"#d69524",crystalrose:"#d75c91",polarmint:"#2da875",void:"#25d9ef" };
+    const accents = { nebula:"#7c5cff",ember:"#ff7a3d",jade:"#2fe6a0",plasma:"#ff4fb8",glacier:"#4fd4ff",amber:"#ffb347",abyss:"#6fe7dd",rust:"#e0754a",venom:"#9be15d",wine:"#e0527a",linen:"#b5651d",sky:"#2f80c9",blossom:"#d6497d",sage:"#3f8f5f",sand:"#c96a3b",lilac:"#8b5fc9",mist:"#3f7ea6",citrus:"#d68910",coral:"#e0654f",frost:"#1b8f96",void:"#25d9ef" };
     return accents[interfaceTheme] || accents.void;
   };
   const clockLabel = (seconds) => {
