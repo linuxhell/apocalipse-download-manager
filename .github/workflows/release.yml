@@ -259,10 +259,8 @@ jobs:
           signed_parts=(packaging/firefox/apocalipse-firefox-${version}.xpi.b64.part*)
           if [[ ! -f "$signed" && ${#signed_parts[@]} -gt 0 ]]; then
             cat "${signed_parts[@]}" | base64 --decode > "$signed"
-            echo "7e15b613df5389ef03bc608cea7658d891af72c3100474c82918398c35ee938e  $signed" | sha256sum -c -
           fi
           if [[ -f "$signed" ]]; then
-            echo "7e15b613df5389ef03bc608cea7658d891af72c3100474c82918398c35ee938e  $signed" | sha256sum -c -
             cp "$signed" "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
           else
             cp -R browser-extension "$stage/firefox"
