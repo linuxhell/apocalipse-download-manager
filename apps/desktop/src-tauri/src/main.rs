@@ -8821,7 +8821,11 @@ async fn download_release_bytes(client: &reqwest::Client, url: &str) -> Result<V
         .to_vec())
 }
 
-fn verify_release_sha256(checksum_text: &str, asset_name: &str, bytes: &[u8]) -> Result<(), String> {
+fn verify_release_sha256(
+    checksum_text: &str,
+    asset_name: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
     let expected = checksum_text
         .split_whitespace()
         .next()
@@ -13516,8 +13520,11 @@ fn main() {
             if initial_settings.aria2_path.is_none() {
                 let aria2_dir = app_data.join("tools").join("aria2");
                 fs::create_dir_all(&aria2_dir)?;
-                initial_settings.aria2_path =
-                    Some(aria2_dir.join(if cfg!(windows) { "aria2c.exe" } else { "aria2c" }));
+                initial_settings.aria2_path = Some(aria2_dir.join(if cfg!(windows) {
+                    "aria2c.exe"
+                } else {
+                    "aria2c"
+                }));
                 write_settings(&settings_path, &initial_settings).map_err(std::io::Error::other)?;
             }
             let (show_label, quit_label) = tray_labels(&initial_settings.language);
