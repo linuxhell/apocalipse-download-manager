@@ -570,10 +570,13 @@ impl Endpoint {
                     ));
                 };
                 let direct = torrents_dir.join(format!("{}.torrent", info_hash.to_ascii_lowercase()));
-                let saved = if direct.is_file() {
-                    Some(direct)
-                } else {
-                    fs::read_dir(torrents_dir)
+                let mut saved = None;
+                for _ in 0..30 {
+                    if direct.is_file() {
+                        saved = Some(direct.clone());
+                        break;
+                    }
+                    saved = fs::read_dir(torrents_dir)
                         .ok()
                         .into_iter()
                         .flatten()
@@ -587,8 +590,12 @@ impl Endpoint {
                                     .file_stem()
                                     .and_then(|stem| stem.to_str())
                                     .is_some_and(|stem| stem.eq_ignore_ascii_case(info_hash))
-                        })
-                };
+                        });
+                    if saved.is_some() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
                 if let Some(saved) = saved {
                     break Ok(saved);
                 }
