@@ -3,32 +3,38 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const source = fs.readFileSync(
-  path.resolve(__dirname, "../apps/desktop/src-tauri/src/aria2.rs"),
-  "utf8",
-);
-const start = source.indexOf("pub async fn preview_magnet_metadata");
-const end = source.indexOf("pub async fn set_download_limit", start);
-const preview = source.slice(start, end);
+const root = path.resolve(__dirname, "..");
+const aria2 = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/aria2.rs"), "utf8");
+const main = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
+const start = aria2.indexOf("pub async fn save_magnet_metadata");
+const end = aria2.indexOf("pub async fn set_download_limit", start);
+const metadata = aria2.slice(start, end);
 
-test("classic aria2 magnet preview pauses followed payload before file inspection", () => {
+test("classic aria2 saves Magnet metadata as a real torrent file", () => {
   assert.ok(start >= 0 && end > start);
-  assert.doesNotMatch(preview, /"bt-metadata-only"\.into\(\), Value::String\("true"\.into\(\)\)/);
-  assert.match(preview, /"pause-metadata"\.into\(\), Value::String\("true"\.into\(\)\)/);
-  assert.match(preview, /torrent_metadata_complete_without_followed_by/);
-  assert.match(preview, /if let Some\(child_gid\) = followed\.as_deref\(\)/);
-  assert.match(preview, /self\.pause\(child_gid\)\.await/);
-  assert.match(preview, /if let Some\(inspect\) = followed\.as_deref\(\)/);
-  assert.doesNotMatch(preview, /followed\.as_deref\(\)\.unwrap_or\(&gid\)/);
+  assert.match(metadata, /"bt-metadata-only"\.into\(\),\s*Value::String\("true"\.into\(\)\)/s);
+  assert.match(metadata, /"bt-save-metadata"\.into\(\),\s*Value::String\("true"\.into\(\)\)/s);
+  assert.match(metadata, /"infoHash"/);
+  assert.match(metadata, /\.torrent/);
+  assert.doesNotMatch(metadata, /pause-metadata|followedBy|aria2\.getFiles/);
 });
 
-test("metadata pseudo-file is never exposed as a real torrent choice", () => {
-  assert.match(preview, /to_ascii_uppercase\(\)\.starts_with\("\[METADATA\]"\)/);
+test("ADM stores and parses torrent files from data/torrents before payload", () => {
+  assert.match(main, /runtime_root\.join\("torrents"\)/);
+  assert.match(main, /materialize_torrent_metadata_file/);
+  assert.match(main, /inspect_torrent_file\(&path\)/);
+  assert.match(main, /torrent_metadata_path = Some\(path\.clone\(\)\)/);
+  assert.match(main, /add_bittorrent[\s\S]*Some\(&bytes\)/);
 });
 
-test("metadata diagnostics expose parent, child and RPC state", () => {
-  assert.match(source, /pub struct MetadataProbe/);
-  assert.match(preview, /child_rpc_error/);
-  assert.match(preview, /parent_metadata_file_count/);
-  assert.match(preview, /child_real_file_count/);
+test("retired followedBy metadata preview code is absent", () => {
+  for (const retired of [
+    "preview_magnet_metadata",
+    "MetadataProbe",
+    "pause-metadata",
+    "followedBy",
+    "aria2-metadata-inspection",
+  ]) {
+    assert.equal(aria2.includes(retired) || main.includes(retired), false, retired);
+  }
 });
