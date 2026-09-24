@@ -908,7 +908,22 @@ footer .bridge-connected i {
 .link-files { min-height:340px; min-width:0; overflow:hidden; }
 .link-files header { display:flex; justify-content:space-between; align-items:center; gap:12px; min-width:0; }
 .link-files header > span { display:flex; gap:6px; flex-shrink:0; }
-.link-files header button[id*="delete"] { border-color:#713443; color:#ff9aaa; }
+.link-files header #link-delete-remote {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-2));
+  color: var(--accent);
+}
+.link-files header #link-delete-remote:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+  color: color-mix(in srgb, var(--accent) 76%, var(--text));
+}
+.link-files header #link-delete-remote:disabled {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--muted);
+  opacity: .58;
+}
 .link-files > small { color:var(--muted); overflow-wrap:anywhere; }
 .link-files > div { display:grid; gap:4px; height:clamp(300px,42vh,460px); overflow-y:scroll; overflow-x:hidden; scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:var(--accent) var(--surface-2); padding:5px; border:1px solid var(--line); border-radius:9px; background:var(--surface); isolation:isolate; }
 .link-files > div::-webkit-scrollbar { width:10px; }
@@ -1312,13 +1327,25 @@ nav { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
   gap: 8px;
   accent-color: var(--accent);
   padding: 7px 9px;
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, .28);
+  color: var(--text);
+  border: 1px solid var(--line);
   border-radius: calc(var(--corner-radius) + 2px);
-  background: rgba(0, 0, 0, .68);
+  background: var(--surface);
 }
-.about-audio-controls button { min-height: 30px; padding: 5px 8px; font-size: 12px; }
-.about-audio-controls label { font-size: 12px; font-weight: 700; }
+.about-audio-controls button {
+  min-height: 30px;
+  padding: 5px 8px;
+  font-size: 12px;
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+}
+.about-audio-controls button:hover {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+  color: var(--accent);
+}
+.about-audio-controls label { color: var(--text); font-size: 12px; font-weight: 700; }
 .about-audio-controls input { width: 100%; }
 .about-scene {
   position: relative;
