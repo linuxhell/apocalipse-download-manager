@@ -2761,15 +2761,20 @@ fn persist_torrent_bytes(state: &AppState, bytes: &[u8]) -> Result<PathBuf, Stri
     Ok(path)
 }
 
-fn validated_torrent_metadata_path(state: &AppState, value: Option<String>) -> Option<PathBuf> {
-    let value = value?;
-    let path = PathBuf::from(value);
-    let directory = torrent_store_directory(state).ok()?;
+fn is_managed_torrent_metadata_path(state: &AppState, path: &Path) -> bool {
+    let Ok(directory) = torrent_store_directory(state) else {
+        return false;
+    };
     let valid_extension = path
         .extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("torrent"));
-    (valid_extension && path.is_file() && path.parent() == Some(directory.as_path())).then_some(path)
+    valid_extension && path.parent() == Some(directory.as_path())
+}
+
+fn validated_torrent_metadata_path(state: &AppState, value: Option<String>) -> Option<PathBuf> {
+    let path = PathBuf::from(value?);
+    (path.is_file() && is_managed_torrent_metadata_path(state, &path)).then_some(path)
 }
 
 async fn materialize_torrent_metadata_file(
