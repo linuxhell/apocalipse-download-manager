@@ -152,7 +152,7 @@ pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<Strategy
             fallbacks: Vec::new(),
             reason: "ftp_transfer",
         },
-        DownloadKind::Torrent | DownloadKind::Magnet | DownloadKind::Ed2k => StrategyPlan {
+        DownloadKind::Torrent | DownloadKind::Magnet => StrategyPlan {
             primary: Engine::Aria2Rpc,
             fallbacks: Vec::new(),
             reason: "peer_to_peer",

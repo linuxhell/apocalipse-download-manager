@@ -309,10 +309,6 @@ struct UserSettings {
     n_m3u8dl_re_path: Option<PathBuf>,
     #[serde(default)]
     aria2_path: Option<PathBuf>,
-    #[serde(default = "default_ed2k_servers")]
-    ed2k_servers: Vec<String>,
-    #[serde(default = "default_ed2k_server_list_url")]
-    ed2k_server_list_url: String,
     #[serde(default)]
     extractor_path: Option<PathBuf>,
     #[serde(default = "default_true")]
@@ -367,44 +363,6 @@ fn default_theme() -> String {
     "void".to_owned()
 }
 
-/// A handful of well-known, publicly-listed eD2K servers (the same kind of
-/// public rendezvous infrastructure a BitTorrent client ships default
-/// trackers/DHT bootstrap nodes for) to connect to immediately. The
-/// authoritative, self-refreshing source is still the downloaded
-/// server.met (see default_ed2k_server_list_url/ed2k_update_server_list):
-/// a server here going offline or changing address is expected and gets
-/// corrected the next time that list updates, exactly like aMule's own
-/// Ed2kServersUrl-driven server.met refresh.
-fn default_ed2k_servers() -> Vec<String> {
-    [
-        "176.123.5.89:4725",
-        "91.208.162.87:4232",
-        "77.42.68.79:4232",
-        "85.17.116.222:6082",
-        "91.208.162.182:4232",
-        "213.141.198.207:4232",
-        "212.95.35.240:4232",
-        "57.131.35.107:4232",
-        "141.227.165.99:4232",
-        "193.187.90.12:4661",
-        "85.121.5.137:4232",
-        "91.208.162.55:4235",
-        "212.95.35.240:4323",
-    ]
-    .into_iter()
-    .map(str::to_owned)
-    .collect()
-}
-
-/// aMule 3.0.0's own documented default source for its server.met
-/// auto-update (`Ed2kServersUrl` in its config), reused here for the same
-/// purpose: aria2-next's --ed2k-server-list only accepts a local file path
-/// (confirmed against its own docs), so this URL is downloaded to a local
-/// file first and that file's path is what actually gets applied.
-fn default_ed2k_server_list_url() -> String {
-    "https://upd.emule-security.org/server.met".to_owned()
-}
-
 fn tray_labels(language: &str) -> (&'static str, &'static str) {
     match language {
         "pt-BR" => ("Mostrar Apocalipse", "Sair"),
@@ -450,8 +408,6 @@ impl Default for UserSettings {
             qjs_path: None,
             n_m3u8dl_re_path: None,
             aria2_path: None,
-            ed2k_servers: default_ed2k_servers(),
-            ed2k_server_list_url: default_ed2k_server_list_url(),
             extractor_path: None,
             aria2_rpc_enabled: true,
             aria2_rpc_auto_start: true,
@@ -1021,325 +977,6 @@ async fn open_link_window(app: tauri::AppHandle) -> Result<(), String> {
         .build()
         .map_err(|error| error.to_string())?;
     Ok(())
-}
-
-#[tauri::command]
-async fn open_ed2k_window(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("apocalipse-ed2k") {
-        window.show().map_err(|error| error.to_string())?;
-        let _ = window.unminimize();
-        let _ = window.maximize();
-        window.set_focus().map_err(|error| error.to_string())?;
-        return Ok(());
-    }
-
-    WebviewWindowBuilder::new(&app, "apocalipse-ed2k", WebviewUrl::App("ed2k.html".into()))
-        .title("Apocalipse ED2K")
-        .inner_size(1200.0, 820.0)
-        .min_inner_size(860.0, 600.0)
-        .resizable(true)
-        .maximized(true)
-        .decorations(true)
-        .build()
-        .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-fn normalize_ed2k_server(value: &str) -> Result<String, String> {
-    let value = value.trim();
-    let (host, port) = value
-        .rsplit_once(':')
-        .ok_or_else(|| "ed2k_server_invalid".to_owned())?;
-    let host = host.trim();
-    let port: u16 = port
-        .trim()
-        .parse()
-        .map_err(|_| "ed2k_server_invalid".to_owned())?;
-    if host.is_empty() || host.contains(['\r', '\n', ',']) || port == 0 {
-        return Err("ed2k_server_invalid".to_owned());
-    }
-    Ok(format!("{host}:{port}"))
-}
-
-#[tauri::command]
-fn ed2k_list_servers(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    Ok(state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .ed2k_servers
-        .clone())
-}
-
-#[tauri::command]
-fn ed2k_add_server(state: State<'_, AppState>, server: String) -> Result<Vec<String>, String> {
-    let server = normalize_ed2k_server(&server)?;
-    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    if !settings
-        .ed2k_servers
-        .iter()
-        .any(|existing| existing == &server)
-    {
-        settings.ed2k_servers.push(server);
-    }
-    let servers = settings.ed2k_servers.clone();
-    save_settings(&state, &settings)?;
-    Ok(servers)
-}
-
-#[tauri::command]
-fn ed2k_remove_server(state: State<'_, AppState>, server: String) -> Result<Vec<String>, String> {
-    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    settings.ed2k_servers.retain(|existing| existing != &server);
-    let servers = settings.ed2k_servers.clone();
-    save_settings(&state, &settings)?;
-    Ok(servers)
-}
-
-fn ed2k_server_list_path(state: &AppState) -> PathBuf {
-    state
-        .queue_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("ed2k")
-        .join("server.met")
-}
-
-#[tauri::command]
-fn ed2k_get_server_list_url(state: State<'_, AppState>) -> Result<String, String> {
-    Ok(state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .ed2k_server_list_url
-        .clone())
-}
-
-#[tauri::command]
-fn ed2k_set_server_list_url(state: State<'_, AppState>, url: String) -> Result<(), String> {
-    let url = url.trim();
-    if !url.starts_with("https://") && !url.starts_with("http://") {
-        return Err("ed2k_server_list_url_invalid".to_owned());
-    }
-    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    settings.ed2k_server_list_url = url.to_owned();
-    save_settings(&state, &settings)
-}
-
-/// Validates the downloaded server.met before it replaces the portable cache.
-/// aria2-next consumes the resulting local path as an initial option on each
-/// ED2K download/search request; it is not a changeable global runtime option.
-fn validate_ed2k_server_met(bytes: &[u8]) -> Result<u32, String> {
-    if bytes.len() < 4 {
-        return Err("ed2k_server_list_payload_too_small".to_owned());
-    }
-    let count_offset = if bytes
-        .first()
-        .is_some_and(|byte| matches!(*byte, 0x0e | 0x0f | 0xe0))
-    {
-        1
-    } else {
-        0
-    };
-    if bytes.len() < count_offset + 4 {
-        return Err("ed2k_server_list_invalid".to_owned());
-    }
-    let count = u32::from_le_bytes(
-        bytes[count_offset..count_offset + 4]
-            .try_into()
-            .map_err(|_| "ed2k_server_list_invalid".to_owned())?,
-    );
-    // Every entry needs at least IPv4+port (6 bytes) and a tag count (4
-    // bytes). This cheap lower-bound rejects HTML/error pages and absurd
-    // counts without reimplementing aria2-next's full eMule tag parser.
-    if count == 0
-        || count > 100_000
-        || bytes.len().saturating_sub(count_offset + 4) < count as usize * 10
-    {
-        return Err("ed2k_server_list_invalid".to_owned());
-    }
-    Ok(count)
-}
-
-#[tauri::command]
-async fn ed2k_update_server_list(state: State<'_, AppState>) -> Result<u64, String> {
-    let (url, proxy_url, proxy_username, proxy_password, dns_servers) = {
-        let settings = state.settings.lock().map_err(|error| error.to_string())?;
-        (
-            settings.ed2k_server_list_url.clone(),
-            settings
-                .proxy_enabled
-                .then(|| settings.proxy_url.clone())
-                .flatten(),
-            settings.proxy_username.clone(),
-            settings.proxy_password.clone(),
-            if settings.dns_enabled {
-                settings.dns_servers.clone()
-            } else {
-                Vec::new()
-            },
-        )
-    };
-    let client = DownloadEngine::network_client_builder(
-        proxy_url.as_deref(),
-        proxy_username.as_deref(),
-        proxy_password.as_deref(),
-        &dns_servers,
-    )
-    .map_err(|error| error.to_string())?
-    .timeout(Duration::from_secs(20))
-    .build()
-    .map_err(|error| error.to_string())?;
-    let response = client
-        .get(&url)
-        .header(reqwest::header::USER_AGENT, "Apocalipse-Download-Manager")
-        .send()
-        .await
-        .map_err(|error| error.to_string())?
-        .error_for_status()
-        .map_err(|error| error.to_string())?;
-    let bytes = read_response_limited(
-        response,
-        16 * 1024 * 1024,
-        "ed2k_server_list_payload_too_large",
-    )
-    .await?;
-    let server_count = validate_ed2k_server_met(&bytes)?;
-    let path = ed2k_server_list_path(&state);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    // Keep the previous known-good cache until the newly downloaded payload
-    // passes structural validation and has been fully written.
-    let staged = path.with_extension(format!("met.download-{}", uuid::Uuid::new_v4()));
-    let backup = path.with_extension("met.backup");
-    fs::write(&staged, &bytes).map_err(|error| error.to_string())?;
-    let _ = fs::remove_file(&backup);
-    if path.exists() {
-        fs::rename(&path, &backup).map_err(|error| error.to_string())?;
-    }
-    if let Err(error) = fs::rename(&staged, &path) {
-        if backup.exists() {
-            let _ = fs::rename(&backup, &path);
-        }
-        return Err(error.to_string());
-    }
-    let _ = fs::remove_file(&backup);
-    diagnostic_log(
-        &state,
-        "INFO",
-        "ed2k.server_list_updated",
-        &format!(
-            "url={} bytes={} servers={server_count}",
-            redact_url(&url),
-            bytes.len()
-        ),
-    );
-    Ok(bytes.len() as u64)
-}
-
-/// Prepares the shared aria2-next ED2K subsystem and refreshes the cached
-/// server.met. aria2-next has no standalone ED2K connect/disconnect RPC: the
-/// actual server handshake is created by an ED2K download/search task, which
-/// receives the configured servers and local server.met as request options.
-#[tauri::command]
-async fn ed2k_connect(state: State<'_, AppState>) -> Result<(), String> {
-    let servers = state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .ed2k_servers
-        .clone();
-    let _endpoint = aria2_endpoint(&state, true).await?;
-    match ed2k_update_server_list(state.clone()).await {
-        Ok(bytes) => diagnostic_log(
-            &state,
-            "INFO",
-            "ed2k.server_sources_refreshed",
-            &format!("bytes={bytes} manual_servers={}", servers.len()),
-        ),
-        Err(error) => {
-            let cached = ed2k_server_list_path(&state);
-            diagnostic_log(
-                &state,
-                "WARN",
-                "ed2k.server_list_refresh_failed",
-                &format!("error={error} using_cached={}", cached.is_file()),
-            );
-            if servers.is_empty() && !cached.is_file() {
-                diagnostic_log(
-                    &state,
-                    "INFO",
-                    "ed2k.builtin_bootstrap",
-                    "using aria2-next built-in ED2K bootstrap servers",
-                );
-            }
-        }
-    }
-    diagnostic_log(
-        &state,
-        "INFO",
-        "ed2k.ready",
-        &format!(
-            "manual_servers={} server_met={}",
-            servers.len(),
-            ed2k_server_list_path(&state).is_file()
-        ),
-    );
-    Ok(())
-}
-
-#[tauri::command]
-async fn ed2k_disconnect(state: State<'_, AppState>) -> Result<(), String> {
-    // aria2-next exposes no independent ED2K disconnect RPC. Existing ED2K
-    // transfers remain under the normal pause/remove controls; this command
-    // only changes the ED2K window's prepared/idle presentation.
-    diagnostic_log(&state, "INFO", "ed2k.window_disconnected", "");
-    Ok(())
-}
-
-#[tauri::command]
-async fn ed2k_search(state: State<'_, AppState>, keyword: String) -> Result<String, String> {
-    let keyword = keyword.trim();
-    if keyword.is_empty() {
-        return Err("ed2k_search_keyword_required".to_owned());
-    }
-    let servers = state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .ed2k_servers
-        .clone();
-    let server_met = ed2k_server_list_path(&state);
-    let endpoint = aria2_endpoint(&state, true).await?;
-    let gid = endpoint
-        .ed2k_search(
-            keyword,
-            &servers,
-            server_met.is_file().then_some(server_met.as_path()),
-        )
-        .await?;
-    diagnostic_log(
-        &state,
-        "INFO",
-        "ed2k.search_started",
-        &format!(
-            "gid={gid} keyword_len={} manual_servers={} server_met={}",
-            keyword.len(),
-            servers.len(),
-            server_met.is_file()
-        ),
-    );
-    Ok(gid)
-}
-
-#[tauri::command]
-async fn ed2k_search_results(
-    state: State<'_, AppState>,
-    gid: String,
-) -> Result<serde_json::Value, String> {
-    let endpoint = aria2_endpoint(&state, false).await?;
-    endpoint.ed2k_search_results(&gid).await
 }
 
 #[cfg(windows)]
@@ -3425,16 +3062,7 @@ fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(fallback))
 }
 
-fn configured_aria2next(settings: &UserSettings) -> PathBuf {
-    configured_tool(
-        &settings.aria2_path,
-        if cfg!(windows) {
-            "aria2next.exe"
-        } else {
-            "aria2next"
-        },
-    )
-}
+fn configured_aria2(settings:&UserSettings)->PathBuf{configured_tool(&settings.aria2_path,if cfg!(windows){"aria2c.exe"}else{"aria2c"})}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExtractorKind {
@@ -3811,38 +3439,6 @@ fn maybe_auto_extract_completed(app: &tauri::AppHandle, id: DownloadId) {
     });
 }
 
-fn protected_aria2_gids(state: &AppState) -> Vec<String> {
-    state
-        .aria2_tasks
-        .lock()
-        .map(|items| items.values().cloned().collect())
-        .unwrap_or_default()
-}
-
-async fn prune_orphan_aria2_torrents(
-    state: &AppState,
-    endpoint: &aria2::Endpoint,
-    reason: &str,
-) -> Result<usize, String> {
-    let protected = protected_aria2_gids(state);
-    let removed = endpoint
-        .prune_orphan_bittorrent_transfers(&protected)
-        .await?;
-    if !removed.is_empty() {
-        diagnostic_log(
-            state,
-            "WARN",
-            "aria2.orphan_bittorrent_removed",
-            &format!(
-                "reason={reason} count={} gids={}",
-                removed.len(),
-                removed.join(",")
-            ),
-        );
-    }
-    Ok(removed.len())
-}
-
 async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::Endpoint, String> {
     let settings = state
         .settings
@@ -3852,7 +3448,7 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
     if !settings.aria2_rpc_enabled {
         return Err("aria2_rpc_disabled".to_owned());
     }
-    let executable = configured_aria2next(&settings);
+    let executable = configured_aria2(&settings);
     let runtime_root = state
         .queue_path
         .parent()
@@ -3879,7 +3475,7 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
                 &settings.aria2_rpc_secret,
             )?);
             if let Some(current) = runtime.as_ref() {
-                spawned = Some((current.pid(), current.port(), current.bt_port()));
+                spawned = Some((current.pid(), current.port()));
             }
         }
         runtime
@@ -3888,13 +3484,13 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
             .ok_or_else(|| "aria2_rpc_runtime_missing".to_owned())?
     };
     let runtime_spawned = spawned.is_some();
-    if let Some((pid, port, bt_port)) = spawned {
+    if let Some((pid, port)) = spawned {
         diagnostic_log(
             state,
             "INFO",
             "aria2.runtime_spawned",
             &format!(
-                "pid={pid} parent_pid={} port={port} bt_listen_port={bt_port} stop_with_parent=true",
+                "pid={pid} parent_pid={} port={port} binary=aria2c backend=classic listen_port=6881-6999 dht_listen_port=6881-6999 stop_with_parent=true",
                 std::process::id()
             ),
         );
@@ -3904,7 +3500,6 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
         endpoint
             .set_global_download_limit(settings.global_bandwidth_limit)
             .await?;
-        prune_orphan_aria2_torrents(state, &endpoint, "runtime_start").await?;
     }
     Ok(endpoint)
 }
@@ -4291,7 +3886,7 @@ fn reconnect_active_downloads_after_network_change(
         let _ = cancel.send(());
     }
     if !ids.is_empty() {
-        // aria2-next restores unfinished session entries with the same GID.
+        // aria2 restores unfinished session entries with the same GID.
         // Keep ADM's task->GID mapping so the restarted runtime can reconnect
         // to the restored transfer. If a GID was not persisted by the engine,
         // run_aria2_download detects it as stale and safely recreates the task.
@@ -5202,7 +4797,7 @@ fn load_queue(path: &Path) -> Vec<DownloadTask> {
             DownloadState::Downloading | DownloadState::Inspecting | DownloadState::Verifying
         ) {
             // Workers do not survive a process restart. Keep the partial data
-            // and persisted aria2-next GID, but present the task as paused
+            // and persisted aria2 GID, but present the task as paused
             // until the user resumes it (or the scheduler explicitly queues it).
             task.state = DownloadState::Paused;
             task.download_speed = Some(0);
@@ -6169,40 +5764,6 @@ async fn log_network_route(state: &AppState, operation: &str, engine: &str) {
     }
 }
 
-fn aria2_bt_proxy_url(settings: &UserSettings) -> Result<Option<String>, String> {
-    if !settings.proxy_enabled {
-        return Ok(None);
-    }
-    let raw = settings
-        .proxy_url
-        .as_deref()
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "proxy_enabled_without_url".to_owned())?;
-    let mut parsed = url::Url::parse(raw).map_err(|_| "invalid_proxy_url".to_owned())?;
-    match parsed.scheme() {
-        "http" | "socks4" | "socks5" => {}
-        "socks5h" => {
-            parsed
-                .set_scheme("socks5")
-                .map_err(|_| "aria2_bt_proxy_scheme_unsupported".to_owned())?;
-        }
-        _ => return Err("aria2_bt_proxy_scheme_unsupported".to_owned()),
-    }
-    if let Some(username) = settings
-        .proxy_username
-        .as_deref()
-        .filter(|value| !value.is_empty())
-    {
-        parsed
-            .set_username(username)
-            .map_err(|_| "invalid_proxy_username".to_owned())?;
-        parsed
-            .set_password(settings.proxy_password.as_deref())
-            .map_err(|_| "invalid_proxy_password".to_owned())?;
-    }
-    Ok(Some(parsed.to_string()))
-}
-
 fn aria2_http_proxy_url(settings: &UserSettings) -> Option<String> {
     if !settings.proxy_enabled {
         return None;
@@ -6312,7 +5873,7 @@ async fn run_aria2_download(
     let route_operation = id.to_string();
     tauri::async_runtime::spawn(async move {
         let state = route_app.state::<AppState>();
-        log_network_route(&state, &route_operation, "aria2next").await;
+        log_network_route(&state, &route_operation, "aria2").await;
     });
     let endpoint = match aria2_endpoint(&state, false).await {
         Ok(endpoint) => endpoint,
@@ -6339,36 +5900,11 @@ async fn run_aria2_download(
         ),
     );
     let (context, connections, download_limit) = aria2_request_context(&state, &task);
-    let bt_proxy = if is_bittorrent {
-        let settings = state
-            .settings
-            .lock()
-            .map(|settings| settings.clone())
-            .unwrap_or_default();
-        match aria2_bt_proxy_url(&settings) {
-            Ok(proxy) => proxy,
-            Err(error) => {
-                update_task(&app, id, true, |item| {
-                    item.state = DownloadState::Failed {
-                        message: format!("aria2_proxy_failed:{error}"),
-                    }
-                });
-                if let Ok(mut workers) = state.workers.lock() {
-                    workers.remove(&id);
-                }
-                start_next_queued(&app);
-                return;
-            }
-        }
-    } else {
-        None
-    };
     let existing_task = state
         .aria2_tasks
         .lock()
         .ok()
         .and_then(|items| items.get(&id).cloned());
-    let had_existing_task = existing_task.is_some();
     let existing_task = match existing_task {
         Some(gid) => match endpoint.status(&gid).await {
             Ok(status) => Some((gid, status.status)),
@@ -6409,7 +5945,7 @@ async fn run_aria2_download(
         None => {
             let is_http = matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp);
             let add_uri_started_at = Instant::now();
-            let added = if is_bittorrent {
+            let added = if is_bittorrent && context.proxy_required { Err("aria2_bittorrent_proxy_unsupported".to_owned()) } else if is_bittorrent {
                 // task.destination is what the rest of the app (disk cleanup,
                 // "remove from disk") treats as the torrent's own root
                 // directory for Torrent/Magnet tasks: it recursively deletes
@@ -6434,37 +5970,10 @@ async fn run_aria2_download(
                 match torrent_bytes {
                     Ok(bytes) => {
                         endpoint
-                            .add_bittorrent(
-                                &task.source,
-                                bytes.as_deref(),
-                                &task.destination,
-                                &task.torrent_selection,
-                                download_limit,
-                                bt_proxy.as_deref(),
-                            )
+                            .add_bittorrent(&task.source, bytes.as_deref(), &task.destination, &task.torrent_selection, download_limit)
                             .await
                     }
                     Err(error) => Err(error),
-                }
-            } else if kind == DownloadKind::Ed2k {
-                if context.proxy_required {
-                    Err("ed2k_proxy_unsupported".to_owned())
-                } else {
-                    let servers = state
-                        .settings
-                        .lock()
-                        .map(|settings| settings.ed2k_servers.clone())
-                        .unwrap_or_default();
-                    let server_met = ed2k_server_list_path(&state);
-                    endpoint
-                        .add_ed2k_download(
-                            &task.source,
-                            &task.destination,
-                            &servers,
-                            server_met.is_file().then_some(server_met.as_path()),
-                            download_limit,
-                        )
-                        .await
                 }
             } else if context.proxy_required && context.proxy_url.is_none() {
                 Err("aria2_proxy_scheme_unsupported".to_owned())
@@ -6513,37 +6022,8 @@ async fn run_aria2_download(
             }
         }
     };
-    let mut preview_warmup_pending = is_bittorrent && !had_existing_task;
-    let preview_warmup_bytes = 64_u64 * 1024 * 1024;
-    diagnostic_log(
-        &state,
-        "INFO",
-        "aria2.task_started",
-        &format!(
-            "task={id} gid={gid} engine={kind:?} connections={connections} bt_listen_port={}",
-            endpoint.bt_listen_port()
-        ),
-    );
-    state.diagnostics.record(
-        if is_bittorrent {
-            "torrent.engine_selected"
-        } else if kind == DownloadKind::Ed2k {
-            "ed2k.engine_selected"
-        } else {
-            "http.engine_selected"
-        },
-        "INFO",
-        None,
-        Some(&id.to_string()),
-        serde_json::json!({
-            "engine": "aria2-rpc",
-            "connections": connections,
-            "kind": format!("{kind:?}"),
-            "streamMaxConnections": connections,
-            "btListenPort": endpoint.bt_listen_port(),
-            "fileAllocation": "none"
-        }),
-    );
+    diagnostic_log(&state,"INFO","aria2.task_started",&format!("task={id} gid={gid} engine={kind:?} connections={} listen_port=6881-6999 dht_listen_port=6881-6999",connections.min(16)));
+    state.diagnostics.record(if is_bittorrent{"torrent.engine_selected"}else{"http.engine_selected"},"INFO",None,Some(&id.to_string()),serde_json::json!({"engine":"aria2-rpc","backend":"classic","connections":connections.min(16),"kind":format!("{kind:?}"),"maxConnectionPerServer":connections.min(16),"split":connections.min(16),"listenPort":"6881-6999","dhtListenPort":"6881-6999","fileAllocation":"none"}));
 
     let mut last_at = Instant::now();
     let transfer_started_at = startup_started_at;
@@ -6574,96 +6054,7 @@ async fn run_aria2_download(
                         continue;
                     }
                 };
-                // aria2-next keeps a Magnet on the same GID. With
-                // pause-metadata=true it pauses after metadata is validated;
-                // commit the user's selection (or all files) through
-                // changeOption, then unpause that same GID before payload.
-                if is_bittorrent
-                    && matches!(
-                        status.file_selection_state.as_deref(),
-                        Some("awaiting" | "ready")
-                    )
-                {
-                    if status.file_count == 0 {
-                        continue;
-                    }
-                    if status.file_selection_state.as_deref() == Some("awaiting") {
-                        let selected = if task.torrent_selection.is_empty() {
-                            (1..=status.file_count).collect::<Vec<_>>()
-                        } else {
-                            task.torrent_selection.clone()
-                        };
-                        if let Err(error) = endpoint.set_selected_files(&gid, &selected).await {
-                            diagnostic_log(
-                                &state,
-                                "ERROR",
-                                "aria2.file_selection_failed",
-                                &format!("task={id} gid={gid} error={error}"),
-                            );
-                            update_task(&app, id, true, |item| {
-                                item.state = DownloadState::Failed {
-                                    message: format!("aria2_file_selection_failed:{error}"),
-                                };
-                            });
-                            terminal = true;
-                            break;
-                        }
-                    }
-                    if let Err(error) = endpoint.resume(&gid).await {
-                        diagnostic_log(
-                            &state,
-                            "ERROR",
-                            "aria2.metadata_resume_failed",
-                            &format!("task={id} gid={gid} error={error}"),
-                        );
-                        update_task(&app, id, true, |item| {
-                            item.state = DownloadState::Failed {
-                                message: format!("aria2_metadata_resume_failed:{error}"),
-                            };
-                        });
-                        terminal = true;
-                        break;
-                    }
-                    diagnostic_log(
-                        &state,
-                        "INFO",
-                        "aria2.metadata_selection_applied",
-                        &format!(
-                            "task={id} gid={gid} files={} selected={}",
-                            status.file_count,
-                            if task.torrent_selection.is_empty() {
-                                status.file_count
-                            } else {
-                                task.torrent_selection.len()
-                            }
-                        ),
-                    );
-                    continue;
-                }
-
-                if preview_warmup_pending && status.downloaded >= preview_warmup_bytes {
-                    preview_warmup_pending = false;
-                    match endpoint.set_bittorrent_sequential(&gid, false).await {
-                        Ok(()) => diagnostic_log(
-                            &state,
-                            "INFO",
-                            "torrent.preview_window_ready",
-                            &format!(
-                                "task={id} gid={gid} received={} warmup_bytes={} sequential=false",
-                                status.downloaded, preview_warmup_bytes
-                            ),
-                        ),
-                        Err(error) => diagnostic_log(
-                            &state,
-                            "WARN",
-                            "torrent.preview_warmup_release_failed",
-                            &format!("task={id} gid={gid} error={error}"),
-                        ),
-                    }
-                }
-
-                // Compatibility fallback for legacy aria2-style followedBy
-                // handoffs. aria2-next Magnet downloads should stay on one GID.
+                // Follow the classic aria2 metadata-to-content GID handoff.
                 if let Some(next_gid) = status.followed_by {
                     diagnostic_log(
                         &state,
@@ -6761,7 +6152,7 @@ async fn run_aria2_download(
                         "bytesPerSecond": status.speed,
                         "reportedBytesPerSecond": status.speed,
                         "computedDeltaBytesPerSecond": raw_speed,
-                        "speedSource": "aria2-next",
+                        "speedSource": "aria2",
                         "receivedBytes": status.downloaded,
                         "totalBytes": status.total,
                         "progressPercent": percent,
@@ -6958,7 +6349,7 @@ async fn run_external_download(
                         "N_m3u8DL-RE"
                     },
                 ),
-                configured_aria2next(&settings),
+                configured_aria2(&settings),
                 settings.connections_per_download.clamp(1, 32),
                 settings
                     .proxy_enabled
@@ -6979,9 +6370,9 @@ async fn run_external_download(
                 "yt-dlp".into(),
                 "N_m3u8DL-RE".into(),
                 if cfg!(windows) {
-                    "aria2next.exe".into()
+                    "aria2c.exe".into()
                 } else {
-                    "aria2next".into()
+                    "aria2".into()
                 },
                 16,
                 None,
@@ -7710,7 +7101,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "ytDlp": settings.yt_dlp_path.as_ref().is_some_and(|path| path.is_file()),
             "qjs": settings.qjs_path.as_ref().is_some_and(|path| path.is_file()),
             "nM3u8DlRe": settings.n_m3u8dl_re_path.as_ref().is_some_and(|path| path.is_file()),
-            "aria2Next": settings.aria2_path.as_ref().is_some_and(|path| path.is_file()),
+            "aria2": settings.aria2_path.as_ref().is_some_and(|path| path.is_file()),
             "aria2RpcEnabled": settings.aria2_rpc_enabled,
             "aria2RpcAutoStart": settings.aria2_rpc_auto_start,
             "mediaPlayer": settings.media_player_path.as_ref().is_some_and(|path| path.is_file()),
@@ -8354,18 +7745,7 @@ fn suggested_name(source: &str) -> String {
                 .map(|(_, value)| value.into_owned())
         })
         .flatten();
-    // ed2k://|file|<name>|<size>|<hash>|/ carries its filename as the third
-    // pipe-delimited field, not as a path segment or query parameter.
-    let ed2k_name = (classify_url(source) == Some(DownloadKind::Ed2k))
-        .then(|| source.split('|').nth(2))
-        .flatten()
-        .filter(|value| !value.is_empty())
-        .map(|value| {
-            percent_encoding::percent_decode_str(value)
-                .decode_utf8_lossy()
-                .into_owned()
-        });
-    let resolved_name = magnet_name.or(ed2k_name);
+    let resolved_name = magnet_name;
     resolved_name
         .as_deref()
         .unwrap_or(source)
@@ -8899,7 +8279,7 @@ async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>
         })
         .collect::<Vec<_>>();
 
-    let aria2_path = configured_aria2next(&settings);
+    let aria2_path = configured_aria2(&settings);
     let aria2_endpoint = {
         let mut runtime = state
             .aria2_runtime
@@ -8916,7 +8296,7 @@ async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>
         None => None,
     };
     statuses.push(ToolStatus {
-        id: "aria2next".to_owned(),
+        id: "aria2".to_owned(),
         path: aria2_path.to_string_lossy().into_owned(),
         found: aria2_path.is_file(),
         version: aria2_version,
@@ -8967,7 +8347,7 @@ fn set_tool_paths(
     yt_dlp: String,
     qjs: String,
     n_m3u8dl_re: String,
-    aria2_next: String,
+    aria2: String,
     extractor: String,
 ) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
@@ -8975,7 +8355,7 @@ fn set_tool_paths(
     settings.yt_dlp_path = optional_path(yt_dlp);
     settings.qjs_path = optional_path(qjs);
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
-    settings.aria2_path = optional_path(aria2_next);
+    settings.aria2_path = optional_path(aria2);
     settings.extractor_path = optional_path(extractor);
     save_settings(&state, &settings)
 }
@@ -9245,28 +8625,12 @@ fn release_platform_architecture() -> Result<(&'static str, &'static str), Strin
     Ok((platform, architecture))
 }
 
-/// aria2-next publishes exact, versioned asset names (e.g.
-/// `aria2-next-2.8.1-linux-x86_64`), unlike upstream aria2's static builds
+/// aria2 publishes exact, versioned asset names (e.g.
+/// `aria2-2.8.1-linux-x86_64`), unlike upstream aria2's static builds
 /// which this used to match by substring. Matching the exact suffix (minus
 /// the version, which changes every release) is both simpler and safer than
 /// substring markers here.
-fn aria2next_asset_suffix() -> Result<&'static str, String> {
-    if cfg!(target_os = "windows") && cfg!(target_arch = "x86_64") {
-        Ok("windows-x86_64.exe")
-    } else if cfg!(target_os = "windows") && cfg!(target_arch = "aarch64") {
-        Ok("windows-arm64.exe")
-    } else if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
-        Ok("linux-x86_64")
-    } else if cfg!(target_os = "linux") && cfg!(target_arch = "aarch64") {
-        Ok("linux-aarch64")
-    } else if cfg!(target_os = "macos") && cfg!(target_arch = "x86_64") {
-        Ok("macos-x86_64")
-    } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
-        Ok("macos-arm64")
-    } else {
-        Err("manual_update_required:aria2next".to_owned())
-    }
-}
+fn aria2_asset_suffix()->Result<&'static str,String>{if cfg!(target_os="windows")&&cfg!(target_arch="x86_64"){Ok("windows-x64.exe")}else if cfg!(target_os="linux")&&cfg!(target_arch="x86_64"){Ok("linux-x64")}else if cfg!(target_os="macos")&&cfg!(target_arch="x86_64"){Ok("macos-x64")}else{Err("manual_update_required:aria2".to_owned())}}
 
 fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
     let mut best: Option<(u64, PathBuf)> = None;
@@ -9430,37 +8794,6 @@ async fn download_release_bytes(client: &reqwest::Client, url: &str) -> Result<V
         .to_vec())
 }
 
-/// Verifies `bytes` against a `sha256sum`-formatted checksums file (lines of
-/// `<hex digest>  <filename>` or `<hex digest> *<filename>`) published
-/// alongside a release asset. Unlike upstream aria2's static builds
-/// (distributed for well over a decade, packaged by every major Linux
-/// distro), aria2-next is a single-maintainer fork: trusting whatever bytes
-/// GitHub happens to serve for its release asset is not enough here, so
-/// every download of it is checked against the checksums file the same
-/// release publishes before the binary is ever executed.
-fn verify_release_checksum(
-    checksums_text: &str,
-    asset_name: &str,
-    bytes: &[u8],
-) -> Result<(), String> {
-    let expected = checksums_text
-        .lines()
-        .find_map(|line| {
-            let mut parts = line.split_whitespace();
-            let digest = parts.next()?;
-            let name = parts.next()?.trim_start_matches('*');
-            (name == asset_name).then(|| digest.to_ascii_lowercase())
-        })
-        .ok_or_else(|| format!("checksum_entry_missing:{asset_name}"))?;
-    let actual = format!("{:x}", Sha256::digest(bytes));
-    if actual != expected {
-        return Err(format!(
-            "checksum_mismatch:{asset_name}:expected={expected}:actual={actual}"
-        ));
-    }
-    Ok(())
-}
-
 fn install_validated_executable(
     bytes: &[u8],
     target: &Path,
@@ -9575,29 +8908,7 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             install_validated_executable(&bytes, &target, &["--version"])?;
             target
         }
-        "aria2next" => {
-            let release = github_latest_release(&client, "AnInsomniacy/aria2-next").await?;
-            let suffix = aria2next_asset_suffix()?;
-            let (asset_name, url) = release_asset(&release, |name| {
-                name.starts_with("aria2-next-")
-                    && name.ends_with(suffix)
-                    && !name.ends_with(".sha256")
-            })?;
-            let bytes = download_release_bytes(&client, &url).await?;
-            let (_, checksums_url) =
-                release_asset(&release, |name| name.ends_with("-checksums.sha256"))?;
-            let checksums_bytes = download_release_bytes(&client, &checksums_url).await?;
-            let checksums_text =
-                String::from_utf8(checksums_bytes).map_err(|error| error.to_string())?;
-            verify_release_checksum(&checksums_text, &asset_name, &bytes)?;
-            let target = tool_dir.join(if cfg!(windows) {
-                "aria2next.exe"
-            } else {
-                "aria2next"
-            });
-            install_validated_executable(&bytes, &target, &["--version"])?;
-            target
-        }
+        "aria2" => {let release=github_latest_release(&client,"FerroDownload/aria2-static-builds").await?;let suffix=aria2_asset_suffix()?;let(_,url)=release_asset(&release,|name|name.starts_with("aria2c-")&&name.ends_with(suffix)&&!name.ends_with(".sha256"))?;let bytes=download_release_bytes(&client,&url).await?;let target=tool_dir.join(if cfg!(windows){"aria2c.exe"}else{"aria2c"});install_validated_executable(&bytes,&target,&["--version"])?;target}
         "n-m3u8dl-re" => {
             let release = github_latest_release(&client, "nilaoda/N_m3u8DL-RE").await?;
             let (platform_marker, arch_marker) = match (platform, architecture) {
@@ -9856,7 +9167,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &settings.qjs_path,
                 if cfg!(windows) { "qjs.exe" } else { "qjs" },
             ),
-            "aria2next" => configured_aria2next(&settings),
+            "aria2" => configured_aria2(&settings),
             "n-m3u8dl-re" => configured_tool(
                 &settings.n_m3u8dl_re_path,
                 if cfg!(windows) {
@@ -9909,7 +9220,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
 
     {
         let (platform, architecture) = release_platform_architecture()?;
-        let aria2next_suffix = aria2next_asset_suffix()?;
+        let aria2_suffix = aria2_asset_suffix()?;
         let (repository, executable_name, asset_markers, version_args): (
             &str,
             &str,
@@ -9922,16 +9233,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &[],
                 &["--version"],
             ),
-            "aria2next" => (
-                "AnInsomniacy/aria2-next",
-                if cfg!(windows) {
-                    "aria2next.exe"
-                } else {
-                    "aria2next"
-                },
-                std::slice::from_ref(&aria2next_suffix),
-                &["--version"],
-            ),
+            "aria2" => ("FerroDownload/aria2-static-builds",if cfg!(windows){"aria2c.exe"}else{"aria2c"},std::slice::from_ref(&aria2_suffix),&["--version"]),
             "n-m3u8dl-re" => (
                 "nilaoda/N_m3u8DL-RE",
                 if cfg!(windows) {
@@ -10026,9 +9328,9 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                         }
                         _ => false,
                     },
-                    _ => asset_markers
-                        .iter()
-                        .all(|marker| name.contains(&marker.to_ascii_lowercase())),
+                    "aria2" => name.starts_with("aria2c-") && name.ends_with(aria2_suffix) && !name.ends_with(".sha256"),
+
+                    _ => asset_markers.iter().all(|marker| name.contains(&marker.to_ascii_lowercase())),
                 }
             })
             .ok_or_else(|| format!("compatible_release_asset_not_found:{repository}:{tag}"))?;
@@ -10051,27 +9353,10 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             .await
             .map_err(|error| error.to_string())?;
         let sha256 = format!("{:x}", Sha256::digest(&bytes));
-        if id == "aria2next" {
-            let (_, checksums_url) =
-                release_asset(&release, |name| name.ends_with("-checksums.sha256"))?;
-            let checksums_bytes = client
-                .get(&checksums_url)
-                .send()
-                .await
-                .map_err(|error| error.to_string())?
-                .error_for_status()
-                .map_err(|error| error.to_string())?
-                .bytes()
-                .await
-                .map_err(|error| error.to_string())?;
-            let checksums_text =
-                String::from_utf8(checksums_bytes.to_vec()).map_err(|error| error.to_string())?;
-            verify_release_checksum(&checksums_text, asset_name, &bytes)?;
-        }
         let temporary =
             std::env::temp_dir().join(format!("apocalipse-tool-update-{}", uuid::Uuid::new_v4()));
         let (replacement, ffprobe_replacement) =
-            if id == "qjs" || id == "aria2next" || (id == "ffmpeg" && platform == "macos") {
+            if id == "qjs" || id == "aria2" || (id == "ffmpeg" && platform == "macos") {
                 let ffprobe_replacement = if id == "ffmpeg" {
                     let marker = "x64";
                     let expected = format!("ffprobe-darwin-{marker}");
@@ -10134,7 +9419,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         if replacement.len() < 32_768 || (id == "ffmpeg" && ffprobe_replacement.len() < 32_768) {
             return Err(format!("replacement_executable_invalid:{asset_name}"));
         }
-        if id == "aria2next" {
+        if id == "aria2" {
             stop_aria2_runtime(&state);
         }
         let parent = executable
@@ -10282,33 +9567,10 @@ async fn inspect_torrent_metadata(
         return inspect_torrent_bytes(&bytes);
     }
 
-    // Only a bare magnet link reaches here: resolving its metadata needs a
-    // real BitTorrent round-trip (BEP 9), which only aria2 itself can do.
-    let bt_proxy = {
-        let settings = state.settings.lock().map_err(|error| error.to_string())?;
-        aria2_bt_proxy_url(&settings)?
-    };
-    let endpoint = aria2_endpoint(&state, true).await?;
-    // A metadata-only Magnet preview can be checkpointed by aria2-next's
-    // save-session interval if the app is closed while BEP 9 is still
-    // resolving. Such a restored task has no ADM queue row and keeps its
-    // info-hash registered inside libtorrent, causing the next Analyze click
-    // to fail with "torrent already exists in session". Remove only engine
-    // torrents that are not owned by a persisted ADM task.
-    let removed_orphans =
-        prune_orphan_aria2_torrents(&state, &endpoint, "metadata_preview").await?;
-    let runtime_root = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
-    let session_may_restore = fs::metadata(runtime_root.join("aria2-rpc").join("aria2.session"))
-        .map(|metadata| metadata.len() > 0)
-        .unwrap_or(false);
-    if removed_orphans == 0 && session_may_restore {
-        // The RPC listener becomes ready slightly before aria2-next finishes
-        // attaching BitTorrent entries restored from input-file. The user's
-        // diagnostic showed that attach about half a second after startup.
-        // Give that restore one bounded grace window, then reconcile again.
-        tokio::time::sleep(Duration::from_millis(650)).await;
-        prune_orphan_aria2_torrents(&state, &endpoint, "metadata_preview_restore_grace").await?;
-    }
+    // Only a bare Magnet reaches here: resolve metadata through classic aria2.
+    if state.settings.lock().map_err(|e|e.to_string())?.proxy_enabled{return Err("aria2_bittorrent_proxy_unsupported".to_owned());}
+    let endpoint=aria2_endpoint(&state,true).await?;
+    let runtime_root=state.queue_path.parent().unwrap_or_else(||Path::new("."));
     let workspace = runtime_root
         .join("aria2-metadata-inspection")
         .join(uuid::Uuid::new_v4().simple().to_string());
@@ -10323,10 +9585,7 @@ async fn inspect_torrent_metadata(
         &format!("log_offset={log_start}"),
     );
     let metadata = endpoint
-        .preview_magnet_metadata(
-            &source,
-            &workspace,
-            bt_proxy.as_deref(),
+        .preview_magnet_metadata(&source,&workspace,
             |elapsed_secs, connections, seeders, total_length, completed_length, followed_by| {
                 if let Some(content_gid) = followed_by {
                     diagnostic_log(
@@ -11067,7 +10326,6 @@ fn start_download(
             DownloadKind::Http
                 | DownloadKind::AcceleratedHttp
                 | DownloadKind::Ftp
-                | DownloadKind::Ed2k
         )
     {
         diagnostic_log(
@@ -12707,8 +11965,6 @@ fn association_id(source: &str) -> Option<&'static str> {
     let lower = source.to_ascii_lowercase();
     if lower.starts_with("magnet:") {
         Some("magnet")
-    } else if lower.starts_with("ed2k:") {
-        Some("ed2k")
     } else if lower.starts_with("sftp:") {
         Some("sftp")
     } else if lower.starts_with("ftp:") {
@@ -13742,7 +12998,7 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<AutostartStatus
     get_autostart(app)
 }
 
-const ASSOCIATION_IDS: [&str; 6] = ["m3u8", "torrent", "magnet", "ed2k", "ftp", "sftp"];
+const ASSOCIATION_IDS: [&str; 5] = ["m3u8", "torrent", "magnet", "ftp", "sftp"];
 
 #[cfg(target_os = "windows")]
 fn configure_association(id: &str, enabled: bool, _: &HashMap<String, bool>) -> Result<(), String> {
@@ -13833,7 +13089,6 @@ fn configure_association(
         ("m3u8", "application/vnd.apple.mpegurl"),
         ("torrent", "application/x-bittorrent"),
         ("magnet", "x-scheme-handler/magnet"),
-        ("ed2k", "x-scheme-handler/ed2k"),
         ("ftp", "x-scheme-handler/ftp"),
         ("sftp", "x-scheme-handler/sftp"),
     ];
@@ -14148,12 +13403,12 @@ fn main() {
             let mut initial_settings =
                 load_settings(&settings_path).map_err(std::io::Error::other)?;
             if initial_settings.aria2_path.is_none() {
-                let aria2_dir = app_data.join("tools").join("aria2next");
+                let aria2_dir = app_data.join("tools").join("aria2");
                 fs::create_dir_all(&aria2_dir)?;
                 initial_settings.aria2_path = Some(aria2_dir.join(if cfg!(windows) {
-                    "aria2next.exe"
+                    "aria2c.exe"
                 } else {
-                    "aria2next"
+                    "aria2"
                 }));
                 write_settings(&settings_path, &initial_settings).map_err(std::io::Error::other)?;
             }
@@ -14294,17 +13549,6 @@ fn main() {
             get_about_media,
             get_about_background,
             open_link_window,
-            open_ed2k_window,
-            ed2k_list_servers,
-            ed2k_add_server,
-            ed2k_remove_server,
-            ed2k_get_server_list_url,
-            ed2k_set_server_list_url,
-            ed2k_update_server_list,
-            ed2k_connect,
-            ed2k_disconnect,
-            ed2k_search,
-            ed2k_search_results,
             authenticate_local_link_account,
             authenticate_remote_link_account,
             list_link_shares,

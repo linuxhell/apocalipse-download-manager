@@ -32,7 +32,7 @@ const catalogs = {
     aiStatusProposed: "Awaiting approval", aiStatusTesting: "Testing", aiStatusSaved: "Saved", aiStatusConfirmed: "Confirmed", aiStatusRejected: "Did not work",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
-    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", aria2Backend: "aria2-next (HTTP/HTTPS, torrent, magnet and ED2K)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "mpv / media player",
+    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "mpv / media player",
     donatePaypal: "Donate via PayPal",
     about: "About", aboutDescription: "About the creator.", aboutCreator: "Creator: Juliano - Brazil", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume", facebookRecordingFallback: "Facebook could not provide this Reel for direct download. Use Record on the video while it is playing.",
     overview: "OVERVIEW",
@@ -270,7 +270,7 @@ const catalogs = {
     aiStatusProposed: "Aguardando aprovação", aiStatusTesting: "Em teste", aiStatusSaved: "Guardada", aiStatusConfirmed: "Confirmada", aiStatusRejected: "Não funcionou",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
-    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", aria2Backend: "aria2-next (HTTP/HTTPS, torrent, magnet e ED2K)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "mpv / reprodutor de mídia",
+    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "mpv / reprodutor de mídia",
     donatePaypal: "Faça uma doação pelo PayPal",
     about: "Sobre", aboutDescription: "Sobre o criador.", aboutCreator: "Criador: Juliano - Brasil", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume", facebookRecordingFallback: "O Facebook não disponibilizou este Reel para download direto. Use Gravar no vídeo enquanto ele estiver em reprodução.",
     overview: "VISÃO GERAL",
@@ -508,7 +508,7 @@ const catalogs = {
     aiStatusProposed: "等待批准", aiStatusTesting: "测试中", aiStatusSaved: "已保存", aiStatusConfirmed: "已确认", aiStatusRejected: "未解决",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
-    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", aria2Backend: "aria2-next（HTTP/HTTPS、种子、磁力链接和 ED2K）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "mpv / 媒体播放器",
+    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", aria2Backend: "aria2（HTTP/HTTPS、FTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "mpv / 媒体播放器",
     donatePaypal: "通过 PayPal 捐赠",
     about: "关于", aboutDescription: "关于创作者。", aboutCreator: "创作者：Juliano - 巴西", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量", facebookRecordingFallback: "Facebook 无法提供此 Reel 的直接下载。请在视频播放时使用“录制”。",
     overview: "概览",
@@ -771,7 +771,7 @@ let selectionPointerActive = false;
 let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
-const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", ed2k: "ed2kDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", about: "aboutDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
+const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", about: "aboutDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
 let lastUiInteractionTrace = null;
 const freshUiTrace = () => {
   const now = performance.now();
@@ -876,7 +876,7 @@ function updateSpeeds(tasks) {
     const changed = !previous || task.received !== previous.bytes;
     const changedAt = changed ? now : previous.changedAt;
     // When the backend has an engine-reported byte/s value, display that
-    // value directly. Do not apply a second UI EWMA: aria2-next, yt-dlp and
+    // value directly. Do not apply a second UI EWMA: aria2, yt-dlp and
     // N_m3u8DL-RE already report their own live throughput. Byte-delta EWMA
     // remains only as a fallback for engines that cannot provide byte/s.
     const hasEngineSpeed = active
@@ -1439,11 +1439,6 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     if (button.dataset.page === "link") {
       invoke("open_link_window").catch((error) => window.alert(String(error)));
       invoke("record_ui_diagnostic", { level: "INFO", event: "link_window_requested", detail: "source=main_navigation" }).catch(() => {});
-      return;
-    }
-    if (button.dataset.page === "ed2k") {
-      invoke("open_ed2k_window").catch((error) => window.alert(String(error)));
-      invoke("record_ui_diagnostic", { level: "INFO", event: "ed2k_window_requested", detail: "source=main_navigation" }).catch(() => {});
       return;
     }
     activePage = button.dataset.page;
@@ -2442,7 +2437,7 @@ document.querySelector("#save-tools").onclick = async (event) => {
       ytDlp: document.querySelector("#tool-yt-dlp").value,
       qjs: document.querySelector("#tool-qjs").value,
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
-      aria2Next: document.querySelector("#tool-aria2next").value,
+      aria2: document.querySelector("#tool-aria2").value,
       extractor: document.querySelector("#tool-extractor").value,
     });
     await invoke("set_media_player", { path: document.querySelector("#tool-player").value });
