@@ -9699,35 +9699,95 @@ async fn inspect_torrent_metadata(
         "aria2.metadata_attempt_started",
         &format!("log_offset={log_start}"),
     );
+    diagnostic_log(
+        &state,
+        "INFO",
+        "aria2.metadata_rpc_plan",
+        "mode=followed_pause metadata_only=false pause_metadata=true save_metadata=false timeout_seconds=150 complete_without_child_grace_seconds=3",
+    );
+    let mut metadata_complete_logged = false;
+    let mut metadata_child_logged = false;
+    let mut metadata_files_logged = false;
     let metadata = endpoint
-        .preview_magnet_metadata(
-            &source,
-            &workspace,
-            |elapsed_secs, connections, seeders, total_length, completed_length, followed_by| {
-                if let Some(content_gid) = followed_by {
-                    diagnostic_log(
-                        &state,
-                        "WARN",
-                        "aria2.metadata_preview_followed_unexpectedly",
-                        &format!(
-                            "elapsed={elapsed_secs}s content_gid={content_gid} \
-                             peak_connections={connections} peak_seeders={seeders}"
-                        ),
-                    );
-                } else {
+        .preview_magnet_metadata(&source, &workspace, |probe| {
+            diagnostic_log(
+                &state,
+                if probe.child_rpc_error.is_some() { "WARN" } else { "INFO" },
+                "aria2.metadata_probe",
+                &format!(
+                    "elapsed={}s metadata_gid={} status={} connections={} seeders={} total={} completed={} \
+                     info_name_present={} parent_files={} parent_metadata_files={} followed_by={} \
+                     child_status={} child_files={} child_real_files={} child_total={} child_completed={} child_rpc_error={}",
+                    probe.elapsed_secs,
+                    probe.metadata_gid,
+                    probe.status,
+                    probe.connections,
+                    probe.seeders,
+                    probe.total_length,
+                    probe.completed_length,
+                    probe.info_name_present,
+                    probe.parent_file_count,
+                    probe.parent_metadata_file_count,
+                    probe.followed_by.as_deref().unwrap_or("none"),
+                    probe.child_status.as_deref().unwrap_or("none"),
+                    probe.child_file_count,
+                    probe.child_real_file_count,
+                    probe.child_total_length,
+                    probe.child_completed_length,
+                    probe.child_rpc_error.as_deref().unwrap_or("none"),
+                ),
+            );
+            if probe.status == "complete" && !metadata_complete_logged {
+                metadata_complete_logged = true;
+                diagnostic_log(
+                    &state,
+                    "INFO",
+                    "aria2.metadata_received",
+                    &format!(
+                        "elapsed={}s metadata_gid={} bytes={} info_name_present={} followed_by={}",
+                        probe.elapsed_secs,
+                        probe.metadata_gid,
+                        probe.completed_length,
+                        probe.info_name_present,
+                        probe.followed_by.as_deref().unwrap_or("none"),
+                    ),
+                );
+            }
+            if let Some(content_gid) = probe.followed_by.as_deref() {
+                if !metadata_child_logged {
+                    metadata_child_logged = true;
                     diagnostic_log(
                         &state,
                         "INFO",
-                        "aria2.metadata_preview_progress",
+                        "aria2.metadata_child_discovered",
                         &format!(
-                            "elapsed={elapsed_secs}s peak_connections={connections} \
-                             peak_seeders={seeders} peak_total_length={total_length} \
-                             peak_completed_length={completed_length}"
+                            "elapsed={}s metadata_gid={} content_gid={} child_status={} child_total={} child_completed={}",
+                            probe.elapsed_secs,
+                            probe.metadata_gid,
+                            content_gid,
+                            probe.child_status.as_deref().unwrap_or("none"),
+                            probe.child_total_length,
+                            probe.child_completed_length,
                         ),
                     );
                 }
-            },
-        )
+            }
+            if probe.child_real_file_count > 0 && !metadata_files_logged {
+                metadata_files_logged = true;
+                diagnostic_log(
+                    &state,
+                    "INFO",
+                    "aria2.metadata_files_ready",
+                    &format!(
+                        "elapsed={}s content_gid={} files={} total={}",
+                        probe.elapsed_secs,
+                        probe.followed_by.as_deref().unwrap_or("none"),
+                        probe.child_real_file_count,
+                        probe.child_total_length,
+                    ),
+                );
+            }
+        })
         .await;
     let _ = fs::remove_dir_all(&workspace);
     // Capture the exact aria2 log interval while the attempt is still recent.
