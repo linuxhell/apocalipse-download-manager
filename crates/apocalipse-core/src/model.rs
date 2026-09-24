@@ -37,6 +37,9 @@ pub struct DownloadTask {
     pub upload_speed: Option<u64>,
     #[serde(default)]
     pub torrent_selection: Vec<usize>,
+    /// Persistent .torrent file kept under data/torrents for Torrent/Magnet tasks.
+    #[serde(default)]
+    pub torrent_metadata_path: Option<PathBuf>,
     /// aria2 GID persisted across ADM restarts. Classic aria2 can restore
     /// unfinished transfers from its session file, allowing the UI to reconnect
     /// to a transfer instead of creating a duplicate.
@@ -108,6 +111,7 @@ impl DownloadTask {
             download_speed: None,
             upload_speed: None,
             torrent_selection: Vec::new(),
+            torrent_metadata_path: None,
             aria2_gid: None,
             torrent_seeders: None,
             torrent_leechers: None,
