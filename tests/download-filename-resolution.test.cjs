@@ -5,6 +5,7 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
 const main = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
+const app = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8");
 
 test("a resolved page/media title is used as the file name before falling back to the raw URL", () => {
   // Regression: enqueue_download_impl used to decide the file name purely
@@ -57,4 +58,31 @@ test("the Content-Disposition probe runs on a plain OS thread, not inside the to
   // servers, both spawned as dedicated std::thread workers.
   assert.match(main, /\.name\("apocalipse-extension-bridge"\.into\(\)\)/);
   assert.match(main, /\.name\("apocalipse-link-client"\.into\(\)\)/);
+});
+
+test("the Content-Disposition probe falls back to a ranged GET with a real User-Agent, not just a bare HEAD", () => {
+  // Regression: a HEAD-only probe against gopeed.com/api/download?tpl=...
+  // came back with no Content-Disposition at all (many "download endpoint"
+  // style servers only compute it while actually serving a body, and some
+  // block requests without a browser-like User-Agent), so the file kept
+  // falling back to the literal name "download" even after the probe was
+  // added. A HEAD miss now retries with a minimal ranged GET.
+  const probeBody = main.slice(
+    main.indexOf("async fn probe_content_disposition_filename("),
+    main.indexOf("async fn probe_content_disposition_filename(") + 2000,
+  );
+  assert.match(probeBody, /\.user_agent\(PROBE_USER_AGENT\)/);
+  assert.match(probeBody, /client\s*\n\s*\.get\(url\)/);
+  assert.match(probeBody, /header\(reqwest::header::RANGE, "bytes=0-0"\)/);
+});
+
+test("a resolved audio title (not just video) fills the save-dialog file name for bridge downloads", () => {
+  // Regression: the save dialog shown for a bridge.download with
+  // start_immediately=false has its own, separate title-based file name
+  // fallback in app.js — and it only ever applied to pendingMediaKind ===
+  // "video", so a SoundCloud audio capture with a perfectly good resolved
+  // track title still fell back to the raw (meaningless) CDN URL segment.
+  assert.doesNotMatch(app, /pendingMediaKind === "video" && titleName/);
+  assert.match(app, /\(pendingMediaKind === "video" \|\| pendingMediaKind === "audio"\) && titleName/);
+  assert.match(app, /const titleExtension = pendingMediaKind === "audio" \? "m4a" : "mp4";/);
 });

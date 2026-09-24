@@ -11670,20 +11670,47 @@ fn parse_content_disposition_filename(value: &str) -> Option<String> {
 /// an extra request on the common path. Bounded to a short timeout so a slow
 /// or unresponsive server can never stall the caller for long.
 async fn probe_content_disposition_filename(url: &str) -> Option<String> {
+    const PROBE_USER_AGENT: &str =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152.0.0.0 Safari/537.36";
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(4))
         .redirect(reqwest::redirect::Policy::limited(10))
+        .user_agent(PROBE_USER_AGENT)
         .build()
         .ok()?;
-    let header = match client.head(url).send().await {
+    let disposition_header = |response: &reqwest::Response| {
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_DISPOSITION)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    };
+    // Many "download endpoint" style servers (redirect/mirror services in
+    // particular) only compute Content-Disposition while actually serving a
+    // body, not on a bare HEAD — so a HEAD miss falls back to a ranged GET
+    // that reads at most one byte, keeping the request just as cheap.
+    let head_header = match client.head(url).send().await {
         Ok(response) if response.status().is_success() || response.status().is_redirection() => {
-            response
-                .headers()
-                .get(reqwest::header::CONTENT_DISPOSITION)
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_owned)
+            disposition_header(&response)
         }
         _ => None,
+    };
+    let header = if head_header.is_some() {
+        head_header
+    } else {
+        match client
+            .get(url)
+            .header(reqwest::header::RANGE, "bytes=0-0")
+            .send()
+            .await
+        {
+            Ok(response)
+                if response.status().is_success() || response.status().is_redirection() =>
+            {
+                disposition_header(&response)
+            }
+            _ => None,
+        }
     };
     header.and_then(|value| parse_content_disposition_filename(&value))
 }

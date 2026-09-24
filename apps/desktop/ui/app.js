@@ -3033,13 +3033,19 @@ async function consumeBridgeDownload() {
     resetTaskConnections();
     document.querySelector("#url").value = request.url;
     const requestedName = request.fileName || "";
-    const genericMediaName = /^(?:watch|reel|video|download)(?:\.[a-z0-9]{1,10})?$/i.test(requestedName.trim());
+    const genericMediaName = /^(?:watch|reel|video|audio|track|download)(?:\.[a-z0-9]{1,10})?$/i.test(requestedName.trim());
     const titleName = String(pendingTitle || "")
       .replace(/[<>:\"/\\|?*\u0000-\u001f]/g, "_")
       .replace(/[. ]+$/g, "")
       .trim();
-    document.querySelector("#file-name").value = pendingMediaKind === "video" && titleName && (!requestedName || genericMediaName)
-      ? `${[...titleName].slice(0, 110).join("")}.mp4`
+    // A resolved page/media title (e.g. a SoundCloud track name) is almost
+    // always a better file name than the source URL's own path, which for a
+    // signed CDN stream carries no useful name at all. This used to apply
+    // only to video captures, so audio captures (like SoundCloud) fell back
+    // to the raw, meaningless URL segment even when the real title was known.
+    const titleExtension = pendingMediaKind === "audio" ? "m4a" : "mp4";
+    document.querySelector("#file-name").value = (pendingMediaKind === "video" || pendingMediaKind === "audio") && titleName && (!requestedName || genericMediaName)
+      ? `${[...titleName].slice(0, 110).join("")}.${titleExtension}`
       : requestedName;
     resetAnalysisForNewRequest();
     resetMediaInspection();
