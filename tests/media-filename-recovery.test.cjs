@@ -10,7 +10,7 @@ const popup = readFileSync(join(root, 'popup.js'), 'utf8');
 const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
 
 test('0.3.169 rejects generic media labels before deriving a file name', () => {
-  assert.equal(manifest.version, '0.3.174');
+  assert.equal(manifest.version, '0.3.175');
   assert.match(contentScript, /genericMediaTitle/);
   assert.match(contentScript, /normalize\("NFD"\)/);
   assert.match(contentScript, /pageMediaTitle/);
