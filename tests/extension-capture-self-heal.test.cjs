@@ -10,7 +10,7 @@ const pageHook = readFileSync(join(root, 'browser-extension/page-hook.js'), 'utf
 const manifest = JSON.parse(readFileSync(join(root, 'browser-extension/manifest.json'), 'utf8'));
 
 test('0.3.169 repairs capture scripts in tabs that were already open during an extension reload', () => {
-  assert.equal(manifest.version, '0.3.175');
+  assert.equal(manifest.version, '0.3.176');
   assert.ok(manifest.permissions.includes('scripting'));
   assert.match(background, /APOCALIPSE_CONTENT_PING/);
   assert.match(background, /chrome\.scripting\.executeScript/);
