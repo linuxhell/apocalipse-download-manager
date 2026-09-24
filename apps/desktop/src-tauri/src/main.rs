@@ -7380,13 +7380,6 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
     if let Some(bytes) = read_sanitized_log_tail(&aria2_log, 1024 * 1024) {
         entries.push(("engines/aria2-runtime.log".to_owned(), bytes));
     }
-    let metadata_attempt_log = runtime_root
-        .join("logs")
-        .join("engines")
-        .join("aria2-metadata-attempt.log");
-    if let Some(bytes) = read_sanitized_log_tail(&metadata_attempt_log, 33 * 1024 * 1024) {
-        entries.push(("engines/aria2-metadata-attempt.log".to_owned(), bytes));
-    }
     let debugger_index = serde_json::json!({
         "format": "Apocalipse Forensic Debugger V4",
         "startHere": [
@@ -9753,216 +9746,46 @@ async fn inspect_torrent_metadata(
         return Err("not_a_torrent".to_owned());
     }
 
-    let local = PathBuf::from(&source);
-    if local.is_file() {
-        return inspect_torrent_file(&local);
-    }
+    let endpoint = if source.starts_with("magnet:") {
+        if state
+            .settings
+            .lock()
+            .map_err(|error| error.to_string())?
+            .proxy_enabled
+        {
+            return Err("aria2_bittorrent_proxy_unsupported".to_owned());
+        }
+        Some(aria2_endpoint(&state, true).await?)
+    } else {
+        None
+    };
 
-    if (source.starts_with("http://") || source.starts_with("https://"))
-        && source
-            .split(['?', '#'])
-            .next()
-            .is_some_and(|value| value.to_ascii_lowercase().ends_with(".torrent"))
-    {
-        let bytes = fetch_torrent_file_bytes(&state, &source).await?;
-        return inspect_torrent_bytes(&bytes);
-    }
-
-    // Only a bare Magnet reaches here: resolve metadata through classic aria2.
-    if state
-        .settings
-        .lock()
-        .map_err(|e| e.to_string())?
-        .proxy_enabled
-    {
-        return Err("aria2_bittorrent_proxy_unsupported".to_owned());
-    }
-    let endpoint = aria2_endpoint(&state, true).await?;
-    let runtime_root = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
-    let workspace = runtime_root
-        .join("aria2-metadata-inspection")
-        .join(uuid::Uuid::new_v4().simple().to_string());
-    fs::create_dir_all(&workspace).map_err(|error| error.to_string())?;
-    let aria2_log = runtime_root.join("aria2-rpc").join("aria2.log");
-    let log_start = fs::metadata(&aria2_log).map(|info| info.len()).unwrap_or(0);
-    let attempt_started = Instant::now();
-    diagnostic_log(
-        &state,
-        "INFO",
-        "aria2.metadata_attempt_started",
-        &format!("log_offset={log_start}"),
-    );
-    diagnostic_log(
-        &state,
-        "INFO",
-        "aria2.metadata_rpc_plan",
-        "mode=followed_pause metadata_only=false pause_metadata=true save_metadata=false timeout_seconds=150 complete_without_child_grace_seconds=3",
-    );
-    let mut metadata_complete_logged = false;
-    let mut metadata_child_logged = false;
-    let mut metadata_files_logged = false;
-    let metadata = endpoint
-        .preview_magnet_metadata(&source, &workspace, |probe| {
+    let path = materialize_torrent_metadata_file(&state, endpoint.as_ref(), &source)
+        .await
+        .map_err(|error| {
             diagnostic_log(
                 &state,
-                if probe.child_rpc_error.is_some() { "WARN" } else { "INFO" },
-                "aria2.metadata_probe",
-                &format!(
-                    "elapsed={}s metadata_gid={} status={} connections={} seeders={} total={} completed={} \
-                     info_name_present={} parent_files={} parent_metadata_files={} followed_by={} \
-                     child_status={} child_files={} child_real_files={} child_total={} child_completed={} child_rpc_error={}",
-                    probe.elapsed_secs,
-                    probe.metadata_gid,
-                    probe.status,
-                    probe.connections,
-                    probe.seeders,
-                    probe.total_length,
-                    probe.completed_length,
-                    probe.info_name_present,
-                    probe.parent_file_count,
-                    probe.parent_metadata_file_count,
-                    probe.followed_by.as_deref().unwrap_or("none"),
-                    probe.child_status.as_deref().unwrap_or("none"),
-                    probe.child_file_count,
-                    probe.child_real_file_count,
-                    probe.child_total_length,
-                    probe.child_completed_length,
-                    probe.child_rpc_error.as_deref().unwrap_or("none"),
-                ),
+                "WARN",
+                "aria2.metadata_save_failed",
+                &format!("error={error}"),
             );
-            if probe.status == "complete" && !metadata_complete_logged {
-                metadata_complete_logged = true;
-                diagnostic_log(
-                    &state,
-                    "INFO",
-                    "aria2.metadata_received",
-                    &format!(
-                        "elapsed={}s metadata_gid={} bytes={} info_name_present={} followed_by={}",
-                        probe.elapsed_secs,
-                        probe.metadata_gid,
-                        probe.completed_length,
-                        probe.info_name_present,
-                        probe.followed_by.as_deref().unwrap_or("none"),
-                    ),
-                );
-            }
-            if let Some(content_gid) = probe.followed_by.as_deref() {
-                if !metadata_child_logged {
-                    metadata_child_logged = true;
-                    diagnostic_log(
-                        &state,
-                        "INFO",
-                        "aria2.metadata_child_discovered",
-                        &format!(
-                            "elapsed={}s metadata_gid={} content_gid={} child_status={} child_total={} child_completed={}",
-                            probe.elapsed_secs,
-                            probe.metadata_gid,
-                            content_gid,
-                            probe.child_status.as_deref().unwrap_or("none"),
-                            probe.child_total_length,
-                            probe.child_completed_length,
-                        ),
-                    );
-                }
-            }
-            if probe.child_real_file_count > 0 && !metadata_files_logged {
-                metadata_files_logged = true;
-                diagnostic_log(
-                    &state,
-                    "INFO",
-                    "aria2.metadata_files_ready",
-                    &format!(
-                        "elapsed={}s content_gid={} files={} total={}",
-                        probe.elapsed_secs,
-                        probe.followed_by.as_deref().unwrap_or("none"),
-                        probe.child_real_file_count,
-                        probe.child_total_length,
-                    ),
-                );
-            }
-        })
-        .await;
-    let _ = fs::remove_dir_all(&workspace);
-    // Capture the exact aria2 log interval while the attempt is still recent.
-    // Later DHT debug traffic must not evict its BEP 9 handshake from the ZIP.
-    let log_end = fs::metadata(&aria2_log).map(|info| info.len()).unwrap_or(0);
-    let snapshot = runtime_root
-        .join("logs")
-        .join("engines")
-        .join("aria2-metadata-attempt.log");
-    let max_capture = 32 * 1024 * 1024_u64;
-    let rotated = log_end < log_start;
-    let start = if rotated { 0 } else { log_start };
-    let capture_start = start.max(log_end.saturating_sub(max_capture));
-    let truncated = capture_start > start;
-    let mut saved = false;
-    let _ = fs::remove_file(&snapshot);
-    if let Ok(mut file) = fs::File::open(&aria2_log) {
-        if file.seek(SeekFrom::Start(capture_start)).is_ok() {
-            let capture_len = log_end.saturating_sub(capture_start).min(max_capture) as usize;
-            let mut raw = vec![0; capture_len];
-            if file.read_exact(&mut raw).is_ok() {
-                let header = format!(
-                    "attempt_duration_ms={} result={} log_start={} log_end={} captured_start={} rotated={} truncated={}\n",
-                    attempt_started.elapsed().as_millis(),
-                    if metadata.is_ok() { "success" } else { "error" },
-                    log_start, log_end, capture_start, rotated, truncated
-                );
-                let body = String::from_utf8_lossy(&raw);
-                let sanitized = body
-                    .lines()
-                    .map(sanitize_log_detail)
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                if let Some(parent) = snapshot.parent() {
-                    let _ = fs::create_dir_all(parent);
-                }
-                saved = fs::write(&snapshot, format!("{header}{sanitized}")).is_ok();
-            }
-        }
-    }
-    diagnostic_log(&state, "INFO", "aria2.metadata_attempt_captured", &format!(
-        "duration_ms={} log_start={} log_end={} captured_start={} rotated={} truncated={} saved={}",
-        attempt_started.elapsed().as_millis(), log_start, log_end, capture_start, rotated, truncated, saved
-    ));
-    let metadata = metadata.map_err(|error| {
-        diagnostic_log(
-            &state,
-            "WARN",
-            "aria2.metadata_preview_failed",
-            &format!("error={error}"),
-        );
-        error
-    })?;
+            error
+        })?;
+    let mut inspection = inspect_torrent_file(&path)?;
+    inspection.torrent_path = Some(path.to_string_lossy().into_owned());
     diagnostic_log(
         &state,
         "INFO",
-        "aria2.metadata_previewed",
+        "aria2.metadata_parsed",
         &format!(
-            "name={} files={} total_size={} file_lengths={:?}",
-            metadata.name,
-            metadata.files.len(),
-            metadata.total_size,
-            metadata
-                .files
-                .iter()
-                .map(|file| file.length)
-                .collect::<Vec<_>>()
+            "path={} name={} files={} total_size={}",
+            path.display(),
+            inspection.name,
+            inspection.files.len(),
+            inspection.total_size
         ),
     );
-    Ok(TorrentInspection {
-        name: metadata.name,
-        files: metadata
-            .files
-            .into_iter()
-            .map(|file| TorrentFileInfo {
-                index: file.index,
-                path: file.path,
-                size: file.length,
-            })
-            .collect(),
-        total_size: metadata.total_size,
-    })
+    Ok(inspection)
 }
 
 async fn read_response_limited(
