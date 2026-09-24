@@ -485,14 +485,8 @@ impl Endpoint {
             "dir".into(),
             Value::String(torrents_dir.to_string_lossy().into_owned()),
         );
-        options.insert(
-            "bt-metadata-only".into(),
-            Value::String("true".into()),
-        );
-        options.insert(
-            "bt-save-metadata".into(),
-            Value::String("true".into()),
-        );
+        options.insert("bt-metadata-only".into(), Value::String("true".into()));
+        options.insert("bt-save-metadata".into(), Value::String("true".into()));
         options.insert("file-allocation".into(), Value::String("none".into()));
 
         let gid = self
@@ -569,7 +563,8 @@ impl Endpoint {
                         "torrent_metadata_saved_without_info_hash:connections={peak_connections}:seeders={peak_seeders}:total={peak_total}:completed={peak_completed}"
                     ));
                 };
-                let direct = torrents_dir.join(format!("{}.torrent", info_hash.to_ascii_lowercase()));
+                let direct =
+                    torrents_dir.join(format!("{}.torrent", info_hash.to_ascii_lowercase()));
                 let mut saved = None;
                 for _ in 0..30 {
                     if direct.is_file() {
