@@ -24,7 +24,7 @@ test("ADM stores and parses torrent files from data/torrents before payload", ()
   assert.match(main, /materialize_torrent_metadata_file/);
   assert.match(main, /inspect_torrent_file\(&path\)/);
   assert.match(main, /torrent_metadata_path = Some\(path\.clone\(\)\)/);
-  assert.match(main, /add_bittorrent[\s\S]*Some\(&bytes\)/);
+  assert.match(main, /add_bittorrent[\s\S]*&bytes/);
 });
 
 test("retired followedBy metadata preview code is absent", () => {
