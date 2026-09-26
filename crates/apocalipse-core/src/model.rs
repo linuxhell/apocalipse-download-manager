@@ -37,7 +37,7 @@ pub struct DownloadTask {
     pub upload_speed: Option<u64>,
     #[serde(default)]
     pub torrent_selection: Vec<usize>,
-    /// Persistent .torrent file kept under data/torrents for Torrent/Magnet tasks.
+    /// Optional saved .torrent file when torrent metadata retention is enabled.
     #[serde(default)]
     pub torrent_metadata_path: Option<PathBuf>,
     /// aria2 GID persisted across ADM restarts. Classic aria2 can restore
