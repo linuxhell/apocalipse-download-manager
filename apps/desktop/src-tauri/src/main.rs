@@ -225,6 +225,8 @@ struct AppState {
     link_transfers: Mutex<HashMap<String, Arc<LinkTransferControl>>>,
     aria2_runtime: Mutex<Option<aria2::Runtime>>,
     aria2_tasks: Mutex<HashMap<DownloadId, String>>,
+    pending_torrent_metadata: Mutex<HashMap<String, Vec<u8>>>,
+    active_torrent_metadata: Mutex<HashMap<DownloadId, Vec<u8>>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
     diagnostics: diagnostics::Diagnostics,
@@ -317,6 +319,8 @@ struct UserSettings {
     aria2_rpc_auto_start: bool,
     #[serde(default)]
     aria2_rpc_port: Option<u16>,
+    #[serde(default)]
+    save_torrent_metadata: bool,
     #[serde(default = "default_aria2_rpc_secret", skip_serializing)]
     aria2_rpc_secret: String,
     #[serde(default)]
@@ -412,6 +416,7 @@ impl Default for UserSettings {
             aria2_rpc_enabled: true,
             aria2_rpc_auto_start: true,
             aria2_rpc_port: None,
+            save_torrent_metadata: false,
             aria2_rpc_secret: default_aria2_rpc_secret(),
             media_player_path: None,
             user_agent: None,
@@ -534,6 +539,7 @@ struct TorrentInspection {
     files: Vec<TorrentFileInfo>,
     total_size: u64,
     torrent_path: Option<String>,
+    torrent_token: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -2680,11 +2686,6 @@ fn btext(value: Option<&BValue>) -> String {
     }
 }
 
-fn inspect_torrent_file(path: &Path) -> Result<TorrentInspection, String> {
-    let data = fs::read(path).map_err(|error| error.to_string())?;
-    inspect_torrent_bytes(&data)
-}
-
 fn inspect_torrent_bytes(data: &[u8]) -> Result<TorrentInspection, String> {
     let mut position = 0;
     let BValue::Dict(root) = parse_bencode(data, &mut position)? else {
@@ -2739,6 +2740,7 @@ fn inspect_torrent_bytes(data: &[u8]) -> Result<TorrentInspection, String> {
         name,
         files,
         torrent_path: None,
+        torrent_token: None,
     })
 }
 
@@ -2838,6 +2840,37 @@ async fn materialize_torrent_metadata_file(
         ),
     );
     Ok(path)
+}
+
+async fn load_torrent_metadata_without_saving(
+    state: &AppState,
+    endpoint: Option<&aria2::Endpoint>,
+    source: &str,
+) -> Result<Vec<u8>, String> {
+    let local = PathBuf::from(source);
+    if local.is_file() {
+        return fs::read(local).map_err(|error| error.to_string());
+    }
+    if (source.starts_with("http://") || source.starts_with("https://"))
+        && source.split(['?', '#']).next().is_some_and(|value| value.to_ascii_lowercase().ends_with(".torrent"))
+    {
+        return fetch_torrent_file_bytes(state, source).await;
+    }
+    if !source.starts_with("magnet:") {
+        return Err("not_a_torrent".to_owned());
+    }
+    let endpoint = endpoint.ok_or_else(|| "aria2_endpoint_required".to_owned())?;
+    let root = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
+    let temporary = root.join("aria2-rpc").join("metadata-staging").join(uuid::Uuid::new_v4().to_string());
+    fs::create_dir_all(&temporary).map_err(|error| error.to_string())?;
+    let result = async {
+        let path = endpoint.save_magnet_metadata(source, &temporary, |elapsed, status, connections, seeders, total, completed, info_hash| {
+            diagnostic_log(state, "INFO", "aria2.metadata_progress", &format!("elapsed={elapsed}s status={status} connections={connections} seeders={seeders} total={total} completed={completed} info_hash={}", info_hash.unwrap_or("none")));
+        }).await?;
+        fs::read(path).map_err(|error| error.to_string())
+    }.await;
+    let _ = fs::remove_dir_all(&temporary);
+    result
 }
 
 #[derive(Serialize)]
@@ -3846,6 +3879,8 @@ struct DownloadContext {
     request_content_type: Option<String>,
     #[serde(default)]
     torrent_metadata_path: Option<String>,
+    #[serde(default)]
+    torrent_metadata_token: Option<String>,
 }
 
 #[derive(Clone)]
@@ -5073,6 +5108,43 @@ fn save_settings(state: &AppState, settings: &UserSettings) -> Result<(), String
     write_settings(&state.settings_path, settings)
 }
 
+#[tauri::command]
+fn get_torrent_storage_setting(state: State<'_, AppState>) -> Result<bool, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    Ok(settings.save_torrent_metadata)
+}
+
+#[tauri::command]
+fn set_torrent_storage_setting(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.save_torrent_metadata = enabled;
+    save_settings(&state, &settings)
+}
+
+#[tauri::command]
+fn remove_saved_torrent_metadata(state: State<'_, AppState>) -> Result<usize, String> {
+    let root = torrent_store_directory(&state)?;
+    let referenced = state
+        .queue
+        .lock()
+        .map_err(|error| error.to_string())?
+        .iter()
+        .filter_map(|task| task.torrent_metadata_path.clone())
+        .collect::<HashSet<_>>();
+    let mut removed = 0;
+    for entry in fs::read_dir(root).map_err(|error| error.to_string())? {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        if is_managed_torrent_metadata_path(&state, &path)
+            && !referenced.contains(&path)
+            && path.is_file()
+        {
+            fs::remove_file(path).map_err(|error| error.to_string())?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 fn update_capacity_estimate(
     estimate: &mut HttpCapacityEstimate,
     observed: u64,
@@ -5247,6 +5319,13 @@ fn read_sanitized_log_tail(path: &Path, max_bytes: usize) -> Option<Vec<u8>> {
             .join("\n")
             .into_bytes(),
     )
+}
+
+fn read_sanitized_log_head(path: &Path, max_bytes: usize) -> Option<Vec<u8>> {
+    let bytes = fs::read(path).ok()?;
+    if bytes.len() <= max_bytes { return None; }
+    let text = String::from_utf8_lossy(&bytes[..max_bytes]);
+    Some(text.lines().map(sanitize_log_detail).collect::<Vec<_>>().join("\n").into_bytes())
 }
 
 fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
@@ -6059,40 +6138,18 @@ async fn run_aria2_download(
             let added = if is_bittorrent && context.proxy_required {
                 Err("aria2_bittorrent_proxy_unsupported".to_owned())
             } else if is_bittorrent {
-                // Every Torrent/Magnet task is started from a real .torrent
-                // persisted under data/torrents. This keeps metadata discovery
-                // separate from payload transfer and makes select-file deterministic.
-                let torrent_path = match task
-                    .torrent_metadata_path
-                    .as_ref()
-                    .filter(|path| path.is_file())
-                    .cloned()
-                {
-                    Some(path) => Ok(path),
-                    None => {
-                        materialize_torrent_metadata_file(&state, Some(&endpoint), &task.source)
-                            .await
-                    }
+                // Metadata is kept in memory by default. On a restart, reacquire it
+                // from the original source while preserving the selected file indexes.
+                let cached = state.active_torrent_metadata.lock().ok().and_then(|mut pending| pending.remove(&id));
+                let bytes = if let Some(bytes) = cached {
+                    Ok(bytes)
+                } else if let Some(path) = task.torrent_metadata_path.as_ref().filter(|path| path.is_file()) {
+                    fs::read(path).map_err(|error| error.to_string())
+                } else {
+                    load_torrent_metadata_without_saving(&state, Some(&endpoint), &task.source).await
                 };
-                match torrent_path {
-                    Ok(path) => {
-                        update_task(&app, id, true, |item| {
-                            item.torrent_metadata_path = Some(path.clone())
-                        });
-                        match fs::read(&path) {
-                            Ok(bytes) => {
-                                endpoint
-                                    .add_bittorrent(
-                                        &bytes,
-                                        &task.destination,
-                                        &task.torrent_selection,
-                                        download_limit,
-                                    )
-                                    .await
-                            }
-                            Err(error) => Err(error.to_string()),
-                        }
-                    }
+                match bytes {
+                    Ok(bytes) => endpoint.add_bittorrent(&bytes, &task.destination, &task.torrent_selection, download_limit).await,
                     Err(error) => Err(error),
                 }
             } else if context.proxy_required && context.proxy_url.is_none() {
@@ -7387,9 +7444,13 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             }
         }
     }
-    let aria2_log = runtime_root.join("aria2-rpc").join("aria2.log");
-    if let Some(bytes) = read_sanitized_log_tail(&aria2_log, 1024 * 1024) {
-        entries.push(("engines/aria2-runtime.log".to_owned(), bytes));
+    let ultra_log = state.settings.lock().ok().and_then(|settings| settings.aria2_path.clone())
+        .and_then(|path| path.parent().map(|parent| parent.join("aria2-ultra-adm.log")));
+    if let Some(bytes) = ultra_log.as_deref().and_then(|path| read_sanitized_log_tail(path, 16 * 1024 * 1024)) {
+        entries.push(("engines/aria2-ultra-adm.log".to_owned(), bytes));
+    }
+    if let Some(bytes) = ultra_log.as_deref().and_then(|path| read_sanitized_log_head(path, 2 * 1024 * 1024)) {
+        entries.push(("engines/aria2-ultra-adm-start.log".to_owned(), bytes));
     }
     let debugger_index = serde_json::json!({
         "format": "Apocalipse Forensic Debugger V4",
@@ -7405,7 +7466,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "browserExtension": "logs/by-component/extension-shortcuts-overlays.jsonl",
             "socialMedia": "social/player-debugger.jsonl",
             "link": "logs/by-component/link.jsonl",
-            "aria2": ["logs/by-component/aria2.jsonl", "engines/aria2-runtime.log"],
+            "aria2": ["logs/by-component/aria2.jsonl", "engines/aria2-ultra-adm-start.log", "engines/aria2-ultra-adm.log"],
             "torrent": "logs/by-component/torrent.jsonl",
             "http": "logs/by-component/http.jsonl",
             "externalMediaEngines": ["logs/by-component/external-media-engines.jsonl", "engines/"],
@@ -9857,8 +9918,17 @@ async fn inspect_torrent_metadata(
         None
     };
 
-    let path = materialize_torrent_metadata_file(&state, endpoint.as_ref(), &source)
-        .await
+    let save = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .save_torrent_metadata;
+    let bytes = (if save {
+        let path = materialize_torrent_metadata_file(&state, endpoint.as_ref(), &source).await?;
+        fs::read(path).map_err(|error| error.to_string())
+    } else {
+        load_torrent_metadata_without_saving(&state, endpoint.as_ref(), &source).await
+    })
         .map_err(|error| {
             diagnostic_log(
                 &state,
@@ -9868,15 +9938,26 @@ async fn inspect_torrent_metadata(
             );
             error
         })?;
-    let mut inspection = inspect_torrent_file(&path)?;
-    inspection.torrent_path = Some(path.to_string_lossy().into_owned());
+    let mut inspection = inspect_torrent_bytes(&bytes)?;
+    if save {
+        let path = persist_torrent_bytes(&state, &bytes)?;
+        inspection.torrent_path = Some(path.to_string_lossy().into_owned());
+    } else {
+        let token = uuid::Uuid::new_v4().to_string();
+        let mut pending = state.pending_torrent_metadata.lock().map_err(|error| error.to_string())?;
+        if pending.len() >= 8 {
+            pending.clear();
+        }
+        pending.insert(token.clone(), bytes);
+        inspection.torrent_token = Some(token);
+    }
     diagnostic_log(
         &state,
         "INFO",
         "aria2.metadata_parsed",
         &format!(
             "path={} name={} files={} total_size={}",
-            path.display(),
+            inspection.torrent_path.as_deref().unwrap_or("memory"),
             inspection.name,
             inspection.files.len(),
             inspection.total_size
@@ -10017,6 +10098,13 @@ fn enqueue_download_impl(
     task.auto_extract = auto_extract.unwrap_or(false) && is_archive_file_name(&file_name);
     task.expected_size = expected_size.filter(|value| *value > 0);
     if let Some(context) = context {
+        if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
+            if let Some(token) = context.torrent_metadata_token.as_deref() {
+                let bytes = state.pending_torrent_metadata.lock().map_err(|error| error.to_string())?.remove(token)
+                    .ok_or_else(|| "torrent_metadata_expired_reanalyze".to_owned())?;
+                state.active_torrent_metadata.lock().map_err(|error| error.to_string())?.insert(task.id, bytes);
+            }
+        }
         task.torrent_metadata_path =
             validated_torrent_metadata_path(state, context.torrent_metadata_path);
         if task.expected_size.is_none() {
@@ -13528,12 +13616,10 @@ async fn remove_downloads(
     state: State<'_, AppState>,
     ids: Vec<DownloadId>,
     delete_files: bool,
-    delete_torrent_metadata: Option<bool>,
 ) -> Result<usize, String> {
-    let delete_torrent_metadata = delete_files && delete_torrent_metadata.unwrap_or(false);
     let removal_trace = uuid::Uuid::new_v4().to_string();
     state.diagnostics.record("task.removal_requested", "INFO", Some(&removal_trace), None,
-        serde_json::json!({"taskRefs":ids.iter().map(|id|id.to_string()).collect::<Vec<_>>(),"deleteFiles":delete_files,"deleteTorrentMetadata":delete_torrent_metadata}));
+        serde_json::json!({"taskRefs":ids.iter().map(|id|id.to_string()).collect::<Vec<_>>(),"deleteFiles":delete_files}));
     if ids.is_empty() {
         return Ok(0);
     }
@@ -13560,20 +13646,13 @@ async fn remove_downloads(
     if cancelled_active {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
-    let (removed, retained_torrent_metadata_paths) = {
+    let removed = {
         let queue = state.queue.lock().map_err(|error| error.to_string())?;
-        let removed = queue
-            .iter()
-            .filter(|task| ids.contains(&task.id))
-            .cloned()
-            .collect::<Vec<_>>();
-        let retained_torrent_metadata_paths = queue
-            .iter()
-            .filter(|task| !ids.contains(&task.id))
-            .filter_map(|task| task.torrent_metadata_path.clone())
-            .collect::<HashSet<_>>();
-        (removed, retained_torrent_metadata_paths)
+        queue.iter().filter(|task| ids.contains(&task.id)).cloned().collect::<Vec<_>>()
     };
+    if let Ok(mut metadata) = state.active_torrent_metadata.lock() {
+        for id in &ids { metadata.remove(id); }
+    }
 
     let aria2_targets = {
         let aria2_tasks = state
@@ -13623,7 +13702,6 @@ async fn remove_downloads(
         }
     }
     if delete_files {
-        let mut deleted_torrent_metadata_paths = HashSet::new();
         for task in &removed {
             cleanup_chunk_artifacts(&task.destination)
                 .await
@@ -13636,30 +13714,6 @@ async fn remove_downloads(
                 let hls_workspace = matches!(classify_url(&task.source), Some(DownloadKind::Hls))
                     && hls_workspace_path(task).as_ref() == Some(&path);
                 remove_path_with_retry(&path, torrent_root || hls_workspace).await?;
-            }
-            if delete_torrent_metadata {
-                if let Some(path) = task.torrent_metadata_path.as_deref() {
-                    if is_managed_torrent_metadata_path(&state, path) {
-                        if retained_torrent_metadata_paths.contains(path) {
-                            state.diagnostics.record(
-                                "torrent.metadata_preserved_shared",
-                                "INFO",
-                                Some(&removal_trace),
-                                Some(&task.id.to_string()),
-                                serde_json::json!({"path": path.to_string_lossy()}),
-                            );
-                        } else if deleted_torrent_metadata_paths.insert(path.to_path_buf()) {
-                            remove_path_with_retry(path, false).await?;
-                            state.diagnostics.record(
-                                "torrent.metadata_deleted",
-                                "INFO",
-                                Some(&removal_trace),
-                                Some(&task.id.to_string()),
-                                serde_json::json!({"path": path.to_string_lossy()}),
-                            );
-                        }
-                    }
-                }
             }
             if matches!(classify_url(&task.source), Some(DownloadKind::MediaPage)) {
                 if let Some(parent) = state.queue_path.parent() {
@@ -13797,6 +13851,7 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let app_data = portable_data_directory(app)?;
+            let _ = fs::remove_dir_all(app_data.join("aria2-rpc").join("metadata-staging"));
             let link_tls_config =
                 load_or_create_link_tls_config(&app_data).map_err(std::io::Error::other)?;
             let queue_path = app_data.join("queue.json");
@@ -13859,6 +13914,8 @@ fn main() {
                 link_transfers: Mutex::new(HashMap::new()),
                 aria2_runtime: Mutex::new(None),
                 aria2_tasks: Mutex::new(initial_aria2_tasks),
+                pending_torrent_metadata: Mutex::new(HashMap::new()),
+                active_torrent_metadata: Mutex::new(HashMap::new()),
                 log_path,
                 log_write_lock: Mutex::new(()),
                 diagnostics: diagnostics::Diagnostics::new(&app_data.join("logs")),
@@ -13943,6 +14000,9 @@ fn main() {
             inspect_url,
             inspect_media_formats,
             inspect_torrent_metadata,
+            get_torrent_storage_setting,
+            set_torrent_storage_setting,
+            remove_saved_torrent_metadata,
             get_link_identity,
             pause_link_transfer,
             cancel_link_transfer,
