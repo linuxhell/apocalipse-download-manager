@@ -12264,6 +12264,7 @@ fn queue_from_bridge(
             request_body: request.request_body,
             request_content_type: request.request_content_type,
             torrent_metadata_path: None,
+            torrent_metadata_token: None,
         };
         let task = enqueue_download_impl(
             app.clone(),
