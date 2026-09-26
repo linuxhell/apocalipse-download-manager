@@ -119,7 +119,10 @@ impl Runtime {
         if !session.exists() {
             fs::write(&session, b"").map_err(|e| e.to_string())?
         }
-        let log = executable.parent().unwrap_or(runtime_root).join("aria2-ultra-adm.log");
+        let log = executable
+            .parent()
+            .unwrap_or(runtime_root)
+            .join("aria2-ultra-adm.log");
         let mut command = Command::new(executable);
         command.current_dir(runtime_root);
         command
