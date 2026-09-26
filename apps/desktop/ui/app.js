@@ -54,7 +54,7 @@ const catalogs = {
     keepFiles: "Keep downloaded and partial files on disk",
     listAndFiles: "Clear list and files",
     deleteFiles: "Permanently delete downloaded and partial files",
-    deleteTorrentMetadataConfirm: "Also delete the saved .torrent file(s) from data/torrents?",
+    saveTorrentFiles: "Save .torrent files", saveTorrentFilesHint: "Keep a copy in data/torrents. Off by default.", removeSavedTorrentFiles: "Remove saved .torrent files", torrentFilesRemoved: "Saved .torrent files removed:",
     bridgeStatus: "Extension bridge not configured",
     newTask: "NEW TASK",
     sourceUrl: "Source URL",
@@ -293,7 +293,7 @@ const catalogs = {
     keepFiles: "Manter no disco os arquivos baixados e parciais",
     listAndFiles: "Limpar lista e arquivos",
     deleteFiles: "Excluir permanentemente os arquivos baixados e parciais",
-    deleteTorrentMetadataConfirm: "Deseja apagar também o(s) arquivo(s) .torrent salvo(s) em data/torrents?",
+    saveTorrentFiles: "Salvar arquivos .torrent", saveTorrentFilesHint: "Guarda uma cópia em data/torrents. Desativado por padrão.", removeSavedTorrentFiles: "Remover arquivos .torrent salvos", torrentFilesRemoved: "Arquivos .torrent removidos:",
     bridgeStatus: "Ponte da extensão não configurada",
     newTask: "NOVA TAREFA",
     sourceUrl: "URL de origem",
@@ -532,7 +532,7 @@ const catalogs = {
     keepFiles: "保留磁盘上的已下载文件和部分文件",
     listAndFiles: "清除列表和文件",
     deleteFiles: "永久删除已下载文件和部分文件",
-    deleteTorrentMetadataConfirm: "是否同时删除保存在 data/torrents 中的 .torrent 文件？",
+    saveTorrentFiles: "保存 .torrent 文件", saveTorrentFilesHint: "将副本保存在 data/torrents 中。默认关闭。", removeSavedTorrentFiles: "删除已保存的 .torrent 文件", torrentFilesRemoved: "已删除的 .torrent 文件：",
     bridgeStatus: "扩展桥接尚未配置",
     newTask: "新任务",
     sourceUrl: "来源网址",
@@ -756,12 +756,29 @@ let pendingRequestBody = null;
 let pendingRequestContentType = null;
 let pendingBrowserAssistedPath = null;
 let pendingTorrentMetadataPath = null;
+let pendingTorrentMetadataToken = null;
 let taskConnectionsManuallyChanged = false;
 let analysisGeneration = 0;
 let downloads = [];
 const downloadListState = createTaskListState();
 let activeFilter = "all";
 let activePage = "downloads";
+document.querySelector("#save-torrent-files").onchange = async (event) => {
+  const input = event.target;
+  input.disabled = true;
+  try { await invoke("set_torrent_storage_setting", { enabled: input.checked }); }
+  catch (error) { input.checked = !input.checked; window.alert(String(error)); }
+  finally { input.disabled = false; }
+};
+document.querySelector("#remove-saved-torrent-files").onclick = async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const count = await invoke("remove_saved_torrent_metadata");
+    window.alert(`${t("torrentFilesRemoved")} ${count}`);
+  } catch (error) { window.alert(String(error)); }
+  finally { button.disabled = false; }
+};
 let overallSpeed = 0;
 let overallUploadSpeed = 0;
 let lastClipboardLink = "";
@@ -1455,6 +1472,7 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector("#themes-panel").hidden = activePage !== "themes";
     document.querySelector("#language-panel").hidden = activePage !== "language";
     document.querySelector("#about-panel").hidden = activePage !== "about";
+    document.querySelector("#torrent-storage-controls").hidden = activePage !== "torrents";
     document.querySelector("#add").hidden = activePage === "about";
     if (activePage === "about" && aboutAudio.src) {
       aboutAudio.currentTime = 0;
@@ -1466,6 +1484,9 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector(".metrics").hidden = ["link", "logs", "themes", "language", "about"].includes(activePage);
     document.querySelector(".panel").hidden = ["link", "logs", "themes", "language", "about"].includes(activePage);
     renderDownloads();
+    if (activePage === "torrents") invoke("get_torrent_storage_setting").then((enabled) => {
+      document.querySelector("#save-torrent-files").checked = enabled;
+    }).catch(console.error);
     invoke("record_ui_diagnostic", { level: "INFO", event: "page_opened", detail: `page=${activePage} panel_present=${activePage === "link" ? Boolean(document.querySelector("#apocalipse-link-panel")) : activePage === "logs" ? Boolean(document.querySelector("#logs-panel")) : true} duration_ms=${Math.round(performance.now() - openedAt)}` }).catch(() => {});
     if (activePage === "logs") refreshLogEvents().catch(console.error);
   };
@@ -1944,6 +1965,7 @@ async function showTorrentInspection(source, generation = analysisGeneration) {
   document.querySelector("#torrent-total").textContent = formatBytes(torrent.totalSize);
   pendingExpectedSize = Number.isFinite(torrent.totalSize) ? torrent.totalSize : null;
   pendingTorrentMetadataPath = torrent.torrentPath || null;
+  pendingTorrentMetadataToken = torrent.torrentToken || null;
   const root = document.querySelector("#torrent-files");
   root.replaceChildren();
   for (const file of torrent.files) {
@@ -1981,6 +2003,7 @@ document.querySelectorAll("#add").forEach(
       pendingRequestBody = null;
       pendingRequestContentType = null;
       pendingTorrentMetadataPath = null;
+      pendingTorrentMetadataToken = null;
       resetTaskConnections();
       resetMediaInspection();
       invoke("default_download_directory")
@@ -2046,21 +2069,10 @@ document
 async function removeSelectedDownloads(button, deleteFiles) {
   button.disabled = true;
   const ids = [...selectedIds];
-  const shouldAskTorrentMetadata = deleteFiles
-    && activePage === "torrents"
-    && ids.some((id) => {
-      const task = downloads.find((item) => item.id === id);
-      return task
-        && isTorrent(task)
-        && Boolean(task.torrent_metadata_path);
-    });
-  const deleteTorrentMetadata = shouldAskTorrentMetadata
-    ? window.confirm(t("deleteTorrentMetadataConfirm"))
-    : false;
   downloadListState.beginRemoval(ids);
   let removed = false;
   try {
-    await invoke("remove_downloads", { ids, deleteFiles, deleteTorrentMetadata });
+    await invoke("remove_downloads", { ids, deleteFiles });
     removed = true;
     downloadListState.finishRemoval(ids, true);
     downloads = downloadListState.visible(downloads);
@@ -2630,6 +2642,7 @@ document.querySelector("#url").oninput = () => {
   pendingRequestContentType = null;
   pendingBrowserAssistedPath = null;
   pendingTorrentMetadataPath = null;
+  pendingTorrentMetadataToken = null;
   resetTaskConnections();
   resetAnalysisForNewRequest();
   document.querySelector("#auto-extract").checked = false;
@@ -2865,6 +2878,7 @@ document.querySelector("#enqueue").onclick = async () => {
           requestBody: pendingRequestBody,
           requestContentType: pendingRequestContentType,
           torrentMetadataPath: pendingTorrentMetadataPath,
+          torrentMetadataToken: pendingTorrentMetadataToken,
         },
       });
     acceptEnqueuedTask(acceptedTask);
@@ -2884,6 +2898,7 @@ document.querySelector("#enqueue").onclick = async () => {
     pendingExpectedSize = null;
     pendingBrowserAssistedPath = null;
     pendingTorrentMetadataPath = null;
+    pendingTorrentMetadataToken = null;
     resetMediaInspection();
   } catch (error) {
     const box = document.querySelector("#analysis");
@@ -2944,6 +2959,7 @@ setInterval(async () => {
     pendingRequestBody = null;
     pendingRequestContentType = null;
     pendingTorrentMetadataPath = null;
+    pendingTorrentMetadataToken = null;
     resetTaskConnections();
     const url = document.querySelector("#url");
     url.value = link;
