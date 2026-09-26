@@ -18,5 +18,5 @@ test("ADM retains metadata in memory for selection without a persistent torrent 
   assert.match(main, /pending_torrent_metadata: Mutex<HashMap<String, Vec<u8>>>/);
   assert.match(main, /active_torrent_metadata: Mutex<HashMap<DownloadId, Vec<u8>>>/);
   assert.match(main, /inspect_torrent_bytes\(&bytes\)/);
-  assert.match(main, /endpoint\.add_bittorrent\(&bytes, &task\.destination, &task\.torrent_selection/);
+  assert.match(main, /endpoint\s*\.add_bittorrent\(\s*&bytes,\s*&task\.destination,\s*&task\.torrent_selection/);
 });
