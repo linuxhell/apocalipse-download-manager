@@ -2852,7 +2852,10 @@ async fn load_torrent_metadata_without_saving(
         return fs::read(local).map_err(|error| error.to_string());
     }
     if (source.starts_with("http://") || source.starts_with("https://"))
-        && source.split(['?', '#']).next().is_some_and(|value| value.to_ascii_lowercase().ends_with(".torrent"))
+        && source
+            .split(['?', '#'])
+            .next()
+            .is_some_and(|value| value.to_ascii_lowercase().ends_with(".torrent"))
     {
         return fetch_torrent_file_bytes(state, source).await;
     }
@@ -2861,7 +2864,10 @@ async fn load_torrent_metadata_without_saving(
     }
     let endpoint = endpoint.ok_or_else(|| "aria2_endpoint_required".to_owned())?;
     let root = state.queue_path.parent().unwrap_or_else(|| Path::new("."));
-    let temporary = root.join("aria2-rpc").join("metadata-staging").join(uuid::Uuid::new_v4().to_string());
+    let temporary = root
+        .join("aria2-rpc")
+        .join("metadata-staging")
+        .join(uuid::Uuid::new_v4().to_string());
     fs::create_dir_all(&temporary).map_err(|error| error.to_string())?;
     let result = async {
         let path = endpoint.save_magnet_metadata(source, &temporary, |elapsed, status, connections, seeders, total, completed, info_hash| {
@@ -5323,9 +5329,17 @@ fn read_sanitized_log_tail(path: &Path, max_bytes: usize) -> Option<Vec<u8>> {
 
 fn read_sanitized_log_head(path: &Path, max_bytes: usize) -> Option<Vec<u8>> {
     let bytes = fs::read(path).ok()?;
-    if bytes.len() <= max_bytes { return None; }
+    if bytes.len() <= max_bytes {
+        return None;
+    }
     let text = String::from_utf8_lossy(&bytes[..max_bytes]);
-    Some(text.lines().map(sanitize_log_detail).collect::<Vec<_>>().join("\n").into_bytes())
+    Some(
+        text.lines()
+            .map(sanitize_log_detail)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .into_bytes(),
+    )
 }
 
 fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
@@ -6140,16 +6154,34 @@ async fn run_aria2_download(
             } else if is_bittorrent {
                 // Metadata is kept in memory by default. On a restart, reacquire it
                 // from the original source while preserving the selected file indexes.
-                let cached = state.active_torrent_metadata.lock().ok().and_then(|mut pending| pending.remove(&id));
+                let cached = state
+                    .active_torrent_metadata
+                    .lock()
+                    .ok()
+                    .and_then(|mut pending| pending.remove(&id));
                 let bytes = if let Some(bytes) = cached {
                     Ok(bytes)
-                } else if let Some(path) = task.torrent_metadata_path.as_ref().filter(|path| path.is_file()) {
+                } else if let Some(path) = task
+                    .torrent_metadata_path
+                    .as_ref()
+                    .filter(|path| path.is_file())
+                {
                     fs::read(path).map_err(|error| error.to_string())
                 } else {
-                    load_torrent_metadata_without_saving(&state, Some(&endpoint), &task.source).await
+                    load_torrent_metadata_without_saving(&state, Some(&endpoint), &task.source)
+                        .await
                 };
                 match bytes {
-                    Ok(bytes) => endpoint.add_bittorrent(&bytes, &task.destination, &task.torrent_selection, download_limit).await,
+                    Ok(bytes) => {
+                        endpoint
+                            .add_bittorrent(
+                                &bytes,
+                                &task.destination,
+                                &task.torrent_selection,
+                                download_limit,
+                            )
+                            .await
+                    }
                     Err(error) => Err(error),
                 }
             } else if context.proxy_required && context.proxy_url.is_none() {
@@ -7444,12 +7476,25 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             }
         }
     }
-    let ultra_log = state.settings.lock().ok().and_then(|settings| settings.aria2_path.clone())
-        .and_then(|path| path.parent().map(|parent| parent.join("aria2-ultra-adm.log")));
-    if let Some(bytes) = ultra_log.as_deref().and_then(|path| read_sanitized_log_tail(path, 16 * 1024 * 1024)) {
+    let ultra_log = state
+        .settings
+        .lock()
+        .ok()
+        .and_then(|settings| settings.aria2_path.clone())
+        .and_then(|path| {
+            path.parent()
+                .map(|parent| parent.join("aria2-ultra-adm.log"))
+        });
+    if let Some(bytes) = ultra_log
+        .as_deref()
+        .and_then(|path| read_sanitized_log_tail(path, 16 * 1024 * 1024))
+    {
         entries.push(("engines/aria2-ultra-adm.log".to_owned(), bytes));
     }
-    if let Some(bytes) = ultra_log.as_deref().and_then(|path| read_sanitized_log_head(path, 2 * 1024 * 1024)) {
+    if let Some(bytes) = ultra_log
+        .as_deref()
+        .and_then(|path| read_sanitized_log_head(path, 2 * 1024 * 1024))
+    {
         entries.push(("engines/aria2-ultra-adm-start.log".to_owned(), bytes));
     }
     let debugger_index = serde_json::json!({
@@ -9929,22 +9974,25 @@ async fn inspect_torrent_metadata(
     } else {
         load_torrent_metadata_without_saving(&state, endpoint.as_ref(), &source).await
     })
-        .map_err(|error| {
-            diagnostic_log(
-                &state,
-                "WARN",
-                "aria2.metadata_save_failed",
-                &format!("error={error}"),
-            );
-            error
-        })?;
+    .map_err(|error| {
+        diagnostic_log(
+            &state,
+            "WARN",
+            "aria2.metadata_save_failed",
+            &format!("error={error}"),
+        );
+        error
+    })?;
     let mut inspection = inspect_torrent_bytes(&bytes)?;
     if save {
         let path = persist_torrent_bytes(&state, &bytes)?;
         inspection.torrent_path = Some(path.to_string_lossy().into_owned());
     } else {
         let token = uuid::Uuid::new_v4().to_string();
-        let mut pending = state.pending_torrent_metadata.lock().map_err(|error| error.to_string())?;
+        let mut pending = state
+            .pending_torrent_metadata
+            .lock()
+            .map_err(|error| error.to_string())?;
         if pending.len() >= 8 {
             pending.clear();
         }
@@ -10100,9 +10148,17 @@ fn enqueue_download_impl(
     if let Some(context) = context {
         if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
             if let Some(token) = context.torrent_metadata_token.as_deref() {
-                let bytes = state.pending_torrent_metadata.lock().map_err(|error| error.to_string())?.remove(token)
+                let bytes = state
+                    .pending_torrent_metadata
+                    .lock()
+                    .map_err(|error| error.to_string())?
+                    .remove(token)
                     .ok_or_else(|| "torrent_metadata_expired_reanalyze".to_owned())?;
-                state.active_torrent_metadata.lock().map_err(|error| error.to_string())?.insert(task.id, bytes);
+                state
+                    .active_torrent_metadata
+                    .lock()
+                    .map_err(|error| error.to_string())?
+                    .insert(task.id, bytes);
             }
         }
         task.torrent_metadata_path =
@@ -13648,10 +13704,16 @@ async fn remove_downloads(
     }
     let removed = {
         let queue = state.queue.lock().map_err(|error| error.to_string())?;
-        queue.iter().filter(|task| ids.contains(&task.id)).cloned().collect::<Vec<_>>()
+        queue
+            .iter()
+            .filter(|task| ids.contains(&task.id))
+            .cloned()
+            .collect::<Vec<_>>()
     };
     if let Ok(mut metadata) = state.active_torrent_metadata.lock() {
-        for id in &ids { metadata.remove(id); }
+        for id in &ids {
+            metadata.remove(id);
+        }
     }
 
     let aria2_targets = {
