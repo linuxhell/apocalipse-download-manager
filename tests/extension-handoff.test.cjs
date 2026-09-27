@@ -33,7 +33,7 @@ function worker() {
   });
   vm.runInContext(readFileSync(join(__dirname, '../browser-extension/background.js'), 'utf8'), context);
   const send = (message, pageUrl = 'https://page.example/') => new Promise((resolve, reject) => {
-    if (listeners[0](message, { tab: { id: 1, url: pageUrl } }, resolve) !== true) reject(new Error('message not handled'));
+    if (!listeners.some(listener => listener(message, { tab: { id: 1, url: pageUrl } }, resolve) === true)) reject(new Error('message not handled'));
   });
   return { context, requests, send, name: item => context.mediaDownloadFileName(item) };
 }
