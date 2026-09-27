@@ -1596,6 +1596,18 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     contentType: message.contentType || null,
   };
   void diagnostic("capture.decision", { traceId: crypto.randomUUID(), url: request.url, pageUrl: request.pageUrl, startedAt: Date.now() }, { detail: `mode=${request.force ? "force" : "auto"} tab=${shortcutTabId ?? "none"} source=${request.source}` });
+  if (/^magnet:\?/i.test(String(request.url || ""))) {
+    bridgeRequest("/v1/download", {
+      method: "POST",
+      body: JSON.stringify({
+        url: request.url, pageUrl: request.pageUrl, fileName: null,
+        userAgent: globalThis.navigator?.userAgent || null,
+        startImmediately: false,
+      }),
+    }).then((result) => reply({ ok: true, target: "desktop", ...result }))
+      .catch((error) => reply({ ok: false, error: String(error) }));
+    return true;
+  }
   streamCapturedUrl(request)
     .then(reply)
     .catch((error) => {
