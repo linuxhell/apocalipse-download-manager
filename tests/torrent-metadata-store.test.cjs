@@ -42,7 +42,7 @@ test("pausing keeps the managed torrent copy so resume does not depend on the or
   assert.ok(pauseStart >= 0 && resumeStart > pauseStart);
   assert.doesNotMatch(pause, /torrent_metadata_path\s*=\s*None|remove_path_with_retry\([^\n]*torrent_metadata/i);
   assert.match(main, /task\s*\.torrent_metadata_path[\s\S]*add_bittorrent[\s\S]*&bytes/);
-  assert.match(main, /persist_torrent_bytes\(state, &bytes\)/);
+  assert.match(main, /persist_torrent_bytes\(state, endpoint, &bytes\)\.await/);
 });
 
 
