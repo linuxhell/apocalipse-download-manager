@@ -153,16 +153,22 @@ fn torrent_relative_display_path(path: &str, root_name: Option<&str>) -> String 
         .to_owned()
 }
 
-fn magnet_v1_info_hash(magnet: &str) -> Option<String> {
-    let parsed = url::Url::parse(magnet).ok()?;
-    parsed.query_pairs().find_map(|(key, value)| {
+fn magnet_info_hashes(magnet: &str) -> Vec<String> {
+    let Ok(parsed) = url::Url::parse(magnet) else {
+        return Vec::new();
+    };
+    parsed.query_pairs().filter_map(|(key, value)| {
         if !key.eq_ignore_ascii_case("xt") {
             return None;
         }
-        let value = value.strip_prefix("urn:btih:")?;
-        (value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
-            .then(|| value.to_ascii_lowercase())
-    })
+        let value = value.to_ascii_lowercase();
+        let hash = value.strip_prefix("urn:btih:")
+            .filter(|hash| hash.len() == 40)
+            .or_else(|| value.strip_prefix("urn:btmh:1220")
+                .filter(|hash| hash.len() == 64))?;
+        hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+            .then(|| hash.to_owned())
+    }).collect()
 }
 
 fn spawn_bounded_log_reader(stdout: impl std::io::Read + Send + 'static, path: PathBuf) {
@@ -372,6 +378,14 @@ impl Drop for Runtime {
 }
 
 impl Endpoint {
+    /// aria2-next's native metadata parser understands v1, v2 and hybrid
+    /// torrents and returns the same one-based file indices as getFiles.
+    pub async fn inspect_torrent(&self, torrent_bytes: &[u8]) -> Result<Value, String> {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(torrent_bytes);
+        self.call("aria2.inspectTorrent", vec![Value::String(encoded)])
+            .await
+    }
+
     async fn call(&self, method: &str, mut params: Vec<Value>) -> Result<Value, String> {
         params.insert(0, Value::String(format!("token:{}", self.secret)));
         let response = self
@@ -630,7 +644,7 @@ impl Endpoint {
             .ok_or_else(|| "aria2_gid_missing".to_owned())
     }
 
-    async fn find_existing_torrent_gid(&self, info_hash: &str) -> Option<String> {
+    async fn find_existing_torrent_gid(&self, info_hashes: &[String]) -> Option<String> {
         let keys = json!(["gid", "status", "errorMessage", "infoHash", "bittorrent"]);
         let calls = [
             ("aria2.tellActive", vec![keys.clone()]),
@@ -651,11 +665,16 @@ impl Endpoint {
                 continue;
             };
             for task in tasks {
-                let task_hash = task
-                    .get("infoHash")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                if !task_hash.eq_ignore_ascii_case(info_hash) {
+                let matches_hash = [
+                    task.get("infoHash"),
+                    task.get("bittorrent").and_then(|bt| bt.get("infoHashV1")),
+                    task.get("bittorrent").and_then(|bt| bt.get("infoHashV2")),
+                ]
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .any(|hash| info_hashes.iter().any(|expected| hash.eq_ignore_ascii_case(expected)));
+                if !matches_hash {
                     continue;
                 }
                 let Some(gid) = task.get("gid").and_then(Value::as_str) else {
@@ -693,9 +712,9 @@ impl Endpoint {
         options.insert("pause-metadata".into(), Value::String("true".into()));
         options.insert("file-allocation".into(), Value::String("none".into()));
 
-        let expected_hash = magnet_v1_info_hash(magnet);
-        let mut gid = if let Some(info_hash) = expected_hash.as_deref() {
-            self.find_existing_torrent_gid(info_hash).await
+        let expected_hashes = magnet_info_hashes(magnet);
+        let mut gid = if !expected_hashes.is_empty() {
+            self.find_existing_torrent_gid(&expected_hashes).await
         } else {
             None
         };
@@ -860,9 +879,9 @@ impl Endpoint {
                     let failed_gid = gid.clone();
                     let _ = self.remove(&failed_gid).await;
                     let _ = self.remove_result(&failed_gid).await;
-                    if let Some(info_hash) = expected_hash.as_deref() {
+                    if !expected_hashes.is_empty() {
                         for _ in 0..20 {
-                            if let Some(existing) = self.find_existing_torrent_gid(info_hash).await
+                            if let Some(existing) = self.find_existing_torrent_gid(&expected_hashes).await
                             {
                                 gid = existing;
                                 last_signature.clear();
