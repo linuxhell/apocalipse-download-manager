@@ -122,7 +122,12 @@ fn spawn_bounded_log_reader(stdout: impl std::io::Read + Send + 'static, path: P
                 if fs::rename(&path, &previous).is_err() {
                     let _ = fs::remove_file(&path);
                 }
-                file = match OpenOptions::new().create(true).write(true).truncate(true).open(&path) {
+                file = match OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(&path)
+                {
                     Ok(file) => file,
                     Err(_) => return,
                 };
@@ -552,17 +557,7 @@ impl Endpoint {
     pub async fn inspect_magnet_metadata(
         &self,
         magnet: &str,
-        mut on_progress: impl FnMut(
-            u64,
-            &str,
-            u64,
-            u64,
-            u64,
-            u64,
-            Option<&str>,
-            Option<&str>,
-            bool,
-        ),
+        mut on_progress: impl FnMut(u64, &str, u64, u64, u64, u64, Option<&str>, Option<&str>, bool),
     ) -> Result<MagnetMetadata, String> {
         let mut options = Map::new();
         options.insert("pause-metadata".into(), Value::String("true".into()));
@@ -640,8 +635,14 @@ impl Endpoint {
             let metadata_ready = selection_ready || (status == "paused" && name.is_some());
 
             let now = tokio::time::Instant::now();
-            let signature = format!("{status}:{}:{}", selection_state.unwrap_or("none"), metadata_ready);
-            if signature != last_signature || now.duration_since(last_report) >= Duration::from_secs(5) {
+            let signature = format!(
+                "{status}:{}:{}",
+                selection_state.unwrap_or("none"),
+                metadata_ready
+            );
+            if signature != last_signature
+                || now.duration_since(last_report) >= Duration::from_secs(5)
+            {
                 last_signature = signature;
                 last_report = now;
                 on_progress(
@@ -709,14 +710,12 @@ impl Endpoint {
             }
 
             if matches!(status, "error" | "removed") {
-                result = Some(Err(
-                    value
-                        .get("errorMessage")
-                        .and_then(Value::as_str)
-                        .filter(|message| !message.is_empty())
-                        .unwrap_or("torrent_metadata_unavailable")
-                        .to_owned(),
-                ));
+                result = Some(Err(value
+                    .get("errorMessage")
+                    .and_then(Value::as_str)
+                    .filter(|message| !message.is_empty())
+                    .unwrap_or("torrent_metadata_unavailable")
+                    .to_owned()));
                 break;
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
