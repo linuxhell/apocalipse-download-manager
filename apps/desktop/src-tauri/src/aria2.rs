@@ -634,8 +634,14 @@ impl Endpoint {
         let keys = json!(["gid", "status", "errorMessage", "infoHash", "bittorrent"]);
         let calls = [
             ("aria2.tellActive", vec![keys.clone()]),
-            ("aria2.tellWaiting", vec![json!(0), json!(1000), keys.clone()]),
-            ("aria2.tellStopped", vec![json!(0), json!(1000), keys.clone()]),
+            (
+                "aria2.tellWaiting",
+                vec![json!(0), json!(1000), keys.clone()],
+            ),
+            (
+                "aria2.tellStopped",
+                vec![json!(0), json!(1000), keys.clone()],
+            ),
         ];
         for (method, params) in calls {
             let Ok(value) = self.call(method, params).await else {
@@ -856,7 +862,8 @@ impl Endpoint {
                     let _ = self.remove_result(&failed_gid).await;
                     if let Some(info_hash) = expected_hash.as_deref() {
                         for _ in 0..20 {
-                            if let Some(existing) = self.find_existing_torrent_gid(info_hash).await {
+                            if let Some(existing) = self.find_existing_torrent_gid(info_hash).await
+                            {
                                 gid = existing;
                                 last_signature.clear();
                                 tokio::time::sleep(Duration::from_millis(50)).await;

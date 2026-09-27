@@ -10047,10 +10047,7 @@ async fn inspect_torrent_metadata(
 }
 
 #[tauri::command]
-async fn discard_torrent_metadata(
-    state: State<'_, AppState>,
-    gid: String,
-) -> Result<(), String> {
+async fn discard_torrent_metadata(state: State<'_, AppState>, gid: String) -> Result<(), String> {
     let Some(gid) = validated_torrent_metadata_gid(Some(gid)) else {
         return Err("invalid_torrent_metadata_gid".to_owned());
     };
