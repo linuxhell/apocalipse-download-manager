@@ -1529,7 +1529,10 @@ document.querySelector("#export-logs").onclick = async (event) => {
   // itself so every completion path (saved, cancelled, or failed) re-enables it.
   const button = event.currentTarget;
   button.disabled = true;
-  try { await invoke("export_diagnostic_bundle"); } catch (error) { window.alert(String(error)); }
+  try {
+    const savedPath = await invoke("export_diagnostic_bundle");
+    if (savedPath) window.alert(`${t("exportLog")}: ${savedPath}`);
+  } catch (error) { window.alert(String(error)); }
   finally { button.disabled = false; }
 };
 document.querySelector("#clear-logs").onclick = async () => { await invoke("clear_general_log"); await refreshLogEvents(); };
