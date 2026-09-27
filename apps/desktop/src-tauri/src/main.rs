@@ -7479,8 +7479,12 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
         }
     }
     let aria2_log = runtime_root.join("aria2-rpc").join("aria2.log");
-    if let Some(bytes) = read_sanitized_log_tail(&aria2_log, 1024 * 1024) {
-        entries.push(("engines/aria2-runtime.log".to_owned(), bytes));
+    let aria2_previous_log = aria2_log.with_extension("log.1");
+    if let Some(bytes) = read_sanitized_log_tail(&aria2_previous_log, 32 * 1024 * 1024) {
+        entries.push(("engines/aria2-ultra.log.1".to_owned(), bytes));
+    }
+    if let Some(bytes) = read_sanitized_log_tail(&aria2_log, 32 * 1024 * 1024) {
+        entries.push(("engines/aria2-ultra.log".to_owned(), bytes));
     }
     let debugger_index = serde_json::json!({
         "format": "Apocalipse Forensic Debugger V4",
@@ -7496,7 +7500,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "browserExtension": "logs/by-component/extension-shortcuts-overlays.jsonl",
             "socialMedia": "social/player-debugger.jsonl",
             "link": "logs/by-component/link.jsonl",
-            "aria2": ["logs/by-component/aria2.jsonl", "engines/aria2-runtime.log"],
+            "aria2": ["logs/by-component/aria2.jsonl", "engines/aria2-ultra.log.1", "engines/aria2-ultra.log"],
             "torrent": "logs/by-component/torrent.jsonl",
             "http": "logs/by-component/http.jsonl",
             "externalMediaEngines": ["logs/by-component/external-media-engines.jsonl", "engines/"],
