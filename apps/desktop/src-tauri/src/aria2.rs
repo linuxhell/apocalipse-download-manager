@@ -146,11 +146,9 @@ fn torrent_relative_display_path(path: &str, root_name: Option<&str>) -> String 
             }
         }
     }
+    // Metadata may arrive before the engine reports the torrent's root name.
+    // Keep the directory structure so files with equal basenames stay distinct.
     normalized
-        .rsplit('/')
-        .find(|segment| !segment.is_empty())
-        .unwrap_or(path)
-        .to_owned()
 }
 
 fn magnet_info_hashes(magnet: &str) -> Vec<String> {
