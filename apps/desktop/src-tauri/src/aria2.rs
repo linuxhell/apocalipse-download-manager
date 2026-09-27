@@ -213,7 +213,7 @@ impl Runtime {
             .arg("--max-concurrent-downloads=20")
             .arg("--summary-interval=0")
             .arg("--console-log-level=warn")
-            .arg("--log-level=notice")
+            .arg("--log-level=info")
             // aria2 writes its own raw log to stdout; ADM owns the file so it can
             // enforce a hard 32 MiB + 32 MiB rotation even on long-running sessions.
             .arg("--log=-")
