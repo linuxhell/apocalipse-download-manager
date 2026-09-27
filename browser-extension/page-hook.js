@@ -92,6 +92,8 @@
     } catch { return null; }
   };
   const classify = (value) => {
+    if (!bypassActive() && /^magnet:\?/i.test(String(value || "").trim()))
+      return { url: String(value).trim(), kind: "magnet" };
     try {
       const url = new URL(String(value || ""), location.href);
       if (url.hostname.toLowerCase() === "chatgpt.com" && url.pathname === "/backend-api/estuary/content") {
@@ -190,7 +192,7 @@
   window.fetch = function(input, init) {
     const value = typeof input === "string" || input instanceof URL ? String(input) : input?.url;
     const candidate = classify(value);
-    if (candidate?.kind === "chatgpt-library") {
+    if (candidate?.kind === "chatgpt-library" || candidate?.kind === "magnet") {
       trace(forceActive() ? "FORCE_PASSTHROUGH" : "AUTO_PASSTHROUGH", { primitive: "window.fetch", kind: candidate.kind, url: safeUrl(candidate.url) });
     } else if (emit(candidate, "window.fetch")) {
       return Promise.resolve(new Response("", { status: 204, statusText: "Handled by Apocalipse" }));
