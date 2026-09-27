@@ -126,6 +126,8 @@ impl Runtime {
         let mut command = Command::new(executable);
         command.current_dir(runtime_root);
         command
+            .arg("--no-conf=true")
+            .arg("--auto-save-interval=60")
             .arg("--enable-rpc=true")
             .arg("--rpc-listen-all=false")
             .arg("--rpc-allow-origin-all=false")
