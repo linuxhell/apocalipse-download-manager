@@ -24,7 +24,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     fs::OpenOptions,
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     net::{IpAddr, TcpListener, TcpStream, UdpSocket},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -5315,9 +5315,13 @@ fn sanitize_log_detail(detail: &str) -> String {
 }
 
 fn read_sanitized_log_tail(path: &Path, max_bytes: usize) -> Option<Vec<u8>> {
-    let bytes = fs::read(path).ok()?;
-    let start = bytes.len().saturating_sub(max_bytes);
-    let text = String::from_utf8_lossy(&bytes[start..]);
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let count = len.min(max_bytes as u64) as usize;
+    let mut bytes = vec![0; count];
+    file.seek(SeekFrom::Start(len - count as u64)).ok()?;
+    file.read_exact(&mut bytes).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
     Some(
         text.lines()
             .map(sanitize_log_detail)
@@ -5328,11 +5332,14 @@ fn read_sanitized_log_tail(path: &Path, max_bytes: usize) -> Option<Vec<u8>> {
 }
 
 fn read_sanitized_log_head(path: &Path, max_bytes: usize) -> Option<Vec<u8>> {
-    let bytes = fs::read(path).ok()?;
-    if bytes.len() <= max_bytes {
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    if len <= max_bytes as u64 {
         return None;
     }
-    let text = String::from_utf8_lossy(&bytes[..max_bytes]);
+    let mut bytes = vec![0; max_bytes];
+    file.read_exact(&mut bytes).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
     Some(
         text.lines()
             .map(sanitize_log_detail)
