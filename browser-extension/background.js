@@ -804,11 +804,15 @@ async function takeBrowserDownload(item, eraseFromHistory = false, resolvedFileN
     return false;
   }
   const forced = forceIsActive(modifierTabId);
-  // Disposable links are consumed by their first request, no matter who makes
-  // it. "Force" must never override this: resending the same disposable URL
-  // to the desktop after Chrome already consumed it commonly produces a 404,
-  // so a disposable link always takes the browser-assisted path.
+  // This callback runs after Chrome has started the request. A disposable
+  // response cannot be handed to aria2 by retrying the URL.
   const browserAssisted = disposable;
+  if (disposable && !forceIsActive(modifierTabId)) {
+    void diagnostic("browser_download.single_use_browser_default", state, {
+      detail: `disposable=true download_id=${item.id} browser_keeps_response=true`,
+    });
+    return false;
+  }
   void diagnostic("browser_download.detected", state, { detail: `disposable=${disposable} assisted=${browserAssisted} force=${forced} initial_url=${item.url === url} final_url=${Boolean(item.finalUrl)} tab=${modifierTabId ?? "none"} file=${effectiveFileName || "unknown"} filename_source=${fileNameDecision.source}` });
 
   // Disposable links are consumed by their first request. At this point Chrome
@@ -819,6 +823,9 @@ async function takeBrowserDownload(item, eraseFromHistory = false, resolvedFileN
   // equivalent disposable-download pattern, not to a hard-coded host.
   if (browserAssisted) {
     await markAssistedDownload({ ...item, filename: effectiveFileName || item.filename }, url);
+    void diagnostic("browser_download.force_exclusive_unavailable", state, {
+      level: "WARN", detail: "final_url_generated_after_site_action; browser_already_owns_response",
+    });
     void diagnostic("browser_download.assisted_original_response", state, {
       detail: `disposable=${disposable} force=${forceIsActive(modifierTabId)} download_id=${item.id}`,
     });
