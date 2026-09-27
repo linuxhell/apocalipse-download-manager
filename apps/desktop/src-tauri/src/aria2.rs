@@ -4,9 +4,12 @@ use serde_json::{json, Map, Value};
 use std::{
     collections::HashMap,
     fs,
+    fs::OpenOptions,
+    io::{BufRead, BufReader, Write},
     net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    thread,
     time::Duration,
 };
 
@@ -33,6 +36,25 @@ pub struct RequestContext {
     pub proxy_username: Option<String>,
     pub proxy_password: Option<String>,
     pub proxy_required: bool,
+}
+
+const ARIA2_LOG_MAX_BYTES: u64 = 32 * 1024 * 1024;
+const ARIA2_LOG_MAX_LINE_BYTES: usize = 256 * 1024;
+
+#[derive(Debug, Clone)]
+pub struct TorrentMetadataFile {
+    pub index: usize,
+    pub path: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct MagnetMetadata {
+    pub gid: String,
+    pub name: String,
+    pub files: Vec<TorrentMetadataFile>,
+    pub total_size: u64,
+    pub info_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -64,6 +86,56 @@ fn number(value: Option<&Value>) -> u64 {
                 .or_else(|| value.as_u64())
         })
         .unwrap_or(0)
+}
+
+fn spawn_bounded_log_reader(stdout: impl std::io::Read + Send + 'static, path: PathBuf) {
+    thread::spawn(move || {
+        let previous = path.with_extension("log.1");
+        let mut reader = BufReader::new(stdout);
+        let mut line = Vec::with_capacity(4096);
+        let mut file = match OpenOptions::new().create(true).append(true).open(&path) {
+            Ok(file) => file,
+            Err(_) => return,
+        };
+        let mut written = fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+
+        loop {
+            line.clear();
+            let read = match reader.read_until(b'\n', &mut line) {
+                Ok(read) => read,
+                Err(_) => break,
+            };
+            if read == 0 {
+                break;
+            }
+            if line.len() > ARIA2_LOG_MAX_LINE_BYTES {
+                line.truncate(ARIA2_LOG_MAX_LINE_BYTES);
+                if !line.ends_with(b"\n") {
+                    line.push(b'\n');
+                }
+            }
+
+            if written.saturating_add(line.len() as u64) > ARIA2_LOG_MAX_BYTES {
+                let _ = file.flush();
+                drop(file);
+                let _ = fs::remove_file(&previous);
+                if fs::rename(&path, &previous).is_err() {
+                    let _ = fs::remove_file(&path);
+                }
+                file = match OpenOptions::new().create(true).write(true).truncate(true).open(&path) {
+                    Ok(file) => file,
+                    Err(_) => return,
+                };
+                written = 0;
+            }
+
+            if file.write_all(&line).is_err() {
+                break;
+            }
+            written = written.saturating_add(line.len() as u64);
+        }
+        let _ = file.flush();
+    });
 }
 
 fn reserve_loopback_port(requested: Option<u16>) -> Result<u16, String> {
@@ -136,8 +208,10 @@ impl Runtime {
             .arg("--max-concurrent-downloads=20")
             .arg("--summary-interval=0")
             .arg("--console-log-level=warn")
-            .arg("--log-level=debug")
-            .arg(format!("--log={}", log.display()))
+            .arg("--log-level=notice")
+            // aria2 writes its own raw log to stdout; ADM owns the file so it can
+            // enforce a hard 32 MiB + 32 MiB rotation even on long-running sessions.
+            .arg("--log=-")
             .arg("--download-result=hide")
             .arg(format!("--input-file={}", session.display()))
             .arg(format!("--save-session={}", session.display()))
@@ -146,8 +220,8 @@ impl Runtime {
             .arg("--enable-dht6=true")
             .arg("--enable-peer-exchange=true")
             .arg("--bt-enable-lpd=true")
-            .arg("--bt-min-crypto-level=arc4")
-            .arg("--bt-require-crypto=false")
+            // Keep encryption negotiation at the engine default. aria2-next maps
+            // the legacy arc4 knob to "required", which can reject normal peers.
             .arg("--follow-torrent=true")
             .arg("--listen-port=6881-6999")
             .arg("--dht-listen-port=6881-6999")
@@ -155,7 +229,7 @@ impl Runtime {
             .arg("--bt-request-peer-speed-limit=50K")
             .arg("--seed-time=0")
             .arg("--seed-ratio=0.0")
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::null());
         #[cfg(target_os = "windows")]
         {
@@ -163,6 +237,9 @@ impl Runtime {
             command.creation_flags(0x08000000);
         }
         let mut child = command.spawn().map_err(|e| e.to_string())?;
+        if let Some(stdout) = child.stdout.take() {
+            spawn_bounded_log_reader(stdout, log);
+        }
         std::thread::sleep(Duration::from_millis(150));
         if let Ok(Some(status)) = child.try_wait() {
             return Err(format!("aria2_exited_early:{status}"));
@@ -468,6 +545,234 @@ impl Endpoint {
             .as_str()
             .map(str::to_owned)
             .ok_or_else(|| "aria2_gid_missing".to_owned())
+    }
+
+    /// Acquires Magnet metadata with aria2-ultra/aria2-next's RPC file-selection
+    /// pause. Metadata stays inside the running engine; no .torrent copy is needed.
+    pub async fn inspect_magnet_metadata(
+        &self,
+        magnet: &str,
+        mut on_progress: impl FnMut(
+            u64,
+            &str,
+            u64,
+            u64,
+            u64,
+            u64,
+            Option<&str>,
+            Option<&str>,
+            bool,
+        ),
+    ) -> Result<MagnetMetadata, String> {
+        let mut options = Map::new();
+        options.insert("pause-metadata".into(), Value::String("true".into()));
+        options.insert("file-allocation".into(), Value::String("none".into()));
+
+        let gid = self
+            .call(
+                "aria2.addUri",
+                vec![json!([magnet]), Value::Object(options)],
+            )
+            .await
+            .map_err(|error| format!("magnet_native_add_failed:{error}"))?
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "aria2_gid_missing".to_owned())?;
+
+        let started = tokio::time::Instant::now();
+        let deadline = started + Duration::from_secs(150);
+        let mut last_report = started;
+        let mut last_signature = String::new();
+        let mut result = None;
+
+        while tokio::time::Instant::now() < deadline {
+            let value = match self
+                .call(
+                    "aria2.tellStatus",
+                    vec![
+                        Value::String(gid.clone()),
+                        json!([
+                            "status",
+                            "errorMessage",
+                            "connections",
+                            "numSeeders",
+                            "totalLength",
+                            "completedLength",
+                            "infoHash",
+                            "bittorrent"
+                        ]),
+                    ],
+                )
+                .await
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    result = Some(Err(error));
+                    break;
+                }
+            };
+
+            let status = value
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let connections = number(value.get("connections"));
+            let seeders = number(value.get("numSeeders"));
+            let total = number(value.get("totalLength"));
+            let completed = number(value.get("completedLength"));
+            let info_hash = value
+                .get("infoHash")
+                .and_then(Value::as_str)
+                .filter(|hash| !hash.is_empty());
+            let bittorrent = value.get("bittorrent");
+            let selection_state = bittorrent
+                .and_then(|bt| bt.get("fileSelectionState"))
+                .and_then(Value::as_str)
+                .filter(|state| !state.is_empty());
+            let name = bittorrent
+                .and_then(|bt| bt.get("info"))
+                .and_then(|info| info.get("name"))
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty());
+            let selection_ready = selection_state.is_some_and(|state| {
+                matches!(state.to_ascii_lowercase().as_str(), "awaiting" | "ready")
+            });
+            let metadata_ready = selection_ready || (status == "paused" && name.is_some());
+
+            let now = tokio::time::Instant::now();
+            let signature = format!("{status}:{}:{}", selection_state.unwrap_or("none"), metadata_ready);
+            if signature != last_signature || now.duration_since(last_report) >= Duration::from_secs(5) {
+                last_signature = signature;
+                last_report = now;
+                on_progress(
+                    now.duration_since(started).as_secs(),
+                    status,
+                    connections,
+                    seeders,
+                    total,
+                    completed,
+                    info_hash,
+                    selection_state,
+                    metadata_ready,
+                );
+            }
+
+            if metadata_ready {
+                match self
+                    .call("aria2.getFiles", vec![Value::String(gid.clone())])
+                    .await
+                {
+                    Ok(files_value) => {
+                        let files = files_value
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|file| {
+                                let index = number(file.get("index")) as usize;
+                                let path = file.get("path")?.as_str()?.to_owned();
+                                (index > 0).then_some(TorrentMetadataFile {
+                                    index,
+                                    path,
+                                    size: number(file.get("length")),
+                                })
+                            })
+                            .collect::<Vec<_>>();
+                        if files.is_empty() {
+                            result = Some(Err("torrent_metadata_files_empty".to_owned()));
+                            break;
+                        }
+                        let total_size = files.iter().map(|file| file.size).sum();
+                        let display_name = name
+                            .map(str::to_owned)
+                            .or_else(|| {
+                                files
+                                    .first()
+                                    .and_then(|file| Path::new(&file.path).file_name())
+                                    .and_then(|name| name.to_str())
+                                    .map(str::to_owned)
+                            })
+                            .unwrap_or_else(|| "magnet".to_owned());
+                        result = Some(Ok(MagnetMetadata {
+                            gid: gid.clone(),
+                            name: display_name,
+                            files,
+                            total_size,
+                            info_hash: info_hash.map(str::to_owned),
+                        }));
+                        break;
+                    }
+                    Err(error) => {
+                        result = Some(Err(error));
+                        break;
+                    }
+                }
+            }
+
+            if matches!(status, "error" | "removed") {
+                result = Some(Err(
+                    value
+                        .get("errorMessage")
+                        .and_then(Value::as_str)
+                        .filter(|message| !message.is_empty())
+                        .unwrap_or("torrent_metadata_unavailable")
+                        .to_owned(),
+                ));
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+
+        let result = result.unwrap_or_else(|| Err("torrent_metadata_timeout".to_owned()));
+        if result.is_err() {
+            let _ = self.remove(&gid).await;
+            let _ = self.remove_result(&gid).await;
+        }
+        result
+    }
+
+    pub async fn prepare_magnet_download(
+        &self,
+        gid: &str,
+        destination_dir: &Path,
+        only_files: &[usize],
+        download_limit: u64,
+    ) -> Result<(), String> {
+        let mut options = Map::new();
+        options.insert(
+            "dir".into(),
+            Value::String(destination_dir.to_string_lossy().into_owned()),
+        );
+        options.insert("continue".into(), Value::String("true".into()));
+        options.insert("file-allocation".into(), Value::String("none".into()));
+        options.insert("pause-metadata".into(), Value::String("false".into()));
+        options.insert(
+            "bt-prioritize-piece".into(),
+            Value::String("head,tail".into()),
+        );
+        if download_limit > 0 {
+            options.insert(
+                "max-download-limit".into(),
+                Value::String(download_limit.to_string()),
+            );
+        }
+        if !only_files.is_empty() {
+            options.insert(
+                "select-file".into(),
+                Value::String(
+                    only_files
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                ),
+            );
+        }
+        self.call(
+            "aria2.changeOption",
+            vec![Value::String(gid.to_owned()), Value::Object(options)],
+        )
+        .await?;
+        self.resume(gid).await
     }
 
     /// Downloads only Magnet metadata and persists it as a real .torrent file.
