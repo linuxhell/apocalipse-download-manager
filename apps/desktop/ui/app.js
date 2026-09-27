@@ -1983,8 +1983,8 @@ document.querySelectorAll("#add").forEach(
       pendingRequestBody = null;
       pendingRequestContentType = null;
       pendingTorrentMetadataPath = null;
-  pendingTorrentMetadataGid = null;
-    pendingTorrentMetadataGid = null;
+
+      pendingTorrentMetadataGid = null;
       resetTaskConnections();
       resetMediaInspection();
       invoke("default_download_directory")
@@ -2634,6 +2634,7 @@ document.querySelector("#url").oninput = () => {
   pendingRequestContentType = null;
   pendingBrowserAssistedPath = null;
   pendingTorrentMetadataPath = null;
+
   pendingTorrentMetadataGid = null;
   resetTaskConnections();
   resetAnalysisForNewRequest();
@@ -2890,7 +2891,7 @@ document.querySelector("#enqueue").onclick = async () => {
     pendingExpectedSize = null;
     pendingBrowserAssistedPath = null;
     pendingTorrentMetadataPath = null;
-  pendingTorrentMetadataGid = null;
+
     pendingTorrentMetadataGid = null;
     resetMediaInspection();
   } catch (error) {
@@ -2952,7 +2953,7 @@ setInterval(async () => {
     pendingRequestBody = null;
     pendingRequestContentType = null;
     pendingTorrentMetadataPath = null;
-  pendingTorrentMetadataGid = null;
+
     pendingTorrentMetadataGid = null;
     resetTaskConnections();
     const url = document.querySelector("#url");
