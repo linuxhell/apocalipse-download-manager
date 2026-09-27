@@ -93,3 +93,18 @@ test('overlapping batches and a single request do not share mutable request stat
     assert.equal(payload.startImmediately, index !== 4);
   }
 });
+
+test('page-generated magnet link enters the torrent handoff without an HTTP fetch', async () => {
+  const { requests, send } = worker();
+  const magnet = 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Example';
+  const result = await send({
+    type: 'APOCALIPSE_PRE_DOWNLOAD_URL',
+    url: magnet,
+    source: 'window.open',
+  }, 'https://example.org/torrent');
+  assert.equal(result.ok, true);
+  assert.equal(result.target, 'desktop');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, magnet);
+  assert.equal(requests[0].pageUrl, 'https://example.org/torrent');
+});
