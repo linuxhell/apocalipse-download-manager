@@ -2691,28 +2691,53 @@ async fn inspect_torrent_bytes_with_engine(
     data: &[u8],
 ) -> Result<TorrentInspection, String> {
     let value = endpoint.inspect_torrent(data).await?;
-    let name = value.get("name").and_then(serde_json::Value::as_str)
-        .ok_or("torrent_name_missing")?.to_owned();
-    let entries = value.get("files").and_then(serde_json::Value::as_array)
+    let name = value
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("torrent_name_missing")?
+        .to_owned();
+    let entries = value
+        .get("files")
+        .and_then(serde_json::Value::as_array)
         .ok_or("torrent_has_no_files")?;
-    let files = entries.iter().map(|entry| {
-        let number = |key| entry.get(key).and_then(|value| {
-            value.as_u64().or_else(|| value.as_str()?.parse::<u64>().ok())
-        });
-        let index = usize::try_from(number("index").ok_or("torrent_index_missing")?)
-            .map_err(|_| "torrent_index_invalid")?;
-        let path = entry.get("path").and_then(serde_json::Value::as_str)
-            .ok_or("torrent_path_missing")?.to_owned();
-        if index == 0 || path.is_empty() {
-            return Err("torrent_file_invalid".to_owned());
-        }
-        Ok(TorrentFileInfo { index, path, size: number("length").ok_or("torrent_length_missing")? })
-    }).collect::<Result<Vec<_>, String>>()?;
+    let files = entries
+        .iter()
+        .map(|entry| {
+            let number = |key| {
+                entry.get(key).and_then(|value| {
+                    value
+                        .as_u64()
+                        .or_else(|| value.as_str()?.parse::<u64>().ok())
+                })
+            };
+            let index = usize::try_from(number("index").ok_or("torrent_index_missing")?)
+                .map_err(|_| "torrent_index_invalid")?;
+            let path = entry
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .ok_or("torrent_path_missing")?
+                .to_owned();
+            if index == 0 || path.is_empty() {
+                return Err("torrent_file_invalid".to_owned());
+            }
+            Ok(TorrentFileInfo {
+                index,
+                path,
+                size: number("length").ok_or("torrent_length_missing")?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     if files.is_empty() {
         return Err("torrent_has_no_files".to_owned());
     }
     let total_size = files.iter().map(|file| file.size).sum();
-    Ok(TorrentInspection { name, files, total_size, torrent_path: None, torrent_gid: None })
+    Ok(TorrentInspection {
+        name,
+        files,
+        total_size,
+        torrent_path: None,
+        torrent_gid: None,
+    })
 }
 
 async fn inspect_torrent_bytes_compatible(
@@ -2722,8 +2747,8 @@ async fn inspect_torrent_bytes_compatible(
     if let Some(endpoint) = endpoint {
         match inspect_torrent_bytes_with_engine(endpoint, data).await {
             Ok(inspection) => return Ok(inspection),
-            Err(error) if error.contains("No such method:")
-                || error.contains("Method not found") => {}
+            Err(error)
+                if error.contains("No such method:") || error.contains("Method not found") => {}
             Err(error) => return Err(error),
         }
     }
