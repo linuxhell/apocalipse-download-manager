@@ -303,9 +303,10 @@ impl Endpoint {
         options.insert("continue".into(), Value::String(resume.to_string()));
         // Direct downloads use the same sparse truncation profile as the
         // measured Windows v5 CLI run; BitTorrent keeps its own allocation.
-        options.insert("file-allocation".into(), Value::String(
-            if http_download { "trunc" } else { "none" }.into(),
-        ));
+        options.insert(
+            "file-allocation".into(),
+            Value::String(if http_download { "trunc" } else { "none" }.into()),
+        );
         if download_limit > 0 {
             options.insert(
                 "max-download-limit".into(),
