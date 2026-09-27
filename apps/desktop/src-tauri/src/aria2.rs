@@ -157,18 +157,26 @@ fn magnet_info_hashes(magnet: &str) -> Vec<String> {
     let Ok(parsed) = url::Url::parse(magnet) else {
         return Vec::new();
     };
-    parsed.query_pairs().filter_map(|(key, value)| {
-        if !key.eq_ignore_ascii_case("xt") {
-            return None;
-        }
-        let value = value.to_ascii_lowercase();
-        let hash = value.strip_prefix("urn:btih:")
-            .filter(|hash| hash.len() == 40)
-            .or_else(|| value.strip_prefix("urn:btmh:1220")
-                .filter(|hash| hash.len() == 64))?;
-        hash.bytes().all(|byte| byte.is_ascii_hexdigit())
-            .then(|| hash.to_owned())
-    }).collect()
+    parsed
+        .query_pairs()
+        .filter_map(|(key, value)| {
+            if !key.eq_ignore_ascii_case("xt") {
+                return None;
+            }
+            let value = value.to_ascii_lowercase();
+            let hash = value
+                .strip_prefix("urn:btih:")
+                .filter(|hash| hash.len() == 40)
+                .or_else(|| {
+                    value
+                        .strip_prefix("urn:btmh:1220")
+                        .filter(|hash| hash.len() == 64)
+                })?;
+            hash.bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+                .then(|| hash.to_owned())
+        })
+        .collect()
 }
 
 fn spawn_bounded_log_reader(stdout: impl std::io::Read + Send + 'static, path: PathBuf) {
@@ -673,7 +681,11 @@ impl Endpoint {
                 .into_iter()
                 .flatten()
                 .filter_map(Value::as_str)
-                .any(|hash| info_hashes.iter().any(|expected| hash.eq_ignore_ascii_case(expected)));
+                .any(|hash| {
+                    info_hashes
+                        .iter()
+                        .any(|expected| hash.eq_ignore_ascii_case(expected))
+                });
                 if !matches_hash {
                     continue;
                 }
@@ -881,7 +893,8 @@ impl Endpoint {
                     let _ = self.remove_result(&failed_gid).await;
                     if !expected_hashes.is_empty() {
                         for _ in 0..20 {
-                            if let Some(existing) = self.find_existing_torrent_gid(&expected_hashes).await
+                            if let Some(existing) =
+                                self.find_existing_torrent_gid(&expected_hashes).await
                             {
                                 gid = existing;
                                 last_signature.clear();
@@ -917,8 +930,12 @@ impl Endpoint {
         download_limit: u64,
     ) -> Result<(), String> {
         let selected_files = if only_files.is_empty() {
-            let files = self.call("aria2.getFiles", vec![Value::String(gid.to_owned())]).await?;
-            files.as_array().ok_or("torrent_metadata_files_empty")?
+            let files = self
+                .call("aria2.getFiles", vec![Value::String(gid.to_owned())])
+                .await?;
+            files
+                .as_array()
+                .ok_or("torrent_metadata_files_empty")?
                 .iter()
                 .map(|file| number(file.get("index")) as usize)
                 .filter(|index| *index > 0)
@@ -949,7 +966,13 @@ impl Endpoint {
         }
         options.insert(
             "select-file".into(),
-            Value::String(selected_files.iter().map(usize::to_string).collect::<Vec<_>>().join(",")),
+            Value::String(
+                selected_files
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
         );
         self.call(
             "aria2.changeOption",
