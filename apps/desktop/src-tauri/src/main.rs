@@ -2781,9 +2781,7 @@ fn validated_torrent_metadata_path(state: &AppState, value: Option<String>) -> O
 
 fn validated_torrent_metadata_gid(value: Option<String>) -> Option<String> {
     value.filter(|gid| {
-        !gid.is_empty()
-            && gid.len() <= 64
-            && gid.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        !gid.is_empty() && gid.len() <= 64 && gid.bytes().all(|byte| byte.is_ascii_alphanumeric())
     })
 }
 
