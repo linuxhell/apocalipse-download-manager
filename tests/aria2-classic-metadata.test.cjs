@@ -66,7 +66,9 @@ test("Magnet metadata exposes relative torrent paths instead of aria2 runtime pa
 });
 
 test("aria2-ultra reuses an existing info-hash and cleans duplicate session ghosts", () => {
-  assert.match(aria2, /magnet_v1_info_hash/);
+  assert.match(aria2, /magnet_info_hashes/);
+  assert.match(aria2, /urn:btmh:1220/);
+  assert.match(aria2, /infoHashV2/);
   assert.match(aria2, /find_existing_torrent_gid/);
   assert.match(aria2, /aria2\.tellActive/);
   assert.match(aria2, /aria2\.tellWaiting/);
