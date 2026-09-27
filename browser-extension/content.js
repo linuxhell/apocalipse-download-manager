@@ -1050,6 +1050,22 @@
       chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 }).catch(() => {});
       return;
     }
+    // A magnet: navigation is an external protocol, so downloads.onCreated
+    // never sees it. Capture the link while the browser still owns the click.
+    const magnetAnchor = event.target.closest?.("a[href]");
+    const magnetUrl = magnetAnchor?.getAttribute("href")?.trim() || "";
+    if (!event.ctrlKey && /^magnet:\?/i.test(magnetUrl)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      trace("magnet_handoff", "auto", { scheme: "magnet", force });
+      chrome.runtime.sendMessage({
+        type: "APOCALIPSE_DOWNLOAD",
+        item: { url: magnetUrl, kind: "torrent", userAgent: navigator.userAgent },
+      }).then((result) => {
+        if (result?.target !== "desktop") location.assign(magnetUrl);
+      }).catch(() => location.assign(magnetUrl));
+      return;
+    }
     if (force) {
       if (forceKnownHlsDownload(event)) return;
       // Force is a transaction, not an instruction to steal the visible href.
