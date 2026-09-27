@@ -534,6 +534,7 @@ struct TorrentInspection {
     files: Vec<TorrentFileInfo>,
     total_size: u64,
     torrent_path: Option<String>,
+    torrent_gid: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -2739,6 +2740,7 @@ fn inspect_torrent_bytes(data: &[u8]) -> Result<TorrentInspection, String> {
         name,
         files,
         torrent_path: None,
+        torrent_gid: None,
     })
 }
 
@@ -2775,6 +2777,14 @@ fn is_managed_torrent_metadata_path(state: &AppState, path: &Path) -> bool {
 fn validated_torrent_metadata_path(state: &AppState, value: Option<String>) -> Option<PathBuf> {
     let path = PathBuf::from(value?);
     (path.is_file() && is_managed_torrent_metadata_path(state, &path)).then_some(path)
+}
+
+fn validated_torrent_metadata_gid(value: Option<String>) -> Option<String> {
+    value.filter(|gid| {
+        !gid.is_empty()
+            && gid.len() <= 64
+            && gid.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    })
 }
 
 async fn materialize_torrent_metadata_file(
@@ -3846,6 +3856,8 @@ struct DownloadContext {
     request_content_type: Option<String>,
     #[serde(default)]
     torrent_metadata_path: Option<String>,
+    #[serde(default)]
+    torrent_metadata_gid: Option<String>,
 }
 
 #[derive(Clone)]
@@ -6058,10 +6070,83 @@ async fn run_aria2_download(
             let add_uri_started_at = Instant::now();
             let added = if is_bittorrent && context.proxy_required {
                 Err("aria2_bittorrent_proxy_unsupported".to_owned())
+            } else if is_bittorrent && task.source.starts_with("magnet:") {
+                let prepared_gid = if let Some(gid) = task.torrent_metadata_gid.clone() {
+                    match endpoint
+                        .prepare_magnet_download(
+                            &gid,
+                            &task.destination,
+                            &task.torrent_selection,
+                            download_limit,
+                        )
+                        .await
+                    {
+                        Ok(()) => Ok(gid),
+                        Err(error) => {
+                            diagnostic_log(
+                                &state,
+                                "WARN",
+                                "aria2.metadata_gid_stale",
+                                &format!("task={id} gid={gid} error={error} reacquire=true"),
+                            );
+                            let metadata = endpoint
+                                .inspect_magnet_metadata(
+                                    &task.source,
+                                    |elapsed, status, connections, seeders, total, completed, info_hash, selection_state, ready| {
+                                        diagnostic_log(
+                                            &state,
+                                            "INFO",
+                                            "aria2.metadata_progress",
+                                            &format!(
+                                                "task={id} engine=aria2-ultra elapsed={elapsed}s status={status} connections={connections} seeders={seeders} total={total} completed={completed} info_hash={} selection_state={} metadata_ready={ready}",
+                                                info_hash.unwrap_or("none"),
+                                                selection_state.unwrap_or("none")
+                                            ),
+                                        );
+                                    },
+                                )
+                                .await?;
+                            endpoint
+                                .prepare_magnet_download(
+                                    &metadata.gid,
+                                    &task.destination,
+                                    &task.torrent_selection,
+                                    download_limit,
+                                )
+                                .await?;
+                            Ok(metadata.gid)
+                        }
+                    }
+                } else {
+                    let metadata = endpoint
+                        .inspect_magnet_metadata(
+                            &task.source,
+                            |elapsed, status, connections, seeders, total, completed, info_hash, selection_state, ready| {
+                                diagnostic_log(
+                                    &state,
+                                    "INFO",
+                                    "aria2.metadata_progress",
+                                    &format!(
+                                        "task={id} engine=aria2-ultra elapsed={elapsed}s status={status} connections={connections} seeders={seeders} total={total} completed={completed} info_hash={} selection_state={} metadata_ready={ready}",
+                                        info_hash.unwrap_or("none"),
+                                        selection_state.unwrap_or("none")
+                                    ),
+                                );
+                            },
+                        )
+                        .await?;
+                    endpoint
+                        .prepare_magnet_download(
+                            &metadata.gid,
+                            &task.destination,
+                            &task.torrent_selection,
+                            download_limit,
+                        )
+                        .await?;
+                    Ok(metadata.gid)
+                };
+                prepared_gid
             } else if is_bittorrent {
-                // Every Torrent/Magnet task is started from a real .torrent
-                // persisted under data/torrents. This keeps metadata discovery
-                // separate from payload transfer and makes select-file deterministic.
                 let torrent_path = match task
                     .torrent_metadata_path
                     .as_ref()
@@ -6124,7 +6209,10 @@ async fn run_aria2_download(
                     if let Ok(mut items) = state.aria2_tasks.lock() {
                         items.insert(id, gid.clone());
                     }
-                    update_task(&app, id, true, |item| item.aria2_gid = Some(gid.clone()));
+                    update_task(&app, id, true, |item| {
+                        item.aria2_gid = Some(gid.clone());
+                        item.torrent_metadata_gid = None;
+                    });
                     gid
                 }
                 Err(error) => {
@@ -9843,7 +9931,7 @@ async fn inspect_torrent_metadata(
         return Err("not_a_torrent".to_owned());
     }
 
-    let endpoint = if source.starts_with("magnet:") {
+    if source.starts_with("magnet:") {
         if state
             .settings
             .lock()
@@ -9852,22 +9940,89 @@ async fn inspect_torrent_metadata(
         {
             return Err("aria2_bittorrent_proxy_unsupported".to_owned());
         }
-        Some(aria2_endpoint(&state, true).await?)
-    } else {
-        None
-    };
+        let endpoint = aria2_endpoint(&state, true).await?;
+        let native = endpoint
+            .inspect_magnet_metadata(
+                &source,
+                |elapsed, status, connections, seeders, total, completed, info_hash, selection_state, ready| {
+                    diagnostic_log(
+                        &state,
+                        "INFO",
+                        "aria2.metadata_progress",
+                        &format!(
+                            "engine=aria2-ultra elapsed={elapsed}s status={status} connections={connections} seeders={seeders} total={total} completed={completed} info_hash={} selection_state={} metadata_ready={ready}",
+                            info_hash.unwrap_or("none"),
+                            selection_state.unwrap_or("none")
+                        ),
+                    );
+                },
+            )
+            .await;
+        match native {
+            Ok(metadata) => {
+                diagnostic_log(
+                    &state,
+                    "INFO",
+                    "aria2.metadata_ready",
+                    &format!(
+                        "engine=aria2-ultra gid={} files={} total_size={} info_hash={}",
+                        metadata.gid,
+                        metadata.files.len(),
+                        metadata.total_size,
+                        metadata.info_hash.as_deref().unwrap_or("none")
+                    ),
+                );
+                return Ok(TorrentInspection {
+                    name: metadata.name,
+                    files: metadata
+                        .files
+                        .into_iter()
+                        .map(|file| TorrentFileInfo {
+                            index: file.index,
+                            path: file.path,
+                            size: file.size,
+                        })
+                        .collect(),
+                    total_size: metadata.total_size,
+                    torrent_path: None,
+                    torrent_gid: Some(metadata.gid),
+                });
+            }
+            Err(error) if error.starts_with("magnet_native_add_failed:") => {
+                diagnostic_log(
+                    &state,
+                    "WARN",
+                    "aria2.metadata_native_unsupported",
+                    &format!("engine=aria2-ultra fallback=classic error={error}"),
+                );
+                let path = materialize_torrent_metadata_file(&state, Some(&endpoint), &source)
+                    .await
+                    .map_err(|fallback_error| {
+                        diagnostic_log(
+                            &state,
+                            "WARN",
+                            "aria2.metadata_save_failed",
+                            &format!("error={fallback_error}"),
+                        );
+                        fallback_error
+                    })?;
+                let mut inspection = inspect_torrent_file(&path)?;
+                inspection.torrent_path = Some(path.to_string_lossy().into_owned());
+                return Ok(inspection);
+            }
+            Err(error) => {
+                diagnostic_log(
+                    &state,
+                    "WARN",
+                    "aria2.metadata_failed",
+                    &format!("engine=aria2-ultra error={error}"),
+                );
+                return Err(error);
+            }
+        }
+    }
 
-    let path = materialize_torrent_metadata_file(&state, endpoint.as_ref(), &source)
-        .await
-        .map_err(|error| {
-            diagnostic_log(
-                &state,
-                "WARN",
-                "aria2.metadata_save_failed",
-                &format!("error={error}"),
-            );
-            error
-        })?;
+    let path = materialize_torrent_metadata_file(&state, None, &source).await?;
     let mut inspection = inspect_torrent_file(&path)?;
     inspection.torrent_path = Some(path.to_string_lossy().into_owned());
     diagnostic_log(
@@ -10019,6 +10174,7 @@ fn enqueue_download_impl(
     if let Some(context) = context {
         task.torrent_metadata_path =
             validated_torrent_metadata_path(state, context.torrent_metadata_path);
+        task.torrent_metadata_gid = validated_torrent_metadata_gid(context.torrent_metadata_gid);
         if task.expected_size.is_none() {
             task.expected_size = context.expected_size.filter(|value| *value > 0);
         }
@@ -12120,6 +12276,7 @@ fn queue_from_bridge(
             request_body: request.request_body,
             request_content_type: request.request_content_type,
             torrent_metadata_path: None,
+            torrent_metadata_gid: None,
         };
         let task = enqueue_download_impl(
             app.clone(),
