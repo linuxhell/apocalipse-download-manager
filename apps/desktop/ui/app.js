@@ -1950,10 +1950,20 @@ async function showTorrentInspection(source, generation = analysisGeneration) {
   root.replaceChildren();
   for (const file of torrent.files) {
     const row = document.createElement("label");
+    row.className = "torrent-file-row";
     const input = Object.assign(document.createElement("input"), { type: "checkbox", checked: true });
     input.dataset.torrentIndex = file.index;
     input.dataset.torrentSize = Number(file.size) || 0;
-    row.append(input, Object.assign(document.createElement("span"), { textContent: file.path }), Object.assign(document.createElement("small"), { textContent: formatBytes(file.size) }));
+    const path = Object.assign(document.createElement("span"), {
+      className: "torrent-file-path",
+      textContent: file.path,
+      title: file.path,
+    });
+    const size = Object.assign(document.createElement("small"), {
+      className: "torrent-file-size",
+      textContent: formatBytes(file.size),
+    });
+    row.append(input, path, size);
     root.append(row);
   }
   document.querySelector("#torrent-inspection").hidden = false;
@@ -2753,13 +2763,15 @@ document.querySelector("#analyze").onclick = async () => {
       document.querySelector("#enqueue").hidden = false;
       return;
     }
-    try {
-      const hostResolution = await invoke("resolve_file_host_url", { url: url.value });
-      if (!current()) return;
-      if (hostResolution?.adapted && hostResolution.url) url.value = hostResolution.url;
-    } catch (error) {
-      if (!current()) return;
-      console.warn("file-host-adapter", error);
+    if (/^https?:\/\//i.test(url.value)) {
+      try {
+        const hostResolution = await invoke("resolve_file_host_url", { url: url.value });
+        if (!current()) return;
+        if (hostResolution?.adapted && hostResolution.url) url.value = hostResolution.url;
+      } catch (error) {
+        if (!current()) return;
+        console.warn("file-host-adapter", error);
+      }
     }
     const plan = await invoke("inspect_url", { url: url.value });
     if (!current()) return;

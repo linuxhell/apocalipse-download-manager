@@ -46,6 +46,9 @@ test("ADM carries the paused Magnet gid from inspection into the queued task", (
 test("aria2 raw logs are bounded and rotated instead of growing forever", () => {
   assert.match(aria2, /ARIA2_LOG_MAX_BYTES:\s*u64 = 32 \* 1024 \* 1024/);
   assert.match(aria2, /with_extension\("log\.1"\)/);
+  assert.match(aria2, /prepare_bounded_log_files/);
+  assert.match(aria2, /preserve_log_tail/);
+  assert.match(aria2, /for index in 2\.\.=10/);
   assert.match(aria2, /fs::remove_file\(&previous\)/);
   assert.match(aria2, /fs::rename\(&path, &previous\)/);
   assert.match(aria2, /\.arg\("--log=-"\)/);
@@ -55,4 +58,9 @@ test("aria2 raw logs are bounded and rotated instead of growing forever", () => 
 test("legacy arc4 flags no longer force aria2-next encryption-required mode", () => {
   assert.doesNotMatch(aria2, /--bt-min-crypto-level=arc4/);
   assert.doesNotMatch(aria2, /--bt-require-crypto=false/);
+});
+
+test("Magnet metadata exposes relative torrent paths instead of aria2 runtime paths", () => {
+  assert.match(aria2, /torrent_relative_display_path/);
+  assert.match(aria2, /root_index \+ 1/);
 });

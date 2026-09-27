@@ -51,3 +51,19 @@ test("shared torrent metadata is preserved while another task still references i
   assert.match(main, /torrent\.metadata_preserved_shared/);
   assert.match(main, /deleted_torrent_metadata_paths\.insert\(path\.to_path_buf\(\)\)/);
 });
+
+test("completed or failed Magnet tasks can be downloaded again while active duplicates remain blocked", () => {
+  const start = main.indexOf("fn reserve_queued_task(");
+  const end = main.indexOf("#[tauri::command]", start);
+  const reserve = main.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(reserve, /torrent_task/);
+  assert.match(reserve, /DownloadState::Completed \| DownloadState::Failed/);
+  assert.match(reserve, /duplicate_active_download/);
+});
+
+test("torrent metadata UI is one compact list and skips file-host adaptation for Magnet", () => {
+  assert.match(ui, /row\.className = "torrent-file-row"/);
+  assert.match(ui, /className: "torrent-file-path"/);
+  assert.match(ui, /\^https\?:\\\/\\\//);
+});

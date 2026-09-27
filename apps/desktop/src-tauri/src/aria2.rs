@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     fs,
     fs::OpenOptions,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
     net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -88,8 +88,74 @@ fn number(value: Option<&Value>) -> u64 {
         .unwrap_or(0)
 }
 
+fn preserve_log_tail(source: &Path, destination: &Path, max_bytes: u64) -> std::io::Result<()> {
+    let mut input = fs::File::open(source)?;
+    let length = input.metadata()?.len();
+    if length > max_bytes {
+        input.seek(SeekFrom::Start(length - max_bytes))?;
+    }
+    let mut output = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(destination)?;
+    std::io::copy(&mut input.take(max_bytes), &mut output)?;
+    output.flush()
+}
+
+fn prepare_bounded_log_files(path: &Path) {
+    let previous = path.with_extension("log.1");
+    for index in 2..=10 {
+        let stray = path.with_extension(format!("log.{index}"));
+        let _ = fs::remove_file(stray);
+    }
+    if fs::metadata(&previous)
+        .map(|metadata| metadata.len() > ARIA2_LOG_MAX_BYTES)
+        .unwrap_or(false)
+    {
+        let _ = fs::remove_file(&previous);
+    }
+    if fs::metadata(path)
+        .map(|metadata| metadata.len() > ARIA2_LOG_MAX_BYTES)
+        .unwrap_or(false)
+    {
+        let staged = path.with_extension("log.1.tmp");
+        let _ = fs::remove_file(&staged);
+        if preserve_log_tail(path, &staged, ARIA2_LOG_MAX_BYTES).is_ok() {
+            let _ = fs::remove_file(&previous);
+            let _ = fs::rename(&staged, &previous);
+        } else {
+            let _ = fs::remove_file(&staged);
+        }
+        let _ = OpenOptions::new().write(true).truncate(true).open(path);
+    }
+}
+
+fn torrent_relative_display_path(path: &str, root_name: Option<&str>) -> String {
+    let normalized = path.replace('\\', "/");
+    if let Some(root_name) = root_name.filter(|name| !name.trim().is_empty()) {
+        let root_name = root_name.replace('\\', "/");
+        let segments = normalized.split('/').collect::<Vec<_>>();
+        if let Some(root_index) = segments
+            .iter()
+            .position(|segment| segment.eq_ignore_ascii_case(root_name.as_str()))
+        {
+            let relative = segments[root_index + 1..].join("/");
+            if !relative.is_empty() {
+                return relative;
+            }
+        }
+    }
+    normalized
+        .rsplit('/')
+        .find(|segment| !segment.is_empty())
+        .unwrap_or(path)
+        .to_owned()
+}
+
 fn spawn_bounded_log_reader(stdout: impl std::io::Read + Send + 'static, path: PathBuf) {
     thread::spawn(move || {
+        prepare_bounded_log_files(&path);
         let previous = path.with_extension("log.1");
         let mut reader = BufReader::new(stdout);
         let mut line = Vec::with_capacity(4096);
@@ -670,7 +736,10 @@ impl Endpoint {
                             .flatten()
                             .filter_map(|file| {
                                 let index = number(file.get("index")) as usize;
-                                let path = file.get("path")?.as_str()?.to_owned();
+                                let path = torrent_relative_display_path(
+                                    file.get("path")?.as_str()?,
+                                    name,
+                                );
                                 (index > 0).then_some(TorrentMetadataFile {
                                     index,
                                     path,

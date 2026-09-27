@@ -760,10 +760,11 @@ dialog input:focus {
   overflow: hidden;
   background: #0a1117;
 }
-#torrent-files { max-height: 240px; overflow: auto; display: grid; gap: 6px; }
-#torrent-files label { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; }
-#torrent-files label span { overflow-wrap: anywhere; }
-#torrent-files label small { color: var(--muted); white-space: nowrap; }
+#torrent-files { max-height: 240px; overflow: auto; display: block; border: 1px solid var(--line); border-radius: 8px; }
+#torrent-files .torrent-file-row { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 7px 8px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
+#torrent-files .torrent-file-row:last-child { border-bottom: 0; }
+#torrent-files .torrent-file-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+#torrent-files .torrent-file-size { color: var(--muted); white-space: nowrap; }
 .destination-history > div:first-child {
   display: flex;
   align-items: center;

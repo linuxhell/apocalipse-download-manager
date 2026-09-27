@@ -3607,7 +3607,7 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
             "INFO",
             "aria2.runtime_spawned",
             &format!(
-                "pid={pid} parent_pid={} port={port} binary=aria2c backend=classic listen_port=6881-6999 dht_listen_port=6881-6999 stop_with_parent=true",
+                "pid={pid} parent_pid={} port={port} binary=aria2c engine=aria2-ultra listen_port=6881-6999 dht_listen_port=6881-6999 stop_with_parent=true",
                 std::process::id()
             ),
         );
@@ -8301,17 +8301,12 @@ fn reserve_queued_task(
     reject_active_duplicate: bool,
 ) -> Result<(), String> {
     if reject_active_duplicate {
-        let torrent_task = matches!(
-            classify_url(&task.source),
-            Some(DownloadKind::Torrent | DownloadKind::Magnet)
-        );
         if let Some(existing) = queue.iter().find(|existing| {
             existing.source == task.source
-                && (torrent_task
-                    || !matches!(
-                        existing.state,
-                        DownloadState::Completed | DownloadState::Failed { .. }
-                    ))
+                && !matches!(
+                    existing.state,
+                    DownloadState::Completed | DownloadState::Failed { .. }
+                )
         }) {
             return Err(format!("duplicate_active_download:{}", existing.id));
         }
