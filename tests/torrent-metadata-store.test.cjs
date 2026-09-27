@@ -67,3 +67,10 @@ test("torrent metadata UI is one compact list and skips file-host adaptation for
   assert.match(ui, /className: "torrent-file-path"/);
   assert.match(ui, /\^https\?:\\\/\\\//);
 });
+
+test("completed and removed torrents detach every aria2/libtorrent gid", () => {
+  assert.match(main, /if is_bittorrent \{[\s\S]*endpoint\.remove\(&gid\)\.await/s);
+  assert.match(main, /task\.torrent_metadata_gid\.clone\(\)/);
+  assert.match(main, /task\.aria2_gid\.clone\(\)/);
+  assert.match(main, /for gid in gids/);
+});

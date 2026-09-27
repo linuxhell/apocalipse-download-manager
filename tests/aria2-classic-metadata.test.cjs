@@ -64,3 +64,19 @@ test("Magnet metadata exposes relative torrent paths instead of aria2 runtime pa
   assert.match(aria2, /torrent_relative_display_path/);
   assert.match(aria2, /root_index \+ 1/);
 });
+
+test("aria2-ultra reuses an existing info-hash and cleans duplicate session ghosts", () => {
+  assert.match(aria2, /magnet_v1_info_hash/);
+  assert.match(aria2, /find_existing_torrent_gid/);
+  assert.match(aria2, /aria2\.tellActive/);
+  assert.match(aria2, /aria2\.tellWaiting/);
+  assert.match(aria2, /aria2\.tellStopped/);
+  assert.match(nativeMetadata, /torrent already exists in session/);
+});
+
+test("closing or re-analyzing the dialog discards an uncommitted Magnet metadata gid", () => {
+  assert.match(main, /async fn discard_torrent_metadata/);
+  assert.match(app, /async function discardPendingTorrentMetadata/);
+  assert.match(app, /await discardPendingTorrentMetadata\(\)/);
+  assert.match(app, /pendingTorrentMetadataGid = null;\s*dialog\.close\(\)/s);
+});

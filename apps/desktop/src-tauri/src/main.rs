@@ -6415,6 +6415,12 @@ async fn run_aria2_download(
                             item.aria2_gid = None;
                         });
                         maybe_auto_extract_completed(&app, id);
+                        if is_bittorrent {
+                            // Detach the libtorrent handle before dropping the RPC result.
+                            // Otherwise the info-hash can remain in-session and reject a
+                            // later re-download as "torrent already exists in session".
+                            let _ = endpoint.remove(&gid).await;
+                        }
                         let _ = endpoint.remove_result(&gid).await;
                         if let Ok(mut items) = state.aria2_tasks.lock() {
                             items.remove(&id);
@@ -10038,6 +10044,26 @@ async fn inspect_torrent_metadata(
         ),
     );
     Ok(inspection)
+}
+
+#[tauri::command]
+async fn discard_torrent_metadata(
+    state: State<'_, AppState>,
+    gid: String,
+) -> Result<(), String> {
+    let Some(gid) = validated_torrent_metadata_gid(Some(gid)) else {
+        return Err("invalid_torrent_metadata_gid".to_owned());
+    };
+    let endpoint = aria2_endpoint(&state, true).await?;
+    let _ = endpoint.remove(&gid).await;
+    let _ = endpoint.remove_result(&gid).await;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "aria2.metadata_discarded",
+        &format!("engine=aria2-ultra gid={gid}"),
+    );
+    Ok(())
 }
 
 async fn read_response_limited(
@@ -13739,33 +13765,46 @@ async fn remove_downloads(
             .map_err(|error| error.to_string())?;
         removed
             .iter()
-            .filter_map(|task| {
-                aria2_tasks
-                    .get(&task.id)
-                    .cloned()
-                    .map(|gid| (task.clone(), gid))
+            .map(|task| {
+                let mut gids = Vec::new();
+                for gid in [
+                    aria2_tasks.get(&task.id).cloned(),
+                    task.aria2_gid.clone(),
+                    task.torrent_metadata_gid.clone(),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if !gids.contains(&gid) {
+                        gids.push(gid);
+                    }
+                }
+                (task.clone(), gids)
             })
+            .filter(|(_, gids)| !gids.is_empty())
             .collect::<Vec<_>>()
     };
     if !aria2_targets.is_empty() {
         match aria2_endpoint(&state, true).await {
             Ok(endpoint) => {
-                for (task, gid) in &aria2_targets {
-                    let _ = endpoint.remove(gid).await;
-                    let _ = endpoint.remove_result(gid).await;
+                for (task, gids) in &aria2_targets {
+                    for gid in gids {
+                        let _ = endpoint.remove(gid).await;
+                        let _ = endpoint.remove_result(gid).await;
+                        state.diagnostics.record(
+                            "aria2.task_removed",
+                            "INFO",
+                            Some(&removal_trace),
+                            Some(&task.id.to_string()),
+                            serde_json::json!({
+                                "gid": gid,
+                                "deleteFiles": delete_files
+                            }),
+                        );
+                    }
                     if let Ok(mut items) = state.aria2_tasks.lock() {
                         items.remove(&task.id);
                     }
-                    state.diagnostics.record(
-                        "aria2.task_removed",
-                        "INFO",
-                        Some(&removal_trace),
-                        Some(&task.id.to_string()),
-                        serde_json::json!({
-                            "gid": gid,
-                            "deleteFiles": delete_files
-                        }),
-                    );
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             }
@@ -14100,6 +14139,7 @@ fn main() {
             inspect_url,
             inspect_media_formats,
             inspect_torrent_metadata,
+            discard_torrent_metadata,
             get_link_identity,
             pause_link_transfer,
             cancel_link_transfer,

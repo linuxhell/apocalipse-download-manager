@@ -1901,9 +1901,20 @@ function resetAnalysisForNewRequest() {
   return analysisGeneration;
 }
 const analysisIsCurrent = (generation) => generation === analysisGeneration;
+async function discardPendingTorrentMetadata() {
+  const gid = pendingTorrentMetadataGid;
+  pendingTorrentMetadataGid = null;
+  if (!gid) return;
+  try {
+    await invoke("discard_torrent_metadata", { gid });
+  } catch (error) {
+    console.warn("torrent-metadata-discard", error);
+  }
+}
 dialog.addEventListener("close", () => {
   analysisGeneration += 1;
   document.querySelector("#analyze").disabled = false;
+  discardPendingTorrentMetadata();
 });
 
 function resetMediaInspection() {
@@ -1939,6 +1950,7 @@ function showCapturedPreview({ title, thumbnail, kind, duration, size, showForma
 }
 
 async function showTorrentInspection(source, generation = analysisGeneration) {
+  await discardPendingTorrentMetadata();
   const torrent = await invoke("inspect_torrent_metadata", { source });
   if (!analysisIsCurrent(generation)) return false;
   document.querySelector("#torrent-title").textContent = torrent.name;
@@ -2888,6 +2900,9 @@ document.querySelector("#enqueue").onclick = async () => {
       });
     acceptEnqueuedTask(acceptedTask);
     renderDownloads();
+    // The queued task now owns this paused metadata GID. Do not let the
+    // dialog close handler remove it from aria2-ultra.
+    pendingTorrentMetadataGid = null;
     dialog.close();
     url.value = "";
     document.querySelector("#mirrors").value = "";

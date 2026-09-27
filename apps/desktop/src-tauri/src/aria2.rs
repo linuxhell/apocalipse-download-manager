@@ -153,6 +153,18 @@ fn torrent_relative_display_path(path: &str, root_name: Option<&str>) -> String 
         .to_owned()
 }
 
+fn magnet_v1_info_hash(magnet: &str) -> Option<String> {
+    let parsed = url::Url::parse(magnet).ok()?;
+    parsed.query_pairs().find_map(|(key, value)| {
+        if !key.eq_ignore_ascii_case("xt") {
+            return None;
+        }
+        let value = value.strip_prefix("urn:btih:")?;
+        (value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .then(|| value.to_ascii_lowercase())
+    })
+}
+
 fn spawn_bounded_log_reader(stdout: impl std::io::Read + Send + 'static, path: PathBuf) {
     thread::spawn(move || {
         prepare_bounded_log_files(&path);
@@ -618,6 +630,52 @@ impl Endpoint {
             .ok_or_else(|| "aria2_gid_missing".to_owned())
     }
 
+    async fn find_existing_torrent_gid(&self, info_hash: &str) -> Option<String> {
+        let keys = json!(["gid", "status", "errorMessage", "infoHash", "bittorrent"]);
+        let calls = [
+            ("aria2.tellActive", vec![keys.clone()]),
+            ("aria2.tellWaiting", vec![json!(0), json!(1000), keys.clone()]),
+            ("aria2.tellStopped", vec![json!(0), json!(1000), keys.clone()]),
+        ];
+        for (method, params) in calls {
+            let Ok(value) = self.call(method, params).await else {
+                continue;
+            };
+            let Some(tasks) = value.as_array() else {
+                continue;
+            };
+            for task in tasks {
+                let task_hash = task
+                    .get("infoHash")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if !task_hash.eq_ignore_ascii_case(info_hash) {
+                    continue;
+                }
+                let Some(gid) = task.get("gid").and_then(Value::as_str) else {
+                    continue;
+                };
+                let status = task
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let error = task
+                    .get("errorMessage")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if matches!(status, "complete" | "error" | "removed")
+                    || error.contains("torrent already exists in session")
+                {
+                    let _ = self.remove(gid).await;
+                    let _ = self.remove_result(gid).await;
+                    continue;
+                }
+                return Some(gid.to_owned());
+            }
+        }
+        None
+    }
+
     /// Acquires Magnet metadata with aria2-ultra/aria2-next's RPC file-selection
     /// pause. Metadata stays inside the running engine; no .torrent copy is needed.
     pub async fn inspect_magnet_metadata(
@@ -629,16 +687,23 @@ impl Endpoint {
         options.insert("pause-metadata".into(), Value::String("true".into()));
         options.insert("file-allocation".into(), Value::String("none".into()));
 
-        let gid = self
-            .call(
-                "aria2.addUri",
-                vec![json!([magnet]), Value::Object(options)],
-            )
-            .await
-            .map_err(|error| format!("magnet_native_add_failed:{error}"))?
-            .as_str()
-            .map(str::to_owned)
-            .ok_or_else(|| "aria2_gid_missing".to_owned())?;
+        let expected_hash = magnet_v1_info_hash(magnet);
+        let mut gid = if let Some(info_hash) = expected_hash.as_deref() {
+            self.find_existing_torrent_gid(info_hash).await
+        } else {
+            None
+        };
+        if gid.is_none() {
+            let value = self
+                .call(
+                    "aria2.addUri",
+                    vec![json!([magnet]), Value::Object(options)],
+                )
+                .await
+                .map_err(|error| format!("magnet_native_add_failed:{error}"))?;
+            gid = value.as_str().map(str::to_owned);
+        }
+        let mut gid = gid.ok_or_else(|| "aria2_gid_missing".to_owned())?;
 
         let started = tokio::time::Instant::now();
         let deadline = started + Duration::from_secs(150);
@@ -779,12 +844,32 @@ impl Endpoint {
             }
 
             if matches!(status, "error" | "removed") {
-                result = Some(Err(value
+                let message = value
                     .get("errorMessage")
                     .and_then(Value::as_str)
                     .filter(|message| !message.is_empty())
                     .unwrap_or("torrent_metadata_unavailable")
-                    .to_owned()));
+                    .to_owned();
+                if message.contains("torrent already exists in session") {
+                    let failed_gid = gid.clone();
+                    let _ = self.remove(&failed_gid).await;
+                    let _ = self.remove_result(&failed_gid).await;
+                    if let Some(info_hash) = expected_hash.as_deref() {
+                        for _ in 0..20 {
+                            if let Some(existing) = self.find_existing_torrent_gid(info_hash).await {
+                                gid = existing;
+                                last_signature.clear();
+                                tokio::time::sleep(Duration::from_millis(50)).await;
+                                break;
+                            }
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                        if gid != failed_gid {
+                            continue;
+                        }
+                    }
+                }
+                result = Some(Err(message));
                 break;
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
