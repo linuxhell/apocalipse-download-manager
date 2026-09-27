@@ -295,7 +295,12 @@ impl Endpoint {
             "dir".into(),
             Value::String(directory.to_string_lossy().into_owned()),
         );
-        options.insert("continue".into(), Value::String("true".into()));
+        // Fresh HTTP transfers match the measured CLI profile; an existing
+        // destination or control file keeps resumable downloads resumable.
+        let mut control_path = destination.as_os_str().to_os_string();
+        control_path.push(".aria2");
+        let resume = destination.exists() || Path::new(&control_path).exists();
+        options.insert("continue".into(), Value::String(resume.to_string()));
         // Direct downloads use the same sparse truncation profile as the
         // measured Windows v5 CLI run; BitTorrent keeps its own allocation.
         options.insert("file-allocation".into(), Value::String(
