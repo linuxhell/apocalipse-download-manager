@@ -756,6 +756,7 @@ let pendingRequestBody = null;
 let pendingRequestContentType = null;
 let pendingBrowserAssistedPath = null;
 let pendingTorrentMetadataPath = null;
+let pendingTorrentMetadataGid = null;
 let taskConnectionsManuallyChanged = false;
 let analysisGeneration = 0;
 let downloads = [];
@@ -1944,6 +1945,7 @@ async function showTorrentInspection(source, generation = analysisGeneration) {
   document.querySelector("#torrent-total").textContent = formatBytes(torrent.totalSize);
   pendingExpectedSize = Number.isFinite(torrent.totalSize) ? torrent.totalSize : null;
   pendingTorrentMetadataPath = torrent.torrentPath || null;
+  pendingTorrentMetadataGid = torrent.torrentGid || null;
   const root = document.querySelector("#torrent-files");
   root.replaceChildren();
   for (const file of torrent.files) {
@@ -1981,6 +1983,8 @@ document.querySelectorAll("#add").forEach(
       pendingRequestBody = null;
       pendingRequestContentType = null;
       pendingTorrentMetadataPath = null;
+  pendingTorrentMetadataGid = null;
+    pendingTorrentMetadataGid = null;
       resetTaskConnections();
       resetMediaInspection();
       invoke("default_download_directory")
@@ -2630,6 +2634,7 @@ document.querySelector("#url").oninput = () => {
   pendingRequestContentType = null;
   pendingBrowserAssistedPath = null;
   pendingTorrentMetadataPath = null;
+  pendingTorrentMetadataGid = null;
   resetTaskConnections();
   resetAnalysisForNewRequest();
   document.querySelector("#auto-extract").checked = false;
@@ -2865,6 +2870,7 @@ document.querySelector("#enqueue").onclick = async () => {
           requestBody: pendingRequestBody,
           requestContentType: pendingRequestContentType,
           torrentMetadataPath: pendingTorrentMetadataPath,
+          torrentMetadataGid: pendingTorrentMetadataGid,
         },
       });
     acceptEnqueuedTask(acceptedTask);
@@ -2884,6 +2890,8 @@ document.querySelector("#enqueue").onclick = async () => {
     pendingExpectedSize = null;
     pendingBrowserAssistedPath = null;
     pendingTorrentMetadataPath = null;
+  pendingTorrentMetadataGid = null;
+    pendingTorrentMetadataGid = null;
     resetMediaInspection();
   } catch (error) {
     const box = document.querySelector("#analysis");
@@ -2944,6 +2952,8 @@ setInterval(async () => {
     pendingRequestBody = null;
     pendingRequestContentType = null;
     pendingTorrentMetadataPath = null;
+  pendingTorrentMetadataGid = null;
+    pendingTorrentMetadataGid = null;
     resetTaskConnections();
     const url = document.querySelector("#url");
     url.value = link;
