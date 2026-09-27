@@ -6071,7 +6071,8 @@ async fn run_aria2_download(
             let added = if is_bittorrent && context.proxy_required {
                 Err("aria2_bittorrent_proxy_unsupported".to_owned())
             } else if is_bittorrent && task.source.starts_with("magnet:") {
-                let prepared_gid = if let Some(gid) = task.torrent_metadata_gid.clone() {
+                let prepared_gid: Result<String, String> = async {
+                    if let Some(gid) = task.torrent_metadata_gid.clone() {
                     match endpoint
                         .prepare_magnet_download(
                             &gid,
@@ -6144,7 +6145,9 @@ async fn run_aria2_download(
                         )
                         .await?;
                     Ok(metadata.gid)
-                };
+                    }
+                }
+                .await;
                 prepared_gid
             } else if is_bittorrent {
                 let torrent_path = match task
