@@ -2800,9 +2800,9 @@ document.querySelector("#analyze").onclick = async () => {
       const select = document.querySelector("#media-format");
       select.replaceChildren();
       option(select, "original", pendingMediaKind === "audio" ? "Original (MP4/M4A)" : t("bestQuality"));
-      for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
-        option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
       const audioHls = pendingMediaKind === "audio";
+      if (audioHls) for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
+        option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
       select.hidden = audioHls;
       document.querySelector("#hls-audio-conversion").hidden = !audioHls;
       document.querySelector("#hls-convert-audio").checked = false;
