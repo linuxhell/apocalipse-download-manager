@@ -2686,6 +2686,50 @@ fn inspect_torrent_file(path: &Path) -> Result<TorrentInspection, String> {
     inspect_torrent_bytes(&data)
 }
 
+async fn inspect_torrent_bytes_with_engine(
+    endpoint: &aria2::Endpoint,
+    data: &[u8],
+) -> Result<TorrentInspection, String> {
+    let value = endpoint.inspect_torrent(data).await?;
+    let name = value.get("name").and_then(serde_json::Value::as_str)
+        .ok_or("torrent_name_missing")?.to_owned();
+    let entries = value.get("files").and_then(serde_json::Value::as_array)
+        .ok_or("torrent_has_no_files")?;
+    let files = entries.iter().map(|entry| {
+        let number = |key| entry.get(key).and_then(|value| {
+            value.as_u64().or_else(|| value.as_str()?.parse::<u64>().ok())
+        });
+        let index = usize::try_from(number("index").ok_or("torrent_index_missing")?)
+            .map_err(|_| "torrent_index_invalid")?;
+        let path = entry.get("path").and_then(serde_json::Value::as_str)
+            .ok_or("torrent_path_missing")?.to_owned();
+        if index == 0 || path.is_empty() {
+            return Err("torrent_file_invalid".to_owned());
+        }
+        Ok(TorrentFileInfo { index, path, size: number("length").ok_or("torrent_length_missing")? })
+    }).collect::<Result<Vec<_>, String>>()?;
+    if files.is_empty() {
+        return Err("torrent_has_no_files".to_owned());
+    }
+    let total_size = files.iter().map(|file| file.size).sum();
+    Ok(TorrentInspection { name, files, total_size, torrent_path: None, torrent_gid: None })
+}
+
+async fn inspect_torrent_bytes_compatible(
+    endpoint: Option<&aria2::Endpoint>,
+    data: &[u8],
+) -> Result<TorrentInspection, String> {
+    if let Some(endpoint) = endpoint {
+        match inspect_torrent_bytes_with_engine(endpoint, data).await {
+            Ok(inspection) => return Ok(inspection),
+            Err(error) if error.contains("No such method:")
+                || error.contains("Method not found") => {}
+            Err(error) => return Err(error),
+        }
+    }
+    inspect_torrent_bytes(data)
+}
+
 fn inspect_torrent_bytes(data: &[u8]) -> Result<TorrentInspection, String> {
     let mut position = 0;
     let BValue::Dict(root) = parse_bencode(data, &mut position)? else {
@@ -2751,9 +2795,13 @@ fn torrent_store_directory(state: &AppState) -> Result<PathBuf, String> {
     Ok(directory)
 }
 
-fn persist_torrent_bytes(state: &AppState, bytes: &[u8]) -> Result<PathBuf, String> {
+async fn persist_torrent_bytes(
+    state: &AppState,
+    endpoint: Option<&aria2::Endpoint>,
+    bytes: &[u8],
+) -> Result<PathBuf, String> {
     // Validate before writing anything into the persistent torrent store.
-    inspect_torrent_bytes(bytes)?;
+    inspect_torrent_bytes_compatible(endpoint, bytes).await?;
     let directory = torrent_store_directory(state)?;
     let digest = format!("{:x}", Sha256::digest(bytes));
     let path = directory.join(format!("{digest}.torrent"));
@@ -2793,7 +2841,7 @@ async fn materialize_torrent_metadata_file(
     let local = PathBuf::from(source);
     if local.is_file() {
         let bytes = fs::read(&local).map_err(|error| error.to_string())?;
-        return persist_torrent_bytes(state, &bytes);
+        return persist_torrent_bytes(state, endpoint, &bytes).await;
     }
 
     if (source.starts_with("http://") || source.starts_with("https://"))
@@ -2803,7 +2851,7 @@ async fn materialize_torrent_metadata_file(
             .is_some_and(|value| value.to_ascii_lowercase().ends_with(".torrent"))
     {
         let bytes = fetch_torrent_file_bytes(state, source).await?;
-        return persist_torrent_bytes(state, &bytes);
+        return persist_torrent_bytes(state, endpoint, &bytes).await;
     }
 
     if !source.starts_with("magnet:") {
@@ -10028,8 +10076,10 @@ async fn inspect_torrent_metadata(
         }
     }
 
-    let path = materialize_torrent_metadata_file(&state, None, &source).await?;
-    let mut inspection = inspect_torrent_file(&path)?;
+    let endpoint = aria2_endpoint(&state, true).await?;
+    let path = materialize_torrent_metadata_file(&state, Some(&endpoint), &source).await?;
+    let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+    let mut inspection = inspect_torrent_bytes_compatible(Some(&endpoint), &bytes).await?;
     inspection.torrent_path = Some(path.to_string_lossy().into_owned());
     diagnostic_log(
         &state,
