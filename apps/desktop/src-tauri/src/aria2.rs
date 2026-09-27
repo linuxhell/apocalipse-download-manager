@@ -916,6 +916,19 @@ impl Endpoint {
         only_files: &[usize],
         download_limit: u64,
     ) -> Result<(), String> {
+        let selected_files = if only_files.is_empty() {
+            let files = self.call("aria2.getFiles", vec![Value::String(gid.to_owned())]).await?;
+            files.as_array().ok_or("torrent_metadata_files_empty")?
+                .iter()
+                .map(|file| number(file.get("index")) as usize)
+                .filter(|index| *index > 0)
+                .collect::<Vec<_>>()
+        } else {
+            only_files.to_vec()
+        };
+        if selected_files.is_empty() {
+            return Err("torrent_metadata_files_empty".to_owned());
+        }
         let mut options = Map::new();
         options.insert(
             "dir".into(),
@@ -934,18 +947,10 @@ impl Endpoint {
                 Value::String(download_limit.to_string()),
             );
         }
-        if !only_files.is_empty() {
-            options.insert(
-                "select-file".into(),
-                Value::String(
-                    only_files
-                        .iter()
-                        .map(usize::to_string)
-                        .collect::<Vec<_>>()
-                        .join(","),
-                ),
-            );
-        }
+        options.insert(
+            "select-file".into(),
+            Value::String(selected_files.iter().map(usize::to_string).collect::<Vec<_>>().join(",")),
+        );
         self.call(
             "aria2.changeOption",
             vec![Value::String(gid.to_owned()), Value::Object(options)],
