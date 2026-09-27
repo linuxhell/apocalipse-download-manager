@@ -139,7 +139,7 @@ impl Runtime {
             .arg("--max-concurrent-downloads=20")
             .arg("--summary-interval=0")
             .arg("--console-log-level=warn")
-            .arg("--log-level=debug")
+            .arg("--log-level=notice")
             .arg(format!("--log={}", log.display()))
             .arg("--download-result=hide")
             .arg(format!("--input-file={}", session.display()))
