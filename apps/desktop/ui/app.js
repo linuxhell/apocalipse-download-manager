@@ -1531,7 +1531,7 @@ document.querySelector("#export-logs").onclick = async (event) => {
   button.disabled = true;
   try {
     const savedPath = await invoke("export_diagnostic_bundle");
-    if (savedPath) window.alert(`${t("exportLog")}: ${savedPath}`);
+    if (savedPath) button.title = savedPath;
   } catch (error) { window.alert(String(error)); }
   finally { button.disabled = false; }
 };
