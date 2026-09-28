@@ -149,7 +149,10 @@ fn torrent_relative_display_path(path: &str, root_name: Option<&str>) -> String 
     // Metadata may arrive before the engine reports the torrent's root name.
     // Keep the directory structure so files with equal basenames stay distinct.
     if !Path::new(&normalized).is_absolute()
-        && !normalized.as_bytes().get(1).is_some_and(|byte| *byte == b':')
+        && !normalized
+            .as_bytes()
+            .get(1)
+            .is_some_and(|byte| *byte == b':')
     {
         return normalized;
     }
