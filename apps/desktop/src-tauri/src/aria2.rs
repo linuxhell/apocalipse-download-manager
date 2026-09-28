@@ -1198,3 +1198,5 @@ impl Endpoint {
         )
         .await
         .map(|_| ())
+    }
+}
