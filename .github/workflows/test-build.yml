@@ -1,10 +1,13 @@
-# Manual, build-only artifact generation for testing. No tagging, no
+# Build-only artifact generation for testing. No tagging, no
 # GitHub Release publication, no gh release/delete calls - mirrors
 # release.yml's build job verbatim, minus its release job.
 name: Test build artifacts
 
 on:
   workflow_dispatch:
+  push:
+    branches: [prep-aria2-ultra]
+    paths: [.github/workflows/test-build.yml]
 
 permissions:
   contents: read
@@ -87,7 +90,7 @@ jobs:
           curl --fail --location --retry 3 \
             --header "Authorization: Bearer $GITHUB_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/latest" \
+            "https://api.github.com/repos/linuxhell/aria2-ultra/releases/latest" \
             --output "$release_json"
           read -r asset_id checksum_id asset_name checksum_name < <(python3 - "$release_json" "$ARIA2_SUFFIX" <<'PY'
           import json
@@ -118,13 +121,13 @@ jobs:
             --header "Authorization: Bearer $GITHUB_TOKEN" \
             --header "Accept: application/octet-stream" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/assets/$asset_id" \
+            "https://api.github.com/repos/linuxhell/aria2-ultra/releases/assets/$asset_id" \
             --output "dist/aria2-backend/$ARIA2_BINARY"
           curl --fail --location --retry 3 \
             --header "Authorization: Bearer $GITHUB_TOKEN" \
             --header "Accept: application/octet-stream" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/assets/$checksum_id" \
+            "https://api.github.com/repos/linuxhell/aria2-ultra/releases/assets/$checksum_id" \
             --output "$RUNNER_TEMP/$checksum_name"
           python3 - "dist/aria2-backend/$ARIA2_BINARY" "$RUNNER_TEMP/$checksum_name" "$asset_name" <<'PY'
           import hashlib
@@ -213,3 +216,63 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+
+  extensions:
+    name: Browser extensions test packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate extension JavaScript
+        run: |
+          node --check browser-extension/background.js
+          node --check browser-extension/page-hook.js
+          node --check browser-extension/content.js
+          node --test tests/*.test.cjs
+      - name: Package Chrome, Edge and unsigned Firefox
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 -c "import json; print(json.load(open('browser-extension/manifest.json'))['version'])")
+          mkdir -p dist
+          stage=$(mktemp -d)
+          cp -R browser-extension "$stage/chromium"
+          (cd "$stage/chromium" && zip -qr "$GITHUB_WORKSPACE/dist/apocalipse-chrome-${version}.zip" .)
+          cp "dist/apocalipse-chrome-${version}.zip" "dist/apocalipse-edge-${version}.zip"
+          cp -R browser-extension "$stage/firefox"
+          python3 - "$stage/firefox/manifest.json" <<'PY'
+          import json
+          import sys
+          path = sys.argv[1]
+          with open(path, encoding="utf-8") as stream:
+              manifest = json.load(stream)
+          worker = manifest.pop("background", {}).get("service_worker")
+          if not worker:
+              raise SystemExit("Chromium background service worker is missing")
+          manifest["background"] = {"scripts": [worker]}
+          manifest["browser_specific_settings"] = {
+              "gecko": {
+                  "id": "apocalipse-download-manager@linuxhell",
+                  "strict_min_version": "140.0",
+                  "data_collection_permissions": {
+                      "required": ["authenticationInfo", "browsingActivity", "websiteContent"]
+                  }
+              }
+          }
+          with open(path, "w", encoding="utf-8") as stream:
+              json.dump(manifest, stream, ensure_ascii=False, indent=2)
+              stream.write("\n")
+          PY
+          (cd "$stage/firefox" && zip -qr "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}-unsigned.xpi" .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apocalipse-browser-extensions-test
+          path: |
+            dist/apocalipse-chrome-*.zip
+            dist/apocalipse-edge-*.zip
+            dist/apocalipse-firefox-*-unsigned.xpi
+          if-no-files-found: error
+          retention-days: 14
