@@ -2653,9 +2653,12 @@ document.querySelector("#regenerate-pairing").onclick = async () => {
 function isArchiveFileName(name) {
   return /\.(zip|7z|rar|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz|tar\.zst|gz|bz2|xz|zst|cab|arj|lha|lzh)$/i.test(String(name || ""));
 }
+let knownArchiveName = "";
 function refreshAutoExtractOption() {
   const option = document.querySelector("#auto-extract-option");
-  const archive = isArchiveFileName(document.querySelector("#file-name").value);
+  const source = document.querySelector("#url").value.trim();
+  const archive = /^https?:/i.test(source) && isArchiveFileName(knownArchiveName)
+    && isArchiveFileName(document.querySelector("#file-name").value);
   option.hidden = !archive;
   if (!archive) document.querySelector("#auto-extract").checked = false;
 }
@@ -2684,6 +2687,8 @@ document.querySelector("#url").oninput = () => {
   pendingTorrentMetadataPath = null;
   resetTaskConnections();
   resetAnalysisForNewRequest();
+  knownArchiveName = "";
+  document.querySelector("#file-name").value = "";
   document.querySelector("#auto-extract").checked = false;
   document.querySelector("#auto-extract-option").hidden = true;
   resetMediaInspection();
@@ -2812,6 +2817,7 @@ document.querySelector("#analyze").onclick = async () => {
     const fileName = document.querySelector("#file-name");
     const suggestedFileName = await invoke("suggest_download_name", { url: url.value });
     if (!current()) return;
+    knownArchiveName = isArchiveFileName(suggestedFileName) ? suggestedFileName : "";
     const currentName = fileName.value.trim();
     const genericName = /^(?:watch|reel|video|download)(?:\.[a-z0-9]{1,10})?$/i.test(currentName);
     if (!currentName || (genericName && !pendingTitle)) fileName.value = suggestedFileName;
@@ -3034,6 +3040,7 @@ async function consumeBrowserAssistedDownload() {
     document.querySelector("#url").value = request.url;
     const sourceName = String(request.fileName || "").split(/[\\/]/).pop() || "download.zip";
     document.querySelector("#file-name").value = sourceName;
+    knownArchiveName = isArchiveFileName(sourceName) ? sourceName : "";
     resetAnalysisForNewRequest();
     document.querySelector("#destination").value = await invoke("default_download_directory");
     resetMediaInspection();
@@ -3099,6 +3106,7 @@ async function consumeBridgeDownload() {
     document.querySelector("#file-name").value = (pendingMediaKind === "video" || pendingMediaKind === "audio") && titleName && (!requestedName || genericMediaName)
       ? `${[...titleName].slice(0, 110).join("")}.${titleExtension}`
       : requestedName;
+    knownArchiveName = /^https?:/i.test(request.url) && isArchiveFileName(requestedName) && !pendingMediaKind ? requestedName : "";
     resetAnalysisForNewRequest();
     resetMediaInspection();
     if (pendingThumbnail || pendingTitle || pendingMediaKind === "image") {

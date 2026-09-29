@@ -971,6 +971,7 @@
   const downloadableLink = (anchor) => {
     const url = absolute(anchor?.href);
     if (!url || !/^https?:/i.test(url)) return null;
+    if (new URL(url).pathname.toLowerCase().endsWith(".torrent")) return url;
     // A same-origin URL that looks like a file can still be a generator/landing
     // page (Filespayouts is one example). Let the site's click handler run so
     // downloads.onDeterminingFilename receives the final CDN URL and headers.
@@ -1050,6 +1051,20 @@
       chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 }).catch(() => {});
       return;
     }
+    const magnetAnchor = event.target.closest?.('a[href^="magnet:"]');
+    const magnetUrl = magnetAnchor?.getAttribute("href")?.trim();
+    if (magnetUrl && magnetUrl.toLowerCase().startsWith("magnet:?")) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const title = new URL(magnetUrl).searchParams.get("dn") || "magnet";
+      chrome.runtime.sendMessage({
+        type: "APOCALIPSE_DOWNLOAD",
+        item: { url: magnetUrl, requestUrls: [magnetUrl], kind: "torrent", title },
+      }, (result) => {
+        if (chrome.runtime.lastError || result?.target !== "desktop") location.assign(magnetUrl);
+      });
+      return;
+    }
     if (force) {
       if (forceKnownHlsDownload(event)) return;
       // Force is a transaction, not an instruction to steal the visible href.
@@ -1089,7 +1104,7 @@
         title: fileNameForUrl(url),
       },
     }, (result) => {
-      if (result?.target !== "apocalipse" || chrome.runtime.lastError) location.assign(url);
+      if (chrome.runtime.lastError || result?.target !== "desktop") location.assign(url);
     });
   }, true);
   const hlsForPage = () => {

@@ -748,7 +748,8 @@ dialog input:focus {
 #tools-dialog .aria2-tool-group > label { min-width: 0; }
 #tools-dialog .aria2-tool-group > label[data-tool="aria2-release-repo"] { padding-top: 10px; border-top: 1px solid var(--line); }
 #tools-dialog .aria2-tool-group > label[data-tool="aria2-release-repo"] > div { grid-template-columns: minmax(0, 1fr); }
-.actions #torrent-store-controls[hidden], .actions #clear-torrent-store[hidden] { display: none !important; }
+.actions #torrent-store-controls[hidden], .actions #clear-torrent-store[hidden],
+#auto-extract-option[hidden], #media-inspection[hidden], #media-format-control[hidden] { display: none !important; }
 #tools-dialog .tool-settings {
   min-height: 0;
   overflow-y: auto;
