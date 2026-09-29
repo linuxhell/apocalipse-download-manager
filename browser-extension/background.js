@@ -869,7 +869,6 @@ async function takeBrowserDownload(item, eraseFromHistory = false, resolvedFileN
   }
   if (/^blob:https:\/\/web\.telegram\.org\//i.test(url)) {
     if (bypassIsActive(modifierTabId)) return false;
-    if (!bridgeConnected) return false;
     if (await handOffTelegramBlob(item)) {
       await cancelBrowserDownload(item.id).catch(() => {});
       if (eraseFromHistory) await eraseBrowserDownload(item.id);
@@ -901,10 +900,6 @@ async function takeBrowserDownload(item, eraseFromHistory = false, resolvedFileN
     if (index >= 0) recentFileResponses.splice(index, 1);
   }
   if (bypassIsActive(modifierTabId)) return false;
-  if (!bridgeConnected) {
-    void diagnostic("browser_download.bridge_unavailable", state, { level: "WARN", detail: `disposable=${disposable} file=${effectiveFileName || "unknown"} filename_source=${fileNameDecision.source}` });
-    return false;
-  }
   const forced = forceIsActive(modifierTabId);
   // Disposable links are consumed by their first request, no matter who makes
   // it. "Force" must never override this: resending the same disposable URL

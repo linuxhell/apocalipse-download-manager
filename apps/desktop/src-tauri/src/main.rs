@@ -8615,7 +8615,6 @@ fn set_tool_paths(
     n_m3u8dl_re: String,
     aria2: String,
     extractor: String,
-    aria2_release_repo: String,
 ) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.ffmpeg_path = optional_path(ffmpeg);
@@ -8624,12 +8623,6 @@ fn set_tool_paths(
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
     settings.aria2_path = optional_path(aria2);
     settings.extractor_path = optional_path(extractor);
-    let trimmed_repo = aria2_release_repo.trim();
-    settings.aria2_release_repo = if trimmed_repo.is_empty() {
-        default_aria2_release_repo()
-    } else {
-        trimmed_repo.to_owned()
-    };
     save_settings(&state, &settings)
 }
 
@@ -13827,12 +13820,6 @@ async fn remove_downloads(
 }
 
 #[tauri::command]
-fn get_aria2_release_repo(state: State<'_, AppState>) -> Result<String, String> {
-    let settings = state.settings.lock().map_err(|error| error.to_string())?;
-    Ok(settings.aria2_release_repo.clone())
-}
-
-#[tauri::command]
 fn get_torrent_store_preference(state: State<'_, AppState>) -> Result<bool, String> {
     let settings = state.settings.lock().map_err(|error| error.to_string())?;
     Ok(settings.save_torrent_metadata)
@@ -14164,7 +14151,6 @@ fn main() {
             update_tool,
             suggest_download_name,
             remove_downloads,
-            get_aria2_release_repo,
             get_torrent_store_preference,
             set_torrent_store_preference,
             clear_torrent_store,

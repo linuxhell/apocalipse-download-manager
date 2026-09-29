@@ -4,8 +4,6 @@ const catalogs = {
     autoExtract: "Extract automatically after download",
     autoExtractHint: "Shown only for archive files. Loose root files are kept inside a folder named after the archive.",
     browserAssistedArchiveReady: "Archive received from the browser. Choose where to save it and whether to extract it automatically.",
-    aria2ReleaseRepo: "Release repository (owner/repo)",
-    aria2ReleaseRepoHint: "Download/Update uses releases from this repository.",
     saveTorrentMetadata: "Save .torrent in data/torrents",
     saveTorrentMetadataHint: "Keep a copy of every torrent's metadata so it can be redownloaded later. Turning this off deletes a torrent's saved file when its task is removed.",
     clearTorrentStore: "Clear .torrents in data/torrents",
@@ -250,8 +248,6 @@ const catalogs = {
     autoExtract: "Extrair automaticamente após o download",
     autoExtractHint: "Aparece somente para arquivos compactados. Arquivos soltos ficam dentro de uma pasta com o nome do arquivo compactado.",
     browserAssistedArchiveReady: "Arquivo compactado recebido do navegador. Escolha onde salvar e se deseja extrair automaticamente.",
-    aria2ReleaseRepo: "Repositório das versões (dono/repositório)",
-    aria2ReleaseRepoHint: "Baixar/Atualizar usa as versões deste repositório.",
     saveTorrentMetadata: "Salvar .torrent em data/torrents",
     saveTorrentMetadataHint: "Mantém uma cópia dos metadados de cada torrent para permitir baixar novamente depois. Desligar isso apaga o .torrent salvo quando a tarefa for removida.",
     clearTorrentStore: "Limpar .torrents em data/torrents",
@@ -496,8 +492,6 @@ const catalogs = {
     autoExtract: "下载完成后自动解压",
     autoExtractHint: "仅在压缩文件时显示。根目录中的零散文件会解压到以压缩文件命名的文件夹中。",
     browserAssistedArchiveReady: "已从浏览器接收压缩文件。请选择保存位置以及是否自动解压。",
-    aria2ReleaseRepo: "版本仓库（所有者/仓库）",
-    aria2ReleaseRepoHint: "下载/更新使用此仓库发布的版本。",
     saveTorrentMetadata: "将 .torrent 保存到 data/torrents",
     saveTorrentMetadataHint: "保留每个种子的元数据副本以便日后重新下载。关闭此选项后，移除任务时会删除已保存的 .torrent 文件。",
     clearTorrentStore: "清空 data/torrents 中的 .torrent 文件",
@@ -1879,7 +1873,6 @@ async function refreshToolStatuses() {
       status.textContent = tool.found ? `${t("installed")} · ${tool.version}` : t("missing");
       status.classList.toggle("tool-found", tool.found);
     }
-    document.querySelector("#tool-aria2-release-repo").value = await invoke("get_aria2_release_repo");
   } catch (error) { console.error(error); }
   finally { if (button) button.disabled = false; }
 }
@@ -2501,7 +2494,6 @@ document.querySelector("#save-tools").onclick = async (event) => {
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
       aria2: document.querySelector("#tool-aria2").value,
       extractor: document.querySelector("#tool-extractor").value,
-      aria2ReleaseRepo: document.querySelector("#tool-aria2-release-repo").value,
     });
     await invoke("set_media_player", { path: document.querySelector("#tool-player").value });
     toolsDialog.close();
