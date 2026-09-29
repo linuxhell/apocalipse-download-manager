@@ -12,6 +12,7 @@
     "clipboardRead",
     "cookies",
     "webRequest",
+    "declarativeNetRequest",
     "scripting"
   ],
   "host_permissions": [
