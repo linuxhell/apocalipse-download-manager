@@ -3005,6 +3005,10 @@ setInterval(async () => {
     resetTaskConnections();
     const url = document.querySelector("#url");
     url.value = link;
+    knownArchiveName = "";
+    document.querySelector("#file-name").value = "";
+    document.querySelector("#auto-extract").checked = false;
+    document.querySelector("#auto-extract-option").hidden = true;
     resetAnalysisForNewRequest();
     resetMediaInspection();
     await invoke("activate_main_window");
