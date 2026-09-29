@@ -24,7 +24,7 @@ function node({tag='DIV', r=rect(), parent=null, attrs={}, videos=[], click=null
 test('0.3.169 manifest version is exact', () => {
   const manifest = JSON.parse(src('manifest.json'));
   assert.equal(manifest.version, '0.3.179');
-  assert.match(manifest.version_name, /^0\.3\.178/);
+  assert.ok(manifest.version_name.startsWith(manifest.version));
 });
 
 test('0.3.132 resolved Preview and Download are dispatched explicitly, never synthetic re-click', () => {
