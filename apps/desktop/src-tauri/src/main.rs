@@ -397,7 +397,7 @@ fn default_bridge_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 fn default_aria2_release_repo() -> String {
-    "FerroDownload/aria2-static-builds".to_owned()
+    "linuxhell/aria2-ultra".to_owned()
 }
 fn default_link_password() -> String {
     uuid::Uuid::new_v4().simple().to_string()
@@ -5013,6 +5013,9 @@ fn load_settings(path: &Path) -> Result<UserSettings, String> {
         .ok()
         .and_then(|data| serde_json::from_slice(&data).ok())
         .unwrap_or_default();
+    if settings.aria2_release_repo == "FerroDownload/aria2-static-builds" {
+        settings.aria2_release_repo = default_aria2_release_repo();
+    }
     for share in &mut settings.link_shares {
         if let Ok(metadata) = fs::metadata(&share.path) {
             share.directory = metadata.is_dir();
