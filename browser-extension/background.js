@@ -906,7 +906,7 @@ async function takeBrowserDownload(item, eraseFromHistory = false, resolvedFileN
   // to the desktop after Chrome already consumed it commonly produces a 404,
   // so a disposable link always takes the browser-assisted path.
   const browserAssisted = disposable;
-  void diagnostic("browser_download.detected", state, { detail: `disposable=${disposable} assisted=${browserAssisted} force=${forced} initial_url=${item.url === url} final_url=${Boolean(item.finalUrl)} tab=${modifierTabId ?? "none"} file=${effectiveFileName || "unknown"} filename_source=${fileNameDecision.source}` });
+  void diagnostic("browser_download.detected", state, { detail: `disposable=${disposable} assisted=${browserAssisted} force=${forced} initial_url=${item.url === url} final_url=${Boolean(item.finalUrl)} tab=${modifierTabId ?? "none"} file=${effectiveFileName || "unknown"} filename_source=${fileNameDecision.source} incognito=${Boolean(item.incognito)}` });
 
   // Disposable links are consumed by their first request. At this point Chrome
   // already owns that original response; repeating it on the desktop commonly
@@ -952,7 +952,12 @@ async function takeBrowserDownload(item, eraseFromHistory = false, resolvedFileN
     });
     return true;
   } catch (error) {
-    void diagnostic("browser_download.takeover_failed", state, { level: "ERROR", error: String(error), detail: `disposable=${disposable} cancelled=${cancelled}` });
+    let pairedInThisContext = "unknown";
+    try {
+      const { pairingToken: storedToken = "" } = await chrome.storage.local.get({ pairingToken: "" });
+      pairedInThisContext = Boolean(storedToken);
+    } catch {}
+    void diagnostic("browser_download.takeover_failed", state, { level: "ERROR", error: String(error), detail: `disposable=${disposable} cancelled=${cancelled} incognito=${Boolean(item.incognito)} paired_in_this_context=${pairedInThisContext}` });
     if (cancelled) {
       bypassUntil = Date.now() + 2000;
       chrome.downloads.download({ url, saveAs: false }, () => void chrome.runtime.lastError);
