@@ -2822,15 +2822,23 @@ async fn materialize_torrent_metadata_file(
     let directory = torrent_store_directory(state)?;
     let info_hash = url::Url::parse(source).ok().and_then(|url| {
         url.query_pairs().find_map(|(key, value)| {
-            (key == "xt").then(|| value.strip_prefix("urn:btih:").map(str::to_ascii_lowercase)).flatten()
+            (key == "xt")
+                .then(|| value.strip_prefix("urn:btih:").map(str::to_ascii_lowercase))
+                .flatten()
         })
     });
     if let Some(ref hash) = info_hash {
         if hash.len() == 40 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            for entry in fs::read_dir(&directory).map_err(|error| error.to_string())?.flatten() {
+            for entry in fs::read_dir(&directory)
+                .map_err(|error| error.to_string())?
+                .flatten()
+            {
                 let path = entry.path();
                 let suffix = format!("--{hash}.torrent");
-                let file_name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+                let file_name = path
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("");
                 if (file_name.eq_ignore_ascii_case(&format!("{hash}.torrent"))
                     || file_name.to_ascii_lowercase().ends_with(&suffix))
                     && inspect_torrent_file(&path).is_ok()
@@ -2875,7 +2883,8 @@ async fn materialize_torrent_metadata_file(
     );
     let inspection = inspect_torrent_file(&path)?;
     let title = validate_file_name(&sanitize_title_for_filename(&inspection.name))?;
-    let hash = info_hash.unwrap_or_else(|| format!("{:x}", Sha256::digest(fs::read(&path).unwrap_or_default())));
+    let hash = info_hash
+        .unwrap_or_else(|| format!("{:x}", Sha256::digest(fs::read(&path).unwrap_or_default())));
     let named = directory.join(format!("{title}--{hash}.torrent"));
     if named != path {
         if !named.exists() {
@@ -10067,7 +10076,8 @@ fn enqueue_download_impl(
         .map(sanitize_title_for_filename)
         .filter(|name| !name.is_empty());
     let torrent_name = if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
-        context.as_ref()
+        context
+            .as_ref()
             .and_then(|context| context.torrent_metadata_path.clone())
             .and_then(|path| validated_torrent_metadata_path(state, Some(path)))
             .and_then(|path| inspect_torrent_file(&path).ok())
