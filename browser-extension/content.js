@@ -968,21 +968,28 @@
   }).catch(() => {});
   };
   const trace = traceDiagnostic;
+  // Returns { url, reason }: url is set only when the click should be handed
+  // off; reason always explains the outcome so a diagnostic trace can say
+  // exactly why a click that looked like a download control wasn't taken
+  // over, instead of the previous silent `return null` that left every such
+  // case invisible in a support bundle.
   const downloadableLink = (anchor) => {
     const url = absolute(anchor?.href);
-    if (!url || !/^https?:/i.test(url)) return null;
-    if (new URL(url).pathname.toLowerCase().endsWith(".torrent")) return url;
+    if (!url) return { url: null, reason: "no_href" };
+    if (!/^https?:/i.test(url)) return { url: null, reason: "non_http_scheme" };
+    if (new URL(url).pathname.toLowerCase().endsWith(".torrent")) return { url, reason: "torrent_extension" };
     // A same-origin URL that looks like a file can still be a generator/landing
     // page (Filespayouts is one example). Let the site's click handler run so
     // downloads.onDeterminingFilename receives the final CDN URL and headers.
     // The configured force shortcut intentionally bypasses this safeguard.
     try {
-      if (new URL(url).origin === location.origin) return null;
+      if (new URL(url).origin === location.origin) return { url: null, reason: "same_origin" };
     } catch {
-      return null;
+      return { url: null, reason: "url_parse_failed" };
     }
-    if (anchor.hasAttribute("download")) return url;
-    return /\.(?:7z|apk|bin|bz2|cab|deb|dmg|exe|gz|img|iso|msi|msix|pkg|rar|rpm|tar|tbz2|tgz|txz|xz|zip)(?:$|[?#])/i.test(url) ? url : null;
+    if (anchor.hasAttribute("download")) return { url, reason: "download_attribute" };
+    const matchesExtension = /\.(?:7z|apk|bin|bz2|cab|deb|dmg|exe|gz|img|iso|msi|msix|pkg|rar|rpm|tar|tbz2|tgz|txz|xz|zip)(?:$|[?#])/i.test(url);
+    return matchesExtension ? { url, reason: "known_extension" } : { url: null, reason: "unmatched_extension" };
   };
   const fileNameForUrl = (url) => {
     const value = new URL(url).pathname.split("/").pop() || "download";
@@ -1053,7 +1060,24 @@
     }
     const magnetAnchor = event.target.closest?.('a[href^="magnet:"]');
     const magnetUrl = magnetAnchor?.getAttribute("href")?.trim();
-    if (magnetUrl && magnetUrl.toLowerCase().startsWith("magnet:?")) {
+    if (!magnetUrl) {
+      // Same blind spot as downloadableLink below, for magnet controls
+      // specifically: a <button> or JS-driven "magnet" control has no
+      // <a href="magnet:..."> for closest() to find, so it silently never
+      // reaches APOCALIPSE_DOWNLOAD at all. Trace it so that's visible.
+      for (const node of event.composedPath?.() || []) {
+        const label = `${node?.getAttribute?.("aria-label") || ""} ${node?.title || ""} ${node?.textContent || ""}`
+          .replace(/\s+/g, " ").trim().slice(0, 120);
+        if (/magnet/i.test(label)) {
+          trace("click_magnet_control_without_href", "auto", {
+            tag: node?.tagName || "",
+            label,
+            hasAnchorAncestor: Boolean(event.target.closest?.("a")),
+          });
+          break;
+        }
+      }
+    } else if (magnetUrl.toLowerCase().startsWith("magnet:?")) {
       event.preventDefault();
       event.stopImmediatePropagation();
       const title = new URL(magnetUrl).searchParams.get("dn") || "magnet";
@@ -1075,7 +1099,22 @@
     if (event.ctrlKey || event.shiftKey || event.altKey) return;
     const anchor = event.target.closest?.("a[href]");
     const anchorUrl = absolute(anchor?.href);
-    if (!anchorUrl || /\/undefined(?:$|[?#])/i.test(anchorUrl)) return;
+    if (!anchorUrl || /\/undefined(?:$|[?#])/i.test(anchorUrl)) {
+      // Previously a silent return: a click on a <button> or a JS-driven
+      // control with no <a href> ancestor left zero trace anywhere, so a
+      // "the download button doesn't work" report was undiagnosable from
+      // logs alone. Only log when the click actually looked like a
+      // download/magnet control, to avoid tracing every ordinary click.
+      const control = looksLikeDownloadControl(event);
+      if (control) {
+        trace("click_control_without_href", "auto", {
+          tag: control.node?.tagName || "",
+          label: control.label.slice(0, 120),
+          hasAnchorAncestor: Boolean(event.target.closest?.("a")),
+        });
+      }
+      return;
+    }
     let anchorHost = "";
     try { anchorHost = new URL(anchorUrl).hostname; } catch {}
     const onFilespayouts = /(^|\.)filespayouts\.com$/i.test(location.hostname);
@@ -1090,8 +1129,24 @@
       window.open(anchorUrl, "_blank", "noopener");
       return;
     }
-    const url = force ? anchorUrl : downloadableLink(anchor);
-    if (!url) return;
+    const linkDecision = force ? { url: anchorUrl, reason: "force" } : downloadableLink(anchor);
+    const url = linkDecision.url;
+    if (!url) {
+      // Same rationale as above: an anchor did exist, but was rejected (same
+      // origin, extension not on the allowlist, etc.) - log why instead of
+      // vanishing silently, but only for clicks that looked like a real
+      // download control so ordinary navigation stays quiet.
+      const control = looksLikeDownloadControl(event);
+      if (control) {
+        trace("click_link_rejected", "auto", {
+          reason: linkDecision.reason,
+          href: anchorUrl,
+          host: anchorHost,
+          label: control.label.slice(0, 120),
+        });
+      }
+      return;
+    }
     event.preventDefault();
     event.stopImmediatePropagation();
     chrome.runtime.sendMessage({

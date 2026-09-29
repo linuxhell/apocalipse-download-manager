@@ -14,15 +14,14 @@ test("torrent metadata path persists with the task", () => {
   assert.match(main, /item\.torrent_metadata_path = Some\(path\.clone\(\)\)/);
 });
 
-test("torrent disk removal asks about saved torrent metadata regardless of task state", () => {
-  // Regression: this used to only fire for DownloadState::Completed, so
-  // pausing a torrent before removing it (a very ordinary sequence) skipped
-  // the prompt entirely and left the .torrent file behind in data/torrents.
-  assert.match(ui, /activePage === "torrents"/);
-  assert.doesNotMatch(ui, /stateKey\(task\.state\) === "completed"/);
-  assert.match(ui, /window\.confirm\(t\("deleteTorrentMetadataConfirm"\)\)/);
-  assert.match(ui, /deleteTorrentMetadata/);
-  assert.doesNotMatch(main, /delete_torrent_metadata && task\.state == DownloadState::Completed/);
+test("removing a task never prompts to delete its .torrent - the Torrents-tab control owns that", () => {
+  // Removing this per-task confirm() popup was deliberate (not a
+  // regression): the Torrents tab already has its own explicit
+  // save/clear controls for data/torrents, so a second, redundant prompt
+  // on every task removal was asked to be dropped. Guard both directions:
+  // no popup should come back, and the explicit control should stay wired.
+  assert.doesNotMatch(ui, /window\.confirm\(t\("deleteTorrentMetadataConfirm"\)\)/);
+  assert.match(ui, /const deleteTorrentMetadata = false;/);
   assert.match(main, /if delete_torrent_metadata \{/);
 });
 
