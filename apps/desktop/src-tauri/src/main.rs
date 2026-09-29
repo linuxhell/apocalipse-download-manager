@@ -309,6 +309,14 @@ struct UserSettings {
     n_m3u8dl_re_path: Option<PathBuf>,
     #[serde(default)]
     aria2_path: Option<PathBuf>,
+    // GitHub "owner/repo" the "Download"/"Update" buttons for the aria2 tool
+    // fetch a release from. Defaults to the upstream static-build repo so
+    // existing installs keep working unchanged; point this at a fork (e.g.
+    // aria2-ultra) to have the updater track that fork's releases instead
+    // of silently reverting a manually-installed fork binary back to
+    // vanilla aria2 the next time "Update" is clicked.
+    #[serde(default = "default_aria2_release_repo")]
+    aria2_release_repo: String,
     #[serde(default)]
     extractor_path: Option<PathBuf>,
     #[serde(default = "default_true")]
@@ -353,6 +361,8 @@ struct UserSettings {
     language: String,
     #[serde(default = "default_theme")]
     theme: String,
+    #[serde(default = "default_true")]
+    save_torrent_metadata: bool,
 }
 
 fn default_language() -> String {
@@ -386,6 +396,9 @@ fn default_aria2_rpc_secret() -> String {
 fn default_bridge_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
+fn default_aria2_release_repo() -> String {
+    "FerroDownload/aria2-static-builds".to_owned()
+}
 fn default_link_password() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
@@ -408,6 +421,7 @@ impl Default for UserSettings {
             qjs_path: None,
             n_m3u8dl_re_path: None,
             aria2_path: None,
+            aria2_release_repo: default_aria2_release_repo(),
             extractor_path: None,
             aria2_rpc_enabled: true,
             aria2_rpc_auto_start: true,
@@ -430,6 +444,7 @@ impl Default for UserSettings {
             link_trusted_certificates: HashMap::new(),
             language: default_language(),
             theme: default_theme(),
+            save_torrent_metadata: true,
         }
     }
 }
@@ -8549,6 +8564,7 @@ fn set_tool_paths(
     n_m3u8dl_re: String,
     aria2: String,
     extractor: String,
+    aria2_release_repo: String,
 ) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.ffmpeg_path = optional_path(ffmpeg);
@@ -8557,6 +8573,12 @@ fn set_tool_paths(
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
     settings.aria2_path = optional_path(aria2);
     settings.extractor_path = optional_path(extractor);
+    let trimmed_repo = aria2_release_repo.trim();
+    settings.aria2_release_repo = if trimmed_repo.is_empty() {
+        default_aria2_release_repo()
+    } else {
+        trimmed_repo.to_owned()
+    };
     save_settings(&state, &settings)
 }
 
@@ -9139,8 +9161,13 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             target
         }
         "aria2" => {
-            let release =
-                github_latest_release(&client, "FerroDownload/aria2-static-builds").await?;
+            let aria2_release_repo = state
+                .settings
+                .lock()
+                .map_err(|error| error.to_string())?
+                .aria2_release_repo
+                .clone();
+            let release = github_latest_release(&client, &aria2_release_repo).await?;
             let suffix = aria2_asset_suffix()?;
             let (asset_name, url) = release_asset(&release, |name| {
                 name.starts_with("aria2c-") && name.ends_with(suffix) && !name.ends_with(".sha256")
@@ -9472,20 +9499,26 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
     {
         let (platform, architecture) = release_platform_architecture()?;
         let aria2_suffix = aria2_asset_suffix()?;
+        let aria2_release_repo = state
+            .settings
+            .lock()
+            .map_err(|error| error.to_string())?
+            .aria2_release_repo
+            .clone();
         let (repository, executable_name, asset_markers, version_args): (
-            &str,
+            std::borrow::Cow<'static, str>,
             &str,
             &[&str],
             &[&str],
         ) = match id.as_str() {
             "qjs" => (
-                "quickjs-ng/quickjs",
+                "quickjs-ng/quickjs".into(),
                 if cfg!(windows) { "qjs.exe" } else { "qjs" },
                 &[],
                 &["--version"],
             ),
             "aria2" => (
-                "FerroDownload/aria2-static-builds",
+                aria2_release_repo.into(),
                 if cfg!(windows) {
                     "aria2c.exe"
                 } else {
@@ -9495,7 +9528,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &["--version"],
             ),
             "n-m3u8dl-re" => (
-                "nilaoda/N_m3u8DL-RE",
+                "nilaoda/N_m3u8DL-RE".into(),
                 if cfg!(windows) {
                     "N_m3u8DL-RE.exe"
                 } else {
@@ -9506,9 +9539,9 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             ),
             "ffmpeg" => (
                 if cfg!(target_os = "macos") {
-                    "eugeneware/ffmpeg-static"
+                    "eugeneware/ffmpeg-static".into()
                 } else {
-                    "BtbN/FFmpeg-Builds"
+                    "BtbN/FFmpeg-Builds".into()
                 },
                 if cfg!(windows) {
                     "ffmpeg.exe"
@@ -13530,7 +13563,17 @@ async fn remove_downloads(
     delete_files: bool,
     delete_torrent_metadata: Option<bool>,
 ) -> Result<usize, String> {
-    let delete_torrent_metadata = delete_files && delete_torrent_metadata.unwrap_or(false);
+    // When the caller doesn't say explicitly, fall back to the user's global
+    // "save .torrent in data/torrents" preference: if they've turned that
+    // off, removing a torrent task also removes its stored .torrent file by
+    // default, instead of silently accumulating forever in the store.
+    let save_torrent_metadata_pref = state
+        .settings
+        .lock()
+        .map(|settings| settings.save_torrent_metadata)
+        .unwrap_or(true);
+    let delete_torrent_metadata =
+        delete_files && delete_torrent_metadata.unwrap_or(!save_torrent_metadata_pref);
     let removal_trace = uuid::Uuid::new_v4().to_string();
     state.diagnostics.record("task.removal_requested", "INFO", Some(&removal_trace), None,
         serde_json::json!({"taskRefs":ids.iter().map(|id|id.to_string()).collect::<Vec<_>>(),"deleteFiles":delete_files,"deleteTorrentMetadata":delete_torrent_metadata}));
@@ -13716,6 +13759,65 @@ async fn remove_downloads(
         );
     }
     Ok(removed.len())
+}
+
+#[tauri::command]
+fn get_aria2_release_repo(state: State<'_, AppState>) -> Result<String, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    Ok(settings.aria2_release_repo.clone())
+}
+
+#[tauri::command]
+fn get_torrent_store_preference(state: State<'_, AppState>) -> Result<bool, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    Ok(settings.save_torrent_metadata)
+}
+
+#[tauri::command]
+fn set_torrent_store_preference(state: State<'_, AppState>, enabled: bool) -> Result<bool, String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.save_torrent_metadata = enabled;
+    save_settings(&state, &settings)?;
+    Ok(enabled)
+}
+
+/// Deletes every managed .torrent file under the torrent store directory
+/// (data/torrents) that is not referenced by any task currently in the
+/// queue, so an active or queued torrent's metadata is never removed out
+/// from under it. Returns how many files were deleted.
+#[tauri::command]
+async fn clear_torrent_store(state: State<'_, AppState>) -> Result<usize, String> {
+    let directory = torrent_store_directory(&state)?;
+    let referenced: HashSet<PathBuf> = {
+        let queue = state.queue.lock().map_err(|error| error.to_string())?;
+        queue
+            .iter()
+            .filter_map(|task| task.torrent_metadata_path.clone())
+            .collect()
+    };
+    let mut removed = 0usize;
+    let entries = fs::read_dir(&directory).map_err(|error| error.to_string())?;
+    for entry in entries {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if !path.is_file()
+            || !is_managed_torrent_metadata_path(&state, &path)
+            || referenced.contains(&path)
+        {
+            continue;
+        }
+        if remove_path_with_retry(&path, false).await.is_ok() {
+            removed += 1;
+        }
+    }
+    state.diagnostics.record(
+        "torrent.store_cleared",
+        "INFO",
+        None,
+        None,
+        serde_json::json!({"removed": removed}),
+    );
+    Ok(removed)
 }
 
 fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
@@ -13997,6 +14099,10 @@ fn main() {
             update_tool,
             suggest_download_name,
             remove_downloads,
+            get_aria2_release_repo,
+            get_torrent_store_preference,
+            set_torrent_store_preference,
+            clear_torrent_store,
             read_general_log,
             clear_general_log,
             export_diagnostic_bundle,

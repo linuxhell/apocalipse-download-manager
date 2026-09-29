@@ -53,6 +53,13 @@
           <p id="page-description" class="page-description" data-i18n="downloadsDescription">Manage direct downloads, progress, speed and completed files.</p>
         </div>
         <div class="actions">
+          <label id="torrent-store-controls" class="setting-toggle compact-toggle" hidden>
+            <input id="save-torrent-metadata" type="checkbox" />
+            <span><b data-i18n="saveTorrentMetadata">Save .torrent in data/torrents</b></span>
+          </label>
+          <button id="clear-torrent-store" type="button" hidden>
+            <span data-i18n="clearTorrentStore">Clear .torrents in data/torrents</span>
+          </button>
           <button id="add" class="primary">
             <span>＋</span><b data-i18n="addDownload">Add download</b>
           </button>
@@ -548,6 +555,7 @@
             <label data-tool="qjs"><span>QuickJS (qjs) <small></small></span><div><input id="tool-qjs" type="text" /><button type="button" data-tool-pick="qjs" data-i18n="browse">Browse…</button><button type="button" data-tool-download="qjs" data-i18n="downloadTool">Download</button><button type="button" data-tool-update="qjs" data-i18n="update">Update</button></div></label>
             <label data-tool="n-m3u8dl-re"><span>N_m3u8DL-RE <small></small></span><div><input id="tool-n-m3u8dl-re" type="text" /><button type="button" data-tool-pick="n-m3u8dl-re" data-i18n="browse">Browse…</button><button type="button" data-tool-download="n-m3u8dl-re" data-i18n="downloadTool">Download</button><button type="button" data-tool-update="n-m3u8dl-re" data-i18n="update">Update</button></div></label>
             <label data-tool="aria2"><span><span data-i18n="aria2Backend">aria2 (HTTP/HTTPS, FTP, torrent and magnet)</span> <small></small></span><div><input id="tool-aria2" type="text" /><button type="button" data-tool-pick="aria2" data-i18n="browse">Browse…</button><button type="button" data-tool-download="aria2" data-i18n="downloadTool">Download</button><button type="button" data-tool-update="aria2" data-i18n="update">Update</button></div></label>
+            <label data-tool="aria2-release-repo"><span><span data-i18n="aria2ReleaseRepo">aria2 release source (owner/repo)</span> <small data-i18n="aria2ReleaseRepoHint">Used by Download/Update above. Point this at a fork's GitHub repo to track its releases instead.</small></span><div><input id="tool-aria2-release-repo" type="text" placeholder="FerroDownload/aria2-static-builds" /></div></label>
             <label data-tool="extractor"><span><span data-i18n="archiveExtractor">Archive extractor</span> <small></small></span><div><input id="tool-extractor" type="text" /><button type="button" data-tool-pick="extractor" data-i18n="browse">Browse…</button><button type="button" data-tool-download="extractor" data-i18n="downloadTool">Download</button></div></label>
             <label data-tool="player"><span><span data-i18n="mediaPlayer">mpv / media player</span> <small></small></span><div><input id="tool-player" type="text" /><button type="button" data-tool-pick="player" data-i18n="browse">Browse…</button><button type="button" data-tool-download="player" data-i18n="downloadTool">Download</button></div></label>
           </div>

@@ -4,6 +4,13 @@ const catalogs = {
     autoExtract: "Extract automatically after download",
     autoExtractHint: "Shown only for archive files. Loose root files are kept inside a folder named after the archive.",
     browserAssistedArchiveReady: "Archive received from the browser. Choose where to save it and whether to extract it automatically.",
+    aria2ReleaseRepo: "aria2 release source (owner/repo)",
+    aria2ReleaseRepoHint: "Used by Download/Update above. Point this at a fork's GitHub repo to track its releases instead.",
+    saveTorrentMetadata: "Save .torrent in data/torrents",
+    saveTorrentMetadataHint: "Keep a copy of every torrent's metadata so it can be redownloaded later. Turning this off deletes a torrent's saved file when its task is removed.",
+    clearTorrentStore: "Clear .torrents in data/torrents",
+    clearTorrentStoreConfirm: "Delete every saved .torrent file in data/torrents that isn't used by an active or queued torrent?",
+    torrentStoreCleared: "Removed {count} .torrent file(s) from data/torrents.",
     networkWaiting: "Waiting for network",
     networkWaitingHint: "The connection changed or went offline. This task will resume automatically when a network interface is available.",
     downloads: "Downloads",
@@ -243,6 +250,13 @@ const catalogs = {
     autoExtract: "Extrair automaticamente após o download",
     autoExtractHint: "Aparece somente para arquivos compactados. Arquivos soltos ficam dentro de uma pasta com o nome do arquivo compactado.",
     browserAssistedArchiveReady: "Arquivo compactado recebido do navegador. Escolha onde salvar e se deseja extrair automaticamente.",
+    aria2ReleaseRepo: "Origem das versões do aria2 (dono/repositório)",
+    aria2ReleaseRepoHint: "Usado pelos botões Baixar/Atualizar acima. Aponte para o repositório de um fork para acompanhar as versões dele.",
+    saveTorrentMetadata: "Salvar .torrent em data/torrents",
+    saveTorrentMetadataHint: "Mantém uma cópia dos metadados de cada torrent para permitir baixar novamente depois. Desligar isso apaga o .torrent salvo quando a tarefa for removida.",
+    clearTorrentStore: "Limpar .torrents em data/torrents",
+    clearTorrentStoreConfirm: "Apagar todos os arquivos .torrent salvos em data/torrents que não estejam em uso por um torrent ativo ou na fila?",
+    torrentStoreCleared: "{count} arquivo(s) .torrent removido(s) de data/torrents.",
     networkWaiting: "Aguardando rede",
     networkWaitingHint: "A conexão mudou ou ficou offline. Esta tarefa será retomada automaticamente quando uma interface de rede estiver disponível.",
     downloads: "Downloads",
@@ -482,6 +496,13 @@ const catalogs = {
     autoExtract: "下载完成后自动解压",
     autoExtractHint: "仅在压缩文件时显示。根目录中的零散文件会解压到以压缩文件命名的文件夹中。",
     browserAssistedArchiveReady: "已从浏览器接收压缩文件。请选择保存位置以及是否自动解压。",
+    aria2ReleaseRepo: "aria2 版本来源（所有者/仓库）",
+    aria2ReleaseRepoHint: "用于上方的下载/更新按钮。指向某个分支的 GitHub 仓库即可改为跟踪该分支的版本。",
+    saveTorrentMetadata: "将 .torrent 保存到 data/torrents",
+    saveTorrentMetadataHint: "保留每个种子的元数据副本以便日后重新下载。关闭此选项后，移除任务时会删除已保存的 .torrent 文件。",
+    clearTorrentStore: "清空 data/torrents 中的 .torrent 文件",
+    clearTorrentStoreConfirm: "是否删除 data/torrents 中未被任何活动或排队种子使用的所有 .torrent 文件？",
+    torrentStoreCleared: "已从 data/torrents 删除 {count} 个 .torrent 文件。",
     networkWaiting: "等待网络",
     networkWaitingHint: "网络连接已更改或断开。可用网络接口恢复后，此任务会自动继续。",
     downloads: "下载",
@@ -1437,6 +1458,32 @@ aboutAudio.onpause = () => { aboutPlayPause.textContent = t("aboutPlay"); };
 
 loadAboutMedia().catch(console.error);
 
+async function refreshTorrentStoreControls() {
+  try {
+    document.querySelector("#save-torrent-metadata").checked = await invoke("get_torrent_store_preference");
+  } catch (error) { console.error(error); }
+}
+document.querySelector("#save-torrent-metadata").onchange = (event) => {
+  invoke("set_torrent_store_preference", { enabled: event.target.checked }).catch((error) => {
+    console.error(error);
+    event.target.checked = !event.target.checked;
+  });
+};
+document.querySelector("#clear-torrent-store").onclick = async () => {
+  if (!window.confirm(t("clearTorrentStoreConfirm"))) return;
+  const button = document.querySelector("#clear-torrent-store");
+  button.disabled = true;
+  try {
+    const removed = await invoke("clear_torrent_store");
+    window.alert(t("torrentStoreCleared").replace("{count}", String(removed)));
+  } catch (error) {
+    console.error(error);
+    window.alert(String(error));
+  } finally {
+    button.disabled = false;
+  }
+};
+
 document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data-page="tools"])').forEach((button) => {
   button.onclick = () => {
     const openedAt = performance.now();
@@ -1456,6 +1503,9 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector("#language-panel").hidden = activePage !== "language";
     document.querySelector("#about-panel").hidden = activePage !== "about";
     document.querySelector("#add").hidden = activePage === "about";
+    document.querySelector("#torrent-store-controls").hidden = activePage !== "torrents";
+    document.querySelector("#clear-torrent-store").hidden = activePage !== "torrents";
+    if (activePage === "torrents") refreshTorrentStoreControls().catch(console.error);
     if (activePage === "about" && aboutAudio.src) {
       aboutAudio.currentTime = 0;
       aboutAudio.play().catch(() => {});
@@ -1829,6 +1879,7 @@ async function refreshToolStatuses() {
       status.textContent = tool.found ? `${t("installed")} · ${tool.version}` : t("missing");
       status.classList.toggle("tool-found", tool.found);
     }
+    document.querySelector("#tool-aria2-release-repo").value = await invoke("get_aria2_release_repo");
   } catch (error) { console.error(error); }
   finally { if (button) button.disabled = false; }
 }
@@ -2456,6 +2507,7 @@ document.querySelector("#save-tools").onclick = async (event) => {
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
       aria2: document.querySelector("#tool-aria2").value,
       extractor: document.querySelector("#tool-extractor").value,
+      aria2ReleaseRepo: document.querySelector("#tool-aria2-release-repo").value,
     });
     await invoke("set_media_player", { path: document.querySelector("#tool-player").value });
     toolsDialog.close();
