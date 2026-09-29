@@ -49,6 +49,8 @@ Isso não devia ser possível: `pairingToken` vem do mesmo `chrome.storage.local
 
 **Ainda esperando um bundle que capture essa falha com o build 0.3.184+ pra ter a resposta definitiva.** Hipóteses já descartadas: janela anônima (não é), perfil diferente do Chrome (usuário confirmou que é o mesmo).
 
+Dado novo, não conclusivo: nos dois testes controlados de velocidade mais recentes (item de performance abaixo, ISOs ARM64 e x64 Insider), o handoff do download direto pro ADM funcionou limpo (`extension.popup.download_handed_off`, sem `not_paired`). Isso **não prova que o bug foi corrigido** — só que essas duas tentativas específicas não bateram nele. Continue tratando como aberto até aparecer (ou deixar de aparecer) de forma consistente em mais rodadas.
+
 ## Investigação fechada: "ADM mais lento que aria2 puro" — era variância de rede/CDN, não bug
 
 Histórico rápido (pra quem só olhar o `git log` deste arquivo): a hipótese começou com um teste não controlado (ISO x64, `teste.log`) que mostrou 73.68s no CLI vs 90.96s no ADM (~24% mais lento), e uma rampa de vazão real e mensurável nos primeiros ~5-7s do lado do ADM. Duas hipóteses foram levantadas e **descartadas** com evidência do próprio usuário:
@@ -62,7 +64,9 @@ Histórico rápido (pra quem só olhar o `git log` deste arquivo): a hipótese c
 
 E a rampa real do ADM neste teste (mesmas amostras de `performance/transfer-engine.jsonl`) foi rápida: 16 conexões já ativas em 1.10s, 51.2 MB/s aos 1.45s, **105.4 MB/s (praticamente o pico) aos 2.15s** — nada parecido com a rampa lenta de 5-7s do teste anterior.
 
-**Conclusão**: o gap de 24% do primeiro teste não era um bug reproduzível do ADM — era a variável de confusão que eu levantei mas não tinha confirmado ainda (os dois links foram gerados ~14 minutos separados, a CDN da Microsoft/Akamai pode rotear pra bordas diferentes dependendo do momento). Controlando essa variável, a diferença cai pra ~4%, que é overhead normal de rodar por trás de RPC + coleta de diagnóstico, não vale a pena caçar mais. **Não reabrir esse tópico sem um novo teste controlado (mesmo link, back-to-back) mostrando gap grande de novo.**
+**Conclusão**: o gap de 24% do primeiro teste não era um bug reproduzível do ADM — era a variável de confusão que eu levantei mas não tinha confirmado ainda (os dois links foram gerados ~14 minutos separados, a CDN da Microsoft/Akamai pode rotear pra bordas diferentes dependendo do momento). Controlando essa variável, a diferença cai pra ~4%, que é overhead normal de rodar por trás de RPC + coleta de diagnóstico, não vale a pena caçar mais.
+
+**Segunda confirmação, independente** (ISO x64 Insider Preview, 8731574272 bytes, VPN desligada desta vez): ADM 85.83s → 101.7 MB/s; CMD 81.70s → 106.9 MB/s. **~4.8% de diferença** — bate com o resultado do ARM64. A rampa do ADM nesse teste foi ainda mais rápida: 72.6 MB/s já aos 0.66s, 119.9 MB/s aos 2.05s. Duas medições controladas e independentes convergindo pro mesmo resultado pequeno (~4-5%) fecha o caso. **Não reabrir sem um novo teste controlado mostrando gap grande de novo.**
 
 ## Regras gerais / avisos que continuam valendo
 
