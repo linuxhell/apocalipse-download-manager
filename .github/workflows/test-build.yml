@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
   push:
     branches: [prep-aria2-ultra]
-    paths: [.github/workflows/test-build.yml]
 
 permissions:
   contents: read
