@@ -1071,7 +1071,24 @@
   // calls happen, an unguarded throw meant the click was silently
   // swallowed: no navigation, no handoff, no trace. That is the unexplained
   // "I click and nothing happens" failure mode.
+  //
+  // background.js already re-injects a fresh content script into every open
+  // tab the instant the extension reloads (chrome.runtime.onInstalled ->
+  // repairOpenCaptureTabs), so a person should never have to reload the page
+  // by hand. But that fresh script's click listener is registered on
+  // document AFTER this stale one, and same-phase listeners on the same
+  // element fire in registration order - so as long as this stale instance
+  // is still attached and still calls preventDefault()/
+  // stopImmediatePropagation() on a recognized click, it wins the race and
+  // the working listener underneath it never gets a turn. Detecting
+  // staleness up front and stepping aside (removing this listener, touching
+  // neither preventDefault nor stopImmediatePropagation) lets that fresh
+  // listener handle the very same click.
   const handleDocumentClick = (event) => {
+    if (!extensionContextActive()) {
+      document.removeEventListener("click", handleDocumentClick, true);
+      return;
+    }
     if (event.button !== 0 || event.metaKey) return;
     const bypass = shortcutPressed(event, shortcutKeys.bypass);
     const force = shortcutPressed(event, shortcutKeys.force);
