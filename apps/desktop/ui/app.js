@@ -1992,6 +1992,9 @@ async function showTorrentInspection(source, generation = analysisGeneration) {
   const torrent = await invoke("inspect_torrent_metadata", { source });
   if (!analysisIsCurrent(generation)) return false;
   document.querySelector("#torrent-title").textContent = torrent.name;
+  document.querySelector("#file-name").value = torrent.name;
+  knownArchiveName = "";
+  refreshAutoExtractOption();
   document.querySelector("#torrent-total").textContent = formatBytes(torrent.totalSize);
   pendingExpectedSize = Number.isFinite(torrent.totalSize) ? torrent.totalSize : null;
   pendingTorrentMetadataPath = torrent.torrentPath || null;
@@ -2097,17 +2100,8 @@ document
 async function removeSelectedDownloads(button, deleteFiles) {
   button.disabled = true;
   const ids = [...selectedIds];
-  const shouldAskTorrentMetadata = deleteFiles
-    && activePage === "torrents"
-    && ids.some((id) => {
-      const task = downloads.find((item) => item.id === id);
-      return task
-        && isTorrent(task)
-        && Boolean(task.torrent_metadata_path);
-    });
-  const deleteTorrentMetadata = shouldAskTorrentMetadata
-    ? window.confirm(t("deleteTorrentMetadataConfirm"))
-    : false;
+  // The explicit torrent-store control handles metadata deletion.
+  const deleteTorrentMetadata = false;
   downloadListState.beginRemoval(ids);
   let removed = false;
   try {

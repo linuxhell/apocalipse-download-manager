@@ -2765,11 +2765,12 @@ fn torrent_store_directory(state: &AppState) -> Result<PathBuf, String> {
 }
 
 fn persist_torrent_bytes(state: &AppState, bytes: &[u8]) -> Result<PathBuf, String> {
-    // Validate before writing anything into the persistent torrent store.
-    inspect_torrent_bytes(bytes)?;
+    // Keep a readable title and a digest so torrents with the same title do not collide.
+    let inspection = inspect_torrent_bytes(bytes)?;
     let directory = torrent_store_directory(state)?;
     let digest = format!("{:x}", Sha256::digest(bytes));
-    let path = directory.join(format!("{digest}.torrent"));
+    let title = validate_file_name(&sanitize_title_for_filename(&inspection.name))?;
+    let path = directory.join(format!("{title}--{digest}.torrent"));
     if !path.is_file() {
         fs::write(&path, bytes).map_err(|error| error.to_string())?;
     }
@@ -2819,6 +2820,26 @@ async fn materialize_torrent_metadata_file(
 
     let endpoint = endpoint.ok_or_else(|| "aria2_endpoint_required".to_owned())?;
     let directory = torrent_store_directory(state)?;
+    let info_hash = url::Url::parse(source).ok().and_then(|url| {
+        url.query_pairs().find_map(|(key, value)| {
+            (key == "xt").then(|| value.strip_prefix("urn:btih:").map(str::to_ascii_lowercase)).flatten()
+        })
+    });
+    if let Some(ref hash) = info_hash {
+        if hash.len() == 40 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            for entry in fs::read_dir(&directory).map_err(|error| error.to_string())?.flatten() {
+                let path = entry.path();
+                let suffix = format!("--{hash}.torrent");
+                let file_name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+                if (file_name.eq_ignore_ascii_case(&format!("{hash}.torrent"))
+                    || file_name.to_ascii_lowercase().ends_with(&suffix))
+                    && inspect_torrent_file(&path).is_ok()
+                {
+                    return Ok(path);
+                }
+            }
+        }
+    }
     diagnostic_log(
         state,
         "INFO",
@@ -2852,6 +2873,16 @@ async fn materialize_torrent_metadata_file(
             fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
         ),
     );
+    let inspection = inspect_torrent_file(&path)?;
+    let title = validate_file_name(&sanitize_title_for_filename(&inspection.name))?;
+    let hash = info_hash.unwrap_or_else(|| format!("{:x}", Sha256::digest(fs::read(&path).unwrap_or_default())));
+    let named = directory.join(format!("{title}--{hash}.torrent"));
+    if named != path {
+        if !named.exists() {
+            fs::rename(&path, &named).map_err(|error| error.to_string())?;
+        }
+        return Ok(named);
+    }
     Ok(path)
 }
 
@@ -8746,7 +8777,7 @@ fn find_video_file(root: &Path, depth: usize) -> Option<PathBuf> {
             }
         }
     }
-    best.map(|(_, path)| path)
+    best.filter(|(size, _)| *size > 0).map(|(_, path)| path)
 }
 
 fn find_named_file(root: &Path, expected_name: &str, depth: usize) -> Option<PathBuf> {
@@ -8906,7 +8937,7 @@ fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
             best = Some((size, candidate));
         }
     }
-    best.map(|(_, path)| path)
+    best.filter(|(size, _)| *size > 0).map(|(_, path)| path)
 }
 
 #[tauri::command]
@@ -8934,6 +8965,9 @@ fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
         active_torrent_video(root.parent().unwrap_or(Path::new(".")))
             .ok_or_else(|| "torrent_video_not_available".to_owned())?
     };
+    if video.metadata().map(|metadata| metadata.len()).unwrap_or(0) == 0 {
+        return Err("torrent_video_not_available".to_owned());
+    }
     let player =
         player.unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "vlc.exe" } else { "vlc" }));
     diagnostic_log(
@@ -10039,7 +10073,18 @@ fn enqueue_download_impl(
         .and_then(|context| context.title.as_deref())
         .map(sanitize_title_for_filename)
         .filter(|name| !name.is_empty());
-    let proposed = file_name
+    let torrent_name = if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet) {
+        context.as_ref()
+            .and_then(|context| context.torrent_metadata_path.clone())
+            .and_then(|path| validated_torrent_metadata_path(state, Some(path)))
+            .and_then(|path| inspect_torrent_file(&path).ok())
+            .map(|inspection| sanitize_title_for_filename(&inspection.name))
+            .filter(|name| !name.is_empty())
+    } else {
+        None
+    };
+    let proposed = torrent_name
+        .or(file_name)
         .or(title_based_name)
         .unwrap_or_else(|| suggested_name(&url));
     let file_name = validate_file_name(&append_source_extension(proposed, &url, kind))?;
