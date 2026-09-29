@@ -744,6 +744,11 @@ dialog input:focus {
   background: var(--surface);
 }
 #tools-dialog #tool-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+#tools-dialog .aria2-tool-group { grid-column: 1 / -1; display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+#tools-dialog .aria2-tool-group > label { min-width: 0; }
+#tools-dialog .aria2-tool-group > label[data-tool="aria2-release-repo"] { padding-top: 10px; border-top: 1px solid var(--line); }
+#tools-dialog .aria2-tool-group > label[data-tool="aria2-release-repo"] > div { grid-template-columns: minmax(0, 1fr); }
+.actions #torrent-store-controls[hidden], .actions #clear-torrent-store[hidden] { display: none !important; }
 #tools-dialog .tool-settings {
   min-height: 0;
   overflow-y: auto;
