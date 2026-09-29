@@ -1050,12 +1050,33 @@
     })();
     return true;
   };
-  document.addEventListener("click", (event) => {
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey) return;
+  // Capture phase, not bubble: many download/magnet buttons on ad-supported
+  // sites (the exact class of site reported as broken - bludvfilmes1.xyz,
+  // scloud.ws, esoui.com) run their own click handler directly on the
+  // button/anchor to gate an ad interstitial, and that handler calls
+  // preventDefault()/stopPropagation() before a bubble-phase listener on
+  // document would ever see the event. A capture-phase listener on document
+  // fires first, before any handler further down the tree, so the real
+  // magnet:/file href is read while it still reflects the page's intent -
+  // magnet links in particular have no HTTP request for a network-layer
+  // fallback to catch, so this is their only capture path.
+  //
+  // Every handoff below goes through sendRuntimeMessageQuietly (already
+  // used for the heartbeat/appearance-sync timers above) instead of calling
+  // chrome.runtime.sendMessage directly. Once a newer extension build (an
+  // extension reload during dev/CI testing, or an auto-update) replaces the
+  // service worker this content script was injected by, every chrome.runtime
+  // call here throws synchronously with "Extension context invalidated" -
+  // and since event.preventDefault() has already run by the time these
+  // calls happen, an unguarded throw meant the click was silently
+  // swallowed: no navigation, no handoff, no trace. That is the unexplained
+  // "I click and nothing happens" failure mode.
+  const handleDocumentClick = (event) => {
+    if (event.button !== 0 || event.metaKey) return;
     const bypass = shortcutPressed(event, shortcutKeys.bypass);
     const force = shortcutPressed(event, shortcutKeys.force);
     if (bypass) {
-      chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 }).catch(() => {});
+      void sendRuntimeMessageQuietly({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 });
       return;
     }
     const magnetAnchor = event.target.closest?.('a[href^="magnet:"]');
@@ -1081,11 +1102,11 @@
       event.preventDefault();
       event.stopImmediatePropagation();
       const title = new URL(magnetUrl).searchParams.get("dn") || "magnet";
-      chrome.runtime.sendMessage({
+      void sendRuntimeMessageQuietly({
         type: "APOCALIPSE_DOWNLOAD",
         item: { url: magnetUrl, requestUrls: [magnetUrl], kind: "torrent", title },
-      }, (result) => {
-        if (chrome.runtime.lastError || result?.target !== "desktop") location.assign(magnetUrl);
+      }).then((result) => {
+        if (result?.target !== "desktop") location.assign(magnetUrl);
       });
       return;
     }
@@ -1093,7 +1114,7 @@
       if (forceKnownHlsDownload(event)) return;
       // Force is a transaction, not an instruction to steal the visible href.
       // Let the page run and observe the real downstream file request/download.
-      chrome.runtime.sendMessage({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 }).catch(() => {});
+      void sendRuntimeMessageQuietly({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 });
       return;
     }
     if (event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -1149,7 +1170,7 @@
     }
     event.preventDefault();
     event.stopImmediatePropagation();
-    chrome.runtime.sendMessage({
+    void sendRuntimeMessageQuietly({
       type: "APOCALIPSE_DOWNLOAD",
       item: {
         url,
@@ -1158,10 +1179,11 @@
         kind: "file",
         title: fileNameForUrl(url),
       },
-    }, (result) => {
-      if (chrome.runtime.lastError || result?.target !== "desktop") location.assign(url);
+    }).then((result) => {
+      if (result?.target !== "desktop") location.assign(url);
     });
-  }, true);
+  };
+  document.addEventListener("click", handleDocumentClick, true);
   const hlsForPage = () => {
     const urls = [...new Set(performance.getEntriesByType("resource").map((entry) => entry.name)
       .filter((url) => /\.m3u8(?:$|[?#])/i.test(url)))];
