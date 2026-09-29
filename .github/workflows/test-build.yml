@@ -1,0 +1,215 @@
+# Manual, build-only artifact generation for testing. No tagging, no
+# GitHub Release publication, no gh release/delete calls - mirrors
+# release.yml's build job verbatim, minus its release job.
+name: Test build artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64 portable
+            os: windows-latest
+            artifact: apocalipse-download-manager-windows-x64-portable
+            output: apocalipse-download-manager-windows-x64-portable.zip
+            aria2_suffix: windows-x64.exe
+            aria2_binary: aria2c.exe
+          - name: Linux x64 portable
+            os: ubuntu-latest
+            artifact: apocalipse-download-manager-linux-x64-portable
+            output: apocalipse-download-manager-linux-x64-portable.tar.gz
+            aria2_suffix: linux-x64
+            aria2_binary: aria2c
+          - name: macOS x64 portable
+            os: macos-15-intel
+            artifact: apocalipse-download-manager-macos-x64-portable
+            output: apocalipse-download-manager-macos-x64-portable.zip
+            aria2_suffix: macos-x64
+            aria2_binary: aria2c
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libpam0g-dev patchelf ffmpeg
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: '22'
+
+      - name: Validate
+        shell: bash
+        run: |
+          cargo fmt --all -- --check
+          cargo update -p zip --precise 2.4.2
+          cargo test --workspace --locked
+
+      - name: Verify prepared media with FFmpeg and FFprobe
+        if: runner.os == 'Linux'
+        run: cargo test -p apocalipse-desktop --locked paired_preview_uses_real_mux_and_probe -- --ignored
+      - name: Build desktop
+        run: cargo build --release --locked -p apocalipse-desktop
+
+      - name: Build Linux AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cd apps/desktop
+          npx --yes @tauri-apps/cli@2 build --bundles appimage
+
+      - name: Download aria2 backend
+        shell: bash
+        env:
+          ARIA2_SUFFIX: ${{ matrix.aria2_suffix }}
+          ARIA2_BINARY: ${{ matrix.aria2_binary }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_json="$RUNNER_TEMP/aria2-release.json"
+          curl --fail --location --retry 3 \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/latest" \
+            --output "$release_json"
+          read -r asset_id checksum_id asset_name checksum_name < <(python3 - "$release_json" "$ARIA2_SUFFIX" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              release = json.load(stream)
+          suffix = sys.argv[2].lower()
+          assets = release.get("assets", [])
+          selected = None
+          for asset in assets:
+              name = str(asset.get("name", ""))
+              lower = name.lower()
+              if lower.startswith("aria2c-") and lower.endswith(suffix) and not lower.endswith(".sha256"):
+                  selected = asset
+                  break
+          if selected is None:
+              raise SystemExit(f"aria2 compatible asset not found for suffix: {suffix}")
+          checksum_name = f"{selected['name']}.sha256"
+          checksum = next((asset for asset in assets if asset.get("name") == checksum_name), None)
+          if checksum is None:
+              raise SystemExit(f"aria2 checksum asset not found: {checksum_name}")
+          sys.stdout.buffer.write((f"{selected['id']} {checksum['id']} {selected['name']} {checksum_name}\n").encode())
+          PY
+          )
+          mkdir -p dist/aria2-backend
+          curl --fail --location --retry 3 \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/assets/$asset_id" \
+            --output "dist/aria2-backend/$ARIA2_BINARY"
+          curl --fail --location --retry 3 \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/assets/$checksum_id" \
+            --output "$RUNNER_TEMP/$checksum_name"
+          python3 - "dist/aria2-backend/$ARIA2_BINARY" "$RUNNER_TEMP/$checksum_name" "$asset_name" <<'PY'
+          import hashlib
+          import pathlib
+          import sys
+
+          binary = pathlib.Path(sys.argv[1]).read_bytes()
+          checksum_text = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
+          expected = checksum_text.split()[0].lower()
+          actual = hashlib.sha256(binary).hexdigest()
+          if actual != expected:
+              raise SystemExit(
+                  f"aria2 checksum mismatch for {sys.argv[3]}: expected={expected} actual={actual}"
+              )
+          print(f"aria2 checksum verified: {actual}")
+          PY
+          chmod 755 "dist/aria2-backend/$ARIA2_BINARY"
+
+      - name: Stage Windows portable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $package = "dist/Apocalipse Download Manager"
+          New-Item -ItemType Directory -Force $package | Out-Null
+          Copy-Item "target/release/apocalipse-desktop.exe" "$package/Apocalipse Download Manager.exe"
+          New-Item -ItemType Directory -Force "$package/data/tools/aria2" | Out-Null
+          Copy-Item "dist/aria2-backend/aria2c.exe" "$package/data/tools/aria2/aria2c.exe"
+          Copy-Item "README.md","LICENSE" $package
+          Compress-Archive -Path $package -DestinationPath "dist/${{ matrix.output }}" -Force
+
+      - name: Stage Linux portable
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          package="dist/Apocalipse Download Manager"
+          mkdir -p "$package/data/tools/aria2"
+          install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
+          install -m 755 dist/aria2-backend/aria2c "$package/data/tools/aria2/aria2c"
+          cp README.md LICENSE "$package/"
+          appimage="$(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "$appimage"
+          install -m 755 "$appimage" "dist/apocalipse-download-manager-linux-x64.AppImage"
+          tar -C dist -czf "dist/${{ matrix.output }}" "Apocalipse Download Manager"
+
+      - name: Stage macOS portable
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app="dist/Apocalipse Download Manager.app"
+          mkdir -p "$app/Contents/MacOS/data/tools/aria2" "$app/Contents/Resources"
+          cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
+          chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
+          install -m 755 dist/aria2-backend/aria2c "$app/Contents/MacOS/data/tools/aria2/aria2c"
+          cp packaging/macos/Info.plist "$app/Contents/Info.plist"
+          python3 - "$app/Contents/Info.plist" <<'PYMAC'
+          import plistlib
+          import sys
+          import tomllib
+
+          with open("Cargo.toml", "rb") as stream:
+              version = tomllib.load(stream)["workspace"]["package"]["version"]
+          version = version.split("-", 1)[0].split("+", 1)[0]
+          path = sys.argv[1]
+          with open(path, "rb") as stream:
+              info = plistlib.load(stream)
+          info["CFBundleShortVersionString"] = version
+          info["CFBundleVersion"] = version
+          with open(path, "wb") as stream:
+              plistlib.dump(info, stream, sort_keys=False)
+          PYMAC
+          cp README.md LICENSE "$app/Contents/Resources/"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "dist/${{ matrix.output }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.output }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: apocalipse-download-manager-linux-x64-appimage
+          path: dist/apocalipse-download-manager-linux-x64.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
