@@ -3608,22 +3608,29 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
             .ok_or_else(|| "aria2_rpc_runtime_missing".to_owned())?
     };
     let runtime_spawned = spawned.is_some();
-    if let Some((pid, port)) = spawned {
-        diagnostic_log(
-            state,
-            "INFO",
-            "aria2.runtime_spawned",
-            &format!(
-                "pid={pid} parent_pid={} port={port} binary=aria2c backend=classic listen_port=6881-6999 dht_listen_port=6881-6999 stop_with_parent=true",
-                std::process::id()
-            ),
-        );
-    }
     if runtime_spawned {
         endpoint.wait_ready().await?;
         endpoint
             .set_global_download_limit(settings.global_bandwidth_limit)
             .await?;
+    }
+    if let Some((pid, port)) = spawned {
+        // Logged after wait_ready() so we can include the actual aria2
+        // version string (aria2-ultra vs. a stray vanilla aria2c on PATH is
+        // otherwise indistinguishable from the diagnostics bundle alone).
+        let version = endpoint
+            .version()
+            .await
+            .unwrap_or_else(|_| "unknown".to_owned());
+        diagnostic_log(
+            state,
+            "INFO",
+            "aria2.runtime_spawned",
+            &format!(
+                "pid={pid} parent_pid={} port={port} binary=aria2c backend=aria2-ultra version={version} listen_port=6881-6999 dht_listen_port=6881-6999 stop_with_parent=true",
+                std::process::id()
+            ),
+        );
     }
     Ok(endpoint)
 }
@@ -6158,7 +6165,7 @@ async fn run_aria2_download(
         }
     };
     diagnostic_log(&state,"INFO","aria2.task_started",&format!("task={id} gid={gid} engine={kind:?} connections={} listen_port=6881-6999 dht_listen_port=6881-6999",connections.min(16)));
-    state.diagnostics.record(if is_bittorrent{"torrent.engine_selected"}else{"http.engine_selected"},"INFO",None,Some(&id.to_string()),serde_json::json!({"engine":"aria2-rpc","backend":"classic","connections":connections.min(16),"kind":format!("{kind:?}"),"maxConnectionPerServer":connections.min(16),"split":connections.min(16),"listenPort":"6881-6999","dhtListenPort":"6881-6999","fileAllocation":"none"}));
+    state.diagnostics.record(if is_bittorrent{"torrent.engine_selected"}else{"http.engine_selected"},"INFO",None,Some(&id.to_string()),serde_json::json!({"engine":"aria2-rpc","backend":"aria2-ultra","connections":connections.min(16),"kind":format!("{kind:?}"),"maxConnectionPerServer":connections.min(16),"split":connections.min(16),"listenPort":"6881-6999","dhtListenPort":"6881-6999","fileAllocation":if is_bittorrent{"none"}else{"trunc"}}));
 
     let mut last_at = Instant::now();
     let transfer_started_at = startup_started_at;
@@ -6350,6 +6357,16 @@ async fn run_aria2_download(
                     }
                     "error" | "removed" => {
                         let engine_tag = if is_bittorrent { "aria2_torrent_error" } else { "aria2_task_failed" };
+                        diagnostic_log(
+                            &state,
+                            "ERROR",
+                            if is_bittorrent { "aria2.torrent_error" } else { "aria2.http_error" },
+                            &format!(
+                                "task={id} gid={gid} status={} reason={}",
+                                status.status,
+                                status.error_message.as_deref().unwrap_or("unknown")
+                            ),
+                        );
                         update_task(&app, id, true, |item| {
                             item.state = DownloadState::Failed {
                                 message: status

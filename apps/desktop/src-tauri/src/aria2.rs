@@ -130,7 +130,12 @@ impl Runtime {
             .arg(format!("--rpc-secret={secret}"))
             .arg(format!("--stop-with-process={}", std::process::id()))
             .arg("--continue=true")
-            .arg("--file-allocation=none")
+            // No explicit --file-allocation here: aria2-ultra's own compiled
+            // default (trunc) is what we want for direct/HTTP downloads, and
+            // it auto-downgrades to none for BitTorrent (v1/v2/hybrid) on its
+            // own (see RequestGroup::setDownloadContext upstream). Forcing
+            // "none" here as vanilla aria2 builds typically do would silently
+            // defeat that and make every direct download slower.
             .arg("--auto-file-renaming=false")
             .arg("--allow-overwrite=true")
             .arg("--max-concurrent-downloads=20")
@@ -291,7 +296,8 @@ impl Endpoint {
             Value::String(directory.to_string_lossy().into_owned()),
         );
         options.insert("continue".into(), Value::String("true".into()));
-        options.insert("file-allocation".into(), Value::String("none".into()));
+        // No explicit file-allocation override: let the daemon's default
+        // (aria2-ultra: trunc) apply to direct/HTTP/FTP downloads.
         if download_limit > 0 {
             options.insert(
                 "max-download-limit".into(),
