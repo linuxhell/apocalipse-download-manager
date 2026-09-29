@@ -952,12 +952,28 @@ async function takeBrowserDownload(item, eraseFromHistory = false, resolvedFileN
     });
     return true;
   } catch (error) {
+    // "not_paired" here has repeatedly shown up alongside a normal window,
+    // a heartbeat that is authenticating fine in the very same session, and
+    // a pairingToken that popup.js's own storage.onChanged listener never
+    // fires a removal for - none of which explain a genuinely empty token
+    // read from the same extension storage. Distinguish "key never existed"
+    // (raw, no default) from "key exists but is falsy" (null vs "" are not
+    // the same story) and count the tab's total storage keys, so the next
+    // bundle either confirms a real empty-token bug or rules it out for
+    // something else entirely (a stale service worker snapshot, a second
+    // profile, ...).
     let pairedInThisContext = "unknown";
+    let pairingTokenPresent = "unknown";
+    let pairingTokenRawType = "unknown";
+    let storageKeyCount = "unknown";
     try {
-      const { pairingToken: storedToken = "" } = await chrome.storage.local.get({ pairingToken: "" });
-      pairedInThisContext = Boolean(storedToken);
+      const raw = await chrome.storage.local.get(null);
+      storageKeyCount = Object.keys(raw).length;
+      pairingTokenPresent = Object.prototype.hasOwnProperty.call(raw, "pairingToken");
+      pairingTokenRawType = typeof raw.pairingToken;
+      pairedInThisContext = Boolean(raw.pairingToken);
     } catch {}
-    void diagnostic("browser_download.takeover_failed", state, { level: "ERROR", error: String(error), detail: `disposable=${disposable} cancelled=${cancelled} incognito=${Boolean(item.incognito)} paired_in_this_context=${pairedInThisContext}` });
+    void diagnostic("browser_download.takeover_failed", state, { level: "ERROR", error: String(error), detail: `disposable=${disposable} cancelled=${cancelled} incognito=${Boolean(item.incognito)} paired_in_this_context=${pairedInThisContext} pairing_token_present=${pairingTokenPresent} pairing_token_type=${pairingTokenRawType} storage_key_count=${storageKeyCount}` });
     if (cancelled) {
       bypassUntil = Date.now() + 2000;
       chrome.downloads.download({ url, saveAs: false }, () => void chrome.runtime.lastError);
