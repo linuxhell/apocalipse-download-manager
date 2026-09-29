@@ -49,24 +49,20 @@ Isso não devia ser possível: `pairingToken` vem do mesmo `chrome.storage.local
 
 **Ainda esperando um bundle que capture essa falha com o build 0.3.184+ pra ter a resposta definitiva.** Hipóteses já descartadas: janela anônima (não é), perfil diferente do Chrome (usuário confirmou que é o mesmo).
 
-## Investigação em andamento, não resolvida: ADM mais lento que aria2 puro pra mesmo arquivo/servidor
+## Investigação fechada: "ADM mais lento que aria2 puro" — era variância de rede/CDN, não bug
 
-O usuário rodou o **mesmo** aria2-ultra.exe via `cmd`, direto (sem ADM), baixando a mesma URL do ISO do Windows 11 (`software.download.prss.microsoft.com`), e me mandou o `--log-level=debug` completo (`teste.log`, ~4 milhões de linhas). Comparação real que eu fiz (não é chute, são números do log):
+Histórico rápido (pra quem só olhar o `git log` deste arquivo): a hipótese começou com um teste não controlado (ISO x64, `teste.log`) que mostrou 73.68s no CLI vs 90.96s no ADM (~24% mais lento), e uma rampa de vazão real e mensurável nos primeiros ~5-7s do lado do ADM. Duas hipóteses foram levantadas e **descartadas** com evidência do próprio usuário:
+- `continue=true` retomando um `.aria2`/parcial de tentativa anterior — descartado: usuário confirmou que sempre excluía o arquivo da lista **e do disco** a cada falha, e a pasta do teste do `cmd` estava vazia.
+- Polling de status do ADM a 100ms competindo por CPU — descartado por inspeção do código: esse intervalo agressivo só dura até o primeiro byte chegar (frequentemente <1s), não cobre os 5-7s da rampa observada.
 
-- **CLI puro**: início `19:09:31.531`, fim (`Download complete`) `19:10:45.213` → **73.68s** pra 8172068864 bytes → **110.9 MB/s médio**.
-- **ADM** (bundle anterior, mesmo arquivo): início `18:55:32.082`, fim `18:57:03.044` → **90.96s** → **89.8 MB/s médio**. Cerca de **24% mais lento**.
+**Teste controlado que resolveu a dúvida**: usuário gerou um link novo (ISO Windows 11 **ARM64**, 7937691648 bytes) e baixou pelo ADM e pelo `cmd` **em sequência, minutos um do outro**, mesmo link nos dois. Resultado:
+- **ADM**: 79.51s → 99.9 MB/s médio.
+- **CMD**: 76.12s → 104.3 MB/s médio.
+- Diferença: **~4%**, não 24%.
 
-Em ambos os casos as 16 conexões TCP abrem quase instantaneamente (CLI: todas as 16 entre `19:09:31.552` e `19:09:31.644`, ~90ms; ADM: `connections=16` já aos 0.71s). **Não é diferença na contagem de conexões nem velocidade de abrir socket.** A diferença está em como a vazão agregada sobe depois disso:
-- ADM (amostras reais de `performance/transfer-engine.jsonl`, taxa instantânea `computedDeltaBytesPerSecond`): 0.9 MB/s aos 0.71s → 11.2 MB/s aos 1.43s → 54.1 MB/s aos 1.78s → 73.9 MB/s aos 2.83s → só estabiliza perto de 85-100 MB/s por volta dos 5-7s.
-- CLI: não tem telemetria de bytes/s no log bruto do aria2 (é log `--log-level=debug` do binário, sem barra de progresso capturada), mas a densidade de eventos `socket: read:1` por segundo (proxy grosseiro de atividade) já está em ~9000/s no segundo seguinte à conexão (`19:09:32`), sem o mesmo período prolongado de quase-zero que o ADM mostra.
+E a rampa real do ADM neste teste (mesmas amostras de `performance/transfer-engine.jsonl`) foi rápida: 16 conexões já ativas em 1.10s, 51.2 MB/s aos 1.45s, **105.4 MB/s (praticamente o pico) aos 2.15s** — nada parecido com a rampa lenta de 5-7s do teste anterior.
 
-**Suspeito mais concreto ainda não confirmado**: `apps/desktop/src-tauri/src/aria2.rs`, `add_download()`, linha ~298: `options.insert("continue".into(), Value::String("true".into()));` — enviado incondicionalmente em toda chamada `aria2.addUri` do ADM. Se o destino já tinha um arquivo parcial/`.aria2` de uma tentativa anterior (bem provável nesta sessão especificamente, já que o mesmo ISO foi tentado várias vezes por causa do bug do `not_paired`), aria2 faria trabalho de retomada antes de puxar bytes novos — o que bateria com uma rampa de alguns segundos. Isso **não foi confirmado**, só é a explicação mais plausível que encontrei até agora batendo com a diferença real medida.
-
-**Próximos passos pra quem pegar isso**:
-1. Perguntar ao usuário o comando `aria2c` exato usado no teste do `cmd` (flags de `--continue`, `--file-allocation`, etc.) e se a pasta de destino do teste do `cmd` estava vazia ou já tinha um arquivo/`.aria2` de tentativa anterior.
-2. Reproduzir o teste do ADM apontando pra um destino garantidamente limpo (sem `.aria2`/parcial prévio) e comparar de novo.
-3. Se `continue=true` for mesmo a causa, considerar: só enviar `continue=true` quando existir de fato um `.aria2`/arquivo parcial no destino (checar antes de montar as options), em vez de sempre.
-4. **Não afirmar conclusão nenhuma sobre isso sem novo log real comparando as duas condições.**
+**Conclusão**: o gap de 24% do primeiro teste não era um bug reproduzível do ADM — era a variável de confusão que eu levantei mas não tinha confirmado ainda (os dois links foram gerados ~14 minutos separados, a CDN da Microsoft/Akamai pode rotear pra bordas diferentes dependendo do momento). Controlando essa variável, a diferença cai pra ~4%, que é overhead normal de rodar por trás de RPC + coleta de diagnóstico, não vale a pena caçar mais. **Não reabrir esse tópico sem um novo teste controlado (mesmo link, back-to-back) mostrando gap grande de novo.**
 
 ## Regras gerais / avisos que continuam valendo
 
