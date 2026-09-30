@@ -97,3 +97,10 @@ Validação local: node --test tests/*.test.cjs, cargo test -p apocalipse-core e
 - Descoberta de mídia percorre raízes abertas dos shreddit-player, inclusive componentes internos; catálogo, overlays e resolução de player usam a mesma descoberta. Timer existente cobre raízes criadas depois.
 - Download usa permalink do shreddit-post e pageExtractor, sem misturar manifests/tracks de outros posts ou baixar DASH sem áudio. Sem permalink não oferece download de uma faixa isolada. Gravação mantém os critérios de capacidade existentes.
 - Testes executam content.js real com vídeo em Shadow DOM: catálogo, Download e gravação de player MSE. Download real via yt-dlp requer reteste no navegador do usuário.
+
+
+## Reddit — extensão 0.3.187 e desktop atualizado (teste)
+- Log reddit.zip confirma post encaminhado a engine=Http/Aria2Rpc aria2_accelerated_http com nome O reddit de OVNIs.mp4. A 0.3.186 corrigiu descoberta, mas faltou classificação desktop do permalink.
+- Classificador agora encaminha URLs de posts Reddit ao MediaPage/yt-dlp; imagens i.redd.it, tracks v.redd.it e feed continuam HTTP. Requer atualizar desktop e extensão.
+- Título comum de mídia agora prioriza post-title/cabeçalho do shreddit-post, atravessando raízes para vídeos e imagens. Overlay usa a mesma resolução do catálogo.
+- 48 testes core passaram (46 unitários + 2 integração); 38 arquivos JS passaram. Teste executa script real para título de post no download e imagem. Reprodução final no Windows requer reteste; ZIP não contém arquivo inválido para inspecionar bytes.

@@ -42,7 +42,7 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
     querySelector: selector => selector.includes('a[href') && permalink ? { href: permalink } : null,
     querySelectorAll: () => [], closest: selector => selector.includes('article') ? post : null,
   };
-  const redditPost = { getAttribute: name => name === 'permalink' ? permalink : null };
+  const redditPost = { getAttribute: name => name === 'permalink' ? permalink : name === 'post-title' ? 'Exact Reddit post title' : null };
   const player = { closest: selector => selector === 'shreddit-post' ? redditPost : null };
   player.shadowRoot = { host: player, querySelectorAll: selector => selector === 'video' || selector === 'video,audio' ? [video] : [] };
   if (shadow) video.getRootNode = () => player.shadowRoot;
@@ -88,12 +88,13 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
   });
   context.window = context; context.top = context;
   vm.runInContext(readFileSync(join(__dirname, '../browser-extension/tiktok-identity.js'), 'utf8'), context);
-  vm.runInContext(script.replace(/\}\)\(\);\s*$/, 'globalThis.testHooks = { installOverlays, collect };\n})();'), context);
+  vm.runInContext(script.replace(/\}\)\(\);\s*$/, 'globalThis.testHooks = { installOverlays, collect, titleInfoFor };\n})();'), context);
   context.testHooks.installOverlays();
   const button = appended.find(node => node.className === 'apocalipse-media-download');
   assert.ok(button, 'the actual overlay must be installed');
   return {
     sent, fetched, location, video, appended,
+    imageTitle: () => context.testHooks.titleInfoFor({ tagName: "IMG", closest: () => redditPost }),
     click: () => button.click({ preventDefault() {}, stopPropagation() {} }),
     scan: () => context.testHooks.collect(),
     downloads: () => sent.filter(message => message.type === 'APOCALIPSE_DOWNLOAD'),
@@ -332,6 +333,7 @@ test('Reddit shadow video appears in popup and Download sends its post, not a si
   const item = p.downloads()[0].item;
   assert.equal(item.url, expected);
   assert.equal(item.pageExtractor, true);
+  assert.equal(item.title, "Exact Reddit post title");
   assert.equal(item.audioUrl, null);
   assert.equal(item.requestUrls.length, 0);
 });
@@ -343,4 +345,11 @@ test('Reddit MSE shadow video keeps Record and sends the permalink before readin
   await p.click();
   assert.equal(p.downloads()[0].item.url, 'https://www.reddit.com/r/UFOs/comments/def456/second_post/');
   assert.equal(p.fetched.length, 0);
+});
+
+
+test('Reddit images use their post title instead of subreddit page title', () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOs/', shadow: true, permalink: '/r/UFOs/comments/abc123/title/' });
+  assert.equal(p.imageTitle().title, 'Exact Reddit post title');
+  assert.equal(p.imageTitle().source, 'reddit_post');
 });

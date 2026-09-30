@@ -56,21 +56,25 @@
     });
     return [...found];
   };
-  const redditUrlFor = element => {
-    if (!isRedditPage() || element?.tagName !== "VIDEO") return null;
+  const redditPostFor = element => {
+    if (!isRedditPage()) return null;
     let node = element;
     while (node) {
       const post = node.closest?.("shreddit-post");
-      const permalink = post?.getAttribute?.("permalink");
-      if (permalink) {
-        try {
-          const url = new URL(permalink, location.href);
-          if (/^https?:$/.test(url.protocol) && /(^|\.)reddit\.com$/i.test(url.hostname)
-            && /^\/r\/[^/]+\/comments\/[^/]+(?:\/|$)/.test(url.pathname)) return url.href;
-        } catch {}
-      }
+      if (post) return post;
       node = node.getRootNode?.()?.host || null;
     }
+    return null;
+  };
+  const redditUrlFor = element => {
+    if (element?.tagName !== "VIDEO") return null;
+    const permalink = redditPostFor(element)?.getAttribute?.("permalink");
+    if (!permalink) return null;
+    try {
+      const url = new URL(permalink, location.href);
+      if (/^https?:$/.test(url.protocol) && /(^|\.)reddit\.com$/i.test(url.hostname)
+        && /^\/r\/[^/]+\/comments\/[^/]+(?:\/|$)/.test(url.pathname)) return url.href;
+    } catch {}
     return null;
   };
   let mainHookReady = false;
@@ -365,6 +369,10 @@
     return "";
   };
   const titleInfoFor = (element) => {
+    const redditPost = redditPostFor(element);
+    const redditTitle = compactMediaTitle(redditPost?.getAttribute?.("post-title")
+      || redditPost?.querySelector?.('[slot="title"],h1,h2,h3')?.textContent);
+    if (redditTitle) return { title: redditTitle, source: "reddit_post" };
     const labels = [
       element?.getAttribute?.("aria-label"),
       element?.title,
@@ -1770,7 +1778,7 @@
           candidate: currentUrl,
         });
         const thumbnail = await captureThumbnailFor(element, "video");
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, pageExtractor: Boolean(socialPageUrl), audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: resolved?.mediaKind || element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail } }, (result) => {
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, pageExtractor: Boolean(socialPageUrl), audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: resolved?.mediaKind || element.tagName.toLowerCase(), title: facebookPageUrl || isRedditPage() ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail } }, (result) => {
           const failed = chrome.runtime.lastError || !result?.ok;
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";
