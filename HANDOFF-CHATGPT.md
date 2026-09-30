@@ -76,3 +76,17 @@ E a rampa real do ADM neste teste (mesmas amostras de `performance/transfer-engi
 - Consultar o handoff do `aria2-ultra` antes de assumir comportamento default do motor.
 - Rodar `node --test tests/*.test.cjs` (raiz do repo) e, pra mudanças em Rust, `cargo test -p apocalipse-core` + `cargo fmt --all -- --check` antes de cada commit.
 - Este arquivo deve ser mantido atualizado ou apagado quando ficar obsoleto.
+
+## Retomada 29/09 à noite — extensão 0.3.185 (artefato de teste)
+
+Evidências: UUPDump terminou 8217/8217 bytes; Rapidgator terminou 4252486/4252486 bytes com nome `7-Zip_26.03.rar`. Faltava opção Extrair. TikTok mostrava mensagem de arquivo compactado para MP4. Corrigidos o caminho local antigo não limpo em `consumeBridgeDownload`, o filtro que excluía `mediaKind=file` e o refresh da opção de extração. Download HTTP simples limpa somente seus próprios resíduos; teste verifica que outras tarefas são preservadas.
+
+TikTok: preview por Compartilhar + clique real em Copy funciona intermitentemente; popup cobria a instrução. Agora fecha quando espera Copy, e a instrução na página tem PT/EN/ZH. Resolução pode atender uma linha ambígua vinculada ao player, sem liberar faixas arbitrárias sem vínculo.
+
+Cliques: eventos correlacionados click_observed / click_handoff_started / acknowledged ou failed, além dos motivos de clique ignorado. Runtime inválido continua sem poder enviar eventos: ausência de log não prova ausência de clique.
+
+Metadados: teste registrou 40 conexões desde ~5s, mas metadados somente após ~31s. Novos campos incluem valores atuais (antes eram máximos), máximos, gid, tempo de addUri, primeira conexão, primeiro tamanho/byte e fase. RPC não expõe negociação ut_metadata ou causa de tracker/DHT: as fases observadas não devem ser anunciadas como causa definitiva. Motor usa log info, sem dump debug gigante.
+
+Facebook Reel 2270956583757694: não patrocinado segundo usuário, yt-dlp falhou duas vezes com cannot parse data. A mensagem anterior sugeria indisponibilidade definitiva; agora descreve falha de extração e alternativas. external.failure_detail guarda a razão sanitizada e compacta. Download desse Reel ainda requer reteste; não afirmar que foi resolvido.
+
+Validação local: node --test tests/*.test.cjs, cargo test -p apocalipse-core e cargo fmt passaram. Acompanhar test-build até o fim; não executar release.yml ou merge em main.

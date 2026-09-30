@@ -2442,6 +2442,12 @@ async fn finish_download(
         fs::remove_file(&request.destination).await?;
     }
     fs::rename(partial, &request.destination).await?;
+    if let Err(error) = cleanup_chunk_artifacts(&request.destination).await {
+        let _ = events.try_send(DownloadEvent::Diagnostic {
+            event: "http.cleanup_failed",
+            detail: serde_json::json!({ "error": error.to_string() }),
+        });
+    }
     let _ = events
         .send(DownloadEvent::Completed { bytes: received })
         .await;
@@ -2733,6 +2739,48 @@ mod tests {
         assert!(headers.iter().any(|(name, _)| name == "User-Agent"));
         assert!(headers.iter().any(|(name, _)| name == "Cookie"));
         assert!(!remove_header(&mut headers, "referer"));
+    }
+
+    #[tokio::test]
+    async fn completed_single_download_cleans_its_journal_but_preserves_other_tasks() {
+        let root = std::env::temp_dir().join(format!("adm-cleanup-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).await.unwrap();
+        let destination = root.join("payload.zip");
+        let partial = partial_path(&destination);
+        fs::write(&partial, b"payload").await.unwrap();
+        let own = chunk_directory(&destination);
+        let other = chunk_directory(&root.join("other.zip"));
+        fs::create_dir_all(&own).await.unwrap();
+        fs::create_dir_all(&other).await.unwrap();
+        fs::write(own.join("single-a.json"), b"journal")
+            .await
+            .unwrap();
+        fs::write(other.join("single-a.json"), b"other task")
+            .await
+            .unwrap();
+        let (tx, _rx) = mpsc::channel(4);
+        let request = DownloadRequest {
+            url: "https://example.test/get.php".into(),
+            destination: destination.clone(),
+            overwrite: false,
+            connections: 1,
+            adaptive_connections: false,
+            network_capacity_hint_bps: None,
+            host_capacity_hint_bps: None,
+            method: "GET".into(),
+            body: None,
+            headers: Vec::new(),
+            expected_size: Some(7),
+            expected_sha256: None,
+            limiters: Vec::new(),
+        };
+        finish_download(&request, &partial, 7, Some(7), &tx)
+            .await
+            .unwrap();
+        assert_eq!(fs::read(&destination).await.unwrap(), b"payload");
+        assert!(!own.exists());
+        assert!(other.join("single-a.json").exists());
+        fs::remove_dir_all(root).await.unwrap();
     }
 
     #[tokio::test]

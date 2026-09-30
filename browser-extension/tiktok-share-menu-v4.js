@@ -102,11 +102,13 @@
   };
 
   const removeHint = () => document.getElementById('apocalipse-tiktok-copy-hint')?.remove();
-  const showHint = () => {
+  const showHint = (language = 'en') => {
     removeHint();
     const hint = document.createElement('div');
     hint.id = 'apocalipse-tiktok-copy-hint';
-    hint.textContent = 'Clique no botão azul Copy para abrir este vídeo no VLC.';
+    hint.textContent = /^pt/i.test(language) ? 'Clique no botão azul Copy para abrir este vídeo no player.'
+      : /^zh/i.test(language) ? '点击蓝色的 Copy 按钮，在播放器中打开此视频。'
+      : 'Click the blue Copy button to open this video in the player.';
     Object.assign(hint.style, { position: 'fixed', zIndex: '2147483647', left: '50%', top: '18px',
       transform: 'translateX(-50%)', padding: '11px 18px', borderRadius: '9px', color: '#fff',
       background: '#087dbb', font: '600 15px system-ui, sans-serif', boxShadow: '0 3px 14px #0008' });
@@ -124,7 +126,8 @@
       audit({ resolved: false, reason: 'trusted_copy_expired', actionIntent: 'preview' });
     }, 15000);
     pendingTrustedCopy = pending;
-    showHint();
+    const settings = await chrome.storage.local.get({ language: 'en' }).catch(() => ({ language: 'en' }));
+    showHint(settings.language);
     audit({ resolved: false, reason: 'trusted_copy_armed', actionIntent: 'preview', copyCandidates: 1 });
   };
   document.addEventListener('click', event => {

@@ -2854,31 +2854,45 @@ async fn materialize_torrent_metadata_file(
         "aria2.metadata_save_started",
         &format!("directory={}", directory.display()),
     );
-    let path = endpoint
+    let metadata_started = std::time::Instant::now();
+    let metadata_result = endpoint
         .save_magnet_metadata(
             source,
             &directory,
-            |elapsed, status, connections, seeders, total, completed, info_hash| {
+            |elapsed, status, connections, seeders, total, completed, info_hash, diagnostics| {
                 diagnostic_log(
                     state,
                     "INFO",
                     "aria2.metadata_save_progress",
                     &format!(
-                        "elapsed={elapsed}s status={status} connections={connections} seeders={seeders} total={total} completed={completed} info_hash={}",
+                        "elapsed={elapsed}s status={status} connections={connections} seeders={seeders} total={total} completed={completed} info_hash={} diagnostics={diagnostics}",
                         info_hash.unwrap_or("none")
                     ),
                 );
             },
         )
-        .await?;
+        .await;
+    let path = metadata_result.map_err(|error| {
+        diagnostic_log(
+            state,
+            "ERROR",
+            "aria2.metadata_save_failed",
+            &format!(
+                "elapsed_ms={} error={error}",
+                metadata_started.elapsed().as_millis()
+            ),
+        );
+        error
+    })?;
     diagnostic_log(
         state,
         "INFO",
         "aria2.metadata_saved",
         &format!(
-            "path={} bytes={}",
+            "path={} bytes={} elapsed_ms={}",
             path.display(),
-            fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
+            fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
+            metadata_started.elapsed().as_millis()
         ),
     );
     let inspection = inspect_torrent_file(&path)?;
@@ -7003,6 +7017,16 @@ async fn run_external_download(
                         return Ok(());
                     }
                     let detail = external_error_detail(&text, status.code());
+                    diagnostic_log(
+                        &app.state::<AppState>(),
+                        "ERROR",
+                        "external.failure_detail",
+                        &format!(
+                            "task={id} engine={} detail={}",
+                            engine_log_name(kind, &task),
+                            sanitize_log_detail(&detail)
+                        ),
+                    );
                     if kind == DownloadKind::MediaPage
                         && task.source.contains("facebook.com/")
                         && text.to_ascii_lowercase().contains("cannot parse data")

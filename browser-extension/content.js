@@ -957,7 +957,7 @@
   const traceDiagnostic = (eventName, mode, detail = {}, actionId = null) => {
     const level = /failed|error/.test(eventName) ? "ERROR" : /unresolved|rejected|changed/.test(eventName) ? "WARN" : "INFO";
     void globalThis.ADM_DIAG?.emit(eventName, { mode, ...detail }, actionId, level);
-    return chrome.runtime.sendMessage({
+    return sendRuntimeMessageQuietly({
     type: "APOCALIPSE_CAPTURE_TRACE",
     eventName,
     mode,
@@ -1089,10 +1089,25 @@
       document.removeEventListener("click", handleDocumentClick, true);
       return;
     }
-    if (event.button !== 0 || event.metaKey) return;
+    const clickedControl = event.target?.closest?.("a[href],button,[role=button],[role=menuitem],input[type=button],input[type=submit]");
+    const clickTraceId = crypto.randomUUID();
+    if (clickedControl) {
+      traceDiagnostic("click_observed", "auto", {
+        tag: clickedControl.tagName,
+        href: clickedControl.getAttribute?.("href") || "",
+        button: event.button,
+        defaultPrevented: event.defaultPrevented,
+        ctrl: event.ctrlKey, shift: event.shiftKey, alt: event.altKey, meta: event.metaKey,
+      }, clickTraceId);
+    }
+    if (event.button !== 0 || event.metaKey) {
+      if (clickedControl) traceDiagnostic("click_ignored", "auto", { reason: "non_primary_or_meta" }, clickTraceId);
+      return;
+    }
     const bypass = shortcutPressed(event, shortcutKeys.bypass);
     const force = shortcutPressed(event, shortcutKeys.force);
     if (bypass) {
+      traceDiagnostic("click_ignored", "bypass", { reason: "bypass_shortcut" }, clickTraceId);
       void sendRuntimeMessageQuietly({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 });
       return;
     }
@@ -1118,11 +1133,15 @@
     } else if (magnetUrl.toLowerCase().startsWith("magnet:?")) {
       event.preventDefault();
       event.stopImmediatePropagation();
+      traceDiagnostic("click_handoff_started", "auto", { kind: "torrent", href: magnetUrl }, clickTraceId);
       const title = new URL(magnetUrl).searchParams.get("dn") || "magnet";
       void sendRuntimeMessageQuietly({
         type: "APOCALIPSE_DOWNLOAD",
         item: { url: magnetUrl, requestUrls: [magnetUrl], kind: "torrent", title },
       }).then((result) => {
+        traceDiagnostic(result?.target === "desktop" ? "click_handoff_acknowledged" : "click_handoff_failed", "auto", {
+          kind: "torrent", target: result?.target || "none", error: result?.error || (result ? "desktop_not_selected" : "runtime_no_response"),
+        }, clickTraceId);
         if (result?.target !== "desktop") location.assign(magnetUrl);
       });
       return;
@@ -1134,7 +1153,10 @@
       void sendRuntimeMessageQuietly({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 });
       return;
     }
-    if (event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (event.ctrlKey || event.shiftKey || event.altKey) {
+      traceDiagnostic("click_ignored", "auto", { reason: "modifier_navigation" }, clickTraceId);
+      return;
+    }
     const anchor = event.target.closest?.("a[href]");
     const anchorUrl = absolute(anchor?.href);
     if (!anchorUrl || /\/undefined(?:$|[?#])/i.test(anchorUrl)) {
@@ -1187,6 +1209,7 @@
     }
     event.preventDefault();
     event.stopImmediatePropagation();
+    traceDiagnostic("click_handoff_started", "auto", { kind: "file", href: url }, clickTraceId);
     void sendRuntimeMessageQuietly({
       type: "APOCALIPSE_DOWNLOAD",
       item: {
@@ -1197,6 +1220,9 @@
         title: fileNameForUrl(url),
       },
     }).then((result) => {
+      traceDiagnostic(result?.target === "desktop" ? "click_handoff_acknowledged" : "click_handoff_failed", "auto", {
+        kind: "file", target: result?.target || "none", error: result?.error || (result ? "desktop_not_selected" : "runtime_no_response"),
+      }, clickTraceId);
       if (result?.target !== "desktop") location.assign(url);
     });
   };

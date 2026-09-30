@@ -19,9 +19,9 @@ test('Facebook extractor parse failures expose a localized recording fallback', 
   const app = readFileSync(join(__dirname, '../apps/desktop/ui/app.js'), 'utf8');
   assert.match(rust, /cannot parse data/);
   assert.match(rust, /facebook_direct_download_unavailable_use_recording/);
-  assert.match(app, /Facebook could not provide this Reel/);
-  assert.match(app, /O Facebook não disponibilizou este Reel/);
-  assert.match(app, /Facebook 无法提供此 Reel/);
+  assert.match(app, /The Facebook extractor failed to read this Reel/);
+  assert.match(app, /O extrator do Facebook falhou ao ler este Reel/);
+  assert.match(app, /Facebook 提取器无法读取此 Reel/);
   assert.match(app, /t\("facebookRecordingFallback"\)/);
   assert.match(app, /warnedFacebookRecordingFallbacks/);
 });

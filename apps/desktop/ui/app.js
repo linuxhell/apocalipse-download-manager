@@ -39,7 +39,7 @@ const catalogs = {
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
     toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "mpv / media player",
     donatePaypal: "Donate via PayPal",
-    about: "About", aboutDescription: "About the creator.", aboutCreator: "Creator: Juliano - Brazil", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume", facebookRecordingFallback: "Facebook could not provide this Reel for direct download. Use Record on the video while it is playing.",
+    about: "About", aboutDescription: "About the creator.", aboutCreator: "Creator: Juliano - Brazil", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume", facebookRecordingFallback: "The Facebook extractor failed to read this Reel. Update yt-dlp or try capturing its link again. Recording is available as an alternative.",
     overview: "OVERVIEW",
     engineReady: "Engine ready",
     addDownload: "Add download",
@@ -283,7 +283,7 @@ const catalogs = {
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
     toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "mpv / reprodutor de mídia",
     donatePaypal: "Faça uma doação pelo PayPal",
-    about: "Sobre", aboutDescription: "Sobre o criador.", aboutCreator: "Criador: Juliano - Brasil", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume", facebookRecordingFallback: "O Facebook não disponibilizou este Reel para download direto. Use Gravar no vídeo enquanto ele estiver em reprodução.",
+    about: "Sobre", aboutDescription: "Sobre o criador.", aboutCreator: "Criador: Juliano - Brasil", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume", facebookRecordingFallback: "O extrator do Facebook falhou ao ler este Reel. Atualize o yt-dlp ou tente capturar o link novamente. Gravar está disponível como alternativa.",
     overview: "VISÃO GERAL",
     engineReady: "Motor pronto",
     addDownload: "Adicionar download",
@@ -527,7 +527,7 @@ const catalogs = {
     settingsDescription: "配置外观、集成、网络和应用行为。",
     toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", aria2Backend: "aria2（HTTP/HTTPS、FTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "mpv / 媒体播放器",
     donatePaypal: "通过 PayPal 捐赠",
-    about: "关于", aboutDescription: "关于创作者。", aboutCreator: "创作者：Juliano - 巴西", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量", facebookRecordingFallback: "Facebook 无法提供此 Reel 的直接下载。请在视频播放时使用“录制”。",
+    about: "关于", aboutDescription: "关于创作者。", aboutCreator: "创作者：Juliano - 巴西", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量", facebookRecordingFallback: "Facebook 提取器无法读取此 Reel。请更新 yt-dlp 或重新捕获链接。也可以选择录制。",
     overview: "概览",
     engineReady: "引擎已就绪",
     addDownload: "添加下载",
@@ -2803,7 +2803,7 @@ document.querySelector("#analyze").onclick = async () => {
     const fileName = document.querySelector("#file-name");
     const suggestedFileName = await invoke("suggest_download_name", { url: url.value });
     if (!current()) return;
-    knownArchiveName = isArchiveFileName(suggestedFileName) ? suggestedFileName : "";
+    knownArchiveName = knownArchiveName || (isArchiveFileName(suggestedFileName) ? suggestedFileName : "");
     const currentName = fileName.value.trim();
     const genericName = /^(?:watch|reel|video|download)(?:\.[a-z0-9]{1,10})?$/i.test(currentName);
     if (!currentName || (genericName && !pendingTitle)) fileName.value = suggestedFileName;
@@ -3065,6 +3065,7 @@ async function consumeBridgeDownload() {
     const request = await invoke("take_bridge_download", { currentUrl });
     if (!request) return;
     lastClipboardLink = request.url;
+    pendingBrowserAssistedPath = null;
     pendingDiagnosticTrace = request.traceId || null;
     pendingReferer = request.pageUrl || null;
     pendingDuration = Number.isFinite(request.duration) ? request.duration : null;
@@ -3096,9 +3097,11 @@ async function consumeBridgeDownload() {
     document.querySelector("#file-name").value = (pendingMediaKind === "video" || pendingMediaKind === "audio") && titleName && (!requestedName || genericMediaName)
       ? `${[...titleName].slice(0, 110).join("")}.${titleExtension}`
       : requestedName;
-    knownArchiveName = /^https?:/i.test(request.url) && isArchiveFileName(requestedName) && !pendingMediaKind ? requestedName : "";
+    document.querySelector("#auto-extract").checked = false;
+    knownArchiveName = /^https?:/i.test(request.url) && isArchiveFileName(requestedName) && !["video", "audio", "image"].includes(pendingMediaKind) ? requestedName : "";
     resetAnalysisForNewRequest();
     resetMediaInspection();
+    refreshAutoExtractOption();
     if (pendingThumbnail || pendingTitle || pendingMediaKind === "image") {
       showCapturedPreview({ title: pendingTitle, thumbnail: pendingThumbnail || (pendingMediaKind === "image" ? request.url : null), kind: pendingMediaKind, duration: pendingDuration, size: pendingExpectedSize });
     }
