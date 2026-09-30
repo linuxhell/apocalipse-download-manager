@@ -72,6 +72,22 @@ jobs:
       - name: Build desktop
         run: cargo build --release --locked -p apocalipse-desktop
 
+      - name: Verify routing in release executable
+        shell: bash
+        run: |
+          binary="target/release/apocalipse-desktop"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then binary="$binary.exe"; fi
+          "$binary" --verify-media-routing "$RUNNER_TEMP/media-routing.json"
+          python3 - "$RUNNER_TEMP/media-routing.json" <<'PYVERIFY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              report = json.load(stream)
+          assert report["verified"] is True, report
+          assert report["version"] == "0.4.77", report
+          assert report["engine"] == "yt_dlp", report
+          print(json.dumps(report))
+          PYVERIFY
+
       - name: Build Linux AppImage
         if: runner.os == 'Linux'
         shell: bash
@@ -157,6 +173,7 @@ jobs:
           New-Item -ItemType Directory -Force "$package/data/tools/aria2" | Out-Null
           Copy-Item "dist/aria2-backend/aria2c.exe" "$package/data/tools/aria2/aria2c.exe"
           Copy-Item "README.md","LICENSE" $package
+          Copy-Item "$env:RUNNER_TEMP/media-routing.json" "$package/build-verification.json"
           Compress-Archive -Path $package -DestinationPath "dist/${{ matrix.output }}" -Force
 
       - name: Stage Linux portable
@@ -168,6 +185,7 @@ jobs:
           install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
           install -m 755 dist/aria2-backend/aria2c "$package/data/tools/aria2/aria2c"
           cp README.md LICENSE "$package/"
+          cp "$RUNNER_TEMP/media-routing.json" "$package/build-verification.json"
           appimage="$(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
           test -n "$appimage"
           install -m 755 "$appimage" "dist/apocalipse-download-manager-linux-x64.AppImage"
@@ -182,6 +200,7 @@ jobs:
           cp target/release/apocalipse-desktop "$app/Contents/MacOS/Apocalipse Download Manager"
           chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
           install -m 755 dist/aria2-backend/aria2c "$app/Contents/MacOS/data/tools/aria2/aria2c"
+          cp "$RUNNER_TEMP/media-routing.json" "$app/Contents/Resources/build-verification.json"
           cp packaging/macos/Info.plist "$app/Contents/Info.plist"
           python3 - "$app/Contents/Info.plist" <<'PYMAC'
           import plistlib

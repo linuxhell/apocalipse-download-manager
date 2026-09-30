@@ -13980,6 +13980,35 @@ async fn remove_path_with_retry(path: &Path, allow_directory: bool) -> Result<()
 }
 
 fn main() {
+    // CI exercises the actual release executable before it is packaged. This
+    // path exits before opening UI, binding ports or touching portable data.
+    if let Some(report) = std::env::args()
+        .skip(1)
+        .collect::<Vec<_>>()
+        .windows(2)
+        .find(|args| args[0] == "--verify-media-routing")
+        .map(|args| args[1].clone())
+    {
+        let source = "https://www.reddit.com/r/UFOs/comments/1wlkure/guillermo_del_toro_shares_his_terrifying_ufo/";
+        let capabilities = Capabilities {
+            aria2: true,
+            yt_dlp: true,
+            n_m3u8dl_re: true,
+        };
+        let kind = classify_url(source);
+        let plan = plan_download(source, capabilities).expect("routing verification URL");
+        let valid =
+            kind == Some(DownloadKind::MediaPage) && plan.primary == apocalipse_core::Engine::YtDlp;
+        let payload = serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"), "buildSha": env!("ADM_BUILD_SHA"),
+            "source": source, "kind": format!("{kind:?}"),
+            "engine": plan.primary, "reason": plan.reason, "verified": valid,
+        });
+        if fs::write(report, serde_json::to_vec_pretty(&payload).unwrap()).is_err() || !valid {
+            std::process::exit(1);
+        }
+        return;
+    }
     let _ = rustls::crypto::ring::default_provider().install_default();
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -14060,6 +14089,19 @@ fn main() {
                 "INFO",
                 "application.started",
                 env!("CARGO_PKG_VERSION"),
+            );
+            diagnostic_log(
+                &app.state::<AppState>(),
+                "INFO",
+                "application.build",
+                &format!(
+                    "sha={} executable={} reddit_kind={:?}",
+                    env!("ADM_BUILD_SHA"),
+                    std::env::current_exe()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_default(),
+                    classify_url("https://www.reddit.com/r/UFOs/comments/1wlkure/title/")
+                ),
             );
             if let Some(listener) = bridge_listener {
                 let bridge_app = app.handle().clone();
