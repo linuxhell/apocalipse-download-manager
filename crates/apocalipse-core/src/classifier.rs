@@ -46,6 +46,16 @@ pub fn classify_url(input: &str) -> Option<DownloadKind> {
         Some(DownloadKind::Hls)
     } else if path.ends_with(".meta4") || path.ends_with(".metalink") {
         Some(DownloadKind::Metalink)
+    } else if url
+        .domain()
+        .is_some_and(|host| host == "reddit.com" || host.ends_with(".reddit.com"))
+        && path
+            .split('/')
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|parts| parts[0] == "comments" && !parts[1].is_empty())
+    {
+        Some(DownloadKind::MediaPage)
     } else if matches!(
         url.domain(),
         Some(
@@ -76,6 +86,24 @@ pub fn classify_url(input: &str) -> Option<DownloadKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reddit_posts_use_extractor_but_images_and_feeds_remain_http() {
+        for post in [
+            "https://www.reddit.com/r/UFOs/comments/1wlkure/title/",
+            "https://old.reddit.com/comments/abc123/",
+        ] {
+            assert_eq!(classify_url(post), Some(DownloadKind::MediaPage));
+        }
+        for resource in [
+            "https://www.reddit.com/r/UFOs/",
+            "https://i.redd.it/image.jpg",
+            "https://v.redd.it/id/DASH_720.mp4",
+            "https://reddit.com.evil.test/comments/abc123/",
+        ] {
+            assert_eq!(classify_url(resource), Some(DownloadKind::Http));
+        }
+    }
 
     #[test]
     fn classifies_special_inputs() {

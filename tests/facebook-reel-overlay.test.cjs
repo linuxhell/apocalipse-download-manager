@@ -19,16 +19,16 @@ test('Facebook extractor parse failures expose a localized recording fallback', 
   const app = readFileSync(join(__dirname, '../apps/desktop/ui/app.js'), 'utf8');
   assert.match(rust, /cannot parse data/);
   assert.match(rust, /facebook_direct_download_unavailable_use_recording/);
-  assert.match(app, /Facebook could not provide this Reel/);
-  assert.match(app, /O Facebook não disponibilizou este Reel/);
-  assert.match(app, /Facebook 无法提供此 Reel/);
+  assert.match(app, /The Facebook extractor failed to read this Reel/);
+  assert.match(app, /O extrator do Facebook falhou ao ler este Reel/);
+  assert.match(app, /Facebook 提取器无法读取此 Reel/);
   assert.match(app, /t\("facebookRecordingFallback"\)/);
   assert.match(app, /warnedFacebookRecordingFallbacks/);
 });
 
 // Execute the real content script and its installed click handler. Only browser
 // APIs/DOM geometry are mocked; URL selection and the outgoing payload are real.
-function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false } = {}) {
+function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false, shadow = false } = {}) {
   const sent = [], fetched = [], appended = [], listeners = [];
   const location = new URL(url);
   const rect = { left: 20, top: 40, right: 500, bottom: 600, width: 480, height: 560 };
@@ -42,6 +42,10 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
     querySelector: selector => selector.includes('a[href') && permalink ? { href: permalink } : null,
     querySelectorAll: () => [], closest: selector => selector.includes('article') ? post : null,
   };
+  const redditPost = { getAttribute: name => name === 'permalink' ? permalink : name === 'post-title' ? 'Exact Reddit post title' : null };
+  const player = { closest: selector => selector === 'shreddit-post' ? redditPost : null };
+  player.shadowRoot = { host: player, querySelectorAll: selector => selector === 'video' || selector === 'video,audio' ? [video] : [] };
+  if (shadow) video.getRootNode = () => player.shadowRoot;
   const element = tag => ({ tagName: tag.toUpperCase(), style: {}, dataset: {}, offsetWidth: 80,
     addEventListener(type, handler) { this[type] = handler; }, remove() { this.removed = true; } });
   const document = {
@@ -49,7 +53,8 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
     documentElement: { append(node) { appended.push(node); } },
     createElement: element, addEventListener() {}, elementFromPoint: () => video,
     querySelector: selector => selector === 'video' ? video : null,
-    querySelectorAll: selector => selector === 'video' || selector === 'video,audio' ? [video]
+    querySelectorAll: selector => selector === 'shreddit-player' && shadow ? [player]
+      : selector === 'video' || selector === 'video,audio' ? (shadow ? [] : [video])
       : selector === '.apocalipse-media-download' ? appended.filter(node => !node.removed && String(node.className).includes('apocalipse-media-download')) : [],
   };
   const context = vm.createContext({
@@ -83,12 +88,13 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
   });
   context.window = context; context.top = context;
   vm.runInContext(readFileSync(join(__dirname, '../browser-extension/tiktok-identity.js'), 'utf8'), context);
-  vm.runInContext(script.replace(/\}\)\(\);\s*$/, 'globalThis.testHooks = { installOverlays, collect };\n})();'), context);
+  vm.runInContext(script.replace(/\}\)\(\);\s*$/, 'globalThis.testHooks = { installOverlays, collect, titleInfoFor };\n})();'), context);
   context.testHooks.installOverlays();
   const button = appended.find(node => node.className === 'apocalipse-media-download');
   assert.ok(button, 'the actual overlay must be installed');
   return {
     sent, fetched, location, video, appended,
+    imageTitle: () => context.testHooks.titleInfoFor({ tagName: "IMG", closest: () => redditPost }),
     click: () => button.click({ preventDefault() {}, stopPropagation() {} }),
     scan: () => context.testHooks.collect(),
     downloads: () => sent.filter(message => message.type === 'APOCALIPSE_DOWNLOAD'),
@@ -309,10 +315,41 @@ test('generic video-feed pages (3+ visible videos) only overlay the one nearest 
 
 test('generic feed suppression never engages on Facebook, Instagram or TikTok, whose own reel logic is unchanged', () => {
   const start = script.indexOf('let activeGenericFeedVideo = null;');
-  const end = script.indexOf('document.querySelectorAll("video,audio").forEach', start);
+  const end = script.indexOf('queryMediaElements("video,audio").forEach', start);
   assert.ok(start >= 0 && end > start);
   const block = script.slice(start, end);
   assert.match(block, /!isFacebookReelsPage/);
   assert.match(block, /!isInstagramReelsPage/);
   assert.match(block, /!isTikTokPage/);
+});
+
+
+test('Reddit shadow video appears in popup and Download sends its post, not a silent track', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOs/', shadow: true,
+    permalink: '/r/UFOs/comments/abc123/exact_post/', source: 'https://v.redd.it/exact/DASH_720.mp4' });
+  const expected = 'https://www.reddit.com/r/UFOs/comments/abc123/exact_post/';
+  assert.ok(p.scan().find(item => item.url === expected && item.pageExtractor));
+  await p.click();
+  const item = p.downloads()[0].item;
+  assert.equal(item.url, expected);
+  assert.equal(item.pageExtractor, true);
+  assert.equal(item.title, "Exact Reddit post title");
+  assert.equal(item.audioUrl, null);
+  assert.equal(item.requestUrls.length, 0);
+});
+
+test('Reddit MSE shadow video keeps Record and sends the permalink before reading blobs', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOs/', shadow: true, recordable: true,
+    permalink: '/r/UFOs/comments/def456/second_post/', source: 'blob:https://www.reddit.com/player' });
+  assert.ok(p.appended.some(node => String(node.className).includes('apocalipse-media-record')));
+  await p.click();
+  assert.equal(p.downloads()[0].item.url, 'https://www.reddit.com/r/UFOs/comments/def456/second_post/');
+  assert.equal(p.fetched.length, 0);
+});
+
+
+test('Reddit images use their post title instead of subreddit page title', () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOs/', shadow: true, permalink: '/r/UFOs/comments/abc123/title/' });
+  assert.equal(p.imageTitle().title, 'Exact Reddit post title');
+  assert.equal(p.imageTitle().source, 'reddit_post');
 });

@@ -542,6 +542,108 @@ async function cookieHeaderFor(urls) {
   return [...values].map(([name, value]) => `${name}=${value}`).join("; ");
 }
 
+// Some hosts (Rapidgator's "click here to download" flow) never expose the
+// real single-use link through an <a href>, fetch(), or window.open() call
+// that page-hook.js can patch: the page's own JS assigns the final URL to
+// location.href directly, which Chrome makes unforgeable on purpose (no
+// page script, ours included, can override it). By the time
+// chrome.downloads.onDeterminingFilename sees that request, Chrome has
+// already sent it and the single-use token is already spent - too late for
+// aria2-ultra to take over without a 404. The only layer left that can act
+// before the browser's own request reaches the server is the network layer
+// itself: a short-lived, per-tab declarativeNetRequest session rule that
+// redirects the matching request back to the page it came from (a same-tab
+// no-op, not an ERR_BLOCKED interstitial), paired with a non-blocking
+// webRequest.onBeforeRequest observer that captures the real URL at the same
+// moment and hands it to aria2-ultra as the one and only requester.
+const DISPOSABLE_INTERCEPT_RULE_ID = 987001;
+const DISPOSABLE_INTERCEPT_HOSTS = [
+  { suffix: ".rapidgator.net", urlFilter: "*://*.rapidgator.net/download/*" },
+];
+let disposableInterceptTabId = null;
+let disposableInterceptTimer = null;
+
+async function clearDisposableIntercept() {
+  disposableInterceptTabId = null;
+  if (disposableInterceptTimer) {
+    clearTimeout(disposableInterceptTimer);
+    disposableInterceptTimer = null;
+  }
+  try {
+    await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [DISPOSABLE_INTERCEPT_RULE_ID] });
+  } catch {}
+}
+
+async function armDisposableIntercept(tabId, tabUrl, ttlMs = 20000) {
+  if (!Number.isInteger(tabId) || !chrome.declarativeNetRequest?.updateSessionRules) return;
+  let host = "";
+  try { host = new URL(tabUrl || "").hostname.toLowerCase(); } catch { return; }
+  const target = DISPOSABLE_INTERCEPT_HOSTS.find((entry) => host.endsWith(entry.suffix) || host === entry.suffix.slice(1));
+  if (!target) return;
+  disposableInterceptTabId = tabId;
+  try {
+    await chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: [DISPOSABLE_INTERCEPT_RULE_ID],
+      addRules: [{
+        id: DISPOSABLE_INTERCEPT_RULE_ID,
+        priority: 1,
+        condition: {
+          urlFilter: target.urlFilter,
+          tabIds: [tabId],
+          resourceTypes: ["main_frame", "sub_frame", "xmlhttprequest", "other"],
+        },
+        action: { type: "redirect", redirect: { url: tabUrl } },
+      }],
+    });
+  } catch (error) {
+    void diagnostic("capture.disposable_intercept_arm_failed", { traceId: crypto.randomUUID(), url: tabUrl, startedAt: Date.now() }, { level: "WARN", detail: String(error) });
+    return;
+  }
+  void diagnostic("capture.disposable_intercept_armed", { traceId: crypto.randomUUID(), url: tabUrl, startedAt: Date.now() }, { detail: `tab=${tabId} host=${host} ttl_ms=${ttlMs}` });
+  if (disposableInterceptTimer) clearTimeout(disposableInterceptTimer);
+  disposableInterceptTimer = setTimeout(() => { void clearDisposableIntercept(); }, Math.max(1000, Math.min(Number(ttlMs) || 20000, 30000)));
+}
+
+if (chrome.webRequest?.onBeforeRequest?.addListener) {
+  chrome.webRequest.onBeforeRequest.addListener(
+    (details) => {
+      if (details.tabId !== disposableInterceptTabId) return;
+      const host = (() => { try { return new URL(details.url).hostname.toLowerCase(); } catch { return ""; } })();
+      const target = DISPOSABLE_INTERCEPT_HOSTS.find((entry) => host.endsWith(entry.suffix));
+      if (!target) return;
+      const tabId = details.tabId;
+      const state = { traceId: crypto.randomUUID(), url: details.url, pageUrl: null, startedAt: Date.now() };
+      void diagnostic("capture.disposable_intercept_caught", state, { detail: `tab=${tabId} resource_type=${details.type}` });
+      void clearDisposableIntercept();
+      void (async () => {
+        let pageUrl = null;
+        try { pageUrl = (await chrome.tabs.get(tabId))?.url || null; } catch {}
+        try {
+          const handoff = await bridgeRequest("/v1/download", {
+            method: "POST",
+            body: JSON.stringify({
+              url: details.url,
+              fileName: null,
+              pageUrl,
+              duration: null,
+              cookieHeader: await cookieHeaderFor([details.url, pageUrl]),
+              userAgent: navigator.userAgent,
+              requestMethod: "GET",
+              requestBody: null,
+              requestContentType: null,
+              startImmediately: false,
+            }),
+          });
+          void diagnostic("capture.disposable_intercept_handoff_ok", state, { detail: `tab=${tabId} task=${handoff?.taskId || "prompt"}` });
+        } catch (error) {
+          void diagnostic("capture.disposable_intercept_handoff_failed", state, { level: "ERROR", detail: `tab=${tabId} error=${String(error)}` });
+        }
+      })();
+    },
+    { urls: DISPOSABLE_INTERCEPT_HOSTS.map((entry) => `https://*${entry.suffix}/download/*`) },
+  );
+}
+
 async function sourcePageUrl(sender) {
   if (sender.tab?.url) return sender.tab.url;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -767,7 +869,6 @@ async function takeBrowserDownload(item, eraseFromHistory = false, resolvedFileN
   }
   if (/^blob:https:\/\/web\.telegram\.org\//i.test(url)) {
     if (bypassIsActive(modifierTabId)) return false;
-    if (!bridgeConnected) return false;
     if (await handOffTelegramBlob(item)) {
       await cancelBrowserDownload(item.id).catch(() => {});
       if (eraseFromHistory) await eraseBrowserDownload(item.id);
@@ -799,17 +900,13 @@ async function takeBrowserDownload(item, eraseFromHistory = false, resolvedFileN
     if (index >= 0) recentFileResponses.splice(index, 1);
   }
   if (bypassIsActive(modifierTabId)) return false;
-  if (!bridgeConnected) {
-    void diagnostic("browser_download.bridge_unavailable", state, { level: "WARN", detail: `disposable=${disposable} file=${effectiveFileName || "unknown"} filename_source=${fileNameDecision.source}` });
-    return false;
-  }
   const forced = forceIsActive(modifierTabId);
   // Disposable links are consumed by their first request, no matter who makes
   // it. "Force" must never override this: resending the same disposable URL
   // to the desktop after Chrome already consumed it commonly produces a 404,
   // so a disposable link always takes the browser-assisted path.
   const browserAssisted = disposable;
-  void diagnostic("browser_download.detected", state, { detail: `disposable=${disposable} assisted=${browserAssisted} force=${forced} initial_url=${item.url === url} final_url=${Boolean(item.finalUrl)} tab=${modifierTabId ?? "none"} file=${effectiveFileName || "unknown"} filename_source=${fileNameDecision.source}` });
+  void diagnostic("browser_download.detected", state, { detail: `disposable=${disposable} assisted=${browserAssisted} force=${forced} initial_url=${item.url === url} final_url=${Boolean(item.finalUrl)} tab=${modifierTabId ?? "none"} file=${effectiveFileName || "unknown"} filename_source=${fileNameDecision.source} incognito=${Boolean(item.incognito)}` });
 
   // Disposable links are consumed by their first request. At this point Chrome
   // already owns that original response; repeating it on the desktop commonly
@@ -855,7 +952,28 @@ async function takeBrowserDownload(item, eraseFromHistory = false, resolvedFileN
     });
     return true;
   } catch (error) {
-    void diagnostic("browser_download.takeover_failed", state, { level: "ERROR", error: String(error), detail: `disposable=${disposable} cancelled=${cancelled}` });
+    // "not_paired" here has repeatedly shown up alongside a normal window,
+    // a heartbeat that is authenticating fine in the very same session, and
+    // a pairingToken that popup.js's own storage.onChanged listener never
+    // fires a removal for - none of which explain a genuinely empty token
+    // read from the same extension storage. Distinguish "key never existed"
+    // (raw, no default) from "key exists but is falsy" (null vs "" are not
+    // the same story) and count the tab's total storage keys, so the next
+    // bundle either confirms a real empty-token bug or rules it out for
+    // something else entirely (a stale service worker snapshot, a second
+    // profile, ...).
+    let pairedInThisContext = "unknown";
+    let pairingTokenPresent = "unknown";
+    let pairingTokenRawType = "unknown";
+    let storageKeyCount = "unknown";
+    try {
+      const raw = await chrome.storage.local.get(null);
+      storageKeyCount = Object.keys(raw).length;
+      pairingTokenPresent = Object.prototype.hasOwnProperty.call(raw, "pairingToken");
+      pairingTokenRawType = typeof raw.pairingToken;
+      pairedInThisContext = Boolean(raw.pairingToken);
+    } catch {}
+    void diagnostic("browser_download.takeover_failed", state, { level: "ERROR", error: String(error), detail: `disposable=${disposable} cancelled=${cancelled} incognito=${Boolean(item.incognito)} paired_in_this_context=${pairedInThisContext} pairing_token_present=${pairingTokenPresent} pairing_token_type=${pairingTokenRawType} storage_key_count=${storageKeyCount}` });
     if (cancelled) {
       bypassUntil = Date.now() + 2000;
       chrome.downloads.download({ url, saveAs: false }, () => void chrome.runtime.lastError);
@@ -1542,8 +1660,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "APOCALIPSE_SHORTCUT_STATE") {
     bypassHeld = Boolean(message.bypassPressed);
     forceHeld = Boolean(message.forcePressed) && !bypassHeld;
-    if (bypassHeld) armBypass(shortcutTabId, 4000);
-    else if (forceHeld) armForce(shortcutTabId, 20000);
+    if (bypassHeld) { armBypass(shortcutTabId, 4000); void clearDisposableIntercept(); }
+    else if (forceHeld) { armForce(shortcutTabId, 20000); void armDisposableIntercept(shortcutTabId, sender.tab?.url || null, 20000); }
+    else void clearDisposableIntercept();
     const mode = bypassHeld ? "bypass" : (forceHeld ? "force" : "normal");
     if (mode !== lastShortcutMode) {
       const state = { traceId: crypto.randomUUID(), pageUrl: sender.tab?.url || null, startedAt: Date.now() };
@@ -1555,12 +1674,14 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
   if (message?.type === "APOCALIPSE_BYPASS_NEXT") {
     armBypass(shortcutTabId, message.ttlMs);
+    void clearDisposableIntercept();
     void diagnostic("shortcut.bypass_armed", { traceId: crypto.randomUUID(), pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { detail: `tab=${shortcutTabId ?? "none"} ttl_ms=${message.ttlMs || 0}` });
     reply({ ok: true, mode: "bypass" });
     return;
   }
   if (message?.type === "APOCALIPSE_FORCE_NEXT") {
     armForce(shortcutTabId, message.ttlMs);
+    void armDisposableIntercept(shortcutTabId, sender.tab?.url || null, message.ttlMs);
     void diagnostic("shortcut.force_armed", { traceId: crypto.randomUUID(), pageUrl: sender.tab?.url || null, startedAt: Date.now() }, { detail: `tab=${shortcutTabId ?? "none"} ttl_ms=${message.ttlMs || 0}` });
     reply({ ok: true, mode: "force" });
     return;

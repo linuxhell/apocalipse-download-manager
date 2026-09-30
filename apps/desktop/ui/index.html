@@ -53,6 +53,13 @@
           <p id="page-description" class="page-description" data-i18n="downloadsDescription">Manage direct downloads, progress, speed and completed files.</p>
         </div>
         <div class="actions">
+          <label id="torrent-store-controls" class="setting-toggle compact-toggle" hidden>
+            <input id="save-torrent-metadata" type="checkbox" />
+            <span><b data-i18n="saveTorrentMetadata">Save .torrent in data/torrents</b></span>
+          </label>
+          <button id="clear-torrent-store" type="button" hidden>
+            <span data-i18n="clearTorrentStore">Clear .torrents in data/torrents</span>
+          </button>
           <button id="add" class="primary">
             <span>＋</span><b data-i18n="addDownload">Add download</b>
           </button>

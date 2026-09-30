@@ -22,7 +22,7 @@ test("a resolved page/media title is used as the file name before falling back t
   );
   assert.match(enqueueBody, /let title_based_name = context/);
   assert.match(enqueueBody, /\.map\(sanitize_title_for_filename\)/);
-  assert.match(enqueueBody, /let proposed = file_name\s*\n\s*\.or\(title_based_name\)/);
+  assert.match(enqueueBody, /let proposed = torrent_name\s*\n\s*\.or\(file_name\)\s*\n\s*\.or\(title_based_name\)/);
 });
 
 test("bridge downloads with no real file name probe Content-Disposition, unless it's a recognized media capture", () => {

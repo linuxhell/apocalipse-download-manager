@@ -13,7 +13,7 @@
       return /(^|\.)(?:facebook|tiktok)\.com$/i.test(new URL(activePageUrl || '').hostname);
     } catch { return false; }
   };
-  const resolvable = item => Boolean(socialResolverPage() && item?.kind === 'video' && item?.visualOnly && item?.playerBound
+  const resolvable = item => Boolean(socialResolverPage() && item?.kind === 'video' && (item?.visualOnly || item?.ambiguousSocialTrack) && item?.playerBound
     && item?.recommended && !item?.retained && item?.rect && activeMediaTab?.id);
 
   const visibleRows = () => [...document.querySelectorAll('#items > article')];
@@ -299,7 +299,10 @@
         const label = document.querySelector('#bridge-label');
         if (label) { label.removeAttribute('data-i18n'); label.textContent = locale === 'pt_BR'
           ? 'Clique no botão azul Copy no TikTok para abrir no VLC.'
-          : 'Click the blue Copy button in TikTok to open in VLC.'; }
+          : locale === 'zh_CN' ? '点击 TikTok 中蓝色的 Copy 按钮，在播放器中打开视频。'
+          : 'Click the blue Copy button in TikTok to open the video in the player.'; }
+        window.close();
+        return;
       } else showFailure();
       button.disabled = false; syncRows(); return;
     }

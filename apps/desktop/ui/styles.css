@@ -744,6 +744,8 @@ dialog input:focus {
   background: var(--surface);
 }
 #tools-dialog #tool-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.actions #torrent-store-controls[hidden], .actions #clear-torrent-store[hidden],
+#auto-extract-option[hidden], #media-inspection[hidden], #media-format-control[hidden] { display: none !important; }
 #tools-dialog .tool-settings {
   min-height: 0;
   overflow-y: auto;

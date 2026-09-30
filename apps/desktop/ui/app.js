@@ -4,6 +4,11 @@ const catalogs = {
     autoExtract: "Extract automatically after download",
     autoExtractHint: "Shown only for archive files. Loose root files are kept inside a folder named after the archive.",
     browserAssistedArchiveReady: "Archive received from the browser. Choose where to save it and whether to extract it automatically.",
+    saveTorrentMetadata: "Save .torrent in data/torrents",
+    saveTorrentMetadataHint: "Keep a copy of every torrent's metadata so it can be redownloaded later. Turning this off deletes a torrent's saved file when its task is removed.",
+    clearTorrentStore: "Clear .torrents in data/torrents",
+    clearTorrentStoreConfirm: "Delete every saved .torrent file in data/torrents that isn't used by an active or queued torrent?",
+    torrentStoreCleared: "Removed {count} .torrent file(s) from data/torrents.",
     networkWaiting: "Waiting for network",
     networkWaitingHint: "The connection changed or went offline. This task will resume automatically when a network interface is available.",
     downloads: "Downloads",
@@ -34,7 +39,7 @@ const catalogs = {
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
     toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "mpv / media player",
     donatePaypal: "Donate via PayPal",
-    about: "About", aboutDescription: "About the creator.", aboutCreator: "Creator: Juliano - Brazil", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume", facebookRecordingFallback: "Facebook could not provide this Reel for direct download. Use Record on the video while it is playing.",
+    about: "About", aboutDescription: "About the creator.", aboutCreator: "Creator: Juliano - Brazil", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume", facebookRecordingFallback: "The Facebook extractor failed to read this Reel. Update yt-dlp or try capturing its link again. Recording is available as an alternative.",
     overview: "OVERVIEW",
     engineReady: "Engine ready",
     addDownload: "Add download",
@@ -243,6 +248,11 @@ const catalogs = {
     autoExtract: "Extrair automaticamente após o download",
     autoExtractHint: "Aparece somente para arquivos compactados. Arquivos soltos ficam dentro de uma pasta com o nome do arquivo compactado.",
     browserAssistedArchiveReady: "Arquivo compactado recebido do navegador. Escolha onde salvar e se deseja extrair automaticamente.",
+    saveTorrentMetadata: "Salvar .torrent em data/torrents",
+    saveTorrentMetadataHint: "Mantém uma cópia dos metadados de cada torrent para permitir baixar novamente depois. Desligar isso apaga o .torrent salvo quando a tarefa for removida.",
+    clearTorrentStore: "Limpar .torrents em data/torrents",
+    clearTorrentStoreConfirm: "Apagar todos os arquivos .torrent salvos em data/torrents que não estejam em uso por um torrent ativo ou na fila?",
+    torrentStoreCleared: "{count} arquivo(s) .torrent removido(s) de data/torrents.",
     networkWaiting: "Aguardando rede",
     networkWaitingHint: "A conexão mudou ou ficou offline. Esta tarefa será retomada automaticamente quando uma interface de rede estiver disponível.",
     downloads: "Downloads",
@@ -273,7 +283,7 @@ const catalogs = {
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
     toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "mpv / reprodutor de mídia",
     donatePaypal: "Faça uma doação pelo PayPal",
-    about: "Sobre", aboutDescription: "Sobre o criador.", aboutCreator: "Criador: Juliano - Brasil", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume", facebookRecordingFallback: "O Facebook não disponibilizou este Reel para download direto. Use Gravar no vídeo enquanto ele estiver em reprodução.",
+    about: "Sobre", aboutDescription: "Sobre o criador.", aboutCreator: "Criador: Juliano - Brasil", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume", facebookRecordingFallback: "O extrator do Facebook falhou ao ler este Reel. Atualize o yt-dlp ou tente capturar o link novamente. Gravar está disponível como alternativa.",
     overview: "VISÃO GERAL",
     engineReady: "Motor pronto",
     addDownload: "Adicionar download",
@@ -482,6 +492,11 @@ const catalogs = {
     autoExtract: "下载完成后自动解压",
     autoExtractHint: "仅在压缩文件时显示。根目录中的零散文件会解压到以压缩文件命名的文件夹中。",
     browserAssistedArchiveReady: "已从浏览器接收压缩文件。请选择保存位置以及是否自动解压。",
+    saveTorrentMetadata: "将 .torrent 保存到 data/torrents",
+    saveTorrentMetadataHint: "保留每个种子的元数据副本以便日后重新下载。关闭此选项后，移除任务时会删除已保存的 .torrent 文件。",
+    clearTorrentStore: "清空 data/torrents 中的 .torrent 文件",
+    clearTorrentStoreConfirm: "是否删除 data/torrents 中未被任何活动或排队种子使用的所有 .torrent 文件？",
+    torrentStoreCleared: "已从 data/torrents 删除 {count} 个 .torrent 文件。",
     networkWaiting: "等待网络",
     networkWaitingHint: "网络连接已更改或断开。可用网络接口恢复后，此任务会自动继续。",
     downloads: "下载",
@@ -512,7 +527,7 @@ const catalogs = {
     settingsDescription: "配置外观、集成、网络和应用行为。",
     toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", aria2Backend: "aria2（HTTP/HTTPS、FTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "mpv / 媒体播放器",
     donatePaypal: "通过 PayPal 捐赠",
-    about: "关于", aboutDescription: "关于创作者。", aboutCreator: "创作者：Juliano - 巴西", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量", facebookRecordingFallback: "Facebook 无法提供此 Reel 的直接下载。请在视频播放时使用“录制”。",
+    about: "关于", aboutDescription: "关于创作者。", aboutCreator: "创作者：Juliano - 巴西", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量", facebookRecordingFallback: "Facebook 提取器无法读取此 Reel。请更新 yt-dlp 或重新捕获链接。也可以选择录制。",
     overview: "概览",
     engineReady: "引擎已就绪",
     addDownload: "添加下载",
@@ -1437,6 +1452,32 @@ aboutAudio.onpause = () => { aboutPlayPause.textContent = t("aboutPlay"); };
 
 loadAboutMedia().catch(console.error);
 
+async function refreshTorrentStoreControls() {
+  try {
+    document.querySelector("#save-torrent-metadata").checked = await invoke("get_torrent_store_preference");
+  } catch (error) { console.error(error); }
+}
+document.querySelector("#save-torrent-metadata").onchange = (event) => {
+  invoke("set_torrent_store_preference", { enabled: event.target.checked }).catch((error) => {
+    console.error(error);
+    event.target.checked = !event.target.checked;
+  });
+};
+document.querySelector("#clear-torrent-store").onclick = async () => {
+  if (!window.confirm(t("clearTorrentStoreConfirm"))) return;
+  const button = document.querySelector("#clear-torrent-store");
+  button.disabled = true;
+  try {
+    const removed = await invoke("clear_torrent_store");
+    window.alert(t("torrentStoreCleared").replace("{count}", String(removed)));
+  } catch (error) {
+    console.error(error);
+    window.alert(String(error));
+  } finally {
+    button.disabled = false;
+  }
+};
+
 document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data-page="tools"])').forEach((button) => {
   button.onclick = () => {
     const openedAt = performance.now();
@@ -1456,6 +1497,9 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector("#language-panel").hidden = activePage !== "language";
     document.querySelector("#about-panel").hidden = activePage !== "about";
     document.querySelector("#add").hidden = activePage === "about";
+    document.querySelector("#torrent-store-controls").hidden = activePage !== "torrents";
+    document.querySelector("#clear-torrent-store").hidden = activePage !== "torrents";
+    if (activePage === "torrents") refreshTorrentStoreControls().catch(console.error);
     if (activePage === "about" && aboutAudio.src) {
       aboutAudio.currentTime = 0;
       aboutAudio.play().catch(() => {});
@@ -1941,6 +1985,9 @@ async function showTorrentInspection(source, generation = analysisGeneration) {
   const torrent = await invoke("inspect_torrent_metadata", { source });
   if (!analysisIsCurrent(generation)) return false;
   document.querySelector("#torrent-title").textContent = torrent.name;
+  document.querySelector("#file-name").value = torrent.name;
+  knownArchiveName = "";
+  refreshAutoExtractOption();
   document.querySelector("#torrent-total").textContent = formatBytes(torrent.totalSize);
   pendingExpectedSize = Number.isFinite(torrent.totalSize) ? torrent.totalSize : null;
   pendingTorrentMetadataPath = torrent.torrentPath || null;
@@ -2046,17 +2093,8 @@ document
 async function removeSelectedDownloads(button, deleteFiles) {
   button.disabled = true;
   const ids = [...selectedIds];
-  const shouldAskTorrentMetadata = deleteFiles
-    && activePage === "torrents"
-    && ids.some((id) => {
-      const task = downloads.find((item) => item.id === id);
-      return task
-        && isTorrent(task)
-        && Boolean(task.torrent_metadata_path);
-    });
-  const deleteTorrentMetadata = shouldAskTorrentMetadata
-    ? window.confirm(t("deleteTorrentMetadataConfirm"))
-    : false;
+  // The explicit torrent-store control handles metadata deletion.
+  const deleteTorrentMetadata = false;
   downloadListState.beginRemoval(ids);
   let removed = false;
   try {
@@ -2601,9 +2639,12 @@ document.querySelector("#regenerate-pairing").onclick = async () => {
 function isArchiveFileName(name) {
   return /\.(zip|7z|rar|tar|tar\.gz|tgz|tar\.bz2|tbz2|tar\.xz|txz|tar\.zst|gz|bz2|xz|zst|cab|arj|lha|lzh)$/i.test(String(name || ""));
 }
+let knownArchiveName = "";
 function refreshAutoExtractOption() {
   const option = document.querySelector("#auto-extract-option");
-  const archive = isArchiveFileName(document.querySelector("#file-name").value);
+  const source = document.querySelector("#url").value.trim();
+  const archive = /^https?:/i.test(source) && isArchiveFileName(knownArchiveName)
+    && isArchiveFileName(document.querySelector("#file-name").value);
   option.hidden = !archive;
   if (!archive) document.querySelector("#auto-extract").checked = false;
 }
@@ -2632,6 +2673,8 @@ document.querySelector("#url").oninput = () => {
   pendingTorrentMetadataPath = null;
   resetTaskConnections();
   resetAnalysisForNewRequest();
+  knownArchiveName = "";
+  document.querySelector("#file-name").value = "";
   document.querySelector("#auto-extract").checked = false;
   document.querySelector("#auto-extract-option").hidden = true;
   resetMediaInspection();
@@ -2760,6 +2803,7 @@ document.querySelector("#analyze").onclick = async () => {
     const fileName = document.querySelector("#file-name");
     const suggestedFileName = await invoke("suggest_download_name", { url: url.value });
     if (!current()) return;
+    knownArchiveName = knownArchiveName || (isArchiveFileName(suggestedFileName) ? suggestedFileName : "");
     const currentName = fileName.value.trim();
     const genericName = /^(?:watch|reel|video|download)(?:\.[a-z0-9]{1,10})?$/i.test(currentName);
     if (!currentName || (genericName && !pendingTitle)) fileName.value = suggestedFileName;
@@ -2947,6 +2991,10 @@ setInterval(async () => {
     resetTaskConnections();
     const url = document.querySelector("#url");
     url.value = link;
+    knownArchiveName = "";
+    document.querySelector("#file-name").value = "";
+    document.querySelector("#auto-extract").checked = false;
+    document.querySelector("#auto-extract-option").hidden = true;
     resetAnalysisForNewRequest();
     resetMediaInspection();
     await invoke("activate_main_window");
@@ -2982,6 +3030,7 @@ async function consumeBrowserAssistedDownload() {
     document.querySelector("#url").value = request.url;
     const sourceName = String(request.fileName || "").split(/[\\/]/).pop() || "download.zip";
     document.querySelector("#file-name").value = sourceName;
+    knownArchiveName = isArchiveFileName(sourceName) ? sourceName : "";
     resetAnalysisForNewRequest();
     document.querySelector("#destination").value = await invoke("default_download_directory");
     resetMediaInspection();
@@ -3016,6 +3065,7 @@ async function consumeBridgeDownload() {
     const request = await invoke("take_bridge_download", { currentUrl });
     if (!request) return;
     lastClipboardLink = request.url;
+    pendingBrowserAssistedPath = null;
     pendingDiagnosticTrace = request.traceId || null;
     pendingReferer = request.pageUrl || null;
     pendingDuration = Number.isFinite(request.duration) ? request.duration : null;
@@ -3047,8 +3097,11 @@ async function consumeBridgeDownload() {
     document.querySelector("#file-name").value = (pendingMediaKind === "video" || pendingMediaKind === "audio") && titleName && (!requestedName || genericMediaName)
       ? `${[...titleName].slice(0, 110).join("")}.${titleExtension}`
       : requestedName;
+    document.querySelector("#auto-extract").checked = false;
+    knownArchiveName = /^https?:/i.test(request.url) && isArchiveFileName(requestedName) && !["video", "audio", "image"].includes(pendingMediaKind) ? requestedName : "";
     resetAnalysisForNewRequest();
     resetMediaInspection();
+    refreshAutoExtractOption();
     if (pendingThumbnail || pendingTitle || pendingMediaKind === "image") {
       showCapturedPreview({ title: pendingTitle, thumbnail: pendingThumbnail || (pendingMediaKind === "image" ? request.url : null), kind: pendingMediaKind, duration: pendingDuration, size: pendingExpectedSize });
     }

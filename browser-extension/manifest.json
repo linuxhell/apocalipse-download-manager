@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.176",
+  "version": "0.3.187",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -12,6 +12,7 @@
     "clipboardRead",
     "cookies",
     "webRequest",
+    "declarativeNetRequest",
     "scripting"
   ],
   "host_permissions": [
@@ -144,5 +145,5 @@
       "48": "icons/alien-48.png"
     }
   },
-  "version_name": "0.3.176 - confirmed build, popup theme sync verified working"
+  "version_name": "0.3.187 - Reddit post titles and extractor routing"
 }

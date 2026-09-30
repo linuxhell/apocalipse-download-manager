@@ -2396,9 +2396,22 @@ async fn finish_download(
             bail!("incomplete download: received {received} of {expected} bytes");
         }
     }
-    if let Some(expected) = request.expected_size {
-        if received != expected {
-            bail!("expected size mismatch: received {received} of {expected} bytes");
+    // request.expected_size is a hint captured earlier (e.g. the browser
+    // extension's own prehook probe of the same URL, before handing off).
+    // For a response body generated per-request - a server-side script that
+    // embeds a timestamp, nonce or session id, uupdump.net's get.php among
+    // them - that earlier probe's Content-Length legitimately differs by a
+    // few bytes from this download's own, even though this download is
+    // itself complete and internally consistent (received == total, just
+    // checked above). Treating that stale hint as authoritative turned a
+    // successful download into an infinite retry loop that ended in the
+    // remote host rate-limiting the retries (HTTP 429). Only fall back to it
+    // when this response never reported its own Content-Length at all.
+    if total.is_none() {
+        if let Some(expected) = request.expected_size {
+            if received != expected {
+                bail!("expected size mismatch: received {received} of {expected} bytes");
+            }
         }
     }
 
@@ -2429,6 +2442,12 @@ async fn finish_download(
         fs::remove_file(&request.destination).await?;
     }
     fs::rename(partial, &request.destination).await?;
+    if let Err(error) = cleanup_chunk_artifacts(&request.destination).await {
+        let _ = events.try_send(DownloadEvent::Diagnostic {
+            event: "http.cleanup_failed",
+            detail: serde_json::json!({ "error": error.to_string() }),
+        });
+    }
     let _ = events
         .send(DownloadEvent::Completed { bytes: received })
         .await;
@@ -2723,6 +2742,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn completed_single_download_cleans_its_journal_but_preserves_other_tasks() {
+        let root = std::env::temp_dir().join(format!("adm-cleanup-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).await.unwrap();
+        let destination = root.join("payload.zip");
+        let partial = partial_path(&destination);
+        fs::write(&partial, b"payload").await.unwrap();
+        let own = chunk_directory(&destination);
+        let other = chunk_directory(&root.join("other.zip"));
+        fs::create_dir_all(&own).await.unwrap();
+        fs::create_dir_all(&other).await.unwrap();
+        fs::write(own.join("single-a.json"), b"journal")
+            .await
+            .unwrap();
+        fs::write(other.join("single-a.json"), b"other task")
+            .await
+            .unwrap();
+        let (tx, _rx) = mpsc::channel(4);
+        let request = DownloadRequest {
+            url: "https://example.test/get.php".into(),
+            destination: destination.clone(),
+            overwrite: false,
+            connections: 1,
+            adaptive_connections: false,
+            network_capacity_hint_bps: None,
+            host_capacity_hint_bps: None,
+            method: "GET".into(),
+            body: None,
+            headers: Vec::new(),
+            expected_size: Some(7),
+            expected_sha256: None,
+            limiters: Vec::new(),
+        };
+        finish_download(&request, &partial, 7, Some(7), &tx)
+            .await
+            .unwrap();
+        assert_eq!(fs::read(&destination).await.unwrap(), b"payload");
+        assert!(!own.exists());
+        assert!(other.join("single-a.json").exists());
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn expected_sha256_blocks_promotion_of_corrupted_partial() {
         let root = std::env::temp_dir().join(format!("adm-integrity-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&root).await.unwrap();
@@ -2750,6 +2811,76 @@ mod tests {
             .is_err());
         assert!(!destination.exists());
         assert!(partial.exists());
+        let _ = fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn a_stale_prehook_size_hint_never_fails_a_self_consistent_download() {
+        // uupdump.net's get.php generates its response body per request (it
+        // embeds a session id), so a browser-extension prehook probe and the
+        // desktop's own download of the very same URL moments later can
+        // legitimately differ by a couple of bytes. The download itself is
+        // complete and correct - received matches this response's own
+        // Content-Length - so the earlier hint must not fail it.
+        let root = std::env::temp_dir().join(format!("adm-size-hint-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).await.unwrap();
+        let destination = root.join("payload.zip");
+        let partial = partial_path(&destination);
+        fs::write(&partial, b"a payload that is 17 bytes")
+            .await
+            .unwrap();
+        let (tx, _rx) = mpsc::channel(4);
+        let request = DownloadRequest {
+            url: "https://uupdump.net/get.php".into(),
+            destination: destination.clone(),
+            overwrite: false,
+            connections: 1,
+            adaptive_connections: false,
+            network_capacity_hint_bps: None,
+            host_capacity_hint_bps: None,
+            method: "POST".into(),
+            body: None,
+            headers: Vec::new(),
+            expected_size: Some(8215),
+            expected_sha256: None,
+            limiters: Vec::new(),
+        };
+        assert!(finish_download(&request, &partial, 8217, Some(8217), &tx)
+            .await
+            .is_ok());
+        assert!(destination.exists());
+        let _ = fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn expected_size_hint_still_gates_a_response_with_no_content_length() {
+        // Without this response's own total, the earlier hint is the only
+        // signal available and must still be enforced.
+        let root = std::env::temp_dir().join(format!("adm-size-hint-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).await.unwrap();
+        let destination = root.join("payload.zip");
+        let partial = partial_path(&destination);
+        fs::write(&partial, b"short").await.unwrap();
+        let (tx, _rx) = mpsc::channel(4);
+        let request = DownloadRequest {
+            url: "https://example.test/payload.zip".into(),
+            destination: destination.clone(),
+            overwrite: false,
+            connections: 1,
+            adaptive_connections: false,
+            network_capacity_hint_bps: None,
+            host_capacity_hint_bps: None,
+            method: "GET".into(),
+            body: None,
+            headers: Vec::new(),
+            expected_size: Some(8215),
+            expected_sha256: None,
+            limiters: Vec::new(),
+        };
+        assert!(finish_download(&request, &partial, 5, None, &tx)
+            .await
+            .is_err());
+        assert!(!destination.exists());
         let _ = fs::remove_dir_all(root).await;
     }
 

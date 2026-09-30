@@ -70,6 +70,7 @@ function page({ url = 'https://www.tiktok.com/', source = 'https://v16.tiktok.co
         onChanged: { addListener() {} },
       },
       runtime: {
+        id: 'synthetic-extension-id',
         onMessage: { addListener() {} },
         sendMessage(message, callback) {
           sent.push(message);

@@ -38,6 +38,45 @@
       refreshOverlayLanguages();
     }
   });
+  // Reddit's native players keep <video> inside open component roots.
+  // Keep discovery scoped to players, rather than scanning every component
+  // on every page. The existing periodic scan also finds late-created roots.
+  const isRedditPage = () => /(^|\.)reddit\.com$/i.test(location.hostname);
+  const queryMediaElements = (selector) => {
+    const found = new Set(document.querySelectorAll(selector));
+    if (!isRedditPage()) return [...found];
+    const visit = root => {
+      root.querySelectorAll(selector).forEach(element => found.add(element));
+      root.querySelectorAll("*").forEach(element => {
+        if (element.shadowRoot) visit(element.shadowRoot);
+      });
+    };
+    document.querySelectorAll("shreddit-player").forEach(player => {
+      if (player.shadowRoot) visit(player.shadowRoot);
+    });
+    return [...found];
+  };
+  const redditPostFor = element => {
+    if (!isRedditPage()) return null;
+    let node = element;
+    while (node) {
+      const post = node.closest?.("shreddit-post");
+      if (post) return post;
+      node = node.getRootNode?.()?.host || null;
+    }
+    return null;
+  };
+  const redditUrlFor = element => {
+    if (element?.tagName !== "VIDEO") return null;
+    const permalink = redditPostFor(element)?.getAttribute?.("permalink");
+    if (!permalink) return null;
+    try {
+      const url = new URL(permalink, location.href);
+      if (/^https?:$/.test(url.protocol) && /(^|\.)reddit\.com$/i.test(url.hostname)
+        && /^\/r\/[^/]+\/comments\/[^/]+(?:\/|$)/.test(url.pathname)) return url.href;
+    } catch {}
+    return null;
+  };
   let mainHookReady = false;
   const pingMainHook = () => {
     try {
@@ -330,6 +369,10 @@
     return "";
   };
   const titleInfoFor = (element) => {
+    const redditPost = redditPostFor(element);
+    const redditTitle = compactMediaTitle(redditPost?.getAttribute?.("post-title")
+      || redditPost?.querySelector?.('[slot="title"],h1,h2,h3')?.textContent);
+    if (redditTitle) return { title: redditTitle, source: "reddit_post" };
     const labels = [
       element?.getAttribute?.("aria-label"),
       element?.title,
@@ -510,7 +553,7 @@
     const pageVideo = ["og:video", "og:video:url", "og:video:secure_url"]
       .map(name => absolute(document.querySelector(`meta[property="${name}"]`)?.content));
     const pageBound = Boolean(source && /^https?:/i.test(source) && pageVideo.includes(source)
-      && document.querySelectorAll("video").length === 1);
+      && queryMediaElements("video").length === 1);
     if (pageBound) candidates.push(
       document.querySelector('meta[property="og:image:secure_url"]')?.content,
       document.querySelector('meta[property="og:image"]')?.content,
@@ -519,7 +562,7 @@
       document.querySelector('link[rel="image_src"]')?.href,
     );
     for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
-      if (document.querySelectorAll("video").length > 1) break;
+      if (queryMediaElements("video").length > 1) break;
       try {
         const data = JSON.parse(script.textContent || "null");
         const nodes = Array.isArray(data) ? data : [data];
@@ -819,7 +862,7 @@
         ...extra,
       });
     };
-    document.querySelectorAll("video").forEach((element) => {
+    queryMediaElements("video").forEach((element) => {
       // YouTube uses several hidden/standby Blob players on watch, live and
       // Shorts pages. They are implementation details, not separate media.
       // The canonical page-extractor row is added once below.
@@ -844,6 +887,10 @@
           pageExtractor: true,
           previewUrl: absolute(element.currentSrc || element.src),
           ...context,
+        });
+      } else if (redditUrlFor(element)) {
+        add(redditUrlFor(element), "video", element, undefined, {
+          pageExtractor: true, previewUrl: absolute(element.currentSrc || element.src), ...context,
         });
       } else if (tikTokUrl) {
         add(tikTokUrl, "video", element, undefined, {
@@ -908,7 +955,7 @@
     if (youtubeUrl) {
       const parsed = new URL(youtubeUrl);
       const videoId = parsed.searchParams.get("v") || parsed.pathname.match(/^\/(?:shorts|live)\/([^/]+)/)?.[1] || (parsed.hostname === "youtu.be" ? parsed.pathname.split("/")[1] : null);
-      const videos = [...document.querySelectorAll("video")];
+      const videos = [...queryMediaElements("video")];
       const video = videos.sort((left, right) => {
         const a = left.getBoundingClientRect?.() || { width: 0, height: 0 };
         const b = right.getBoundingClientRect?.() || { width: 0, height: 0 };
@@ -957,7 +1004,7 @@
   const traceDiagnostic = (eventName, mode, detail = {}, actionId = null) => {
     const level = /failed|error/.test(eventName) ? "ERROR" : /unresolved|rejected|changed/.test(eventName) ? "WARN" : "INFO";
     void globalThis.ADM_DIAG?.emit(eventName, { mode, ...detail }, actionId, level);
-    return chrome.runtime.sendMessage({
+    return sendRuntimeMessageQuietly({
     type: "APOCALIPSE_CAPTURE_TRACE",
     eventName,
     mode,
@@ -968,20 +1015,28 @@
   }).catch(() => {});
   };
   const trace = traceDiagnostic;
+  // Returns { url, reason }: url is set only when the click should be handed
+  // off; reason always explains the outcome so a diagnostic trace can say
+  // exactly why a click that looked like a download control wasn't taken
+  // over, instead of the previous silent `return null` that left every such
+  // case invisible in a support bundle.
   const downloadableLink = (anchor) => {
     const url = absolute(anchor?.href);
-    if (!url || !/^https?:/i.test(url)) return null;
+    if (!url) return { url: null, reason: "no_href" };
+    if (!/^https?:/i.test(url)) return { url: null, reason: "non_http_scheme" };
+    if (new URL(url).pathname.toLowerCase().endsWith(".torrent")) return { url, reason: "torrent_extension" };
     // A same-origin URL that looks like a file can still be a generator/landing
     // page (Filespayouts is one example). Let the site's click handler run so
     // downloads.onDeterminingFilename receives the final CDN URL and headers.
     // The configured force shortcut intentionally bypasses this safeguard.
     try {
-      if (new URL(url).origin === location.origin) return null;
+      if (new URL(url).origin === location.origin) return { url: null, reason: "same_origin" };
     } catch {
-      return null;
+      return { url: null, reason: "url_parse_failed" };
     }
-    if (anchor.hasAttribute("download")) return url;
-    return /\.(?:7z|apk|bin|bz2|cab|deb|dmg|exe|gz|img|iso|msi|msix|pkg|rar|rpm|tar|tbz2|tgz|txz|xz|zip)(?:$|[?#])/i.test(url) ? url : null;
+    if (anchor.hasAttribute("download")) return { url, reason: "download_attribute" };
+    const matchesExtension = /\.(?:7z|apk|bin|bz2|cab|deb|dmg|exe|gz|img|iso|msi|msix|pkg|rar|rpm|tar|tbz2|tgz|txz|xz|zip)(?:$|[?#])/i.test(url);
+    return matchesExtension ? { url, reason: "known_extension" } : { url: null, reason: "unmatched_extension" };
   };
   const fileNameForUrl = (url) => {
     const value = new URL(url).pathname.split("/").pop() || "download";
@@ -1042,25 +1097,131 @@
     })();
     return true;
   };
-  document.addEventListener("click", (event) => {
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey) return;
+  // Capture phase, not bubble: many download/magnet buttons on ad-supported
+  // sites (the exact class of site reported as broken - bludvfilmes1.xyz,
+  // scloud.ws, esoui.com) run their own click handler directly on the
+  // button/anchor to gate an ad interstitial, and that handler calls
+  // preventDefault()/stopPropagation() before a bubble-phase listener on
+  // document would ever see the event. A capture-phase listener on document
+  // fires first, before any handler further down the tree, so the real
+  // magnet:/file href is read while it still reflects the page's intent -
+  // magnet links in particular have no HTTP request for a network-layer
+  // fallback to catch, so this is their only capture path.
+  //
+  // Every handoff below goes through sendRuntimeMessageQuietly (already
+  // used for the heartbeat/appearance-sync timers above) instead of calling
+  // chrome.runtime.sendMessage directly. Once a newer extension build (an
+  // extension reload during dev/CI testing, or an auto-update) replaces the
+  // service worker this content script was injected by, every chrome.runtime
+  // call here throws synchronously with "Extension context invalidated" -
+  // and since event.preventDefault() has already run by the time these
+  // calls happen, an unguarded throw meant the click was silently
+  // swallowed: no navigation, no handoff, no trace. That is the unexplained
+  // "I click and nothing happens" failure mode.
+  //
+  // background.js already re-injects a fresh content script into every open
+  // tab the instant the extension reloads (chrome.runtime.onInstalled ->
+  // repairOpenCaptureTabs), so a person should never have to reload the page
+  // by hand. But that fresh script's click listener is registered on
+  // document AFTER this stale one, and same-phase listeners on the same
+  // element fire in registration order - so as long as this stale instance
+  // is still attached and still calls preventDefault()/
+  // stopImmediatePropagation() on a recognized click, it wins the race and
+  // the working listener underneath it never gets a turn. Detecting
+  // staleness up front and stepping aside (removing this listener, touching
+  // neither preventDefault nor stopImmediatePropagation) lets that fresh
+  // listener handle the very same click.
+  const handleDocumentClick = (event) => {
+    if (!extensionContextActive()) {
+      document.removeEventListener("click", handleDocumentClick, true);
+      return;
+    }
+    const clickedControl = event.target?.closest?.("a[href],button,[role=button],[role=menuitem],input[type=button],input[type=submit]");
+    const clickTraceId = crypto.randomUUID();
+    if (clickedControl) {
+      traceDiagnostic("click_observed", "auto", {
+        tag: clickedControl.tagName,
+        href: clickedControl.getAttribute?.("href") || "",
+        button: event.button,
+        defaultPrevented: event.defaultPrevented,
+        ctrl: event.ctrlKey, shift: event.shiftKey, alt: event.altKey, meta: event.metaKey,
+      }, clickTraceId);
+    }
+    if (event.button !== 0 || event.metaKey) {
+      if (clickedControl) traceDiagnostic("click_ignored", "auto", { reason: "non_primary_or_meta" }, clickTraceId);
+      return;
+    }
     const bypass = shortcutPressed(event, shortcutKeys.bypass);
     const force = shortcutPressed(event, shortcutKeys.force);
     if (bypass) {
-      chrome.runtime.sendMessage({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 }).catch(() => {});
+      traceDiagnostic("click_ignored", "bypass", { reason: "bypass_shortcut" }, clickTraceId);
+      void sendRuntimeMessageQuietly({ type: "APOCALIPSE_BYPASS_NEXT", ttlMs: 4000 });
+      return;
+    }
+    const magnetAnchor = event.target.closest?.('a[href^="magnet:"]');
+    const magnetUrl = magnetAnchor?.getAttribute("href")?.trim();
+    if (!magnetUrl) {
+      // Same blind spot as downloadableLink below, for magnet controls
+      // specifically: a <button> or JS-driven "magnet" control has no
+      // <a href="magnet:..."> for closest() to find, so it silently never
+      // reaches APOCALIPSE_DOWNLOAD at all. Trace it so that's visible.
+      for (const node of event.composedPath?.() || []) {
+        const label = `${node?.getAttribute?.("aria-label") || ""} ${node?.title || ""} ${node?.textContent || ""}`
+          .replace(/\s+/g, " ").trim().slice(0, 120);
+        if (/magnet/i.test(label)) {
+          trace("click_magnet_control_without_href", "auto", {
+            tag: node?.tagName || "",
+            label,
+            hasAnchorAncestor: Boolean(event.target.closest?.("a")),
+          });
+          break;
+        }
+      }
+    } else if (magnetUrl.toLowerCase().startsWith("magnet:?")) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      traceDiagnostic("click_handoff_started", "auto", { kind: "torrent", href: magnetUrl }, clickTraceId);
+      const title = new URL(magnetUrl).searchParams.get("dn") || "magnet";
+      void sendRuntimeMessageQuietly({
+        type: "APOCALIPSE_DOWNLOAD",
+        item: { url: magnetUrl, requestUrls: [magnetUrl], kind: "torrent", title },
+      }).then((result) => {
+        traceDiagnostic(result?.target === "desktop" ? "click_handoff_acknowledged" : "click_handoff_failed", "auto", {
+          kind: "torrent", target: result?.target || "none", error: result?.error || (result ? "desktop_not_selected" : "runtime_no_response"),
+        }, clickTraceId);
+        if (result?.target !== "desktop") location.assign(magnetUrl);
+      });
       return;
     }
     if (force) {
       if (forceKnownHlsDownload(event)) return;
       // Force is a transaction, not an instruction to steal the visible href.
       // Let the page run and observe the real downstream file request/download.
-      chrome.runtime.sendMessage({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 }).catch(() => {});
+      void sendRuntimeMessageQuietly({ type: "APOCALIPSE_FORCE_NEXT", ttlMs: 20000 });
       return;
     }
-    if (event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (event.ctrlKey || event.shiftKey || event.altKey) {
+      traceDiagnostic("click_ignored", "auto", { reason: "modifier_navigation" }, clickTraceId);
+      return;
+    }
     const anchor = event.target.closest?.("a[href]");
     const anchorUrl = absolute(anchor?.href);
-    if (!anchorUrl || /\/undefined(?:$|[?#])/i.test(anchorUrl)) return;
+    if (!anchorUrl || /\/undefined(?:$|[?#])/i.test(anchorUrl)) {
+      // Previously a silent return: a click on a <button> or a JS-driven
+      // control with no <a href> ancestor left zero trace anywhere, so a
+      // "the download button doesn't work" report was undiagnosable from
+      // logs alone. Only log when the click actually looked like a
+      // download/magnet control, to avoid tracing every ordinary click.
+      const control = looksLikeDownloadControl(event);
+      if (control) {
+        trace("click_control_without_href", "auto", {
+          tag: control.node?.tagName || "",
+          label: control.label.slice(0, 120),
+          hasAnchorAncestor: Boolean(event.target.closest?.("a")),
+        });
+      }
+      return;
+    }
     let anchorHost = "";
     try { anchorHost = new URL(anchorUrl).hostname; } catch {}
     const onFilespayouts = /(^|\.)filespayouts\.com$/i.test(location.hostname);
@@ -1075,11 +1236,28 @@
       window.open(anchorUrl, "_blank", "noopener");
       return;
     }
-    const url = force ? anchorUrl : downloadableLink(anchor);
-    if (!url) return;
+    const linkDecision = force ? { url: anchorUrl, reason: "force" } : downloadableLink(anchor);
+    const url = linkDecision.url;
+    if (!url) {
+      // Same rationale as above: an anchor did exist, but was rejected (same
+      // origin, extension not on the allowlist, etc.) - log why instead of
+      // vanishing silently, but only for clicks that looked like a real
+      // download control so ordinary navigation stays quiet.
+      const control = looksLikeDownloadControl(event);
+      if (control) {
+        trace("click_link_rejected", "auto", {
+          reason: linkDecision.reason,
+          href: anchorUrl,
+          host: anchorHost,
+          label: control.label.slice(0, 120),
+        });
+      }
+      return;
+    }
     event.preventDefault();
     event.stopImmediatePropagation();
-    chrome.runtime.sendMessage({
+    traceDiagnostic("click_handoff_started", "auto", { kind: "file", href: url }, clickTraceId);
+    void sendRuntimeMessageQuietly({
       type: "APOCALIPSE_DOWNLOAD",
       item: {
         url,
@@ -1088,10 +1266,14 @@
         kind: "file",
         title: fileNameForUrl(url),
       },
-    }, (result) => {
-      if (result?.target !== "apocalipse" || chrome.runtime.lastError) location.assign(url);
+    }).then((result) => {
+      traceDiagnostic(result?.target === "desktop" ? "click_handoff_acknowledged" : "click_handoff_failed", "auto", {
+        kind: "file", target: result?.target || "none", error: result?.error || (result ? "desktop_not_selected" : "runtime_no_response"),
+      }, clickTraceId);
+      if (result?.target !== "desktop") location.assign(url);
     });
-  }, true);
+  };
+  document.addEventListener("click", handleDocumentClick, true);
   const hlsForPage = () => {
     const urls = [...new Set(performance.getEntriesByType("resource").map((entry) => entry.name)
       .filter((url) => /\.m3u8(?:$|[?#])/i.test(url)))];
@@ -1099,6 +1281,7 @@
     return { candidates: urls, fallback: masters.at(-1) || urls.at(-1) || null };
   };
   const downloadUrlFor = (element) => {
+    if (isRedditPage() && element.tagName === "VIDEO") return redditUrlFor(element);
     if (element.tagName === "VIDEO" && youtubeExtractorUrl()) return youtubeExtractorUrl();
     if (element.tagName === "VIDEO") {
       const tikTokUrl = tikTokUrlFor(element);
@@ -1118,7 +1301,7 @@
     if (element.tagName !== "VIDEO") return immediate;
     // YouTube has its own format-selection pipeline (video + audio merging).
     // Keep both regular videos and live streams out of the generic HLS route.
-    if (youtubeExtractorUrl()) return immediate;
+    if (youtubeExtractorUrl() || isRedditPage()) return immediate;
     const hls = hlsForPage();
     if (!hls.candidates.length) return immediate;
     try {
@@ -1143,6 +1326,7 @@
     if (/(^|\.)facebook\.com$/.test(host)) return "facebook";
     if (/(^|\.)instagram\.com$/.test(host)) return "instagram";
     if (/(^|\.)tiktok\.com$/.test(host)) return "tiktok";
+    if (isRedditPage()) return "reddit";
     if (/(^|\.)(?:x|twitter)\.com$/.test(host)) return "x";
     return "generic";
   };
@@ -1237,7 +1421,7 @@
     let activeFacebookReel = null;
     if (isFacebookReelsPage) {
       const viewportCenter = innerHeight / 2;
-      const candidates = [...document.querySelectorAll("video")]
+      const candidates = [...queryMediaElements("video")]
         .map((video) => ({ video, rect: video.getBoundingClientRect() }))
         .filter(({ rect }) => rect.width >= 100 && rect.height >= 55 && rect.bottom > 0 && rect.top < innerHeight)
         .sort((left, right) => {
@@ -1253,7 +1437,7 @@
     let activeInstagramReel = null;
     if (isInstagramReelsPage) {
       const viewportCenter = innerHeight / 2;
-      activeInstagramReel = [...document.querySelectorAll("video")]
+      activeInstagramReel = [...queryMediaElements("video")]
         .map((video) => ({ video, rect: video.getBoundingClientRect() }))
         .filter(({ rect }) => rect.width >= 100 && rect.height >= 55 && rect.bottom > 0 && rect.top < innerHeight)
         .sort((left, right) =>
@@ -1266,7 +1450,7 @@
     let activeTikTokVideo = null;
     if (isTikTokPage) {
       const viewportCenter = innerHeight / 2;
-      activeTikTokVideo = [...document.querySelectorAll("video")]
+      activeTikTokVideo = [...queryMediaElements("video")]
         .map((video) => ({ video, rect: video.getBoundingClientRect() }))
         .filter(({ rect }) => rect.width >= 100 && rect.height >= 55 && rect.bottom > 0 && rect.top < innerHeight)
         .sort((left, right) =>
@@ -1286,7 +1470,7 @@
     let activeGenericFeedVideo = null;
     if (socialPlatform() === "generic" && !isFacebookReelsPage && !isInstagramReelsPage && !isTikTokPage) {
       const viewportCenter = innerHeight / 2;
-      const visibleVideos = [...document.querySelectorAll("video")]
+      const visibleVideos = [...queryMediaElements("video")]
         .map((video) => ({ video, rect: video.getBoundingClientRect() }))
         .filter(({ rect }) => rect.width >= 100 && rect.height >= 55 && rect.bottom > 0 && rect.top < innerHeight);
       if (visibleVideos.length >= 3) {
@@ -1300,7 +1484,7 @@
       }
     }
 
-    document.querySelectorAll("video,audio").forEach((element) => {
+    queryMediaElements("video,audio").forEach((element) => {
       const facebookPage = /(^|\.)facebook\.com$/i.test(location.hostname);
       const isSocialVideo = element.tagName === "VIDEO" && socialPlatform() !== "generic";
       if (isSocialVideo) {
@@ -1366,7 +1550,8 @@
       const hasDirectHttpMedia = /^https?:/i.test(liveMediaUrl);
       const downloadReady = () => Boolean((downloadUrlFor(element) && /^https?:/.test(downloadUrlFor(element)))
         || /^blob:/i.test(String(element.currentSrc || element.src || '')));
-      const canDownload = Boolean((url && /^https?:/.test(url)) || /^blob:/i.test(liveMediaUrl));
+      const canDownload = isRedditPage() ? Boolean(redditUrlFor(element))
+        : Boolean((url && /^https?:/.test(url)) || /^blob:/i.test(liveMediaUrl));
       // A direct HTTP media URL belongs in the download path. Cross-origin
       // players commonly reject captureStream(), so displaying Record there
       // offers an action that cannot succeed (and duplicates Download).
@@ -1416,7 +1601,7 @@
         const restoreDownloadLabel = () => { button.textContent = `⇩ ${downloadLabel()}`; };
         const clickSource = String(element.currentSrc || element.src || "");
         const clickPage = location.href;
-        const socialVideo = isFacebookVideo || (isTikTokPage && element.tagName === "VIDEO");
+        const socialVideo = isFacebookVideo || (isTikTokPage && element.tagName === "VIDEO") || (isRedditPage() && element.tagName === "VIDEO");
         button.textContent = "…";
         trace("overlay_download_clicked", "download", { tag: element.tagName, facebook: isFacebookVideo, tiktokPage: isTikTokPage, tiktokPermalink: isTikTokVideo, overlays: activeOverlays.size });
         const visibleFacebookUrl = isFacebookVideo && isFacebookMediaUrl(location.href) ? location.href : null;
@@ -1437,7 +1622,7 @@
           ? [typeof resolved === "string" ? resolved : resolved?.url, tikTokUrlFor(element)]
             .find((value) => value && isTikTokVideoUrl(value)) || null
           : null;
-        const socialPageUrl = facebookPageUrl || tikTokPageUrl;
+        const socialPageUrl = facebookPageUrl || tikTokPageUrl || redditUrlFor(element);
         const liveSource = String(element.currentSrc || element.src || "");
         const liveBlobUrl = /^blob:/i.test(liveSource) ? liveSource : null;
         const liveHttpUrl = /^https?:/i.test(liveSource) ? liveSource : null;
@@ -1518,7 +1703,7 @@
 
         // A resolved HLS manifest is more authoritative than incidental network
         // traffic or a generic HTTP source exposed by the player.
-        let currentUrl = socialVideo
+        let currentUrl = isRedditPage() ? redditUrlFor(element) : socialVideo
           ? (socialPageUrl || browserVideoMedia || liveHttpUrl)
           : (resolved?.url || resolved || liveHttpUrl || networkMediaUrl || (isYouTubeVideo ? location.href : null));
         const facebookPlayableUrl = isFacebookVideo && currentUrl && (
@@ -1593,7 +1778,7 @@
           candidate: currentUrl,
         });
         const thumbnail = await captureThumbnailFor(element, "video");
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: resolved?.mediaKind || element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail } }, (result) => {
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, pageExtractor: Boolean(socialPageUrl), audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: resolved?.mediaKind || element.tagName.toLowerCase(), title: facebookPageUrl || isRedditPage() ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail } }, (result) => {
           const failed = chrome.runtime.lastError || !result?.ok;
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";
@@ -1827,7 +2012,7 @@
     // Final reconciliation catches the exact class of bug where a visible
     // social player passed through scanning but still ended the cycle without
     // a live overlay. This is the highest-value event for post-mortem analysis.
-    for (const video of document.querySelectorAll("video")) {
+    for (const video of queryMediaElements("video")) {
       if (socialPlatform() === "generic" || !socialPlayerVisible(video)) continue;
       const active = activeOverlays.has(video);
       const cached = socialDecisionCache.get(video) || "";
@@ -1923,7 +2108,7 @@
       return true;
     }
     if (message?.type === "APOCALIPSE_CAPTURE_PLAYER_THUMBNAIL") {
-      const element = [...document.querySelectorAll("video")]
+      const element = [...queryMediaElements("video")]
         .find(video => playerIdentity(video) === message.playerId);
       const current = element && collect().find(item => item.playerId === message.playerId
         && item.url === message.url && !item.retained);

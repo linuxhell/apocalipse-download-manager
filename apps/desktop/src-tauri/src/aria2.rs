@@ -130,13 +130,18 @@ impl Runtime {
             .arg(format!("--rpc-secret={secret}"))
             .arg(format!("--stop-with-process={}", std::process::id()))
             .arg("--continue=true")
-            .arg("--file-allocation=none")
+            // No explicit --file-allocation here: aria2-ultra's own compiled
+            // default (trunc) is what we want for direct/HTTP downloads, and
+            // it auto-downgrades to none for BitTorrent (v1/v2/hybrid) on its
+            // own (see RequestGroup::setDownloadContext upstream). Forcing
+            // "none" here as vanilla aria2 builds typically do would silently
+            // defeat that and make every direct download slower.
             .arg("--auto-file-renaming=false")
             .arg("--allow-overwrite=true")
             .arg("--max-concurrent-downloads=20")
             .arg("--summary-interval=0")
             .arg("--console-log-level=warn")
-            .arg("--log-level=debug")
+            .arg("--log-level=info")
             .arg(format!("--log={}", log.display()))
             .arg("--download-result=hide")
             .arg(format!("--input-file={}", session.display()))
@@ -291,7 +296,8 @@ impl Endpoint {
             Value::String(directory.to_string_lossy().into_owned()),
         );
         options.insert("continue".into(), Value::String("true".into()));
-        options.insert("file-allocation".into(), Value::String("none".into()));
+        // No explicit file-allocation override: let the daemon's default
+        // (aria2-ultra: trunc) apply to direct/HTTP/FTP downloads.
         if download_limit > 0 {
             options.insert(
                 "max-download-limit".into(),
@@ -477,7 +483,7 @@ impl Endpoint {
         &self,
         magnet: &str,
         torrents_dir: &Path,
-        mut on_progress: impl FnMut(u64, &str, u64, u64, u64, u64, Option<&str>),
+        mut on_progress: impl FnMut(u64, &str, u64, u64, u64, u64, Option<&str>, &Value),
     ) -> Result<PathBuf, String> {
         fs::create_dir_all(torrents_dir).map_err(|error| error.to_string())?;
         let mut options = Map::new();
@@ -489,6 +495,7 @@ impl Endpoint {
         options.insert("bt-save-metadata".into(), Value::String("true".into()));
         options.insert("file-allocation".into(), Value::String("none".into()));
 
+        let request_started = tokio::time::Instant::now();
         let gid = self
             .call(
                 "aria2.addUri",
@@ -503,6 +510,9 @@ impl Endpoint {
         let deadline = started + Duration::from_secs(150);
         let mut last_report = started;
         let mut last_status = String::new();
+        let mut first_connection_ms = None;
+        let mut first_metadata_byte_ms = None;
+        let mut first_metadata_size_ms = None;
         let (mut peak_connections, mut peak_seeders, mut peak_total, mut peak_completed) =
             (0_u64, 0_u64, 0_u64, 0_u64);
 
@@ -519,7 +529,9 @@ impl Endpoint {
                             "numSeeders",
                             "totalLength",
                             "completedLength",
-                            "infoHash"
+                            "infoHash",
+                            "downloadSpeed",
+                            "errorCode"
                         ]),
                     ],
                 )
@@ -540,6 +552,19 @@ impl Endpoint {
                 .filter(|hash| !hash.is_empty());
 
             let now = tokio::time::Instant::now();
+            let elapsed_ms = now.duration_since(started).as_millis() as u64;
+            let connections = number(value.get("connections"));
+            let completed = number(value.get("completedLength"));
+            let total = number(value.get("totalLength"));
+            if connections > 0 && first_connection_ms.is_none() {
+                first_connection_ms = Some(elapsed_ms);
+            }
+            if completed > 0 && first_metadata_byte_ms.is_none() {
+                first_metadata_byte_ms = Some(elapsed_ms);
+            }
+            if total > 0 && first_metadata_size_ms.is_none() {
+                first_metadata_size_ms = Some(elapsed_ms);
+            }
             if status != last_status
                 || now.duration_since(last_report) >= Duration::from_secs(5)
                 || status == "complete"
@@ -549,11 +574,27 @@ impl Endpoint {
                 on_progress(
                     now.duration_since(started).as_secs(),
                     &status,
-                    peak_connections,
-                    peak_seeders,
-                    peak_total,
-                    peak_completed,
+                    connections,
+                    number(value.get("numSeeders")),
+                    total,
+                    completed,
                     info_hash,
+                    &json!({
+                        "gid": gid,
+                        "elapsedMs": elapsed_ms,
+                        "addUriMs": started.duration_since(request_started).as_millis() as u64,
+                        "firstConnectionMs": first_connection_ms,
+                        "firstMetadataSizeMs": first_metadata_size_ms,
+                        "firstMetadataByteMs": first_metadata_byte_ms,
+                        "downloadSpeed": number(value.get("downloadSpeed")),
+                        "errorCode": value.get("errorCode"),
+                        "peakConnections": peak_connections,
+                        "phase": if status == "complete" { "metadata_received_waiting_file" }
+                          else if completed > 0 { "receiving_metadata" }
+                          else if connections > 0 { "connected_waiting_metadata" }
+                          else { "finding_or_connecting_peers" },
+                        "limitation": "RPC connections do not prove metadata-capable peers; tracker/DHT/peer-protocol cause is not exposed",
+                    }),
                 );
             }
 
