@@ -90,3 +90,10 @@ Metadados: teste registrou 40 conexões desde ~5s, mas metadados somente após ~
 Facebook Reel 2270956583757694: não patrocinado segundo usuário, yt-dlp falhou duas vezes com cannot parse data. A mensagem anterior sugeria indisponibilidade definitiva; agora descreve falha de extração e alternativas. external.failure_detail guarda a razão sanitizada e compacta. Download desse Reel ainda requer reteste; não afirmar que foi resolvido.
 
 Validação local: node --test tests/*.test.cjs, cargo test -p apocalipse-core e cargo fmt passaram. Acompanhar test-build até o fim; não executar release.yml ou merge em main.
+
+
+## Reddit — extensão 0.3.186 (teste)
+- Reprodução pública em r/UFOs: 10 shreddit-player com raízes abertas; document.querySelectorAll("video") retorna 0. Vídeos estão no Shadow DOM.
+- Descoberta de mídia percorre raízes abertas dos shreddit-player, inclusive componentes internos; catálogo, overlays e resolução de player usam a mesma descoberta. Timer existente cobre raízes criadas depois.
+- Download usa permalink do shreddit-post e pageExtractor, sem misturar manifests/tracks de outros posts ou baixar DASH sem áudio. Sem permalink não oferece download de uma faixa isolada. Gravação mantém os critérios de capacidade existentes.
+- Testes executam content.js real com vídeo em Shadow DOM: catálogo, Download e gravação de player MSE. Download real via yt-dlp requer reteste no navegador do usuário.

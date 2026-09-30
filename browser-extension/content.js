@@ -38,6 +38,41 @@
       refreshOverlayLanguages();
     }
   });
+  // Reddit's native players keep <video> inside open component roots.
+  // Keep discovery scoped to players, rather than scanning every component
+  // on every page. The existing periodic scan also finds late-created roots.
+  const isRedditPage = () => /(^|\.)reddit\.com$/i.test(location.hostname);
+  const queryMediaElements = (selector) => {
+    const found = new Set(document.querySelectorAll(selector));
+    if (!isRedditPage()) return [...found];
+    const visit = root => {
+      root.querySelectorAll(selector).forEach(element => found.add(element));
+      root.querySelectorAll("*").forEach(element => {
+        if (element.shadowRoot) visit(element.shadowRoot);
+      });
+    };
+    document.querySelectorAll("shreddit-player").forEach(player => {
+      if (player.shadowRoot) visit(player.shadowRoot);
+    });
+    return [...found];
+  };
+  const redditUrlFor = element => {
+    if (!isRedditPage() || element?.tagName !== "VIDEO") return null;
+    let node = element;
+    while (node) {
+      const post = node.closest?.("shreddit-post");
+      const permalink = post?.getAttribute?.("permalink");
+      if (permalink) {
+        try {
+          const url = new URL(permalink, location.href);
+          if (/^https?:$/.test(url.protocol) && /(^|\.)reddit\.com$/i.test(url.hostname)
+            && /^\/r\/[^/]+\/comments\/[^/]+(?:\/|$)/.test(url.pathname)) return url.href;
+        } catch {}
+      }
+      node = node.getRootNode?.()?.host || null;
+    }
+    return null;
+  };
   let mainHookReady = false;
   const pingMainHook = () => {
     try {
@@ -510,7 +545,7 @@
     const pageVideo = ["og:video", "og:video:url", "og:video:secure_url"]
       .map(name => absolute(document.querySelector(`meta[property="${name}"]`)?.content));
     const pageBound = Boolean(source && /^https?:/i.test(source) && pageVideo.includes(source)
-      && document.querySelectorAll("video").length === 1);
+      && queryMediaElements("video").length === 1);
     if (pageBound) candidates.push(
       document.querySelector('meta[property="og:image:secure_url"]')?.content,
       document.querySelector('meta[property="og:image"]')?.content,
@@ -519,7 +554,7 @@
       document.querySelector('link[rel="image_src"]')?.href,
     );
     for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
-      if (document.querySelectorAll("video").length > 1) break;
+      if (queryMediaElements("video").length > 1) break;
       try {
         const data = JSON.parse(script.textContent || "null");
         const nodes = Array.isArray(data) ? data : [data];
@@ -819,7 +854,7 @@
         ...extra,
       });
     };
-    document.querySelectorAll("video").forEach((element) => {
+    queryMediaElements("video").forEach((element) => {
       // YouTube uses several hidden/standby Blob players on watch, live and
       // Shorts pages. They are implementation details, not separate media.
       // The canonical page-extractor row is added once below.
@@ -844,6 +879,10 @@
           pageExtractor: true,
           previewUrl: absolute(element.currentSrc || element.src),
           ...context,
+        });
+      } else if (redditUrlFor(element)) {
+        add(redditUrlFor(element), "video", element, undefined, {
+          pageExtractor: true, previewUrl: absolute(element.currentSrc || element.src), ...context,
         });
       } else if (tikTokUrl) {
         add(tikTokUrl, "video", element, undefined, {
@@ -908,7 +947,7 @@
     if (youtubeUrl) {
       const parsed = new URL(youtubeUrl);
       const videoId = parsed.searchParams.get("v") || parsed.pathname.match(/^\/(?:shorts|live)\/([^/]+)/)?.[1] || (parsed.hostname === "youtu.be" ? parsed.pathname.split("/")[1] : null);
-      const videos = [...document.querySelectorAll("video")];
+      const videos = [...queryMediaElements("video")];
       const video = videos.sort((left, right) => {
         const a = left.getBoundingClientRect?.() || { width: 0, height: 0 };
         const b = right.getBoundingClientRect?.() || { width: 0, height: 0 };
@@ -1234,6 +1273,7 @@
     return { candidates: urls, fallback: masters.at(-1) || urls.at(-1) || null };
   };
   const downloadUrlFor = (element) => {
+    if (isRedditPage() && element.tagName === "VIDEO") return redditUrlFor(element);
     if (element.tagName === "VIDEO" && youtubeExtractorUrl()) return youtubeExtractorUrl();
     if (element.tagName === "VIDEO") {
       const tikTokUrl = tikTokUrlFor(element);
@@ -1253,7 +1293,7 @@
     if (element.tagName !== "VIDEO") return immediate;
     // YouTube has its own format-selection pipeline (video + audio merging).
     // Keep both regular videos and live streams out of the generic HLS route.
-    if (youtubeExtractorUrl()) return immediate;
+    if (youtubeExtractorUrl() || isRedditPage()) return immediate;
     const hls = hlsForPage();
     if (!hls.candidates.length) return immediate;
     try {
@@ -1278,6 +1318,7 @@
     if (/(^|\.)facebook\.com$/.test(host)) return "facebook";
     if (/(^|\.)instagram\.com$/.test(host)) return "instagram";
     if (/(^|\.)tiktok\.com$/.test(host)) return "tiktok";
+    if (isRedditPage()) return "reddit";
     if (/(^|\.)(?:x|twitter)\.com$/.test(host)) return "x";
     return "generic";
   };
@@ -1372,7 +1413,7 @@
     let activeFacebookReel = null;
     if (isFacebookReelsPage) {
       const viewportCenter = innerHeight / 2;
-      const candidates = [...document.querySelectorAll("video")]
+      const candidates = [...queryMediaElements("video")]
         .map((video) => ({ video, rect: video.getBoundingClientRect() }))
         .filter(({ rect }) => rect.width >= 100 && rect.height >= 55 && rect.bottom > 0 && rect.top < innerHeight)
         .sort((left, right) => {
@@ -1388,7 +1429,7 @@
     let activeInstagramReel = null;
     if (isInstagramReelsPage) {
       const viewportCenter = innerHeight / 2;
-      activeInstagramReel = [...document.querySelectorAll("video")]
+      activeInstagramReel = [...queryMediaElements("video")]
         .map((video) => ({ video, rect: video.getBoundingClientRect() }))
         .filter(({ rect }) => rect.width >= 100 && rect.height >= 55 && rect.bottom > 0 && rect.top < innerHeight)
         .sort((left, right) =>
@@ -1401,7 +1442,7 @@
     let activeTikTokVideo = null;
     if (isTikTokPage) {
       const viewportCenter = innerHeight / 2;
-      activeTikTokVideo = [...document.querySelectorAll("video")]
+      activeTikTokVideo = [...queryMediaElements("video")]
         .map((video) => ({ video, rect: video.getBoundingClientRect() }))
         .filter(({ rect }) => rect.width >= 100 && rect.height >= 55 && rect.bottom > 0 && rect.top < innerHeight)
         .sort((left, right) =>
@@ -1421,7 +1462,7 @@
     let activeGenericFeedVideo = null;
     if (socialPlatform() === "generic" && !isFacebookReelsPage && !isInstagramReelsPage && !isTikTokPage) {
       const viewportCenter = innerHeight / 2;
-      const visibleVideos = [...document.querySelectorAll("video")]
+      const visibleVideos = [...queryMediaElements("video")]
         .map((video) => ({ video, rect: video.getBoundingClientRect() }))
         .filter(({ rect }) => rect.width >= 100 && rect.height >= 55 && rect.bottom > 0 && rect.top < innerHeight);
       if (visibleVideos.length >= 3) {
@@ -1435,7 +1476,7 @@
       }
     }
 
-    document.querySelectorAll("video,audio").forEach((element) => {
+    queryMediaElements("video,audio").forEach((element) => {
       const facebookPage = /(^|\.)facebook\.com$/i.test(location.hostname);
       const isSocialVideo = element.tagName === "VIDEO" && socialPlatform() !== "generic";
       if (isSocialVideo) {
@@ -1501,7 +1542,8 @@
       const hasDirectHttpMedia = /^https?:/i.test(liveMediaUrl);
       const downloadReady = () => Boolean((downloadUrlFor(element) && /^https?:/.test(downloadUrlFor(element)))
         || /^blob:/i.test(String(element.currentSrc || element.src || '')));
-      const canDownload = Boolean((url && /^https?:/.test(url)) || /^blob:/i.test(liveMediaUrl));
+      const canDownload = isRedditPage() ? Boolean(redditUrlFor(element))
+        : Boolean((url && /^https?:/.test(url)) || /^blob:/i.test(liveMediaUrl));
       // A direct HTTP media URL belongs in the download path. Cross-origin
       // players commonly reject captureStream(), so displaying Record there
       // offers an action that cannot succeed (and duplicates Download).
@@ -1551,7 +1593,7 @@
         const restoreDownloadLabel = () => { button.textContent = `⇩ ${downloadLabel()}`; };
         const clickSource = String(element.currentSrc || element.src || "");
         const clickPage = location.href;
-        const socialVideo = isFacebookVideo || (isTikTokPage && element.tagName === "VIDEO");
+        const socialVideo = isFacebookVideo || (isTikTokPage && element.tagName === "VIDEO") || (isRedditPage() && element.tagName === "VIDEO");
         button.textContent = "…";
         trace("overlay_download_clicked", "download", { tag: element.tagName, facebook: isFacebookVideo, tiktokPage: isTikTokPage, tiktokPermalink: isTikTokVideo, overlays: activeOverlays.size });
         const visibleFacebookUrl = isFacebookVideo && isFacebookMediaUrl(location.href) ? location.href : null;
@@ -1572,7 +1614,7 @@
           ? [typeof resolved === "string" ? resolved : resolved?.url, tikTokUrlFor(element)]
             .find((value) => value && isTikTokVideoUrl(value)) || null
           : null;
-        const socialPageUrl = facebookPageUrl || tikTokPageUrl;
+        const socialPageUrl = facebookPageUrl || tikTokPageUrl || redditUrlFor(element);
         const liveSource = String(element.currentSrc || element.src || "");
         const liveBlobUrl = /^blob:/i.test(liveSource) ? liveSource : null;
         const liveHttpUrl = /^https?:/i.test(liveSource) ? liveSource : null;
@@ -1653,7 +1695,7 @@
 
         // A resolved HLS manifest is more authoritative than incidental network
         // traffic or a generic HTTP source exposed by the player.
-        let currentUrl = socialVideo
+        let currentUrl = isRedditPage() ? redditUrlFor(element) : socialVideo
           ? (socialPageUrl || browserVideoMedia || liveHttpUrl)
           : (resolved?.url || resolved || liveHttpUrl || networkMediaUrl || (isYouTubeVideo ? location.href : null));
         const facebookPlayableUrl = isFacebookVideo && currentUrl && (
@@ -1728,7 +1770,7 @@
           candidate: currentUrl,
         });
         const thumbnail = await captureThumbnailFor(element, "video");
-        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: resolved?.mediaKind || element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail } }, (result) => {
+        chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, pageExtractor: Boolean(socialPageUrl), audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: resolved?.mediaKind || element.tagName.toLowerCase(), title: facebookPageUrl ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail } }, (result) => {
           const failed = chrome.runtime.lastError || !result?.ok;
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
           button.textContent = failed ? "⚠" : "✓";
@@ -1962,7 +2004,7 @@
     // Final reconciliation catches the exact class of bug where a visible
     // social player passed through scanning but still ended the cycle without
     // a live overlay. This is the highest-value event for post-mortem analysis.
-    for (const video of document.querySelectorAll("video")) {
+    for (const video of queryMediaElements("video")) {
       if (socialPlatform() === "generic" || !socialPlayerVisible(video)) continue;
       const active = activeOverlays.has(video);
       const cached = socialDecisionCache.get(video) || "";
@@ -2058,7 +2100,7 @@
       return true;
     }
     if (message?.type === "APOCALIPSE_CAPTURE_PLAYER_THUMBNAIL") {
-      const element = [...document.querySelectorAll("video")]
+      const element = [...queryMediaElements("video")]
         .find(video => playerIdentity(video) === message.playerId);
       const current = element && collect().find(item => item.playerId === message.playerId
         && item.url === message.url && !item.retained);
