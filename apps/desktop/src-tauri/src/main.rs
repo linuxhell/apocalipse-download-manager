@@ -15926,14 +15926,25 @@ mod log_sanitization_tests {
 
     #[test]
     fn secrets_are_removed_from_json_and_quoted_assignments() {
-        let value = sanitize_log_detail(r#"{"operation":"download","nested":[{"password":"PRIVATE1","api_key":"PRIVATE2"}],"url":"https://user:pass@example.test/file?x=PRIVATE3"}"#);
+        let value = sanitize_log_detail(
+            r#"{"operation":"download","nested":[{"password":"PRIVATE1","api_key":"PRIVATE2"}],"url":"https://user:pass@example.test/file?x=PRIVATE3"}"#,
+        );
         assert!(value.contains("download"));
         for secret in ["PRIVATE1", "PRIVATE2", "PRIVATE3", "user:pass"] {
             assert!(!value.contains(secret), "{value}");
         }
         for key in [
-            "password", "passwd", "cookie", "authorization", "token", "secret", "api-key", "apikey",
-            "api_key", "signature", "sig",
+            "password",
+            "passwd",
+            "cookie",
+            "authorization",
+            "token",
+            "secret",
+            "api-key",
+            "apikey",
+            "api_key",
+            "signature",
+            "sig",
         ] {
             for line in [
                 format!("prefix {{\"{key}\" : \"PRIVATE\"}}"),
