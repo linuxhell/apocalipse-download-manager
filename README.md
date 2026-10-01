@@ -35,7 +35,11 @@
 > FROM A SEED, SOMETHING MAGNIFICENT IS BORN! · DE UMA SEMENTE NASCE ALGO GRANDIOSO! · 一颗种子，孕育出非凡之物！
 
 > [!IMPORTANT]
-> **Download the new Apocalipse Download Manager 0.4.77, install browser extension 0.3.187, and update aria2 in Tools to benefit from these improvements.**
+> **Download the new Apocalipse Download Manager 0.4.78, install browser extension 0.3.188, and update aria2 in Tools to benefit from these improvements.**
+
+### What's new in 0.4.78 / 0.3.188
+
+A full code audit, reviewed line by line with the entire test suite re-run before publishing. Highlights: `queue.json`/`settings.json` are now written atomically so a crash mid-write can no longer erase the download queue; an interrupted Apocalipse Link upload no longer destroys the original file; a single unreachable mirror no longer discards the other healthy ones found in the same probe; HTTP downloads with mirrors or an expected SHA-256 now actually use them instead of silently ignoring both; "remove from disk" no longer deletes unrelated same-named files; and a false-positive bug in 429 (rate limit) detection from an earlier release is fixed. Full list in [CHANGELOG.md](CHANGELOG.md).
 
 ### Performance
 
@@ -150,7 +154,11 @@ If Apocalipse helps you, [donate via PayPal](https://www.paypal.com/cgi-bin/webs
 ## Português do Brasil
 
 > [!IMPORTANT]
-> **Baixe o novo Apocalipse Download Manager 0.4.77, instale a extensão 0.3.187 e atualize o aria2 em Ferramentas para usufruir dos benefícios.**
+> **Baixe o novo Apocalipse Download Manager 0.4.78, instale a extensão 0.3.188 e atualize o aria2 em Ferramentas para usufruir dos benefícios.**
+
+### Novidades da 0.4.78 / 0.3.188
+
+Uma auditoria completa de código, revisada linha a linha e com toda a suíte de testes rodada novamente antes da publicação. Destaques: `queue.json`/`settings.json` agora são gravados de forma atômica, então um travamento no meio da escrita não apaga mais a fila de downloads; um upload interrompido pelo Apocalipse Link não destrói mais o arquivo original; um mirror fora do ar não descarta mais os outros mirrors saudáveis já confirmados na mesma busca; downloads HTTP com mirrors ou SHA-256 esperado agora realmente usam esses dados em vez de ignorá-los silenciosamente; "remover do disco" não apaga mais arquivos não relacionados de mesmo nome; e foi corrigido um bug de falso positivo na detecção do erro 429 (limite de taxa) introduzido numa versão anterior. Lista completa em [CHANGELOG.md](CHANGELOG.md).
 
 ### Desempenho
 
@@ -189,7 +197,11 @@ Se o Apocalipse for útil para você, [faça uma doação pelo PayPal](https://w
 ## 简体中文
 
 > [!IMPORTANT]
-> **请下载新版 Apocalipse Download Manager 0.4.77，安装浏览器扩展 0.3.187，并在“工具”中更新 aria2，以享受这些改进。**
+> **请下载新版 Apocalipse Download Manager 0.4.78，安装浏览器扩展 0.3.188，并在“工具”中更新 aria2，以享受这些改进。**
+
+### 0.4.78 / 0.3.188 更新内容
+
+本次发布基于一次完整的代码审计：逐行审查，并在发布前重新运行了全部测试套件。重点变化：`queue.json`/`settings.json` 现在以原子方式写入，写入过程中崩溃不会再清空下载队列；Apocalipse Link 上传中途断开不再破坏原始文件；单个失效的镜像不再导致同一次探测中已确认健康的其他镜像被丢弃；带有镜像或预期 SHA-256 的 HTTP 下载现在会真正使用这些信息，而不是静默忽略；"从磁盘删除"不再删除无关的同名文件；并修复了早期版本中 429（限速）检测的一个误报缺陷。完整列表见 [CHANGELOG.md](CHANGELOG.md)。
 
 ### 性能
 
