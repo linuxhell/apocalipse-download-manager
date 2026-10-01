@@ -1,4 +1,14 @@
-# Apocalipse Download Manager 0.4.78 — extensão / extension / 扩展 0.3.188
+# Apocalipse Download Manager 0.4.79 — extensão / extension / 扩展 0.3.189
+
+## 0.4.79 — 2026-10-01
+
+- Direct audio analysis offers post-download FFmpeg conversion; MP4 retains its existing options without the extra control.
+- Optional authenticated QUIC receives in Link, extra-path attempts, transfer progress/cancellation and HTTPS fallback.
+- Explicit RFC 9842 dictionary downloads in Tools and bounded MoQ object capture in Recordings, with three-language controls.
+- Existing files are preserved by the new transports and direct-audio conversion. MARS remains research.
+- General-log health, queue/settings persistence failures and extension transport/storage health are now visible in diagnostics and exports. Caught UI errors retain trace correlation; JSON and quoted secrets are sanitized.
+- Browser extension updated to 0.3.189. The Firefox package in this release is the Mozilla-signed XPI supplied by the maintainer (SHA-256 `06c39c075b04a81fb2db53338a5a074d424c60e74beff92497b6d6d69e58c78e`). See [release notes](release-notes-v0.4.79.md) for scope and compatibility requirements.
+
 
 ## Português do Brasil
 

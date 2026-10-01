@@ -10,6 +10,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 apocalipse-core = { path = "../../../crates/apocalipse-core" }
+apocalipse-transport-lab = { path = "../../../experiments/transport-lab", features = ["moqt"] }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -33,3 +34,5 @@ keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync
 zeroize.workspace = true
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "ico"] }
+
+tempfile = "3"

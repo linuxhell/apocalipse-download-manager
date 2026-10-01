@@ -38,6 +38,14 @@
           <small data-i18n="linkRemoteAuthPlan">Remote access uses one login: IP/host + operating-system username + account password.</small>
           <small data-i18n="linkRemoteAccountFormats">Windows: local, domain, Microsoft or AzureAD account. Linux/macOS: local system username.</small>
           <small data-i18n="linkRemoteSecurityNotice">The system password is never saved.</small>
+          <details class="advanced-transport-form">
+            <summary>QUIC</summary>
+            <label><input id="link-quic-enabled" type="checkbox" /><span data-i18n="linkQuic">Use QUIC for receiving shared files (experimental)</span></label>
+            <small data-i18n="linkQuicHint"></small>
+            <label><span data-i18n="linkQuicIps"></span><input id="link-quic-ips" type="text" placeholder="192.168.1.10, 192.168.2.10" /></label>
+            <button id="link-quic-save" type="button" data-i18n="linkQuicSave"></button>
+            <small id="link-quic-status" role="status"></small>
+          </details>
           <small id="link-status"></small>
         </div>
         <div class="link-files">

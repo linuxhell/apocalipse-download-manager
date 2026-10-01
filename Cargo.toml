@@ -1,9 +1,10 @@
 [workspace]
 resolver = "2"
+exclude = ["experiments/transport-lab"]
 members = ["crates/apocalipse-core", "crates/apocalipse-cli", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.4.78"
+version = "0.4.79"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/linuxhell/apocalipse-download-manager"

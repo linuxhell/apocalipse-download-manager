@@ -102,3 +102,62 @@ test('forensic content diagnostics observe media lifecycle and DOM recycling wit
   assert.match(source, /currentTime/);
   assert.doesNotMatch(source, /innerText|textContent|document\.body\.innerHTML/);
 });
+
+test('status exposes failed config sync while retaining the last offline configuration', async () => {
+ const config=session(),h=workerHarness({pairingToken:'x',admDiagnosticsV3:{config,outbox:[]}});
+ h.setOnline(false); await tick();
+ const before=await h.c.ADM_DIAG_WORKER.health();
+ const status=await h.message({type:'ADM_DIAG_STATUS'});
+ assert.equal(status.sessionId,config.sessionId);
+ assert.equal(status.transportErrors,before.transportErrors+1);
+ assert.equal(status.status,'degraded');
+ assert.ok(status.lastTransportErrorAt>0);
+ assert.equal(status.lastSuccessfulConfigSyncAt,null);
+ assert.equal(status.lastTransportError,'diagnostics_transport_failed');
+ assert.equal(h.storage.admDiagnosticsV3.transportErrors,status.transportErrors);
+});
+
+test('upload failure and recovery expose timestamps, durable queue and cumulative counters', async () => {
+ const h=workerHarness({pairingToken:'x'}),config=await h.message({type:'ADM_DIAG_CONTROL',action:'start'});
+ await tick();
+ const before=await h.c.ADM_DIAG_WORKER.health();
+ assert.ok(before.lastSuccessfulConfigSyncAt>0);assert.ok(before.lastSuccessfulUploadAt>0);
+ h.setOnline(false);
+ await h.message({type:'ADM_DIAG_BATCH',events:[{id:webcrypto.randomUUID(),sessionId:config.sessionId,event:'capture.test'}]},{tab:{id:7}});
+ await tick();
+ const offline=await h.c.ADM_DIAG_WORKER.health();
+ assert.equal(offline.transportErrors,1);assert.equal(offline.queued,1);
+ assert.equal(offline.lastSuccessfulUploadAt,before.lastSuccessfulUploadAt);
+ h.setOnline(true);await h.c.ADM_DIAG_WORKER.flush();
+ const recovered=await h.c.ADM_DIAG_WORKER.health();
+ assert.equal(recovered.queued,0);assert.equal(recovered.transportErrors,1);
+ assert.equal(recovered.accepted,before.accepted+1);assert.equal(recovered.status,'healthy');
+ assert.ok(recovered.lastSuccessfulUploadAt>=offline.lastTransportErrorAt);
+ const payload=h.requests.filter(r=>r.body?.health).at(-1).body.health;
+ for(const field of ['transportErrors','lastTransportErrorAt','lastSuccessfulUploadAt','lastSuccessfulConfigSyncAt','queued','accepted','dropped','storageErrors'])assert.ok(field in payload,field);
+});
+
+test('invalid acknowledgement is a transport failure and never removes queued events', async () => {
+ const h=workerHarness({pairingToken:'x'}),config=await h.message({type:'ADM_DIAG_CONTROL',action:'start'});
+ await tick();
+ const fetch=h.c.fetch;
+ h.c.fetch=async (url,options)=>url.endsWith('/events')?{ok:true,json:async()=>({ok:false,error:'private message'})}:fetch(url,options);
+ const id=webcrypto.randomUUID();
+ await h.message({type:'ADM_DIAG_BATCH',events:[{id,sessionId:config.sessionId,event:'capture.test'}]},{tab:{id:7}});
+ await tick();
+ const health=await h.c.ADM_DIAG_WORKER.health();
+ assert.equal(health.lastTransportError,'diagnostics_invalid_ack');assert.equal(health.queued,1);
+ assert.ok(h.storage.admDiagnosticsV3.outbox.some(event=>event.id===id));
+ // A successful config sync must not hide a still-broken upload channel.
+ const status=await h.message({type:'ADM_DIAG_STATUS'});assert.equal(status.status,'degraded');
+ assert.ok(!JSON.stringify(health).includes('private message'));
+});
+
+test('storage failures are visible even when health cannot be saved to disk', async () => {
+ const h=workerHarness({pairingToken:'x'});await tick();
+ h.c.chrome.storage.local.set=async()=>{throw new Error('disk full PRIVATE')};
+ await h.message({type:'ADM_DIAG_STATUS'});
+ const health=await h.c.ADM_DIAG_WORKER.health();
+ assert.ok(health.storageErrors>0);assert.equal(health.status,'degraded');
+ assert.ok(!JSON.stringify(health).includes('PRIVATE'));
+});

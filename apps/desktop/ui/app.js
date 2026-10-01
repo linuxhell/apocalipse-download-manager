@@ -734,6 +734,13 @@ const catalogs = {
 };
 window.apocalipseCatalogs = catalogs;
 
+Object.assign(catalogs["en"], {"linkQuic": "Use QUIC for receiving shared files (experimental)", "linkQuicHint": "Enable on both computers. Uploads use HTTPS. If UDP is unavailable, receiving falls back to HTTPS.", "linkQuicIps": "Additional local interface IPs (up to 3, separated by commas)", "linkQuicSave": "Save transport options", "linkQuicSaved": "Transport options saved.", "linkQuicUsed": "QUIC transfer: {paths} additional paths; {failed} unavailable.", "linkHttpUsed": "HTTPS transfer", "dictionaryTitle": "Download with a compression dictionary", "dictionaryHint": "For compatible HTTPS servers. Same origin, exact-path dictionary and trusted SHA-256 required. Maximum 256 MiB; existing files are preserved. This does not install an update.", "dictionaryUrl": "Dictionary HTTPS URL", "artifactUrl": "File HTTPS URL", "expectedHash": "Expected file SHA-256", "dictionaryDownload": "Download and verify", "transportWorking": "Working…", "transportSaved": "Saved: ", "moqTitle": "MoQ object capture (experimental)", "moqHint": "Requires a compatible MoQ relay, broadcast and track. Saves complete objects to .admmoq, not a playable video. Maximum 256 MiB / 1 hour.", "moqRelay": "HTTPS relay URL", "moqBroadcast": "Broadcast", "moqTrack": "Track", "moqSeconds": "Duration (seconds)", "moqStart": "Start object capture", "moqStop": "Stop and save complete objects", "moqActive": "Capturing objects…", "moqStopping": "Stopping…"});
+Object.assign(catalogs["pt-BR"], {"linkQuic": "Usar QUIC para receber arquivos compartilhados (experimental)", "linkQuicHint": "Ative nos dois computadores. Envios usam HTTPS. Se UDP estiver indisponível, o recebimento volta para HTTPS.", "linkQuicIps": "IPs adicionais das interfaces locais (até 3, separados por vírgulas)", "linkQuicSave": "Salvar opções de transporte", "linkQuicSaved": "Opções de transporte salvas.", "linkQuicUsed": "Transferência QUIC: {paths} caminhos adicionais; {failed} indisponíveis.", "linkHttpUsed": "Transferência HTTPS", "dictionaryTitle": "Download com dicionário de compressão", "dictionaryHint": "Para servidores HTTPS compatíveis. Exige mesma origem, dicionário para o caminho exato e SHA-256 confiável. Máximo de 256 MiB; preserva arquivos existentes. Não instala atualização.", "dictionaryUrl": "URL HTTPS do dicionário", "artifactUrl": "URL HTTPS do arquivo", "expectedHash": "SHA-256 esperado do arquivo", "dictionaryDownload": "Baixar e verificar", "transportWorking": "Processando…", "transportSaved": "Salvo: ", "moqTitle": "Captura de objetos MoQ (experimental)", "moqHint": "Exige relay MoQ compatível, transmissão e faixa. Salva objetos completos em .admmoq; ainda não gera vídeo reproduzível. Máximo de 256 MiB / 1 hora.", "moqRelay": "URL HTTPS do relay", "moqBroadcast": "Transmissão", "moqTrack": "Faixa", "moqSeconds": "Duração (segundos)", "moqStart": "Iniciar captura de objetos", "moqStop": "Parar e salvar objetos completos", "moqActive": "Capturando objetos…", "moqStopping": "Parando…"});
+Object.assign(catalogs["zh-CN"], {"linkQuic": "使用 QUIC 接收共享文件（实验性）", "linkQuicHint": "请在两台电脑上启用。上传使用 HTTPS。UDP 不可用时接收将回退到 HTTPS。", "linkQuicIps": "额外本地接口 IP（最多 3 个，以逗号分隔）", "linkQuicSave": "保存传输选项", "linkQuicSaved": "已保存传输选项。", "linkQuicUsed": "QUIC 传输：{paths} 个额外路径；{failed} 个不可用。", "linkHttpUsed": "HTTPS 传输", "dictionaryTitle": "使用压缩字典下载", "dictionaryHint": "需要兼容的 HTTPS 服务器、同源精确路径字典以及可信的 SHA-256。上限 256 MiB，保留已有文件。此操作不安装更新。", "dictionaryUrl": "字典 HTTPS 网址", "artifactUrl": "文件 HTTPS 网址", "expectedHash": "预期文件 SHA-256", "dictionaryDownload": "下载并验证", "transportWorking": "处理中…", "transportSaved": "已保存：", "moqTitle": "MoQ 对象捕获（实验性）", "moqHint": "需要兼容的 MoQ 中继、广播和轨道。完整对象保存为 .admmoq，尚不可作为视频播放。上限 256 MiB / 1 小时。", "moqRelay": "HTTPS 中继网址", "moqBroadcast": "广播", "moqTrack": "轨道", "moqSeconds": "时长（秒）", "moqStart": "开始捕获对象", "moqStop": "停止并保存完整对象", "moqActive": "正在捕获对象…", "moqStopping": "正在停止…"});
+
+Object.assign(catalogs.en, {originalAudio: "Original audio"});
+Object.assign(catalogs["pt-BR"], {originalAudio: "Áudio original"});
+Object.assign(catalogs["zh-CN"], {originalAudio: "原始音频"});
 let locale = localStorage.getItem("apocalipse.language") || "en";
 const valid = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost"];
 const applyTheme = (theme) => {
@@ -797,6 +804,20 @@ const freshUiTrace = () => {
   if (lastUiInteractionTrace && now - lastUiInteractionTrace.at < 2000) return lastUiInteractionTrace.id;
   return crypto.randomUUID();
 };
+// Use the raw bridge so a failed diagnostic write never recursively reports itself.
+function reportUiError(component, operation, error, level = "ERROR") {
+  const traceId = freshUiTrace();
+  console[level === "WARN" ? "warn" : "error"](`[${component}:${operation}]`, error);
+  const bridge = window.__TAURI__?.core?.invoke;
+  if (!bridge) return Promise.resolve();
+  const detail = { component, operation, traceId, level, errorName: String(error?.name || "Error").slice(0, 80) };
+  const message = String(error?.message || error || "unknown_error").slice(0, 2000);
+  return Promise.allSettled([
+    Promise.resolve().then(() => bridge("record_diagnostics_ui", { event: "caught_error", detail })),
+    Promise.resolve().then(() => bridge("record_ui_diagnostic", { level, event: "error_reported",
+      detail: `trace=${traceId} component=${component} operation=${operation} error=${message}` })),
+  ]).then(() => {});
+}
 const recordStructuredUi = (bridge, event, detail = {}) =>
   bridge("record_diagnostics_ui", { event, detail }).catch(() => {});
 document.addEventListener("click", (event) => {
@@ -857,12 +878,12 @@ const invoke = (command, args = {}) => {
     throw error;
   });
 };
-invoke("set_application_theme", { theme: localStorage.getItem("apocalipse.theme") || "void" }).catch(console.error);
+invoke("set_application_theme", { theme: localStorage.getItem("apocalipse.theme") || "void" }).catch(error => reportUiError("main", "applyAppearance", error));
 invoke("get_app_version").then((version) => {
   document.querySelector("#app-version").textContent = `v${version}`;
 }).catch(() => {});
-window.addEventListener("error", (event) => invoke("record_ui_diagnostic", { level: "ERROR", event: "javascript_error", detail: `message=${event.message} file=${event.filename || "inline"} line=${event.lineno || 0} column=${event.colno || 0}` }).catch(() => {}));
-window.addEventListener("unhandledrejection", (event) => invoke("record_ui_diagnostic", { level: "ERROR", event: "unhandled_rejection", detail: `reason=${String(event.reason)}` }).catch(() => {}));
+window.addEventListener("error", event => { void reportUiError("main", "javascript_error", event.error || event.message); });
+window.addEventListener("unhandledrejection", event => { void reportUiError("main", "unhandled_rejection", event.reason); });
 
 function stateName(state) {
   return t(stateKey(state));
@@ -969,7 +990,7 @@ async function resolveCachedThumbnail(url) {
       return null;
     })
     .catch((error) => {
-      console.warn("thumbnail-cache", error);
+      reportUiError("main", "thumbnail-cache", error, "WARN");
       thumbnailRetryAfter.set(url, Date.now() + 60_000);
       return null;
     })
@@ -1069,7 +1090,7 @@ function renderDownloads(force = false) {
         downloadListState.invalidate();
         await refreshDownloads();
       } catch (error) {
-        console.error(error);
+        reportUiError("main", "renderDownloads", error);
         await refreshDownloads();
       } finally {
         selectionPointerActive = false;
@@ -1190,7 +1211,7 @@ function renderDownloads(force = false) {
           await invoke(command, { id: task.id });
           await refreshDownloads();
         } catch (error) {
-          console.error(error);
+          reportUiError("main", "renderDownloads", error);
         } finally {
           busyIds.delete(task.id);
           button.disabled = false;
@@ -1229,7 +1250,7 @@ function renderDownloads(force = false) {
             await refreshDownloads();
           }
         } catch (error) {
-          console.error(error);
+          reportUiError("main", "renderDownloads", error);
           window.alert(String(error));
         } finally {
           busyIds.delete(task.id);
@@ -1379,7 +1400,7 @@ async function refreshDownloads() {
     updateSpeeds(downloads);
     renderDownloads();
   } catch (error) {
-    console.error(error);
+    reportUiError("main", "refreshDownloads", error);
   }
 }
 
@@ -1409,10 +1430,10 @@ document.querySelector("#import-list").onclick = async (event) => {
       try {
         const fileName = await invoke("suggest_download_name", { url });
         acceptEnqueuedTask(await invoke("enqueue_download", { url, destinationDirectory, fileName, formatSelection: null, torrentSelection: null, mirrors: null, priority: 0, bandwidthLimit: null, connectionsOverride: null, context: {} }));
-      } catch (error) { console.warn("import", url, error); }
+      } catch (error) { reportUiError("main", "import", error, "WARN"); }
     }
     renderDownloads();
-  } catch (error) { console.error(error); }
+  } catch (error) { reportUiError("main", "import-list", error); }
   finally { button.disabled = false; }
 };
 async function applyAboutMedia(media) {
@@ -1452,16 +1473,16 @@ document.querySelector("#about-volume").oninput = (event) => {
 aboutAudio.onplay = () => { aboutPlayPause.textContent = t("aboutPause"); };
 aboutAudio.onpause = () => { aboutPlayPause.textContent = t("aboutPlay"); };
 
-loadAboutMedia().catch(console.error);
+loadAboutMedia().catch(error => reportUiError("main", "about-stop", error));
 
 async function refreshTorrentStoreControls() {
   try {
     document.querySelector("#save-torrent-metadata").checked = await invoke("get_torrent_store_preference");
-  } catch (error) { console.error(error); }
+  } catch (error) { reportUiError("main", "refreshTorrentStoreControls", error); }
 }
 document.querySelector("#save-torrent-metadata").onchange = (event) => {
   invoke("set_torrent_store_preference", { enabled: event.target.checked }).catch((error) => {
-    console.error(error);
+    reportUiError("main", "save-torrent-metadata", error);
     event.target.checked = !event.target.checked;
   });
 };
@@ -1473,7 +1494,7 @@ document.querySelector("#clear-torrent-store").onclick = async () => {
     const removed = await invoke("clear_torrent_store");
     window.alert(t("torrentStoreCleared").replace("{count}", String(removed)));
   } catch (error) {
-    console.error(error);
+    reportUiError("main", "clear-torrent-store", error);
     window.alert(String(error));
   } finally {
     button.disabled = false;
@@ -1489,6 +1510,7 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
       return;
     }
     activePage = button.dataset.page;
+    document.querySelector("#moq-capture-panel").hidden = activePage !== "recordings";
     document.querySelectorAll("nav [data-page]").forEach((item) => item.classList.toggle("active", item === button));
     const heading = button.querySelector("b")?.textContent || t("downloads");
     document.querySelector("header h1").textContent = heading;
@@ -1501,7 +1523,7 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector("#add").hidden = activePage === "about";
     document.querySelector("#torrent-store-controls").hidden = activePage !== "torrents";
     document.querySelector("#clear-torrent-store").hidden = activePage !== "torrents";
-    if (activePage === "torrents") refreshTorrentStoreControls().catch(console.error);
+    if (activePage === "torrents") refreshTorrentStoreControls().catch(error => reportUiError("main", "clear-torrent-store", error));
     if (activePage === "about" && aboutAudio.src) {
       aboutAudio.currentTime = 0;
       aboutAudio.play().catch(() => {});
@@ -1513,7 +1535,7 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector(".panel").hidden = ["link", "logs", "themes", "language", "about"].includes(activePage);
     renderDownloads();
     invoke("record_ui_diagnostic", { level: "INFO", event: "page_opened", detail: `page=${activePage} panel_present=${activePage === "link" ? Boolean(document.querySelector("#apocalipse-link-panel")) : activePage === "logs" ? Boolean(document.querySelector("#logs-panel")) : true} duration_ms=${Math.round(performance.now() - openedAt)}` }).catch(() => {});
-    if (activePage === "logs") refreshLogEvents().catch(console.error);
+    if (activePage === "logs") refreshLogEvents().catch(error => reportUiError("main", "clear-torrent-store", error));
   };
 });
 
@@ -1790,9 +1812,9 @@ document.querySelector("#link-connect").onclick = async () => {
     updateLinkTransferButtons();
   }
 };
-document.querySelector("#link-local-up").onclick = () => openLocalLink(linkParent(linkLocalPath)).catch(console.error);
+document.querySelector("#link-local-up").onclick = () => openLocalLink(linkParent(linkLocalPath)).catch(error => reportUiError("main", "link-local-up", error));
 document.querySelector("#link-disconnect").onclick = disconnectLink;
-document.querySelector("#link-remote-up").onclick = () => openRemoteLink(linkParent(linkRemotePath)).catch(console.error);
+document.querySelector("#link-remote-up").onclick = () => openRemoteLink(linkParent(linkRemotePath)).catch(error => reportUiError("main", "link-remote-up", error));
 document.querySelector("#link-delete-remote").onclick = async () => {
   if (!linkSelectedRemote || !window.confirm(t("linkDeleteConfirm").replace("{name}", linkSelectedRemote.name))) return;
   if (linkLocalAccountSession) {
@@ -1875,7 +1897,7 @@ async function refreshToolStatuses() {
       status.textContent = tool.found ? `${t("installed")} · ${tool.version}` : t("missing");
       status.classList.toggle("tool-found", tool.found);
     }
-  } catch (error) { console.error(error); }
+  } catch (error) { reportUiError("main", "refreshToolStatuses", error); }
   finally { if (button) button.disabled = false; }
 }
 async function refreshDestinationHistory() {
@@ -1913,7 +1935,7 @@ async function refreshDestinationHistory() {
       root.append(row);
     }
   } catch (error) {
-    console.error(error);
+    reportUiError("main", "refreshDestinationHistory", error);
   }
 }
 document.querySelectorAll("[data-pick-for]").forEach((button) => {
@@ -1926,7 +1948,7 @@ document.querySelectorAll("[data-pick-for]").forEach((button) => {
       });
       if (selected) input.value = selected;
     } catch (error) {
-      console.error(error);
+      reportUiError("main", "refreshDestinationHistory", error);
     } finally {
       button.disabled = false;
     }
@@ -1964,6 +1986,7 @@ function resetMediaInspection() {
   document.querySelector("#media-format").hidden = false;
   document.querySelector("#hls-audio-conversion").hidden = true;
   document.querySelector("#hls-convert-audio").checked = false;
+  delete document.querySelector("#hls-audio-conversion").dataset.originalName;
   document.querySelector("#media-format-control").hidden = false;
   document.querySelector("#torrent-inspection").hidden = true;
   document.querySelector("#torrent-files").replaceChildren();
@@ -2036,7 +2059,7 @@ document.querySelectorAll("#add").forEach(
         .then((path) => {
           document.querySelector("#destination").value = path;
         })
-        .catch(console.error);
+        .catch(error => reportUiError("main", "resetTaskConnections", error));
       refreshDestinationHistory();
       dialog.showModal();
     }),
@@ -2046,7 +2069,7 @@ const selectLanguage = (language) => {
   localStorage.setItem("apocalipse.language", locale);
   translate();
   window.dispatchEvent(new CustomEvent("apocalipse-language-changed", { detail: { language: locale } }));
-  invoke("set_application_language", { language: locale }).catch(console.error);
+  invoke("set_application_language", { language: locale }).catch(error => reportUiError("main", "resetTaskConnections", error));
 };
 document.querySelectorAll("[data-language-choice]").forEach((button) => {
   button.onclick = () => selectLanguage(button.dataset.languageChoice);
@@ -2076,7 +2099,7 @@ document.querySelector("#redownload-selected").onclick = async (event) => {
     selectedIds.clear();
     await refreshDownloads();
   } catch (error) {
-    console.error(error);
+    reportUiError("main", "redownload-selected", error);
   } finally {
     updateSelectionControls();
   }
@@ -2086,7 +2109,7 @@ document.querySelector("#clear-destinations").onclick = async () => {
     await invoke("clear_download_directories");
     await refreshDestinationHistory();
   } catch (error) {
-    console.error(error);
+    reportUiError("main", "clear-destinations", error);
   }
 };
 document
@@ -2109,7 +2132,7 @@ async function removeSelectedDownloads(button, deleteFiles) {
     clearDialog.close();
     await refreshDownloads();
   } catch (error) {
-    console.error(error);
+    reportUiError("main", "removeSelectedDownloads", error);
     window.alert(`${t("removeFailed")}: ${error}`);
   } finally {
     if (!removed) {
@@ -2184,7 +2207,7 @@ function renderHostRules(rules) {
       try {
         renderHostRules(await invoke("remove_host_rule", { pattern: rule.pattern }));
       } catch (error) {
-        console.error(error);
+        reportUiError("main", "renderHostRules", error);
         remove.disabled = false;
       }
     };
@@ -2223,7 +2246,7 @@ document.querySelector("#save-host-rule").onclick = async (event) => {
     bandwidth.value = "";
     document.querySelector("#host-rule-clear-password").checked = false;
   } catch (error) {
-    console.error(error);
+    reportUiError("main", "save-host-rule", error);
     window.alert(String(error));
   } finally {
     button.disabled = false;
@@ -2313,7 +2336,7 @@ const openSettings = async (target = "general") => {
     targetElement?.focus?.();
     invoke("record_ui_diagnostic", { level: "INFO", event: "settings_section_opened", detail: `section=${target} found=${Boolean(targetElement)}` }).catch(() => {});
   } catch (error) {
-    console.error(error);
+    reportUiError("main", "renderAria2RpcStatus", error);
   }
 };
 document.querySelectorAll("nav [data-settings-target]").forEach((button) => {
@@ -2321,7 +2344,7 @@ document.querySelectorAll("nav [data-settings-target]").forEach((button) => {
     document.querySelectorAll("nav button").forEach((item) => item.classList.toggle("active", item === button));
     document.querySelector("main > header h1").textContent = button.querySelector("b")?.textContent || t("settings");
     document.querySelector("#page-description").textContent = t("settingsDescription");
-    openSettings(button.dataset.settingsTarget).catch(console.error);
+    openSettings(button.dataset.settingsTarget).catch(error => reportUiError("main", "renderAria2RpcStatus", error));
   };
 });
 document
@@ -2356,7 +2379,7 @@ document.querySelector("#aria2-rpc-regenerate-token").onclick = async () => {
     await invoke("regenerate_aria2_rpc_token");
     document.querySelector("#aria2-rpc-status").textContent = t("aria2RpcTokenRegenerated");
   } catch (error) {
-    console.error(error);
+    reportUiError("main", "aria2-rpc-regenerate-token", error);
     window.alert(String(error));
   } finally {
     button.disabled = false;
@@ -2365,7 +2388,7 @@ document.querySelector("#aria2-rpc-regenerate-token").onclick = async () => {
 document.querySelector("#theme").onchange = (event) => {
   localStorage.setItem("apocalipse.theme", event.target.value);
   applyTheme(event.target.value);
-  invoke("set_application_theme", { theme: event.target.value }).catch(console.error);
+  invoke("set_application_theme", { theme: event.target.value }).catch(error => reportUiError("main", "theme", error));
 };
 function syncAppearanceControls() {
   const settings = readAppearance();
@@ -2454,7 +2477,7 @@ document.querySelector("#save-settings").onclick = async () => {
     }
     settingsDialog.close();
   } catch (error) {
-    console.error(error);
+    reportUiError("main", "save-settings", error);
   } finally {
     button.disabled = false;
   }
@@ -2482,7 +2505,7 @@ document.querySelector('[data-page="tools"]').onclick = async () => {
   try {
     await refreshToolStatuses();
     toolsDialog.showModal();
-  } catch (error) { console.error(error); }
+  } catch (error) { reportUiError("main", "save-bandwidth", error); }
 };
 document.querySelectorAll("[data-tools-close]").forEach((button) => button.onclick = () => toolsDialog.close());
 document.querySelector("#save-tools").onclick = async (event) => {
@@ -2499,7 +2522,7 @@ document.querySelector("#save-tools").onclick = async (event) => {
     });
     await invoke("set_media_player", { path: document.querySelector("#tool-player").value });
     toolsDialog.close();
-  } catch (error) { console.error(error); }
+  } catch (error) { reportUiError("main", "save-tools", error); }
   finally { button.disabled = false; }
 };
 document.querySelectorAll("[data-tool-download]").forEach((button) => {
@@ -2544,7 +2567,7 @@ document.querySelectorAll("[data-tool-update]").forEach((button) => {
   };
 });
 document.querySelectorAll("[data-export-close]").forEach((button) => button.onclick = () => exportDialog.close());
-document.querySelector("#donate-paypal").onclick = () => invoke("open_paypal_donation").catch(console.error);
+document.querySelector("#donate-paypal").onclick = () => invoke("open_paypal_donation").catch(error => reportUiError("main", "donate-paypal", error));
 document.querySelector("#export-format").onchange = (event) => {
   document.querySelector("#export-video-codec").disabled = ["mp3", "m4a", "opus", "flac", "wav"].includes(event.target.value);
 };
@@ -2561,7 +2584,7 @@ document.querySelector("#export-recording").onclick = async (event) => {
     });
     exportDialog.close();
     await refreshDownloads();
-  } catch (error) { console.error(error); }
+  } catch (error) { reportUiError("main", "export-recording", error); }
   finally { button.disabled = false; }
 };
 async function refreshDiagnosticLog() {
@@ -2574,7 +2597,7 @@ document.querySelector("#open-log").onclick = async () => {
   try {
     await refreshDiagnosticLog();
     logDialog.showModal();
-  } catch (error) { console.error(error); }
+  } catch (error) { reportUiError("main", "open-log", error); }
 };
 document.querySelector("#clear-log").onclick = async (event) => {
   const button = event.currentTarget;
@@ -2583,11 +2606,11 @@ document.querySelector("#clear-log").onclick = async (event) => {
     await invoke("clear_general_log");
     if (logDialog.open) await refreshDiagnosticLog();
   }
-  catch (error) { console.error(error); }
+  catch (error) { reportUiError("main", "clear-log", error); }
   finally { button.disabled = false; }
 };
-document.querySelector("#refresh-log").onclick = () => refreshDiagnosticLog().catch(console.error);
-document.querySelector("#open-log-external").onclick = () => invoke("open_log_external").catch(console.error);
+document.querySelector("#refresh-log").onclick = () => refreshDiagnosticLog().catch(error => reportUiError("main", "refresh-log", error));
+document.querySelector("#open-log-external").onclick = () => invoke("open_log_external").catch(error => reportUiError("main", "open-log-external", error));
 document.querySelector("#pick-log-editor").onclick = async () => {
   const input = document.querySelector("#log-editor");
   try {
@@ -2596,13 +2619,13 @@ document.querySelector("#pick-log-editor").onclick = async () => {
       input.value = await invoke("set_log_editor", { path: selected });
       updateLogEditorControls();
     }
-  } catch (error) { console.error(error); }
+  } catch (error) { reportUiError("main", "pick-log-editor", error); }
 };
 document.querySelector("#remove-log-editor").onclick = async () => {
   try {
     document.querySelector("#log-editor").value = await invoke("set_log_editor", { path: "" });
     updateLogEditorControls();
-  } catch (error) { console.error(error); }
+  } catch (error) { reportUiError("main", "remove-log-editor", error); }
 };
 document.querySelectorAll("[data-log-close]").forEach((button) => {
   button.onclick = () => logDialog.close();
@@ -2614,7 +2637,7 @@ document.querySelectorAll("[data-tool-pick]").forEach((button) => {
     try {
       const selected = await invoke("pick_executable", { initialPath: input.value });
       if (selected) input.value = selected;
-    } catch (error) { console.error(error); }
+    } catch (error) { reportUiError("main", "remove-log-editor", error); }
     finally { button.disabled = false; }
   };
 });
@@ -2629,13 +2652,13 @@ document.querySelector("#default-limits").onclick = () => {
   document.querySelector("#connections").value = 16;
   updateLimitLabels();
 };
-document.querySelector("#copy-pairing").onclick = () => invoke("copy_bridge_token").catch(console.error);
+document.querySelector("#copy-pairing").onclick = () => invoke("copy_bridge_token").catch(error => reportUiError("main", "copy-pairing", error));
 document.querySelector("#regenerate-pairing").onclick = async () => {
   try {
     const pairing = await invoke("regenerate_bridge_token");
     document.querySelector("#pairing-token").value = pairing.token;
   } catch (error) {
-    console.error(error);
+    reportUiError("main", "regenerate-pairing", error);
   }
 };
 function isArchiveFileName(name) {
@@ -2730,7 +2753,7 @@ async function showMediaInspection(url, generation = analysisGeneration) {
     return true;
   } catch (error) {
     if (!analysisIsCurrent(generation)) return false;
-    console.warn(error);
+    reportUiError("main", "showMediaInspection", error, "WARN");
     // The extension may already have supplied trustworthy title/thumbnail
     // metadata. Preserve it when yt-dlp inspection is blocked by a VPN,
     // CAPTCHA or transient anti-bot response.
@@ -2760,6 +2783,7 @@ function updateHlsAudioConversion() {
   document.querySelector("#media-format").value = selection;
   document.querySelector("#hls-audio-format").disabled = !enabled;
   if (enabled) applyAudioFormatSelection(selection);
+  else if (document.querySelector("#hls-audio-conversion").dataset.originalName) document.querySelector("#file-name").value = document.querySelector("#hls-audio-conversion").dataset.originalName;
 }
 document.querySelector("#hls-convert-audio").onchange = updateHlsAudioConversion;
 document.querySelector("#hls-audio-format").onchange = updateHlsAudioConversion;
@@ -2798,7 +2822,7 @@ document.querySelector("#analyze").onclick = async () => {
       if (hostResolution?.adapted && hostResolution.url) url.value = hostResolution.url;
     } catch (error) {
       if (!current()) return;
-      console.warn("file-host-adapter", error);
+      reportUiError("main", "file-host-adapter", error, "WARN");
     }
     const plan = await invoke("inspect_url", { url: url.value });
     if (!current()) return;
@@ -2835,12 +2859,25 @@ document.querySelector("#analyze").onclick = async () => {
       option(select, "original", pendingMediaKind === "audio" ? "Original (MP4/M4A)" : t("bestQuality"));
       for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
         option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
-      const audioHls = pendingMediaKind === "audio";
+      const audioHls = pendingMediaKind === "audio" && showDirectAudioConversion(url.value, fileName.value, pendingMediaKind);
       select.hidden = audioHls;
       document.querySelector("#hls-audio-conversion").hidden = !audioHls;
       document.querySelector("#hls-convert-audio").checked = false;
       updateHlsAudioConversion();
       showCapturedPreview({ title: pendingTitle || "HLS", thumbnail: pendingThumbnail, kind: "M3U8 / HLS", duration: pendingDuration, size: pendingExpectedSize, showFormats: true });
+    } else if (showDirectAudioConversion(url.value, fileName.value, pendingMediaKind)) {
+      const select = document.querySelector("#media-format");
+      select.replaceChildren();
+      option(select, "original", t("originalAudio"));
+      for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
+        option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
+      select.hidden = true;
+      const conversion = document.querySelector("#hls-audio-conversion");
+      conversion.hidden = false;
+      conversion.dataset.originalName = fileName.value;
+      document.querySelector("#hls-convert-audio").checked = false;
+      updateHlsAudioConversion();
+      showCapturedPreview({ title: pendingTitle || fileName.value, thumbnail: pendingThumbnail, kind: "audio", duration: pendingDuration, size: pendingExpectedSize, showFormats: true });
     } else if (pendingMediaKind === "image" || /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)(?:$|[?#])/i.test(url.value)) {
       showCapturedPreview({ title: pendingTitle || fileName.value, thumbnail: pendingThumbnail || url.value, kind: pendingMediaKind || "image", duration: null, size: pendingExpectedSize });
     }
@@ -2955,9 +2992,9 @@ setInterval(async () => {
     const key = stateKey(task.state);
     if (!allowed && key === "downloading" && !schedulerPaused.has(task.id)) {
       schedulerPaused.add(task.id);
-      invoke("pause_download", { id: task.id }).catch(console.error);
+      invoke("pause_download", { id: task.id }).catch(error => reportUiError("main", "enqueue", error));
     } else if (allowed && key === "paused" && schedulerPaused.delete(task.id)) {
-      invoke("resume_download", { id: task.id }).catch(console.error);
+      invoke("resume_download", { id: task.id }).catch(error => reportUiError("main", "enqueue", error));
     }
   }
 }, 5000);
@@ -3003,7 +3040,7 @@ setInterval(async () => {
     if (!dialog.open) dialog.showModal();
     url.focus();
   } catch (error) {
-    console.error(error);
+    reportUiError("main", "enqueue", error);
   }
 }, 750);
 let consumingBrowserAssistedDownload = false;
@@ -3042,13 +3079,13 @@ async function consumeBrowserAssistedDownload() {
     if (!dialog.open) dialog.showModal();
     document.querySelector("#url").focus();
   } catch (error) {
-    console.error(error);
+    reportUiError("main", "consumeBrowserAssistedDownload", error);
   } finally {
     consumingBrowserAssistedDownload = false;
   }
 }
 setInterval(consumeBrowserAssistedDownload, 400);
-window.__TAURI__?.event?.listen?.("browser-assisted-ready", consumeBrowserAssistedDownload).catch(console.error);
+window.__TAURI__?.event?.listen?.("browser-assisted-ready", consumeBrowserAssistedDownload).catch(error => reportUiError("main", "consumeBrowserAssistedDownload", error));
 
 window.__TAURI__?.event?.listen?.("theme-changed", (event) => {
   const theme = event.payload;
@@ -3056,7 +3093,7 @@ window.__TAURI__?.event?.listen?.("theme-changed", (event) => {
     localStorage.setItem("apocalipse.theme", theme);
     applyTheme(theme);
   }
-}).catch(console.error);
+}).catch(error => reportUiError("main", "consumeBrowserAssistedDownload", error));
 
 let consumingBridgeDownload = false;
 async function consumeBridgeDownload() {
@@ -3113,11 +3150,11 @@ async function consumeBridgeDownload() {
     if (!dialog.open) dialog.showModal();
     invoke("record_ui_diagnostic", { level: "INFO", event: "save_dialog_opened", detail: `trace=${pendingDiagnosticTrace || "none"}` }).catch(() => {});
     document.querySelector("#url").focus();
-  } catch (error) { console.error(error); }
+  } catch (error) { reportUiError("main", "consumeBridgeDownload", error); }
   finally { consumingBridgeDownload = false; }
 }
 setInterval(consumeBridgeDownload, 400);
-window.__TAURI__?.event?.listen?.("bridge-download-ready", consumeBridgeDownload).catch(console.error);
+window.__TAURI__?.event?.listen?.("bridge-download-ready", consumeBridgeDownload).catch(error => reportUiError("main", "consumeBridgeDownload", error));
 window.__TAURI__?.event?.listen?.("blob-upload-progress", (event) => {
   const progress = event.payload || {};
   const task = downloads.find((item) => item.id === progress.taskId);
@@ -3131,12 +3168,12 @@ window.__TAURI__?.event?.listen?.("blob-upload-progress", (event) => {
   if (task.total) task.progress_percent = task.received * 100 / task.total;
   updateSpeeds(downloads);
   renderDownloads(true);
-}).catch(console.error);
+}).catch(error => reportUiError("main", "consumeBridgeDownload", error));
 window.__TAURI__?.event?.listen?.("media-preview-error", (event) => {
   const prefix = locale === "pt-BR" ? "Falha na pr\u00e9-visualiza\u00e7\u00e3o. Consulte Logs para os detalhes."
     : locale === "zh-CN" ? "\u9884\u89c8\u5931\u8d25\u3002\u8bf7\u67e5\u770b\u65e5\u5fd7\u3002" : "Preview failed. See Logs for details.";
   window.alert(`${prefix}\n${String(event.payload || "preview_failed")}`);
-}).catch(console.error);
+}).catch(error => reportUiError("main", "consumeBridgeDownload", error));
 window.__TAURI__?.event?.listen?.("recording-completed", async (event) => {
   try {
     await invoke("activate_main_window");
@@ -3149,8 +3186,8 @@ window.__TAURI__?.event?.listen?.("recording-completed", async (event) => {
     document.querySelector("#export-video-codec").value = "copy";
     document.querySelector("#export-audio-codec").value = "copy";
     if (!exportDialog.open) exportDialog.showModal();
-  } catch (error) { console.error(error); }
-}).catch(console.error);
+  } catch (error) { reportUiError("main", "consumeBridgeDownload", error); }
+}).catch(error => reportUiError("main", "consumeBridgeDownload", error));
 const bridgeStatusStartedAt = Date.now();
 let bridgeEverConnected = false;
 async function refreshBridgeStatus() {
@@ -3165,8 +3202,49 @@ async function refreshBridgeStatus() {
       ? t("bridgeConnected")
       : t(initiallyWaiting ? "bridgeWaiting" : "bridgeDisconnected");
   } catch (error) {
-    console.error(error);
+    reportUiError("main", "refreshBridgeStatus", error);
   }
 }
 refreshBridgeStatus();
 setInterval(refreshBridgeStatus, 3000);
+
+document.querySelector("#dictionary-download").onclick = async event => {
+  const button = event.currentTarget, status = document.querySelector("#dictionary-status");
+  button.disabled = true;
+  status.textContent = t("transportWorking");
+  try {
+    const path = await invoke("download_with_dictionary", {
+      dictionaryUrl: document.querySelector("#dictionary-url").value.trim(),
+      artifactUrl: document.querySelector("#dictionary-artifact-url").value.trim(),
+      sha256: document.querySelector("#dictionary-sha256").value.trim(),
+    });
+    status.textContent = t("transportSaved") + path;
+  } catch (error) { status.textContent = String(error); }
+  finally { button.disabled = false; }
+};
+let moqCaptureJob = null;
+document.querySelector("#moq-start").onclick = async event => {
+  const button = event.currentTarget, status = document.querySelector("#moq-status");
+  button.disabled = true;
+  moqCaptureJob = crypto.randomUUID();
+  status.textContent = t("moqActive");
+  document.querySelector("#moq-stop").disabled = false;
+  try {
+    const path = await invoke("capture_moq_objects", {
+      relay: document.querySelector("#moq-relay").value.trim(),
+      broadcast: document.querySelector("#moq-broadcast").value.trim(),
+      track: document.querySelector("#moq-track").value.trim(),
+      seconds: Number(document.querySelector("#moq-seconds").value), jobId: moqCaptureJob,
+    });
+    status.textContent = t("transportSaved") + path;
+  } catch (error) { status.textContent = String(error); }
+  finally { moqCaptureJob = null; button.disabled = false; document.querySelector("#moq-stop").disabled = true; }
+};
+document.querySelector("#moq-stop").onclick = async event => {
+  if (!moqCaptureJob) return;
+  event.currentTarget.disabled = true;
+  try {
+    await invoke("stop_transport_capture", {jobId: moqCaptureJob});
+    document.querySelector("#moq-status").textContent = t("moqStopping");
+  } catch (error) { document.querySelector("#moq-status").textContent = String(error); event.currentTarget.disabled = !moqCaptureJob; }
+};

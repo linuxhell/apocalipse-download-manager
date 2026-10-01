@@ -108,6 +108,8 @@ fn safe_detail(value: &Value, salt: &str, key: &str, depth: usize) -> Value {
                 "engine",
                 "mode",
                 "command",
+                "operation",
+                "errorName",
                 "script",
                 "errorName",
                 "decision",
@@ -229,7 +231,12 @@ impl Diagnostics {
     pub(super) fn status(&self) -> Value {
         self.inner
             .lock()
-            .map(|store| Self::config(&store))
+            .map(|store| {
+                let mut status = Self::config(&store);
+                status["clientHealth"] = store.client_health.clone();
+                status["collectorWriteErrors"] = json!(store.write_errors);
+                status
+            })
             .unwrap_or(json!({"active":false,"error":"diagnostics_lock_failed"}))
     }
     fn persist(&self, store: &mut Store) {

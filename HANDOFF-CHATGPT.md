@@ -138,3 +138,15 @@ Corrigidos (ver mensagem do commit f65c8c7 para detalhe técnico de cada um):
 - ~820 linhas de módulos do `apocalipse-core` (`credentials.rs`, `private_cache.rs`, `signed_update.rs`, `preview.rs`, `media.rs`, `i18n.rs`, `tools.rs`) que parecem não ter nenhum chamador fora dos próprios testes — não apaguei nada disso sem confirmação; pode ser código morto ou pode ser infraestrutura pronta pra feature ainda não ligada.
 
 Extensão bumped pra 0.3.188 (todos os testes com assert de versão hardcoded sincronizados).
+
+## Sessão Arena (01/10) — CI do PR #102 corrigido, artefatos 0.4.79 gerados e aprovados
+
+Estado no dia: `main` em `f90f371` (ADM 0.4.78 / extensão 0.3.188). PR **#102** (`codex/transport-lab`, head `4bbe115`) aberto com o ADM 0.4.79 (áudio direto com FFmpeg, QUIC opcional no Link, dicionário RFC 9842, captura MoQ, saúde de diagnóstico, extensão 0.3.189).
+
+O CI do #102 estava vermelho em **6 jobs** (Linux/Windows/macOS em `test-build.yml` e `validate-portable.yml`), todos no passo de validação, com tudo depois `skipped`. Diagnóstico: `cargo fmt --all -- --check` rejeitava o módulo `log_sanitization_tests` recém-adicionado a `apps/desktop/src-tauri/src/main.rs` (chamada de 182 colunas + array de chaves de 100 colunas); sob `bash -e` isso abortava o passo antes de `cargo test --workspace`.
+
+Correção: commit **`114f86b`** (rustfmt puro, +14/−3, sem mudança de comportamento) sobre o head do #102, na branch da sessão Arena. Como esta sessão não escreve em `codex/transport-lab`, o CI rodou via **PR veículo #103** (`arena/01a0f8c4-...` → `main`, CLEAN/MERGEABLE, não deve ir para main). Resultado: **11/11 checks verdes** incluindo os 3 do transport-lab; artefatos de teste gerados e **aprovados pelo dono em 01/10** (runs [36910575188](https://github.com/linuxhell/apocalipse-download-manager/actions/runs/36910575188), [36910575107](https://github.com/linuxhell/apocalipse-download-manager/actions/runs/36910575107), expiram ≈15/10).
+
+Pendência para fechar o #102: **cherry-pick de `114f86b` na `codex/transport-lab`** (a `main` é ancestral do head, então aplica limpo) e depois fechar o #103. Estado completo no topo de `docs/RETOMADA-COMPLETA.md`.
+
+Ambiente: nesta sandbox não há `cargo`/`rustc` e `static.rust-lang.org`/`crates.io`/mirrors estão bloqueados (npm/PyPI funcionam). Verificação de formato foi feita com rustfmt-WASM (npm `@scalar/rust-fmt`) **calibrado contra a `main`** antes de ser usado como régua; testes Rust e builds vieram do CI. `gh workflow run` está sem `actions:write` — para disparar CI, use um PR.

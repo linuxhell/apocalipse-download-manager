@@ -4,8 +4,16 @@
     pt_BR: { start: 'Diagnosticar esta aba (10 min)', mark: 'Marcar problema agora', stop: 'Encerrar', active: 'Captura detalhada ativa nesta aba', inactive: 'Captura detalhada desligada', hint: 'Somente a aba escolhida. Sem cookies ou texto da p\u00e1gina. Depois de reproduzir, exporte o ZIP no ADM.', failed: 'Diagn\u00f3stico indispon\u00edvel. Atualize e abra o ADM.' },
     zh_CN: { start: '\u8bca\u65ad\u6b64\u6807\u7b7e\u9875 (10 \u5206\u949f)', mark: '\u6807\u8bb0\u95ee\u9898', stop: '\u505c\u6b62', active: '\u8be6\u7ec6\u8bb0\u5f55\u5df2\u5f00\u542f', inactive: '\u8be6\u7ec6\u8bb0\u5f55\u5df2\u5173\u95ed', hint: '\u4ec5\u8bb0\u5f55\u9009\u5b9a\u6807\u7b7e\u9875\uff0c\u4e0d\u542b Cookie \u6216\u7f51\u9875\u6587\u672c\u3002\u91cd\u73b0\u540e\u5728 ADM \u5bfc\u51fa ZIP\u3002', failed: '\u8bca\u65ad\u4e0d\u53ef\u7528\uff0c\u8bf7\u66f4\u65b0\u5e76\u6253\u5f00 ADM\u3002' },
   };
+  const healthLabels = {
+    en: ['Transport errors', 'Storage errors', 'Queued', 'Accepted', 'Dropped', 'Last transport error', 'Last upload', 'Last config sync'],
+    pt_BR: ['Erros de transporte', 'Erros de armazenamento', 'Na fila', 'Aceitos', 'Descartados', 'Último erro de transporte', 'Último envio', 'Última sincronização'],
+    zh_CN: ['传输错误', '存储错误', '排队', '已接收', '已丢弃', '上次传输错误', '上次上传', '上次配置同步'],
+  };
   let language = 'en', busy = false;
   const root = document.querySelector('#logs-panel .diag-controls');
+  const healthLine = document.createElement('p');
+  healthLine.style.cssText = 'white-space:pre-line;overflow-wrap:anywhere';
+  root.append(healthLine);
   const text = () => labels[language] || labels.en;
   function translate() {
     root.querySelectorAll('button').forEach(button => { button.textContent = text()[button.dataset.action]; });
@@ -17,6 +25,15 @@
       const result = await chrome.runtime.sendMessage({ type: 'ADM_DIAG_STATUS' });
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const active = Boolean(result?.active && result.tabId === tab?.id && result.expiresAt > Date.now());
+      const h = healthLabels[language] || healthLabels.en;
+      const time = value => value ? new Date(value).toLocaleString() : '—';
+      healthLine.textContent = [
+        `${h[0]}: ${result?.transportErrors ?? '—'} | ${h[1]}: ${result?.storageErrors ?? '—'}`,
+        `${h[2]}: ${result?.queued ?? '—'} | ${h[3]}: ${result?.accepted ?? '—'} | ${h[4]}: ${result?.dropped ?? '—'}`,
+        `${h[5]}: ${time(result?.lastTransportErrorAt)}`,
+        `${h[6]}: ${time(result?.lastSuccessfulUploadAt)}`,
+        `${h[7]}: ${time(result?.lastSuccessfulConfigSyncAt)}`,
+      ].join('\n');
       root.querySelector('small').textContent = result?.error ? text().failed : `${active ? text().active : text().inactive} | v${chrome.runtime.getManifest().version}`;
       root.querySelector('[data-action="mark"]').disabled = !active;
       root.querySelector('[data-action="stop"]').disabled = !active;

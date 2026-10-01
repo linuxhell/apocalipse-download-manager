@@ -1,8 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod advanced_transports;
+mod audio_conversion;
+
 mod aria2;
 mod diagnostics;
 mod prepared_preview;
+mod runtime_health;
 mod thumbnail_cache;
 mod tiktok_preview;
 
@@ -227,6 +231,7 @@ struct AppState {
     aria2_tasks: Mutex<HashMap<DownloadId, String>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
+    runtime_health: runtime_health::RuntimeHealth,
     diagnostics: diagnostics::Diagnostics,
     global_bandwidth_limiter: Arc<BandwidthLimiter>,
     download_bandwidth_limiters: Mutex<HashMap<DownloadId, Arc<BandwidthLimiter>>>,
@@ -439,6 +444,10 @@ struct UserSettings {
     link_shares: Vec<LinkShare>,
     #[serde(default)]
     link_trusted_certificates: HashMap<String, String>,
+    #[serde(default)]
+    link_quic_enabled: bool,
+    #[serde(default)]
+    link_quic_local_ips: Vec<IpAddr>,
     #[serde(default = "default_language")]
     language: String,
     #[serde(default = "default_theme")]
@@ -524,6 +533,8 @@ impl Default for UserSettings {
             link_password: default_link_password(),
             link_shares: Vec::new(),
             link_trusted_certificates: HashMap::new(),
+            link_quic_enabled: false,
+            link_quic_local_ips: Vec::new(),
             language: default_language(),
             theme: default_theme(),
             save_torrent_metadata: true,
@@ -2026,6 +2037,17 @@ fn copy_link_stream_with_progress<R: Read, W: Write>(
 }
 
 fn download_link_file_to(
+    state: &AppState,
+    id: &str,
+    password: &str,
+    remote_path: &str,
+    destination: &Path,
+    reporter: &mut LinkTransferReporter,
+) -> Result<(), String> {
+    advanced_transports::download_link_file(state, id, password, remote_path, destination, reporter)
+}
+
+fn download_link_file_http_to(
     state: &AppState,
     id: &str,
     password: &str,
@@ -4234,7 +4256,7 @@ fn reconnect_active_downloads_after_network_change(
                     task.upload_speed = Some(0);
                 }
             }
-            let _ = save_queue(&state, &queue);
+            save_queue_in_background(&state, &queue);
         }
         state.diagnostics.record(
             if current.is_some() {
@@ -4359,6 +4381,10 @@ fn handle_link_connection<S: Read + Write>(
         };
         let body = serde_json::to_string(&*queue).unwrap_or_else(|_| "[]".to_owned());
         bridge_response(&mut stream, "200 OK", None, &body);
+        return;
+    }
+    if headers.starts_with("GET /v1/link/quic?") {
+        advanced_transports::serve_ticket(&app, &headers, &mut stream);
         return;
     }
     if headers.starts_with("GET /v1/link/capabilities?")
@@ -5274,14 +5300,42 @@ fn portable_data_directory<R: tauri::Runtime>(
 }
 
 fn save_queue(state: &AppState, queue: &[DownloadTask]) -> Result<(), String> {
-    if let Some(parent) = state.queue_path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let data = serde_json::to_vec_pretty(queue).map_err(|error| error.to_string())?;
-    let result = write_file_atomically(&state.queue_path, &data).map_err(|error| error.to_string());
+    let result = (|| {
+        if let Some(parent) = state.queue_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let data = serde_json::to_vec_pretty(queue).map_err(|error| error.to_string())?;
+        write_file_atomically(&state.queue_path, &data).map_err(|error| error.to_string())
+    })();
+    record_persistence_result(state, "queue", &result);
     state.diagnostics.record("queue.persisted", if result.is_ok() { "INFO" } else { "ERROR" }, None, None,
         serde_json::json!({"ok":result.is_ok(),"taskCount":queue.len(),"taskRefs":queue.iter().take(24).map(|t|t.id.to_string()).collect::<Vec<_>>(),"truncated":queue.len()>24}));
     result
+}
+
+fn record_persistence_result(state: &AppState, component: &str, result: &Result<(), String>) {
+    state.runtime_health.persistence(component, result);
+    if let Err(error) = result {
+        diagnostic_log(
+            state,
+            "ERROR",
+            "persistence.save_failed",
+            &format!("component={component} error={error}"),
+        );
+    }
+}
+
+// Background state changes may continue, but every failure is recorded by save_queue.
+fn save_queue_in_background(state: &AppState, queue: &[DownloadTask]) {
+    if save_queue(state, queue).is_err() {
+        state.diagnostics.record(
+            "queue.persistence_degraded",
+            "ERROR",
+            None,
+            None,
+            serde_json::json!({"reason":"save_failed","retry":"next_state_change"}),
+        );
+    }
 }
 
 fn load_settings(path: &Path) -> Result<UserSettings, String> {
@@ -5368,7 +5422,9 @@ fn write_settings(path: &Path, settings: &UserSettings) -> Result<(), String> {
 }
 
 fn save_settings(state: &AppState, settings: &UserSettings) -> Result<(), String> {
-    write_settings(&state.settings_path, settings)
+    let result = write_settings(&state.settings_path, settings);
+    record_persistence_result(state, "settings", &result);
+    result
 }
 
 fn update_capacity_estimate(
@@ -5493,8 +5549,57 @@ fn redact_url(url: &str) -> String {
     }
 }
 
+fn sensitive_log_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase().replace(['-', '_', ' '], "");
+    [
+        "cookie",
+        "authorization",
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "apikey",
+        "signature",
+    ]
+    .iter()
+    .any(|marker| key.contains(marker))
+        || key == "sig"
+}
+
+fn sanitize_log_json(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            for (key, value) in fields {
+                if sensitive_log_key(key) {
+                    *value = serde_json::json!("<redacted>");
+                } else {
+                    sanitize_log_json(value);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(sanitize_log_json),
+        serde_json::Value::String(text) => *text = sanitize_log_text(text),
+        _ => {}
+    }
+}
+
 fn sanitize_log_detail(detail: &str) -> String {
-    let lowered = detail.to_ascii_lowercase();
+    if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(detail) {
+        if value.is_object() || value.is_array() {
+            sanitize_log_json(&mut value);
+            return value.to_string();
+        }
+    }
+    sanitize_log_text(detail)
+}
+
+fn sanitize_log_text(detail: &str) -> String {
+    // Also cover embedded/malformed JSON, quoted keys and whitespace around separators.
+    let lowered: String = detail
+        .chars()
+        .filter(|c| !c.is_whitespace() && !matches!(c, '\'' | '"' | '\\'))
+        .flat_map(char::to_lowercase)
+        .collect();
     if [
         "cookie:",
         "cookie=",
@@ -5515,6 +5620,9 @@ fn sanitize_log_detail(detail: &str) -> String {
         "sig=",
         "api-key",
         "apikey",
+        "api_key",
+        "access_token",
+        "refresh_token",
     ]
     .iter()
     .any(|marker| lowered.contains(marker))
@@ -5549,35 +5657,20 @@ fn read_sanitized_log_tail(path: &Path, max_bytes: usize) -> Option<Vec<u8>> {
 
 fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
     state.diagnostics.observe_legacy(level, event, detail);
-    let _write_guard = match state.log_write_lock.lock() {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
-    if let Some(parent) = state.log_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if fs::metadata(&state.log_path).is_ok_and(|metadata| metadata.len() > 8 * 1024 * 1024) {
-        let rotated = state.log_path.with_extension("log.1");
-        let _ = fs::remove_file(&rotated);
-        let _ = fs::rename(&state.log_path, rotated);
-    }
-    let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    let local_timestamp = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&state.log_path)
-    {
-        let record = serde_json::json!({
-            "timestamp": timestamp,
-            "localTimestamp": local_timestamp,
-            "level": level,
-            "event": event,
-            "source": "desktop",
-            "detail": sanitize_log_detail(detail),
-        });
-        let _ = writeln!(file, "{record}");
-    }
+    let _write_guard = state.log_write_lock.lock().unwrap_or_else(|error| {
+        state.runtime_health.lock_recovered();
+        state.log_write_lock.clear_poison();
+        error.into_inner()
+    });
+    let record = serde_json::json!({
+        "timestamp": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "localTimestamp": chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "level": level,
+        "event": event,
+        "source": "desktop",
+        "detail": sanitize_log_detail(detail),
+    });
+    state.runtime_health.append(&state.log_path, &record);
 }
 
 fn remember_download_directory(state: &AppState, directory: &Path) -> Result<(), String> {
@@ -5627,7 +5720,7 @@ fn update_task(
                 serde_json::json!({"state":serde_json::to_value(&task.state).ok().map(|v| match v { serde_json::Value::String(name) => name, serde_json::Value::Object(fields) => fields.keys().next().cloned().unwrap_or_default(), _ => "unknown".into() }),"bytes":task.received,"persistRequested":persist}));
         }
         if persist {
-            let _ = save_queue(&state, &queue);
+            save_queue_in_background(&state, &queue);
         }
     }
 }
@@ -5810,7 +5903,7 @@ async fn run_adaptive_social_download(
 async fn run_download(
     app: tauri::AppHandle,
     id: DownloadId,
-    request: DownloadRequest,
+    mut request: DownloadRequest,
     mirrors: Vec<String>,
     mut cancellation: oneshot::Receiver<()>,
 ) {
@@ -5821,6 +5914,48 @@ async fn run_download(
         &format!("task={id} url={}", redact_url(&request.url)),
     );
     log_network_route(&app.state::<AppState>(), &id.to_string(), "NativeHttp").await;
+    let audio_job = match audio_conversion::prepare(&app, id) {
+        Ok(job) => job,
+        Err(error) => {
+            update_task(&app, id, true, |task| {
+                task.state = DownloadState::Failed { message: error }
+            });
+            if let Ok(mut workers) = app.state::<AppState>().workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    };
+    if let Some(job) = &audio_job {
+        request.destination = job.source.clone();
+        if job.source.is_file() {
+            update_task(&app, id, true, |task| task.state = DownloadState::Verifying);
+            let result = tokio::select! {
+                _ = &mut cancellation => return,
+                result = audio_conversion::convert(job) => result,
+            };
+            update_task(&app, id, true, |task| match result {
+                Ok(bytes) => {
+                    task.state = DownloadState::Completed;
+                    task.received = bytes;
+                    task.total = Some(bytes);
+                    task.progress_percent = Some(100.0);
+                    task.completed_at = Some(epoch_seconds());
+                    task.download_speed = Some(0);
+                    task.sha256 = None;
+                    task.integrity_verified = false;
+                }
+                Err(message) => task.state = DownloadState::Failed { message },
+            });
+            if let Ok(mut workers) = app.state::<AppState>().workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    }
+
     update_task(&app, id, true, |task| {
         task.state = DownloadState::Inspecting;
         task.download_speed = Some(0);
@@ -5909,10 +6044,25 @@ async fn run_download(
             result = &mut download => {
                 match result {
                     Ok(()) => {
+                        let converted_bytes = if let Some(job) = &audio_job {
+                            update_task(&app, id, true, |task| { task.state = DownloadState::Verifying; task.download_speed = Some(0); });
+                            let conversion = tokio::select! {
+                                _ = &mut cancellation => { was_cancelled = true; break; },
+                                result = audio_conversion::convert(job) => result,
+                            };
+                            match conversion {
+                                Ok(bytes) => Some(bytes),
+                                Err(error) => {
+                                    update_task(&app, id, true, |task| task.state = DownloadState::Failed { message: error });
+                                    break;
+                                }
+                            }
+                        } else { None };
                         completed_ok = true;
                         diagnostic_log(&app.state::<AppState>(), "INFO", "http.completed", &format!("task={id}"));
                         update_task(&app, id, true, |task| {
                             task.state = DownloadState::Completed;
+                            if let Some(bytes) = converted_bytes { task.received = bytes; task.total = Some(bytes); task.progress_percent = Some(100.0); task.sha256 = None; task.integrity_verified = false; }
                             task.download_speed = Some(0);
                             task.upload_speed = Some(0);
                             task.completed_at = Some(epoch_seconds());
@@ -6048,8 +6198,8 @@ async fn run_download(
                     task.total = Some(bytes);
                     task.download_speed = Some(0);
                     task.upload_speed = Some(0);
-                    task.state = DownloadState::Completed;
-                    task.completed_at = Some(epoch_seconds());
+                    task.state = if audio_job.is_some() { DownloadState::Verifying } else { DownloadState::Completed };
+                    if audio_job.is_none() { task.completed_at = Some(epoch_seconds()); }
                 }),
                 None => break,
             }
@@ -7827,6 +7977,11 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
     let guide = b"Apocalipse Forensic Debugger V4\nStart with debugger-index.json, RELATORIO_PARA_IA.txt, timeline/events-local.jsonl, correlation/index.json and incidents/problem-windows.jsonl. Engine logs are sanitized and stored under engines/. A missing event is not proof of no activity.\n";
     entries.push(("README.txt".to_owned(), guide.to_vec()));
 
+    entries.push((
+        "health/runtime.json".to_owned(),
+        serde_json::to_vec_pretty(&state.runtime_health.snapshot())
+            .map_err(|error| error.to_string())?,
+    ));
     entries.extend(state.diagnostics.export());
     write_diagnostic_zip(&path, entries)?;
     diagnostic_log(
@@ -7841,6 +7996,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
 #[tauri::command]
 fn diagnostics_status(state: State<'_, AppState>) -> serde_json::Value {
     let mut status = state.diagnostics.status();
+    status["runtimeHealth"] = state.runtime_health.snapshot();
     if let Some(object) = status.as_object_mut() {
         object.remove("salt");
     }
@@ -7853,6 +8009,7 @@ fn diagnostics_control(
     action: String,
 ) -> Result<serde_json::Value, String> {
     let mut status = state.diagnostics.control(&action, None)?;
+    status["runtimeHealth"] = state.runtime_health.snapshot();
     if let Some(object) = status.as_object_mut() {
         object.remove("salt");
     }
@@ -7897,8 +8054,13 @@ fn copy_diagnostics_report(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let report = format!(
+        "{}\nRuntime health:\n{}",
+        state.diagnostics.report(),
+        state.runtime_health.snapshot()
+    );
     app.clipboard()
-        .write_text(state.diagnostics.report())
+        .write_text(report)
         .map_err(|error| error.to_string())
 }
 
@@ -10408,6 +10570,19 @@ fn enqueue_download_impl(
         .or(file_name)
         .or(title_based_name)
         .unwrap_or_else(|| suggested_name(&url));
+    if format_selection.as_deref().is_some_and(|value| {
+        value.starts_with("audio:") && audio_conversion::format(Some(value)).is_none()
+    }) {
+        return Err("unsupported_audio_format".into());
+    }
+    let proposed = if let Some(format) = audio_conversion::format(format_selection.as_deref()) {
+        Path::new(&proposed)
+            .with_extension(format)
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        proposed
+    };
     let file_name = validate_file_name(&append_source_extension(proposed, &url, kind))?;
     remember_download_directory(state, &download_dir)?;
     let mut task = DownloadTask::new(&url, download_dir.join(&file_name));
@@ -10944,7 +11119,8 @@ fn start_download(
         && (requires_native_http_compatibility(&task.source)
             || special_http_request
             || !aria2_http_network_compatible
-            || needs_native_integrity);
+            || needs_native_integrity
+            || audio_conversion::format(task.format_selection.as_deref()).is_some());
     if native_http_compatibility {
         diagnostic_log(
             state,
@@ -14503,6 +14679,7 @@ fn main() {
                 aria2_tasks: Mutex::new(initial_aria2_tasks),
                 log_path,
                 log_write_lock: Mutex::new(()),
+                runtime_health: runtime_health::RuntimeHealth::default(),
                 diagnostics: diagnostics::Diagnostics::new(&app_data.join("logs")),
                 global_bandwidth_limiter,
                 download_bandwidth_limiters: Mutex::new(HashMap::new()),
@@ -14650,6 +14827,11 @@ fn main() {
             preview_torrent,
             download_tool,
             update_tool,
+            advanced_transports::get_link_transport_options,
+            advanced_transports::set_link_transport_options,
+            advanced_transports::download_with_dictionary,
+            advanced_transports::capture_moq_objects,
+            advanced_transports::stop_transport_capture,
             suggest_download_name,
             remove_downloads,
             get_torrent_store_preference,
@@ -15735,5 +15917,46 @@ mod tests {
         task.sha256 = Some(expected.clone());
         assert!(!apply_integrity_result(&mut task, Some("   "), &digest));
         assert_eq!(task.sha256.as_deref(), Some(expected.as_str()));
+    }
+}
+
+#[cfg(test)]
+mod log_sanitization_tests {
+    use super::*;
+
+    #[test]
+    fn secrets_are_removed_from_json_and_quoted_assignments() {
+        let value = sanitize_log_detail(
+            r#"{"operation":"download","nested":[{"password":"PRIVATE1","api_key":"PRIVATE2"}],"url":"https://user:pass@example.test/file?x=PRIVATE3"}"#,
+        );
+        assert!(value.contains("download"));
+        for secret in ["PRIVATE1", "PRIVATE2", "PRIVATE3", "user:pass"] {
+            assert!(!value.contains(secret), "{value}");
+        }
+        for key in [
+            "password",
+            "passwd",
+            "cookie",
+            "authorization",
+            "token",
+            "secret",
+            "api-key",
+            "apikey",
+            "api_key",
+            "signature",
+            "sig",
+        ] {
+            for line in [
+                format!("prefix {{\"{key}\" : \"PRIVATE\"}}"),
+                format!("'{key}' = 'PRIVATE'"),
+                format!("{key} : PRIVATE"),
+            ] {
+                assert!(!sanitize_log_detail(&line).contains("PRIVATE"), "{line}");
+            }
+        }
+        assert_eq!(
+            sanitize_log_detail("task=abc reason=timeout"),
+            "task=abc reason=timeout"
+        );
     }
 }
