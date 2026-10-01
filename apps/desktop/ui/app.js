@@ -734,6 +734,10 @@ const catalogs = {
 };
 window.apocalipseCatalogs = catalogs;
 
+Object.assign(catalogs["en"], {"linkQuic": "Use QUIC for receiving shared files (experimental)", "linkQuicHint": "Enable on both computers. Uploads use HTTPS. If UDP is unavailable, receiving falls back to HTTPS.", "linkQuicIps": "Additional local interface IPs (up to 3, separated by commas)", "linkQuicSave": "Save transport options", "linkQuicSaved": "Transport options saved.", "linkQuicUsed": "QUIC transfer: {paths} additional paths; {failed} unavailable.", "linkHttpUsed": "HTTPS transfer", "dictionaryTitle": "Download with a compression dictionary", "dictionaryHint": "For compatible HTTPS servers. Same origin, exact-path dictionary and trusted SHA-256 required. Maximum 256 MiB; existing files are preserved. This does not install an update.", "dictionaryUrl": "Dictionary HTTPS URL", "artifactUrl": "File HTTPS URL", "expectedHash": "Expected file SHA-256", "dictionaryDownload": "Download and verify", "transportWorking": "Working…", "transportSaved": "Saved: ", "moqTitle": "MoQ object capture (experimental)", "moqHint": "Requires a compatible MoQ relay, broadcast and track. Saves complete objects to .admmoq, not a playable video. Maximum 256 MiB / 1 hour.", "moqRelay": "HTTPS relay URL", "moqBroadcast": "Broadcast", "moqTrack": "Track", "moqSeconds": "Duration (seconds)", "moqStart": "Start object capture", "moqStop": "Stop and save complete objects", "moqActive": "Capturing objects…", "moqStopping": "Stopping…"});
+Object.assign(catalogs["pt-BR"], {"linkQuic": "Usar QUIC para receber arquivos compartilhados (experimental)", "linkQuicHint": "Ative nos dois computadores. Envios usam HTTPS. Se UDP estiver indisponível, o recebimento volta para HTTPS.", "linkQuicIps": "IPs adicionais das interfaces locais (até 3, separados por vírgulas)", "linkQuicSave": "Salvar opções de transporte", "linkQuicSaved": "Opções de transporte salvas.", "linkQuicUsed": "Transferência QUIC: {paths} caminhos adicionais; {failed} indisponíveis.", "linkHttpUsed": "Transferência HTTPS", "dictionaryTitle": "Download com dicionário de compressão", "dictionaryHint": "Para servidores HTTPS compatíveis. Exige mesma origem, dicionário para o caminho exato e SHA-256 confiável. Máximo de 256 MiB; preserva arquivos existentes. Não instala atualização.", "dictionaryUrl": "URL HTTPS do dicionário", "artifactUrl": "URL HTTPS do arquivo", "expectedHash": "SHA-256 esperado do arquivo", "dictionaryDownload": "Baixar e verificar", "transportWorking": "Processando…", "transportSaved": "Salvo: ", "moqTitle": "Captura de objetos MoQ (experimental)", "moqHint": "Exige relay MoQ compatível, transmissão e faixa. Salva objetos completos em .admmoq; ainda não gera vídeo reproduzível. Máximo de 256 MiB / 1 hora.", "moqRelay": "URL HTTPS do relay", "moqBroadcast": "Transmissão", "moqTrack": "Faixa", "moqSeconds": "Duração (segundos)", "moqStart": "Iniciar captura de objetos", "moqStop": "Parar e salvar objetos completos", "moqActive": "Capturando objetos…", "moqStopping": "Parando…"});
+Object.assign(catalogs["zh-CN"], {"linkQuic": "使用 QUIC 接收共享文件（实验性）", "linkQuicHint": "请在两台电脑上启用。上传使用 HTTPS。UDP 不可用时接收将回退到 HTTPS。", "linkQuicIps": "额外本地接口 IP（最多 3 个，以逗号分隔）", "linkQuicSave": "保存传输选项", "linkQuicSaved": "已保存传输选项。", "linkQuicUsed": "QUIC 传输：{paths} 个额外路径；{failed} 个不可用。", "linkHttpUsed": "HTTPS 传输", "dictionaryTitle": "使用压缩字典下载", "dictionaryHint": "需要兼容的 HTTPS 服务器、同源精确路径字典以及可信的 SHA-256。上限 256 MiB，保留已有文件。此操作不安装更新。", "dictionaryUrl": "字典 HTTPS 网址", "artifactUrl": "文件 HTTPS 网址", "expectedHash": "预期文件 SHA-256", "dictionaryDownload": "下载并验证", "transportWorking": "处理中…", "transportSaved": "已保存：", "moqTitle": "MoQ 对象捕获（实验性）", "moqHint": "需要兼容的 MoQ 中继、广播和轨道。完整对象保存为 .admmoq，尚不可作为视频播放。上限 256 MiB / 1 小时。", "moqRelay": "HTTPS 中继网址", "moqBroadcast": "广播", "moqTrack": "轨道", "moqSeconds": "时长（秒）", "moqStart": "开始捕获对象", "moqStop": "停止并保存完整对象", "moqActive": "正在捕获对象…", "moqStopping": "正在停止…"});
+
 let locale = localStorage.getItem("apocalipse.language") || "en";
 const valid = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost"];
 const applyTheme = (theme) => {
@@ -1489,6 +1493,7 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
       return;
     }
     activePage = button.dataset.page;
+    document.querySelector("#moq-capture-panel").hidden = activePage !== "recordings";
     document.querySelectorAll("nav [data-page]").forEach((item) => item.classList.toggle("active", item === button));
     const heading = button.querySelector("b")?.textContent || t("downloads");
     document.querySelector("header h1").textContent = heading;
@@ -3170,3 +3175,44 @@ async function refreshBridgeStatus() {
 }
 refreshBridgeStatus();
 setInterval(refreshBridgeStatus, 3000);
+
+document.querySelector("#dictionary-download").onclick = async event => {
+  const button = event.currentTarget, status = document.querySelector("#dictionary-status");
+  button.disabled = true;
+  status.textContent = t("transportWorking");
+  try {
+    const path = await invoke("download_with_dictionary", {
+      dictionaryUrl: document.querySelector("#dictionary-url").value.trim(),
+      artifactUrl: document.querySelector("#dictionary-artifact-url").value.trim(),
+      sha256: document.querySelector("#dictionary-sha256").value.trim(),
+    });
+    status.textContent = t("transportSaved") + path;
+  } catch (error) { status.textContent = String(error); }
+  finally { button.disabled = false; }
+};
+let moqCaptureJob = null;
+document.querySelector("#moq-start").onclick = async event => {
+  const button = event.currentTarget, status = document.querySelector("#moq-status");
+  button.disabled = true;
+  moqCaptureJob = crypto.randomUUID();
+  status.textContent = t("moqActive");
+  document.querySelector("#moq-stop").disabled = false;
+  try {
+    const path = await invoke("capture_moq_objects", {
+      relay: document.querySelector("#moq-relay").value.trim(),
+      broadcast: document.querySelector("#moq-broadcast").value.trim(),
+      track: document.querySelector("#moq-track").value.trim(),
+      seconds: Number(document.querySelector("#moq-seconds").value), jobId: moqCaptureJob,
+    });
+    status.textContent = t("transportSaved") + path;
+  } catch (error) { status.textContent = String(error); }
+  finally { moqCaptureJob = null; button.disabled = false; document.querySelector("#moq-stop").disabled = true; }
+};
+document.querySelector("#moq-stop").onclick = async event => {
+  if (!moqCaptureJob) return;
+  event.currentTarget.disabled = true;
+  try {
+    await invoke("stop_transport_capture", {jobId: moqCaptureJob});
+    document.querySelector("#moq-status").textContent = t("moqStopping");
+  } catch (error) { document.querySelector("#moq-status").textContent = String(error); event.currentTarget.disabled = !moqCaptureJob; }
+};

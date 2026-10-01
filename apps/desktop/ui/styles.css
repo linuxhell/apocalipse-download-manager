@@ -1472,3 +1472,10 @@ body.link-window #link-share-list {
   .about-creator { width: 100%; }
   .about-audio-controls { width: 100%; grid-template-columns: 1fr 1fr; }
 }
+
+.advanced-transport-form { border: 1px solid var(--border, #454555); border-radius: 10px; padding: 14px; margin: 12px 0; }
+.advanced-transport-form summary { cursor: pointer; font-size: 16px; font-weight: 600; }
+.advanced-transport-form label { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+.advanced-transport-form input:not([type="checkbox"]) { width: 100%; min-height: 36px; }
+.advanced-transport-form button { min-height: 36px; margin: 6px 4px 6px 0; }
+.advanced-transport-form [role="status"] { overflow-wrap: anywhere; }

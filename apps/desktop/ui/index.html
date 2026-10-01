@@ -65,6 +65,17 @@
           </button>
         </div>
       </header>
+      <details id="moq-capture-panel" class="advanced-transport-form" hidden>
+        <summary data-i18n="moqTitle">MoQ object capture (experimental)</summary>
+        <p data-i18n="moqHint"></p>
+        <label><span data-i18n="moqRelay"></span><input id="moq-relay" type="url" placeholder="https://relay.example/" /></label>
+        <label><span data-i18n="moqBroadcast"></span><input id="moq-broadcast" type="text" /></label>
+        <label><span data-i18n="moqTrack"></span><input id="moq-track" type="text" /></label>
+        <label><span data-i18n="moqSeconds"></span><input id="moq-seconds" type="number" value="60" min="1" max="3600" /></label>
+        <button id="moq-start" type="button" data-i18n="moqStart"></button>
+        <button id="moq-stop" type="button" data-i18n="moqStop" disabled></button>
+        <p id="moq-status" role="status"></p>
+      </details>
       <section class="metrics">
         <article>
           <span class="cyan">↓</span>
@@ -546,6 +557,15 @@
       <form method="dialog">
         <div class="dialog-head"><div><small data-i18n="toolbox">TOOLBOX</small><h2 data-i18n="tools">Tools</h2></div><button type="button" class="close" data-tools-close>×</button></div>
         <p class="dialog-copy readable-description" data-i18n="toolsPageDescription">Manage the engines used for media, transfers, conversion and preview.</p>
+        <details class="advanced-transport-form">
+          <summary data-i18n="dictionaryTitle">Download with a compression dictionary</summary>
+          <p data-i18n="dictionaryHint"></p>
+          <label><span data-i18n="dictionaryUrl"></span><input id="dictionary-url" type="url" /></label>
+          <label><span data-i18n="artifactUrl"></span><input id="dictionary-artifact-url" type="url" /></label>
+          <label><span data-i18n="expectedHash"></span><input id="dictionary-sha256" type="text" maxlength="64" /></label>
+          <button id="dictionary-download" type="button" data-i18n="dictionaryDownload"></button>
+          <p id="dictionary-status" role="status"></p>
+        </details>
         <section class="tool-settings">
           <b data-i18n="externalTools">Required media and transfer tools</b>
           <small data-i18n="toolsHint">Configure each executable. Apocalipse uses these exact paths for downloads.</small>

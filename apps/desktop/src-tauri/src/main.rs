@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod advanced_transports;
+
 mod aria2;
 mod diagnostics;
 mod prepared_preview;
@@ -439,6 +441,10 @@ struct UserSettings {
     link_shares: Vec<LinkShare>,
     #[serde(default)]
     link_trusted_certificates: HashMap<String, String>,
+    #[serde(default)]
+    link_quic_enabled: bool,
+    #[serde(default)]
+    link_quic_local_ips: Vec<IpAddr>,
     #[serde(default = "default_language")]
     language: String,
     #[serde(default = "default_theme")]
@@ -524,6 +530,8 @@ impl Default for UserSettings {
             link_password: default_link_password(),
             link_shares: Vec::new(),
             link_trusted_certificates: HashMap::new(),
+            link_quic_enabled: false,
+            link_quic_local_ips: Vec::new(),
             language: default_language(),
             theme: default_theme(),
             save_torrent_metadata: true,
@@ -2026,6 +2034,17 @@ fn copy_link_stream_with_progress<R: Read, W: Write>(
 }
 
 fn download_link_file_to(
+    state: &AppState,
+    id: &str,
+    password: &str,
+    remote_path: &str,
+    destination: &Path,
+    reporter: &mut LinkTransferReporter,
+) -> Result<(), String> {
+    advanced_transports::download_link_file(state, id, password, remote_path, destination, reporter)
+}
+
+fn download_link_file_http_to(
     state: &AppState,
     id: &str,
     password: &str,
@@ -4359,6 +4378,10 @@ fn handle_link_connection<S: Read + Write>(
         };
         let body = serde_json::to_string(&*queue).unwrap_or_else(|_| "[]".to_owned());
         bridge_response(&mut stream, "200 OK", None, &body);
+        return;
+    }
+    if headers.starts_with("GET /v1/link/quic?") {
+        advanced_transports::serve_ticket(&app, &headers, &mut stream);
         return;
     }
     if headers.starts_with("GET /v1/link/capabilities?")
@@ -14650,6 +14673,11 @@ fn main() {
             preview_torrent,
             download_tool,
             update_tool,
+            advanced_transports::get_link_transport_options,
+            advanced_transports::set_link_transport_options,
+            advanced_transports::download_with_dictionary,
+            advanced_transports::capture_moq_objects,
+            advanced_transports::stop_transport_capture,
             suggest_download_name,
             remove_downloads,
             get_torrent_store_preference,

@@ -1,4 +1,4 @@
-//! Opt-in, authenticated file-transfer experiment. Not the production Link transport.
+//! Authenticated selected-file transport used by the optional QUIC Link mode.
 use anyhow::{Context, Result, bail, ensure};
 use noq::{
     ClientConfig, Connection, Endpoint, FourTuple, PathStatus, ServerConfig, TransportConfig,
@@ -16,7 +16,7 @@ use subtle::ConstantTimeEq;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const MAX_HEADER: usize = 4096;
-const ALPN: &[u8] = b"apocalipse-link-lab/1";
+const ALPN: &[u8] = b"apocalipse-link/1";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TransferReport {
@@ -24,6 +24,7 @@ pub struct TransferReport {
     pub sha256: String,
     pub multipath_negotiated: bool,
     pub additional_paths: usize,
+    pub failed_paths: usize,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -41,7 +42,7 @@ fn transport() -> Arc<TransportConfig> {
     config.max_concurrent_multipath_paths(4);
     config.max_concurrent_bidi_streams(1u8.into());
     config.max_concurrent_uni_streams(0u8.into());
-    config.max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap()));
+    config.max_idle_timeout(Some(Duration::from_secs(120).try_into().unwrap()));
     Arc::new(config)
 }
 
@@ -124,9 +125,14 @@ pub async fn serve_once(endpoint: &Endpoint, path: &Path, token: &str) -> Result
         token.len() >= 32,
         "use a random token of at least 32 characters"
     );
-    let connection = endpoint.accept().await.context("endpoint closed")?.await?;
-    let (mut send, mut recv) = connection.accept_bi().await?;
-    let request: Request = read_json(&mut recv).await?;
+    let incoming = tokio::time::timeout(Duration::from_secs(30), endpoint.accept())
+        .await?
+        .context("endpoint closed")?;
+    let connection = tokio::time::timeout(Duration::from_secs(10), incoming).await??;
+    let (mut send, mut recv) =
+        tokio::time::timeout(Duration::from_secs(10), connection.accept_bi()).await??;
+    let request: Request =
+        tokio::time::timeout(Duration::from_secs(10), read_json(&mut recv)).await??;
     if !bool::from(request.token.as_bytes().ct_eq(token.as_bytes())) {
         connection.close(1u8.into(), b"authentication failed");
         bail!("authentication failed");
@@ -167,7 +173,7 @@ pub async fn add_paths(
             !ip.is_unspecified() && !ip.is_multicast(),
             "invalid source IP"
         );
-        tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 match connection
                     .open_path(FourTuple::new(remote, Some(*ip)), PathStatus::Available)
@@ -196,8 +202,46 @@ pub async fn download(
     destination: &Path,
     max_bytes: u64,
 ) -> Result<TransferReport> {
+    download_with_progress(
+        endpoint,
+        remote,
+        local_ips,
+        token,
+        destination,
+        max_bytes,
+        |_, _| Ok(()),
+    )
+    .await
+}
+
+/// Unusable extra interfaces do not discard the working primary QUIC path.
+/// The callback can pause or abort; temporary output is removed on abort.
+#[allow(clippy::too_many_arguments)]
+pub async fn download_with_progress(
+    endpoint: &Endpoint,
+    remote: SocketAddr,
+    local_ips: &[IpAddr],
+    token: &str,
+    destination: &Path,
+    max_bytes: u64,
+    mut progress: impl FnMut(u64, u64) -> Result<()>,
+) -> Result<TransferReport> {
+    ensure!(local_ips.len() <= 3, "at most three additional paths");
+    ensure!(
+        local_ips
+            .iter()
+            .all(|ip| !ip.is_unspecified() && !ip.is_multicast()),
+        "invalid source IP"
+    );
     let connection = endpoint.connect(remote, "apocalipse-link.local")?.await?;
-    let additional_paths = add_paths(&connection, remote, local_ips).await?;
+    let mut additional_paths = 0;
+    let mut failed_paths = 0;
+    for ip in local_ips {
+        match add_paths(&connection, remote, &[*ip]).await {
+            Ok(count) => additional_paths += count,
+            Err(_) => failed_paths += 1,
+        }
+    }
     let negotiated = connection.is_multipath_enabled();
     let (mut send, mut recv) = connection.open_bi().await?;
     write_json(
@@ -208,6 +252,7 @@ pub async fn download(
     )
     .await?;
     let header: Header = read_json(&mut recv).await?;
+    progress(0, header.bytes)?;
     ensure!(
         header.bytes <= max_bytes,
         "transfer exceeds configured size limit"
@@ -233,6 +278,7 @@ pub async fn download(
             file.write_all(&buffer[..count]).await?;
             digest.update(&buffer[..count]);
             remaining -= count as u64;
+            progress(header.bytes - remaining, header.bytes)?;
         }
         let sha256 = format!("{:x}", digest.finalize());
         ensure!(sha256 == header.sha256, "SHA-256 verification failed");
@@ -251,6 +297,7 @@ pub async fn download(
             sha256,
             multipath_negotiated: negotiated,
             additional_paths,
+            failed_paths,
         })
     }
     .await;

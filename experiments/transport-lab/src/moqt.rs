@@ -54,6 +54,29 @@ pub async fn capture(
     duration: Duration,
     max_bytes: u64,
 ) -> Result<u64> {
+    capture_with_stop(
+        relay,
+        broadcast_name,
+        track_name,
+        destination,
+        duration,
+        max_bytes,
+        std::future::pending(),
+    )
+    .await
+}
+
+/// Stop keeps only complete objects, like the duration deadline.
+#[allow(clippy::too_many_arguments)]
+pub async fn capture_with_stop(
+    relay: Url,
+    broadcast_name: &str,
+    track_name: &str,
+    destination: &Path,
+    duration: Duration,
+    max_bytes: u64,
+    stop: impl std::future::Future<Output = ()>,
+) -> Result<u64> {
     crate::init_crypto();
     ensure!(
         relay.scheme() == "https",
@@ -100,6 +123,7 @@ pub async fn capture(
             Ok(result) => result,
             Err(_) => Ok(()), // Keep only complete objects when recording duration ends.
         },
+        _ = stop => Ok(()),
         closed = connection.closed() => Err(anyhow::anyhow!("relay connection ended: {closed:?}")),
     };
     if result.is_ok() && objects > 0 {

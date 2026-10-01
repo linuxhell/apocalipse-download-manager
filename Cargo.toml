@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["experiments/transport-lab"]
 members = ["crates/apocalipse-core", "crates/apocalipse-cli", "apps/desktop/src-tauri"]
 
 [workspace.package]
