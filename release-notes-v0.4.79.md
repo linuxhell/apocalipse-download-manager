@@ -1,5 +1,7 @@
 # ADM 0.4.79
 
+> Firefox 0.3.189 in this release uses the maintainer-supplied Mozilla-signed XPI. SHA-256: `06c39c075b04a81fb2db53338a5a074d424c60e74beff92497b6d6d69e58c78e`.
+
 ## Português (Brasil)
 
 - **Áudio direto:** a análise de MP3, M4A, AAC, OGG, WAV, FLAC, OPUS e áudio identificado pela extensão agora oferece conversão por FFmpeg para MP3, M4A, OPUS, FLAC ou WAV. O download original termina antes da conversão. O nome acompanha o formato escolhido; desativar a conversão restaura o nome original. Arquivos MP4 não recebem esse controle extra; as opções existentes do motor continuam disponíveis.
