@@ -6,6 +6,7 @@ mod audio_conversion;
 mod aria2;
 mod diagnostics;
 mod prepared_preview;
+mod runtime_health;
 mod thumbnail_cache;
 mod tiktok_preview;
 
@@ -230,6 +231,7 @@ struct AppState {
     aria2_tasks: Mutex<HashMap<DownloadId, String>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
+    runtime_health: runtime_health::RuntimeHealth,
     diagnostics: diagnostics::Diagnostics,
     global_bandwidth_limiter: Arc<BandwidthLimiter>,
     download_bandwidth_limiters: Mutex<HashMap<DownloadId, Arc<BandwidthLimiter>>>,
@@ -4254,7 +4256,7 @@ fn reconnect_active_downloads_after_network_change(
                     task.upload_speed = Some(0);
                 }
             }
-            let _ = save_queue(&state, &queue);
+            save_queue_in_background(&state, &queue);
         }
         state.diagnostics.record(
             if current.is_some() {
@@ -5298,14 +5300,42 @@ fn portable_data_directory<R: tauri::Runtime>(
 }
 
 fn save_queue(state: &AppState, queue: &[DownloadTask]) -> Result<(), String> {
-    if let Some(parent) = state.queue_path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let data = serde_json::to_vec_pretty(queue).map_err(|error| error.to_string())?;
-    let result = write_file_atomically(&state.queue_path, &data).map_err(|error| error.to_string());
+    let result = (|| {
+        if let Some(parent) = state.queue_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let data = serde_json::to_vec_pretty(queue).map_err(|error| error.to_string())?;
+        write_file_atomically(&state.queue_path, &data).map_err(|error| error.to_string())
+    })();
+    record_persistence_result(state, "queue", &result);
     state.diagnostics.record("queue.persisted", if result.is_ok() { "INFO" } else { "ERROR" }, None, None,
         serde_json::json!({"ok":result.is_ok(),"taskCount":queue.len(),"taskRefs":queue.iter().take(24).map(|t|t.id.to_string()).collect::<Vec<_>>(),"truncated":queue.len()>24}));
     result
+}
+
+fn record_persistence_result(state: &AppState, component: &str, result: &Result<(), String>) {
+    state.runtime_health.persistence(component, result);
+    if let Err(error) = result {
+        diagnostic_log(
+            state,
+            "ERROR",
+            "persistence.save_failed",
+            &format!("component={component} error={error}"),
+        );
+    }
+}
+
+// Background state changes may continue, but every failure is recorded by save_queue.
+fn save_queue_in_background(state: &AppState, queue: &[DownloadTask]) {
+    if save_queue(state, queue).is_err() {
+        state.diagnostics.record(
+            "queue.persistence_degraded",
+            "ERROR",
+            None,
+            None,
+            serde_json::json!({"reason":"save_failed","retry":"next_state_change"}),
+        );
+    }
 }
 
 fn load_settings(path: &Path) -> Result<UserSettings, String> {
@@ -5392,7 +5422,9 @@ fn write_settings(path: &Path, settings: &UserSettings) -> Result<(), String> {
 }
 
 fn save_settings(state: &AppState, settings: &UserSettings) -> Result<(), String> {
-    write_settings(&state.settings_path, settings)
+    let result = write_settings(&state.settings_path, settings);
+    record_persistence_result(state, "settings", &result);
+    result
 }
 
 fn update_capacity_estimate(
@@ -5517,8 +5549,57 @@ fn redact_url(url: &str) -> String {
     }
 }
 
+fn sensitive_log_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase().replace(['-', '_', ' '], "");
+    [
+        "cookie",
+        "authorization",
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "apikey",
+        "signature",
+    ]
+    .iter()
+    .any(|marker| key.contains(marker))
+        || key == "sig"
+}
+
+fn sanitize_log_json(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            for (key, value) in fields {
+                if sensitive_log_key(key) {
+                    *value = serde_json::json!("<redacted>");
+                } else {
+                    sanitize_log_json(value);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(sanitize_log_json),
+        serde_json::Value::String(text) => *text = sanitize_log_text(text),
+        _ => {}
+    }
+}
+
 fn sanitize_log_detail(detail: &str) -> String {
-    let lowered = detail.to_ascii_lowercase();
+    if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(detail) {
+        if value.is_object() || value.is_array() {
+            sanitize_log_json(&mut value);
+            return value.to_string();
+        }
+    }
+    sanitize_log_text(detail)
+}
+
+fn sanitize_log_text(detail: &str) -> String {
+    // Also cover embedded/malformed JSON, quoted keys and whitespace around separators.
+    let lowered: String = detail
+        .chars()
+        .filter(|c| !c.is_whitespace() && !matches!(c, '\'' | '"' | '\\'))
+        .flat_map(char::to_lowercase)
+        .collect();
     if [
         "cookie:",
         "cookie=",
@@ -5539,6 +5620,9 @@ fn sanitize_log_detail(detail: &str) -> String {
         "sig=",
         "api-key",
         "apikey",
+        "api_key",
+        "access_token",
+        "refresh_token",
     ]
     .iter()
     .any(|marker| lowered.contains(marker))
@@ -5573,35 +5657,20 @@ fn read_sanitized_log_tail(path: &Path, max_bytes: usize) -> Option<Vec<u8>> {
 
 fn diagnostic_log(state: &AppState, level: &str, event: &str, detail: &str) {
     state.diagnostics.observe_legacy(level, event, detail);
-    let _write_guard = match state.log_write_lock.lock() {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
-    if let Some(parent) = state.log_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if fs::metadata(&state.log_path).is_ok_and(|metadata| metadata.len() > 8 * 1024 * 1024) {
-        let rotated = state.log_path.with_extension("log.1");
-        let _ = fs::remove_file(&rotated);
-        let _ = fs::rename(&state.log_path, rotated);
-    }
-    let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    let local_timestamp = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&state.log_path)
-    {
-        let record = serde_json::json!({
-            "timestamp": timestamp,
-            "localTimestamp": local_timestamp,
-            "level": level,
-            "event": event,
-            "source": "desktop",
-            "detail": sanitize_log_detail(detail),
-        });
-        let _ = writeln!(file, "{record}");
-    }
+    let _write_guard = state.log_write_lock.lock().unwrap_or_else(|error| {
+        state.runtime_health.lock_recovered();
+        state.log_write_lock.clear_poison();
+        error.into_inner()
+    });
+    let record = serde_json::json!({
+        "timestamp": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "localTimestamp": chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "level": level,
+        "event": event,
+        "source": "desktop",
+        "detail": sanitize_log_detail(detail),
+    });
+    state.runtime_health.append(&state.log_path, &record);
 }
 
 fn remember_download_directory(state: &AppState, directory: &Path) -> Result<(), String> {
@@ -5651,7 +5720,7 @@ fn update_task(
                 serde_json::json!({"state":serde_json::to_value(&task.state).ok().map(|v| match v { serde_json::Value::String(name) => name, serde_json::Value::Object(fields) => fields.keys().next().cloned().unwrap_or_default(), _ => "unknown".into() }),"bytes":task.received,"persistRequested":persist}));
         }
         if persist {
-            let _ = save_queue(&state, &queue);
+            save_queue_in_background(&state, &queue);
         }
     }
 }
@@ -7908,6 +7977,11 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
     let guide = b"Apocalipse Forensic Debugger V4\nStart with debugger-index.json, RELATORIO_PARA_IA.txt, timeline/events-local.jsonl, correlation/index.json and incidents/problem-windows.jsonl. Engine logs are sanitized and stored under engines/. A missing event is not proof of no activity.\n";
     entries.push(("README.txt".to_owned(), guide.to_vec()));
 
+    entries.push((
+        "health/runtime.json".to_owned(),
+        serde_json::to_vec_pretty(&state.runtime_health.snapshot())
+            .map_err(|error| error.to_string())?,
+    ));
     entries.extend(state.diagnostics.export());
     write_diagnostic_zip(&path, entries)?;
     diagnostic_log(
@@ -7922,6 +7996,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
 #[tauri::command]
 fn diagnostics_status(state: State<'_, AppState>) -> serde_json::Value {
     let mut status = state.diagnostics.status();
+    status["runtimeHealth"] = state.runtime_health.snapshot();
     if let Some(object) = status.as_object_mut() {
         object.remove("salt");
     }
@@ -7934,6 +8009,7 @@ fn diagnostics_control(
     action: String,
 ) -> Result<serde_json::Value, String> {
     let mut status = state.diagnostics.control(&action, None)?;
+    status["runtimeHealth"] = state.runtime_health.snapshot();
     if let Some(object) = status.as_object_mut() {
         object.remove("salt");
     }
@@ -7978,8 +8054,13 @@ fn copy_diagnostics_report(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let report = format!(
+        "{}\nRuntime health:\n{}",
+        state.diagnostics.report(),
+        state.runtime_health.snapshot()
+    );
     app.clipboard()
-        .write_text(state.diagnostics.report())
+        .write_text(report)
         .map_err(|error| error.to_string())
 }
 
@@ -14598,6 +14679,7 @@ fn main() {
                 aria2_tasks: Mutex::new(initial_aria2_tasks),
                 log_path,
                 log_write_lock: Mutex::new(()),
+                runtime_health: runtime_health::RuntimeHealth::default(),
                 diagnostics: diagnostics::Diagnostics::new(&app_data.join("logs")),
                 global_bandwidth_limiter,
                 download_bandwidth_limiters: Mutex::new(HashMap::new()),
@@ -15835,5 +15917,35 @@ mod tests {
         task.sha256 = Some(expected.clone());
         assert!(!apply_integrity_result(&mut task, Some("   "), &digest));
         assert_eq!(task.sha256.as_deref(), Some(expected.as_str()));
+    }
+}
+
+#[cfg(test)]
+mod log_sanitization_tests {
+    use super::*;
+
+    #[test]
+    fn secrets_are_removed_from_json_and_quoted_assignments() {
+        let value = sanitize_log_detail(r#"{"operation":"download","nested":[{"password":"PRIVATE1","api_key":"PRIVATE2"}],"url":"https://user:pass@example.test/file?x=PRIVATE3"}"#);
+        assert!(value.contains("download"));
+        for secret in ["PRIVATE1", "PRIVATE2", "PRIVATE3", "user:pass"] {
+            assert!(!value.contains(secret), "{value}");
+        }
+        for key in [
+            "password", "passwd", "cookie", "authorization", "token", "secret", "api-key", "apikey",
+            "api_key", "signature", "sig",
+        ] {
+            for line in [
+                format!("prefix {{\"{key}\" : \"PRIVATE\"}}"),
+                format!("'{key}' = 'PRIVATE'"),
+                format!("{key} : PRIVATE"),
+            ] {
+                assert!(!sanitize_log_detail(&line).contains("PRIVATE"), "{line}");
+            }
+        }
+        assert_eq!(
+            sanitize_log_detail("task=abc reason=timeout"),
+            "task=abc reason=timeout"
+        );
     }
 }

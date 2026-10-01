@@ -3,7 +3,16 @@
   if (globalThis.ADM_DIAG_WORKER || !globalThis.ADM_DIAG_CORE) return;
   const core = ADM_DIAG_CORE, KEY = 'admDiagnosticsV3';
   const contextId = crypto.randomUUID();
-  let state = { config: null, outbox: [], dropped: 0, storageErrors: 0, transportErrors: 0, accepted: 0 };
+  let state = { config: null, outbox: [], dropped: 0, storageErrors: 0, transportErrors: 0, accepted: 0,
+    lastTransportErrorAt: null, lastSuccessfulUploadAt: null, lastSuccessfulConfigSyncAt: null,
+    lastTransportError: null, configDegraded: false, uploadDegraded: false };
+  const healthSnapshot = () => ({ queued: state.outbox.length, dropped: state.dropped,
+    storageErrors: state.storageErrors, transportErrors: state.transportErrors, accepted: state.accepted,
+    lastTransportErrorAt: state.lastTransportErrorAt, lastSuccessfulUploadAt: state.lastSuccessfulUploadAt,
+    lastSuccessfulConfigSyncAt: state.lastSuccessfulConfigSyncAt, lastTransportError: state.lastTransportError,
+    observedAt: Date.now(),
+    status: state.configDegraded || state.uploadDegraded || state.storageErrors > 0 || state.dropped > 0 ? 'degraded' : 'healthy',
+    workerContextId: contextId });
   let serial = Promise.resolve(), sequence = 0, flushing = false, configChecked = 0;
   let rateAt = 0, rateCount = 0;
   const MAX_OUTBOX_BYTES = 8 * 1024 * 1024;
@@ -20,7 +29,7 @@
     serial = next.catch(() => {});
     return next;
   };
-  async function bridge(path, payload) {
+  async function bridgeRequest(path, payload) {
     const { pairingToken = '' } = await chrome.storage.local.get({ pairingToken: '' });
     if (!pairingToken) throw new Error('not_paired');
     const controller = new AbortController();
@@ -34,6 +43,35 @@
       if (!response.ok) throw new Error(`diagnostics_http_${response.status}`);
       return await response.json();
     } finally { clearTimeout(timer); }
+  }
+  async function bridge(path, payload) {
+    try {
+      const result = await bridgeRequest(path, payload);
+      if (path === 'events' && (!result?.ok || !Array.isArray(result.ackIds)
+        || (payload.events.length > 0 && !payload.events.some(event => result.ackIds.includes(event.id))))) throw new Error('diagnostics_invalid_ack');
+      if (path !== 'events' && typeof result?.active !== 'boolean') throw new Error('diagnostics_invalid_config');
+      await transact(async () => {
+        if (path === 'events') state.uploadDegraded = false;
+        else state.configDegraded = false;
+        if (path === 'events') state.lastSuccessfulUploadAt = Date.now();
+        else state.lastSuccessfulConfigSyncAt = Date.now();
+        await persist();
+      });
+      return result;
+    } catch (error) {
+      await transact(async () => {
+        state.transportErrors++;
+        state.lastTransportErrorAt = Date.now();
+        if (path === 'events') state.uploadDegraded = true;
+        else state.configDegraded = true;
+        // Never persist fetch errors verbatim: they can contain URLs or credentials.
+        const code = String(error?.message || '');
+        state.lastTransportError = /^(not_paired|diagnostics_http_\d{3}|diagnostics_invalid_ack|diagnostics_invalid_config)$/.test(code)
+          ? code : error?.name === 'AbortError' ? 'diagnostics_timeout' : 'diagnostics_transport_failed';
+        await persist();
+      });
+      throw error;
+    }
   }
   const sameSession = config => config?.sessionId === state.config?.sessionId;
   const scoped = sender => core.isActive(state.config) && (
@@ -49,7 +87,7 @@
         state.config = config;
         await persist();
       });
-    } catch { /* Status is optional; an unexpired last configuration remains usable. */ }
+    } catch { /* bridge records the failure; keep the unexpired configuration for offline capture. */ }
   }
   function allowed(input, sender) {
     if (!input || typeof input !== 'object' || !scoped(sender) || input.sessionId !== state.config.sessionId) return false;
@@ -102,12 +140,18 @@
     try {
       for (let n = 0; n < 8; n++) {
         const batch = await transact(async () => state.outbox.slice(0, core.MAX_BATCH));
-        if (!batch.length) break;
+        if (!batch.length) {
+          // Refresh the desktop snapshot after acknowledgements, including an empty queue.
+          if (core.isActive(state.config)) {
+            try { await bridge('events', { sessionId: state.config.sessionId, events: [], health: healthSnapshot() }); }
+            catch { /* bridge retained the failure in the locally queryable health. */ }
+          }
+          break;
+        }
         let result;
         try { result = await bridge('events', { sessionId: batch[0].sessionId, events: batch,
-          health: { dropped: state.dropped, storageErrors: state.storageErrors, transportErrors: state.transportErrors,
-            workerContextId: contextId, queued: state.outbox.length } }); }
-        catch { await transact(async () => { state.transportErrors++; await persist(); }); break; }
+          health: healthSnapshot() }); }
+        catch { break; } // bridge already counted and persisted this failure.
         if (!result?.ok || !Array.isArray(result.ackIds)) break;
         const acknowledged = new Set(result.ackIds);
         await transact(async () => {
@@ -125,7 +169,7 @@
     const config = await bridge('control', { action, tabId: Number.isInteger(tabId) ? tabId : null });
     await transact(async () => {
       if (!sameSession(config)) {
-        state = { config, outbox: [], dropped: 0, storageErrors: 0, transportErrors: 0, accepted: 0 };
+        state = { ...state, config, outbox: [], dropped: state.dropped + state.outbox.length };
       } else state.config = config;
       await persist();
     });
@@ -152,7 +196,7 @@
       }
       if (message.type === 'ADM_DIAG_STATUS' && extensionPage) {
         await refreshConfig();
-        return { ...state.config, queued: state.outbox.length, dropped: state.dropped, storageErrors: state.storageErrors };
+        return { ...state.config, ...healthSnapshot() };
       }
       if (message.type === 'ADM_DIAG_CONTROL' && extensionPage) {
         // Only an extension-owned page may start collection, never a webpage relay.
@@ -180,7 +224,7 @@
       frameId: details.frameId, browserTimestamp: details.timeStamp }, null, accepted ? 'INFO' : 'WARN', details.tabId);
   }
   globalThis.ADM_DIAG_WORKER = { message, emit, emitForSender, network, flush, refreshConfig,
-    health: async () => { await load; return { queued: state.outbox.length, dropped: state.dropped, storageErrors: state.storageErrors }; } };
+    health: async () => { await load; return healthSnapshot(); } };
   chrome.alarms?.create('adm-diagnostics-v3', { periodInMinutes: 0.5 });
   chrome.alarms?.onAlarm?.addListener(alarm => { if (alarm.name === 'adm-diagnostics-v3') { void refreshConfig().then(flush); } });
   chrome.webRequest?.onErrorOccurred?.addListener(details => {
