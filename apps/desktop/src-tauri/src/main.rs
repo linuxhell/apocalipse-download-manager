@@ -247,6 +247,88 @@ fn host_from_url(url: &str) -> Option<String> {
     (!host.is_empty()).then_some(host)
 }
 
+/// Path (relative to the project root, no leading slash) to query Apache's
+/// own mirror-selection API for, if `url` points at an Apache distribution.
+/// Apache publishes this mapping itself (dyn/closer.lua); this only needs to
+/// recognize the handful of hostnames that serve the same distribution tree.
+fn apache_mirror_path_info(url: &url::Url) -> Option<String> {
+    let host = url.host_str()?.to_ascii_lowercase();
+    if !(host == "apache.org" || host.ends_with(".apache.org")) {
+        return None;
+    }
+    let path = url.path().trim_start_matches('/');
+    let path = path.strip_prefix("dist/").unwrap_or(path);
+    let path = path.strip_prefix("dyn/closer.lua/").unwrap_or(path);
+    (!path.is_empty()).then(|| path.to_owned())
+}
+
+/// GNU mirrors itself via a single geo-redirecting host (`ftpmirror.gnu.org`)
+/// rather than a JSON API. Rewriting ftp.gnu.org/www.gnu.org/*.gnu.org links
+/// to it is the same "official mirror" entry point GNU's own download pages
+/// link to, not a third-party guess.
+fn gnu_ftpmirror_url(url: &url::Url) -> Option<String> {
+    let host = url.host_str()?.to_ascii_lowercase();
+    let is_gnu = host == "ftp.gnu.org" || host == "www.gnu.org" || host == "gnu.org";
+    if !is_gnu {
+        return None;
+    }
+    let path = url.path();
+    (!path.is_empty() && path != "/").then(|| format!("https://ftpmirror.gnu.org{path}"))
+}
+
+#[derive(serde::Deserialize)]
+struct ApacheCloserResponse {
+    preferred: Option<String>,
+    #[serde(default)]
+    http: Vec<String>,
+    #[serde(default)]
+    backup: Vec<String>,
+    path_info: Option<String>,
+}
+
+/// Queries the project's own official mirror-selection endpoint (Apache's
+/// closer.lua) and, for GNU, rewrites to its own geo-redirecting mirror
+/// host. Never trusted third-party mirror directories: only the project's
+/// own published mechanism, so "automatic mirror" never means "whichever
+/// site happened to host a copy of this file". Best-effort - any failure
+/// (network, unexpected response shape, unsupported host) returns an empty
+/// list and the download proceeds against the original URL alone.
+async fn discover_official_mirrors(url: &str) -> Vec<String> {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return Vec::new();
+    };
+    if let Some(mirror) = gnu_ftpmirror_url(&parsed) {
+        return vec![mirror];
+    }
+    let Some(path_info) = apache_mirror_path_info(&parsed) else {
+        return Vec::new();
+    };
+    let endpoint = format!("https://www.apache.org/dyn/closer.lua/{path_info}?as_json=1");
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return Vec::new(),
+    };
+    let Ok(response) = client.get(&endpoint).send().await else {
+        return Vec::new();
+    };
+    let Ok(body) = response.json::<ApacheCloserResponse>().await else {
+        return Vec::new();
+    };
+    let path_info = body.path_info.unwrap_or(path_info);
+    let mut mirrors: Vec<String> = body
+        .preferred
+        .into_iter()
+        .chain(body.http)
+        .chain(body.backup)
+        .map(|base| format!("{}/{path_info}", base.trim_end_matches('/')))
+        .collect();
+    mirrors.dedup();
+    mirrors
+}
+
 fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize> {
     let host = host_from_url(url);
     if host
@@ -584,7 +666,6 @@ struct LinkTransferReporter {
     direction: String,
     total: u64,
     transferred: u64,
-    started: Instant,
     last_emit: Instant,
     last_speed_at: Instant,
     last_speed_bytes: u64,
@@ -610,7 +691,6 @@ impl LinkTransferReporter {
             direction: direction.to_owned(),
             total,
             transferred: 0,
-            started: now,
             last_emit: now.checked_sub(Duration::from_secs(1)).unwrap_or(now),
             last_speed_at: now,
             last_speed_bytes: 0,
@@ -6277,7 +6357,6 @@ async fn run_aria2_download(
     // almost immediately without keeping the RPC hot for the entire transfer.
     let mut startup_fast_polling = true;
     let mut interval = tokio::time::interval(Duration::from_millis(100));
-    let mut terminal = false;
     loop {
         tokio::select! {
             biased;
@@ -6410,7 +6489,6 @@ async fn run_aria2_download(
                             if let Ok(mut items) = state.aria2_tasks.lock() {
                                 items.remove(&id);
                             }
-                            terminal = true;
                             break;
                         }
                         if is_bittorrent && status.selected_file_bytes > status.total {
@@ -6432,7 +6510,6 @@ async fn run_aria2_download(
                             if let Ok(mut items) = state.aria2_tasks.lock() {
                                 items.remove(&id);
                             }
-                            terminal = true;
                             break;
                         }
                         update_task(&app, id, true, |item| {
@@ -6450,7 +6527,6 @@ async fn run_aria2_download(
                         if let Ok(mut items) = state.aria2_tasks.lock() {
                             items.remove(&id);
                         }
-                        terminal = true;
                         break;
                     }
                     "error" | "removed" => {
@@ -6480,7 +6556,6 @@ async fn run_aria2_download(
                         if let Ok(mut items) = state.aria2_tasks.lock() {
                             items.remove(&id);
                         }
-                        terminal = true;
                         break;
                     }
                     "paused" => {
@@ -6489,7 +6564,6 @@ async fn run_aria2_download(
                             item.download_speed = Some(0);
                             item.upload_speed = Some(0);
                         });
-                        terminal = true;
                         break;
                     }
                     _ => {}
@@ -6497,12 +6571,10 @@ async fn run_aria2_download(
             }
         }
     }
-    if terminal {
-        if let Ok(mut workers) = state.workers.lock() {
-            workers.remove(&id);
-        }
-        start_next_queued(&app);
+    if let Ok(mut workers) = state.workers.lock() {
+        workers.remove(&id);
     }
+    start_next_queued(&app);
 }
 
 async fn run_external_download(
@@ -6561,11 +6633,6 @@ async fn run_external_download(
         });
     });
     let directory = task.destination.parent().unwrap_or_else(|| Path::new("."));
-    let file_name = task
-        .destination
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("download");
     let media_work_directory = (kind == DownloadKind::MediaPage).then(|| {
         app.state::<AppState>()
             .queue_path
@@ -10291,7 +10358,7 @@ fn enqueue_download_impl(
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-fn enqueue_download(
+async fn enqueue_download(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     url: String,
@@ -10306,6 +10373,23 @@ fn enqueue_download(
     auto_extract: Option<bool>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
+    // Only for hosts that publish their own official mirror-selection
+    // mechanism (Apache's closer.lua, GNU's ftpmirror.gnu.org) - never a
+    // third-party guess at "another copy of this file somewhere". Bounded to
+    // a few seconds and entirely best-effort: any failure just means no
+    // extra mirrors, never a blocked or failed enqueue.
+    let auto_mirrors = discover_official_mirrors(&url).await;
+    let mirrors = if auto_mirrors.is_empty() {
+        mirrors
+    } else {
+        let mut merged = mirrors.unwrap_or_default();
+        for candidate in auto_mirrors {
+            if !merged.contains(&candidate) {
+                merged.push(candidate);
+            }
+        }
+        Some(merged)
+    };
     enqueue_download_impl(
         app,
         &state,
@@ -14362,6 +14446,64 @@ mod tests {
             "http://github.com/linuxhell/apocalipse-download-manager/releases"
         )
         .is_none());
+    }
+
+    #[test]
+    fn apache_mirror_path_info_recognizes_the_handful_of_apache_hosts_only() {
+        let dlcdn = url::Url::parse("https://dlcdn.apache.org/httpd/httpd-2.4.62.tar.gz").unwrap();
+        assert_eq!(
+            apache_mirror_path_info(&dlcdn).as_deref(),
+            Some("httpd/httpd-2.4.62.tar.gz")
+        );
+        let archive =
+            url::Url::parse("https://archive.apache.org/dist/httpd/httpd-2.4.62.tar.gz").unwrap();
+        assert_eq!(
+            apache_mirror_path_info(&archive).as_deref(),
+            Some("httpd/httpd-2.4.62.tar.gz")
+        );
+        let unrelated = url::Url::parse("https://example.com/httpd/httpd-2.4.62.tar.gz").unwrap();
+        assert!(apache_mirror_path_info(&unrelated).is_none());
+    }
+
+    #[test]
+    fn gnu_ftpmirror_url_rewrites_only_real_gnu_hosts() {
+        let ftp = url::Url::parse("https://ftp.gnu.org/gnu/wget/wget-1.21.4.tar.gz").unwrap();
+        assert_eq!(
+            gnu_ftpmirror_url(&ftp).as_deref(),
+            Some("https://ftpmirror.gnu.org/gnu/wget/wget-1.21.4.tar.gz")
+        );
+        let unrelated = url::Url::parse("https://example.com/gnu/wget/wget-1.21.4.tar.gz").unwrap();
+        assert!(gnu_ftpmirror_url(&unrelated).is_none());
+    }
+
+    #[test]
+    fn apache_closer_response_parses_the_documented_as_json_shape() {
+        // Real response captured from
+        // https://www.apache.org/dyn/closer.lua/httpd/httpd-2.4.62.tar.gz?as_json=1
+        let body = r#"{
+            "backup": [ "https://downloads.apache.org/" ],
+            "cca2": "us",
+            "http": [ "https://dlcdn.apache.org/" ],
+            "in_attic": false,
+            "in_dist": false,
+            "ipv6": false,
+            "path_info": "httpd/httpd-2.4.62.tar.gz",
+            "preferred": "https://dlcdn.apache.org/"
+        }"#;
+        let parsed: ApacheCloserResponse = serde_json::from_str(body).unwrap();
+        assert_eq!(
+            parsed.preferred.as_deref(),
+            Some("https://dlcdn.apache.org/")
+        );
+        assert_eq!(parsed.http, vec!["https://dlcdn.apache.org/".to_owned()]);
+        assert_eq!(
+            parsed.backup,
+            vec!["https://downloads.apache.org/".to_owned()]
+        );
+        assert_eq!(
+            parsed.path_info.as_deref(),
+            Some("httpd/httpd-2.4.62.tar.gz")
+        );
     }
 
     #[test]
