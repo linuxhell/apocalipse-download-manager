@@ -4,7 +4,7 @@ use std::{net::SocketAddr, time::Duration};
 const TOKEN: &str = "0123456789abcdef0123456789abcdef";
 
 #[tokio::test]
-async fn transfers_with_a_second_validated_path_and_checks_hash() {
+async fn transfers_with_an_extra_path_attempt_and_checks_hash() {
     tokio::time::timeout(Duration::from_secs(20), async {
         let directory = tempfile::tempdir().unwrap();
         let source = directory.path().join("source.bin");

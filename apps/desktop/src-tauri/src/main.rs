@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod advanced_transports;
+mod audio_conversion;
 
 mod aria2;
 mod diagnostics;
@@ -5833,7 +5834,7 @@ async fn run_adaptive_social_download(
 async fn run_download(
     app: tauri::AppHandle,
     id: DownloadId,
-    request: DownloadRequest,
+    mut request: DownloadRequest,
     mirrors: Vec<String>,
     mut cancellation: oneshot::Receiver<()>,
 ) {
@@ -5844,6 +5845,48 @@ async fn run_download(
         &format!("task={id} url={}", redact_url(&request.url)),
     );
     log_network_route(&app.state::<AppState>(), &id.to_string(), "NativeHttp").await;
+    let audio_job = match audio_conversion::prepare(&app, id) {
+        Ok(job) => job,
+        Err(error) => {
+            update_task(&app, id, true, |task| {
+                task.state = DownloadState::Failed { message: error }
+            });
+            if let Ok(mut workers) = app.state::<AppState>().workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    };
+    if let Some(job) = &audio_job {
+        request.destination = job.source.clone();
+        if job.source.is_file() {
+            update_task(&app, id, true, |task| task.state = DownloadState::Verifying);
+            let result = tokio::select! {
+                _ = &mut cancellation => return,
+                result = audio_conversion::convert(job) => result,
+            };
+            update_task(&app, id, true, |task| match result {
+                Ok(bytes) => {
+                    task.state = DownloadState::Completed;
+                    task.received = bytes;
+                    task.total = Some(bytes);
+                    task.progress_percent = Some(100.0);
+                    task.completed_at = Some(epoch_seconds());
+                    task.download_speed = Some(0);
+                    task.sha256 = None;
+                    task.integrity_verified = false;
+                }
+                Err(message) => task.state = DownloadState::Failed { message },
+            });
+            if let Ok(mut workers) = app.state::<AppState>().workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+    }
+
     update_task(&app, id, true, |task| {
         task.state = DownloadState::Inspecting;
         task.download_speed = Some(0);
@@ -5932,10 +5975,25 @@ async fn run_download(
             result = &mut download => {
                 match result {
                     Ok(()) => {
+                        let converted_bytes = if let Some(job) = &audio_job {
+                            update_task(&app, id, true, |task| { task.state = DownloadState::Verifying; task.download_speed = Some(0); });
+                            let conversion = tokio::select! {
+                                _ = &mut cancellation => { was_cancelled = true; break; },
+                                result = audio_conversion::convert(job) => result,
+                            };
+                            match conversion {
+                                Ok(bytes) => Some(bytes),
+                                Err(error) => {
+                                    update_task(&app, id, true, |task| task.state = DownloadState::Failed { message: error });
+                                    break;
+                                }
+                            }
+                        } else { None };
                         completed_ok = true;
                         diagnostic_log(&app.state::<AppState>(), "INFO", "http.completed", &format!("task={id}"));
                         update_task(&app, id, true, |task| {
                             task.state = DownloadState::Completed;
+                            if let Some(bytes) = converted_bytes { task.received = bytes; task.total = Some(bytes); task.progress_percent = Some(100.0); task.sha256 = None; task.integrity_verified = false; }
                             task.download_speed = Some(0);
                             task.upload_speed = Some(0);
                             task.completed_at = Some(epoch_seconds());
@@ -6071,8 +6129,8 @@ async fn run_download(
                     task.total = Some(bytes);
                     task.download_speed = Some(0);
                     task.upload_speed = Some(0);
-                    task.state = DownloadState::Completed;
-                    task.completed_at = Some(epoch_seconds());
+                    task.state = if audio_job.is_some() { DownloadState::Verifying } else { DownloadState::Completed };
+                    if audio_job.is_none() { task.completed_at = Some(epoch_seconds()); }
                 }),
                 None => break,
             }
@@ -10431,6 +10489,19 @@ fn enqueue_download_impl(
         .or(file_name)
         .or(title_based_name)
         .unwrap_or_else(|| suggested_name(&url));
+    if format_selection.as_deref().is_some_and(|value| {
+        value.starts_with("audio:") && audio_conversion::format(Some(value)).is_none()
+    }) {
+        return Err("unsupported_audio_format".into());
+    }
+    let proposed = if let Some(format) = audio_conversion::format(format_selection.as_deref()) {
+        Path::new(&proposed)
+            .with_extension(format)
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        proposed
+    };
     let file_name = validate_file_name(&append_source_extension(proposed, &url, kind))?;
     remember_download_directory(state, &download_dir)?;
     let mut task = DownloadTask::new(&url, download_dir.join(&file_name));
@@ -10967,7 +11038,8 @@ fn start_download(
         && (requires_native_http_compatibility(&task.source)
             || special_http_request
             || !aria2_http_network_compatible
-            || needs_native_integrity);
+            || needs_native_integrity
+            || audio_conversion::format(task.format_selection.as_deref()).is_some());
     if native_http_compatibility {
         diagnostic_log(
             state,

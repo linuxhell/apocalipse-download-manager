@@ -157,7 +157,9 @@ jobs:
           cargo test --workspace
       - name: Verify prepared media with FFmpeg and FFprobe
         if: runner.os == 'Linux'
-        run: cargo test -p apocalipse-desktop paired_preview_uses_real_mux_and_probe -- --ignored
+        run: |
+          cargo test -p apocalipse-desktop paired_preview_uses_real_mux_and_probe -- --ignored
+          cargo test -p apocalipse-desktop direct_audio_conversion_produces_requested_format_and_preserves_existing_files -- --ignored
       - name: Build desktop candidate
         run: cargo build --release -p apocalipse-desktop
       - uses: actions/setup-node@v7

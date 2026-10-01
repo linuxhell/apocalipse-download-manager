@@ -1,5 +1,14 @@
 # Apocalipse Download Manager 0.4.78 — extensão / extension / 扩展 0.3.188
 
+## 0.4.79 — 2026-10-01
+
+- Direct audio analysis offers post-download FFmpeg conversion; MP4 retains its existing options without the extra control.
+- Optional authenticated QUIC receives in Link, extra-path attempts, transfer progress/cancellation and HTTPS fallback.
+- Explicit RFC 9842 dictionary downloads in Tools and bounded MoQ object capture in Recordings, with three-language controls.
+- Existing files are preserved by the new transports and direct-audio conversion. MARS remains research.
+- Browser extension remains 0.3.188. See [release notes](release-notes-v0.4.79.md) for scope and compatibility requirements.
+
+
 ## Português do Brasil
 
 > [!IMPORTANT]

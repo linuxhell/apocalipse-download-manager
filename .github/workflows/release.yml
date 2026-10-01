@@ -71,7 +71,9 @@ jobs:
 
       - name: Verify prepared media with FFmpeg and FFprobe
         if: runner.os == 'Linux'
-        run: cargo test -p apocalipse-desktop --locked paired_preview_uses_real_mux_and_probe -- --ignored
+        run: |
+          cargo test -p apocalipse-desktop --locked paired_preview_uses_real_mux_and_probe -- --ignored
+          cargo test -p apocalipse-desktop --locked direct_audio_conversion_produces_requested_format_and_preserves_existing_files -- --ignored
       - name: Build desktop
         run: cargo build --release --locked -p apocalipse-desktop
 
@@ -86,7 +88,7 @@ jobs:
           with open(sys.argv[1], encoding="utf-8") as stream:
               report = json.load(stream)
           assert report["verified"] is True, report
-          assert report["version"] == "0.4.78", report
+          assert report["version"] == "0.4.79", report
           assert report["engine"] == "yt_dlp", report
           print(json.dumps(report))
           PYVERIFY

@@ -738,6 +738,9 @@ Object.assign(catalogs["en"], {"linkQuic": "Use QUIC for receiving shared files 
 Object.assign(catalogs["pt-BR"], {"linkQuic": "Usar QUIC para receber arquivos compartilhados (experimental)", "linkQuicHint": "Ative nos dois computadores. Envios usam HTTPS. Se UDP estiver indisponível, o recebimento volta para HTTPS.", "linkQuicIps": "IPs adicionais das interfaces locais (até 3, separados por vírgulas)", "linkQuicSave": "Salvar opções de transporte", "linkQuicSaved": "Opções de transporte salvas.", "linkQuicUsed": "Transferência QUIC: {paths} caminhos adicionais; {failed} indisponíveis.", "linkHttpUsed": "Transferência HTTPS", "dictionaryTitle": "Download com dicionário de compressão", "dictionaryHint": "Para servidores HTTPS compatíveis. Exige mesma origem, dicionário para o caminho exato e SHA-256 confiável. Máximo de 256 MiB; preserva arquivos existentes. Não instala atualização.", "dictionaryUrl": "URL HTTPS do dicionário", "artifactUrl": "URL HTTPS do arquivo", "expectedHash": "SHA-256 esperado do arquivo", "dictionaryDownload": "Baixar e verificar", "transportWorking": "Processando…", "transportSaved": "Salvo: ", "moqTitle": "Captura de objetos MoQ (experimental)", "moqHint": "Exige relay MoQ compatível, transmissão e faixa. Salva objetos completos em .admmoq; ainda não gera vídeo reproduzível. Máximo de 256 MiB / 1 hora.", "moqRelay": "URL HTTPS do relay", "moqBroadcast": "Transmissão", "moqTrack": "Faixa", "moqSeconds": "Duração (segundos)", "moqStart": "Iniciar captura de objetos", "moqStop": "Parar e salvar objetos completos", "moqActive": "Capturando objetos…", "moqStopping": "Parando…"});
 Object.assign(catalogs["zh-CN"], {"linkQuic": "使用 QUIC 接收共享文件（实验性）", "linkQuicHint": "请在两台电脑上启用。上传使用 HTTPS。UDP 不可用时接收将回退到 HTTPS。", "linkQuicIps": "额外本地接口 IP（最多 3 个，以逗号分隔）", "linkQuicSave": "保存传输选项", "linkQuicSaved": "已保存传输选项。", "linkQuicUsed": "QUIC 传输：{paths} 个额外路径；{failed} 个不可用。", "linkHttpUsed": "HTTPS 传输", "dictionaryTitle": "使用压缩字典下载", "dictionaryHint": "需要兼容的 HTTPS 服务器、同源精确路径字典以及可信的 SHA-256。上限 256 MiB，保留已有文件。此操作不安装更新。", "dictionaryUrl": "字典 HTTPS 网址", "artifactUrl": "文件 HTTPS 网址", "expectedHash": "预期文件 SHA-256", "dictionaryDownload": "下载并验证", "transportWorking": "处理中…", "transportSaved": "已保存：", "moqTitle": "MoQ 对象捕获（实验性）", "moqHint": "需要兼容的 MoQ 中继、广播和轨道。完整对象保存为 .admmoq，尚不可作为视频播放。上限 256 MiB / 1 小时。", "moqRelay": "HTTPS 中继网址", "moqBroadcast": "广播", "moqTrack": "轨道", "moqSeconds": "时长（秒）", "moqStart": "开始捕获对象", "moqStop": "停止并保存完整对象", "moqActive": "正在捕获对象…", "moqStopping": "正在停止…"});
 
+Object.assign(catalogs.en, {originalAudio: "Original audio"});
+Object.assign(catalogs["pt-BR"], {originalAudio: "Áudio original"});
+Object.assign(catalogs["zh-CN"], {originalAudio: "原始音频"});
 let locale = localStorage.getItem("apocalipse.language") || "en";
 const valid = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost"];
 const applyTheme = (theme) => {
@@ -1969,6 +1972,7 @@ function resetMediaInspection() {
   document.querySelector("#media-format").hidden = false;
   document.querySelector("#hls-audio-conversion").hidden = true;
   document.querySelector("#hls-convert-audio").checked = false;
+  delete document.querySelector("#hls-audio-conversion").dataset.originalName;
   document.querySelector("#media-format-control").hidden = false;
   document.querySelector("#torrent-inspection").hidden = true;
   document.querySelector("#torrent-files").replaceChildren();
@@ -2765,6 +2769,7 @@ function updateHlsAudioConversion() {
   document.querySelector("#media-format").value = selection;
   document.querySelector("#hls-audio-format").disabled = !enabled;
   if (enabled) applyAudioFormatSelection(selection);
+  else if (document.querySelector("#hls-audio-conversion").dataset.originalName) document.querySelector("#file-name").value = document.querySelector("#hls-audio-conversion").dataset.originalName;
 }
 document.querySelector("#hls-convert-audio").onchange = updateHlsAudioConversion;
 document.querySelector("#hls-audio-format").onchange = updateHlsAudioConversion;
@@ -2846,6 +2851,19 @@ document.querySelector("#analyze").onclick = async () => {
       document.querySelector("#hls-convert-audio").checked = false;
       updateHlsAudioConversion();
       showCapturedPreview({ title: pendingTitle || "HLS", thumbnail: pendingThumbnail, kind: "M3U8 / HLS", duration: pendingDuration, size: pendingExpectedSize, showFormats: true });
+    } else if (showDirectAudioConversion(url.value, fileName.value, pendingMediaKind)) {
+      const select = document.querySelector("#media-format");
+      select.replaceChildren();
+      option(select, "original", t("originalAudio"));
+      for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
+        option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
+      select.hidden = true;
+      const conversion = document.querySelector("#hls-audio-conversion");
+      conversion.hidden = false;
+      conversion.dataset.originalName = fileName.value;
+      document.querySelector("#hls-convert-audio").checked = false;
+      updateHlsAudioConversion();
+      showCapturedPreview({ title: pendingTitle || fileName.value, thumbnail: pendingThumbnail, kind: "audio", duration: pendingDuration, size: pendingExpectedSize, showFormats: true });
     } else if (pendingMediaKind === "image" || /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)(?:$|[?#])/i.test(url.value)) {
       showCapturedPreview({ title: pendingTitle || fileName.value, thumbnail: pendingThumbnail || url.value, kind: pendingMediaKind || "image", duration: null, size: pendingExpectedSize });
     }

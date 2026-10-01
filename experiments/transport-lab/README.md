@@ -1,3 +1,15 @@
+# Desktop integration in ADM 0.4.79
+
+**pt-BR:** Esta biblioteca agora também é dependência do desktop. O Link negocia recebimentos QUIC por tickets na conexão TLS autenticada, com progresso, cancelamento e fallback HTTPS. Ative nas duas máquinas. Caminhos adicionais são tentados e reportados; falhas mantêm o principal. Windows pode rejeitar o endereço loopback adicional não atribuído. Ferramentas e Gravações expõem download com dicionário e captura de objetos MoQ, respectivamente. MARS permanece pesquisa. Não há medição de agregação real entre interfaces nem exportação de vídeo MoQ.
+
+**English:** The desktop now depends on this library. Link negotiates QUIC receives through authenticated TLS tickets, with progress/cancellation and HTTPS fallback. Enable it on both peers. Additional paths are attempted and reported; failures retain the primary path. Windows may reject an unassigned additional loopback source. Tools and Recordings expose dictionary downloads and MoQ object capture. MARS remains research; actual interface aggregation and playable MoQ export are unvalidated.
+
+**简体中文：** 桌面现已依赖此库。Link 通过认证 TLS 票据协商 QUIC 接收，支持进度、取消和 HTTPS 回退。请在两个客户端启用。额外路径会被尝试并报告；失败时保留主路径。Windows 可能拒绝未分配的额外环回源。工具和录制提供字典下载及 MoQ 对象捕获。MARS 仍为研究；实际接口带宽聚合及可播放的 MoQ 导出尚未验证。
+
+The CLI instructions below remain useful for standalone interoperability tests. Earlier isolation notes describe the initial prototype; the desktop integration scope above supersedes them.
+
+---
+
 # Laboratório de transportes do ADM / ADM transport lab / ADM 传输实验室
 
 ## Português (Brasil)

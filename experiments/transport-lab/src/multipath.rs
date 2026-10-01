@@ -173,6 +173,10 @@ pub async fn add_paths(
             !ip.is_unspecified() && !ip.is_multicast(),
             "invalid source IP"
         );
+        // Reject addresses not assigned to this machine before asking the QUIC
+        // socket to select one (some platforms silently ignore source hints).
+        let _probe = std::net::UdpSocket::bind(SocketAddr::new(*ip, 0))
+            .context("source IP is not assigned locally")?;
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 match connection
@@ -233,7 +237,11 @@ pub async fn download_with_progress(
             .all(|ip| !ip.is_unspecified() && !ip.is_multicast()),
         "invalid source IP"
     );
-    let connection = endpoint.connect(remote, "apocalipse-link.local")?.await?;
+    let connection = tokio::time::timeout(
+        Duration::from_secs(8),
+        endpoint.connect(remote, "apocalipse-link.local")?,
+    )
+    .await??;
     let mut additional_paths = 0;
     let mut failed_paths = 0;
     for ip in local_ips {
