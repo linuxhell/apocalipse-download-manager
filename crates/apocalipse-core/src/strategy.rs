@@ -60,13 +60,9 @@ pub fn contextual_media_page<'a>(
     // recognized host only ever hands over a direct CDN file (or, for a live
     // broadcast, an .m3u8 we deliberately still leave alone).
     let allowed_kinds: &[DownloadKind] = if host_is("soundcloud.com") {
-        &[
-            DownloadKind::Http,
-            DownloadKind::AcceleratedHttp,
-            DownloadKind::Hls,
-        ]
+        &[DownloadKind::Http, DownloadKind::Hls]
     } else {
-        &[DownloadKind::Http, DownloadKind::AcceleratedHttp]
+        &[DownloadKind::Http]
     };
     if !resource_kind.is_some_and(|kind| allowed_kinds.contains(&kind)) {
         return None;
@@ -142,7 +138,7 @@ pub fn contextual_media_page<'a>(
 pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<StrategyPlan> {
     let kind = classify_url(input)?;
     let plan = match kind {
-        DownloadKind::Http | DownloadKind::AcceleratedHttp => StrategyPlan {
+        DownloadKind::Http => StrategyPlan {
             primary: if capabilities.aria2 {
                 Engine::Aria2Rpc
             } else {

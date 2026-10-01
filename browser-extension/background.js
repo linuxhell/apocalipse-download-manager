@@ -821,15 +821,6 @@ const eraseBrowserDownload = (id) => new Promise((resolve) => {
   });
 });
 
-function isChatGPTLibraryDownload(value) {
-  try {
-    const url = new URL(value);
-    return url.hostname.toLowerCase() === "chatgpt.com" && url.pathname === "/backend-api/estuary/content";
-  } catch {
-    return false;
-  }
-}
-
 function isDisposableDownloadUrl(value) {
   try {
     const url = new URL(value);
