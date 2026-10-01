@@ -1,4 +1,4 @@
-name: Experimental transport lab
+name: Transport regression tests
 on:
   pull_request:
     paths: ['experiments/transport-lab/**', '.github/workflows/transport-lab.yml']
@@ -7,6 +7,9 @@ on:
     paths: ['experiments/transport-lab/**', '.github/workflows/transport-lab.yml']
 permissions:
   contents: read
+concurrency:
+  group: transport-tests-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   validate:
     strategy:
@@ -31,14 +34,3 @@ jobs:
         run: cargo test --locked --manifest-path experiments/transport-lab/Cargo.toml --all-features
       - name: Lint
         run: cargo clippy --locked --manifest-path experiments/transport-lab/Cargo.toml --all-features --all-targets -- -D warnings
-      - name: Build experimental executable
-        run: cargo build --locked --release --manifest-path experiments/transport-lab/Cargo.toml --all-features
-      - uses: actions/upload-artifact@v4
-        with:
-          name: apocalipse-transport-lab-${{ matrix.os }}
-          path: |
-            experiments/transport-lab/target/release/apocalipse-transport-lab
-            experiments/transport-lab/target/release/apocalipse-transport-lab.exe
-            experiments/transport-lab/README.md
-          if-no-files-found: error
-          retention-days: 14
