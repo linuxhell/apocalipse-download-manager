@@ -254,11 +254,9 @@ struct SourceProbe {
     elapsed: Duration,
 }
 
-fn same_download_identity(
-    primary: &SourceProbe,
-    candidate: &SourceProbe,
-    _advertised: bool,
-) -> bool {
+/// Whether two probes are provably the same bytes. Being server-advertised
+/// (`Link: rel=duplicate`) deliberately grants no extra trust here.
+fn same_download_identity(primary: &SourceProbe, candidate: &SourceProbe) -> bool {
     if primary.total.is_some() && candidate.total.is_some() && primary.total != candidate.total {
         return false;
     }
@@ -294,14 +292,6 @@ impl Resolve for CustomDnsResolver {
 impl DownloadEngine {
     pub fn new() -> Result<Self> {
         Self::with_network(None, None, None, &[])
-    }
-
-    pub fn with_proxy(
-        proxy_url: Option<&str>,
-        username: Option<&str>,
-        password: Option<&str>,
-    ) -> Result<Self> {
-        Self::with_network(proxy_url, username, password, &[])
     }
 
     pub fn with_network(
@@ -626,7 +616,6 @@ impl DownloadEngine {
         supplied_mirrors: &[String],
     ) -> Vec<String> {
         let advertised = self.advertised_mirrors(request).await;
-        let advertised_set = advertised.iter().cloned().collect::<HashSet<_>>();
         let mut candidates = vec![request.url.clone()];
         candidates.extend(advertised);
         candidates.extend(supplied_mirrors.iter().cloned());
@@ -641,17 +630,22 @@ impl DownloadEngine {
         for url in candidates {
             let engine = self.clone();
             let request = request.clone();
-            let server_advertised = advertised_set.contains(&url);
             probes.push(async move {
                 let probe = engine.probe_source(&request, &url).await?;
-                Some((url, probe, server_advertised))
+                Some((url, probe))
             });
         }
         let mut verified = Vec::new();
-        while let Some(Some((url, probe, server_advertised))) = probes.next().await {
-            if url == request.url
-                || same_download_identity(primary_identity, &probe, server_advertised)
-            {
+        // A candidate whose probe fails yields None. That must only drop that
+        // one candidate: `while let Some(Some(..))` used to end the whole loop
+        // on the first failure, so one dead mirror answering fastest (a refused
+        // connection usually does) silently discarded every healthy mirror
+        // still in flight.
+        while let Some(result) = probes.next().await {
+            let Some((url, probe)) = result else {
+                continue;
+            };
+            if url == request.url || same_download_identity(primary_identity, &probe) {
                 verified.push((url, probe.elapsed));
             }
         }
@@ -2672,7 +2666,7 @@ mod tests {
             digest: None,
             elapsed: Duration::from_millis(10),
         };
-        assert!(!same_download_identity(&primary, &same_size, true));
+        assert!(!same_download_identity(&primary, &same_size));
 
         let primary = SourceProbe {
             etag: Some("\"file-v1\"".into()),
@@ -2682,7 +2676,7 @@ mod tests {
             etag: Some("\"file-v1\"".into()),
             ..same_size
         };
-        assert!(same_download_identity(&primary, &candidate, true));
+        assert!(same_download_identity(&primary, &candidate));
     }
 
     #[test]
@@ -2705,8 +2699,8 @@ mod tests {
             digest: None,
             elapsed: Duration::from_millis(10),
         };
-        assert!(!same_download_identity(&primary, &different_size, true));
-        assert!(!same_download_identity(&primary, &different_etag, false));
+        assert!(!same_download_identity(&primary, &different_size));
+        assert!(!same_download_identity(&primary, &different_etag));
     }
 
     #[test]
@@ -2723,8 +2717,7 @@ mod tests {
             digest: None,
             elapsed: Duration::from_millis(10),
         };
-        assert!(!same_download_identity(&primary, &duplicate, true));
-        assert!(!same_download_identity(&primary, &duplicate, false));
+        assert!(!same_download_identity(&primary, &duplicate));
     }
 
     #[test]
@@ -3082,5 +3075,70 @@ mod tests {
         assert!(!chunk.exists());
         assert!(unrelated.exists());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn one_dead_mirror_does_not_discard_the_healthy_ones() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        // Healthy origin + healthy mirror, both answering slowly with the same
+        // strong ETag and size, so they are a verified identity match.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                tokio::spawn(async move {
+                    let mut request = Vec::new();
+                    let mut buffer = [0_u8; 1024];
+                    while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                        match socket.read(&mut buffer).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(read) => request.extend_from_slice(&buffer[..read]),
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    let _ = socket
+                        .write_all(
+                            b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-0/100\r\n\
+                              Content-Length: 1\r\nETag: \"same-object\"\r\n\
+                              Connection: close\r\n\r\nx",
+                        )
+                        .await;
+                });
+            }
+        });
+        // A mirror that refuses connections - it fails long before the
+        // healthy, slower candidates answer.
+        let dead = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let dead_address = dead.local_addr().unwrap();
+        drop(dead);
+
+        let primary = format!("http://{address}/file.iso");
+        let good_mirror = format!("http://{address}/mirror/file.iso");
+        let dead_mirror = format!("http://{dead_address}/file.iso");
+        let request = DownloadRequest {
+            url: primary.clone(),
+            destination: std::env::temp_dir().join("unused-mirror-test.iso"),
+            overwrite: false,
+            connections: 4,
+            adaptive_connections: false,
+            network_capacity_hint_bps: None,
+            host_capacity_hint_bps: None,
+            method: "GET".into(),
+            body: None,
+            headers: Vec::new(),
+            expected_size: None,
+            expected_sha256: None,
+            limiters: Vec::new(),
+        };
+        let engine = DownloadEngine::new().unwrap();
+        let sources = engine
+            .verified_sources(&request, &[dead_mirror.clone(), good_mirror.clone()])
+            .await;
+        assert!(sources.contains(&primary), "{sources:?}");
+        assert!(sources.contains(&good_mirror), "{sources:?}");
+        assert!(!sources.contains(&dead_mirror), "{sources:?}");
     }
 }

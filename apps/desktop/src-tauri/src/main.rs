@@ -247,6 +247,88 @@ fn host_from_url(url: &str) -> Option<String> {
     (!host.is_empty()).then_some(host)
 }
 
+/// Path (relative to the project root, no leading slash) to query Apache's
+/// own mirror-selection API for, if `url` points at an Apache distribution.
+/// Apache publishes this mapping itself (dyn/closer.lua); this only needs to
+/// recognize the handful of hostnames that serve the same distribution tree.
+fn apache_mirror_path_info(url: &url::Url) -> Option<String> {
+    let host = url.host_str()?.to_ascii_lowercase();
+    if !(host == "apache.org" || host.ends_with(".apache.org")) {
+        return None;
+    }
+    let path = url.path().trim_start_matches('/');
+    let path = path.strip_prefix("dist/").unwrap_or(path);
+    let path = path.strip_prefix("dyn/closer.lua/").unwrap_or(path);
+    (!path.is_empty()).then(|| path.to_owned())
+}
+
+/// GNU mirrors itself via a single geo-redirecting host (`ftpmirror.gnu.org`)
+/// rather than a JSON API. Rewriting ftp.gnu.org/www.gnu.org/*.gnu.org links
+/// to it is the same "official mirror" entry point GNU's own download pages
+/// link to, not a third-party guess.
+fn gnu_ftpmirror_url(url: &url::Url) -> Option<String> {
+    let host = url.host_str()?.to_ascii_lowercase();
+    let is_gnu = host == "ftp.gnu.org" || host == "www.gnu.org" || host == "gnu.org";
+    if !is_gnu {
+        return None;
+    }
+    let path = url.path();
+    (!path.is_empty() && path != "/").then(|| format!("https://ftpmirror.gnu.org{path}"))
+}
+
+#[derive(serde::Deserialize)]
+struct ApacheCloserResponse {
+    preferred: Option<String>,
+    #[serde(default)]
+    http: Vec<String>,
+    #[serde(default)]
+    backup: Vec<String>,
+    path_info: Option<String>,
+}
+
+/// Queries the project's own official mirror-selection endpoint (Apache's
+/// closer.lua) and, for GNU, rewrites to its own geo-redirecting mirror
+/// host. Never trusted third-party mirror directories: only the project's
+/// own published mechanism, so "automatic mirror" never means "whichever
+/// site happened to host a copy of this file". Best-effort - any failure
+/// (network, unexpected response shape, unsupported host) returns an empty
+/// list and the download proceeds against the original URL alone.
+async fn discover_official_mirrors(url: &str) -> Vec<String> {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return Vec::new();
+    };
+    if let Some(mirror) = gnu_ftpmirror_url(&parsed) {
+        return vec![mirror];
+    }
+    let Some(path_info) = apache_mirror_path_info(&parsed) else {
+        return Vec::new();
+    };
+    let endpoint = format!("https://www.apache.org/dyn/closer.lua/{path_info}?as_json=1");
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return Vec::new(),
+    };
+    let Ok(response) = client.get(&endpoint).send().await else {
+        return Vec::new();
+    };
+    let Ok(body) = response.json::<ApacheCloserResponse>().await else {
+        return Vec::new();
+    };
+    let path_info = body.path_info.unwrap_or(path_info);
+    let mut mirrors: Vec<String> = body
+        .preferred
+        .into_iter()
+        .chain(body.http)
+        .chain(body.backup)
+        .map(|base| format!("{}/{path_info}", base.trim_end_matches('/')))
+        .collect();
+    mirrors.dedup();
+    mirrors
+}
+
 fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize> {
     let host = host_from_url(url);
     if host
@@ -584,7 +666,6 @@ struct LinkTransferReporter {
     direction: String,
     total: u64,
     transferred: u64,
-    started: Instant,
     last_emit: Instant,
     last_speed_at: Instant,
     last_speed_bytes: u64,
@@ -610,7 +691,6 @@ impl LinkTransferReporter {
             direction: direction.to_owned(),
             total,
             transferred: 0,
-            started: now,
             last_emit: now.checked_sub(Duration::from_secs(1)).unwrap_or(now),
             last_speed_at: now,
             last_speed_bytes: 0,
@@ -3498,6 +3578,21 @@ fn move_tree(source: &Path, destination: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// `parent/name`, or `parent/name (N)` for the first N that does not exist.
+fn unique_extraction_directory(parent: &Path, name: &std::ffi::OsStr) -> Result<PathBuf, String> {
+    for index in 0..10_000 {
+        let mut candidate_name = name.to_os_string();
+        if index > 0 {
+            candidate_name.push(format!(" ({index})"));
+        }
+        let candidate = parent.join(candidate_name);
+        if !destination_exists(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    Err("archive_destination_names_exhausted".to_owned())
+}
+
 fn extract_archive_safely(settings: &UserSettings, archive: &Path) -> Result<PathBuf, String> {
     if !archive.is_file()
         || !archive
@@ -3555,13 +3650,23 @@ fn extract_archive_safely(settings: &UserSettings, archive: &Path) -> Result<Pat
         let _ = fs::remove_dir_all(&staging);
         return Err("archive_extraction_empty".to_owned());
     }
-    let destination = if entries.len() == 1 && entries[0].is_dir() {
-        let root_name = entries[0]
+    let destination_name = if entries.len() == 1 && entries[0].is_dir() {
+        entries[0]
             .file_name()
-            .ok_or_else(|| "archive_root_name_missing".to_owned())?;
-        parent.join(root_name)
+            .ok_or_else(|| "archive_root_name_missing".to_owned())?
+            .to_os_string()
     } else {
-        parent.join(archive_name_without_extensions(archive))
+        std::ffi::OsString::from(archive_name_without_extensions(archive))
+    };
+    // Never merge into an existing folder: move_tree replaces same-named
+    // files, so extracting `project.zip` (root `src/`) next to the user's own
+    // `src/` used to overwrite their files without asking.
+    let destination = match unique_extraction_directory(parent, &destination_name) {
+        Ok(destination) => destination,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
     };
     if entries.len() == 1 && entries[0].is_dir() {
         move_tree(&entries[0], &destination)?;
@@ -4160,7 +4265,57 @@ fn run_network_change_monitor(app: tauri::AppHandle) {
     }
 }
 
-fn handle_link_connection<S: Read + Write>(app: &tauri::AppHandle, mut stream: S) {
+const MAX_LINK_JSON_BODY: usize = 1024 * 1024;
+const LINK_SOCKET_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Stores an uploaded file only once every declared byte has arrived. The
+/// body goes to a hidden sibling temporary file that replaces `path` at the
+/// end; truncating `path` up front (the previous behavior) meant a dropped
+/// connection while overwriting an existing file destroyed the original and
+/// left a truncated copy in its place - and a short body still returned 200.
+fn receive_link_upload<R: Read>(
+    path: &Path,
+    initial: &[u8],
+    stream: &mut R,
+    length: usize,
+) -> std::io::Result<()> {
+    let file_name = path.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "upload_path_invalid")
+    })?;
+    let mut temporary_name = std::ffi::OsString::from(".");
+    temporary_name.push(file_name);
+    temporary_name.push(format!(".{}.upload", uuid::Uuid::new_v4().simple()));
+    let temporary = path.with_file_name(temporary_name);
+    let result = (|| {
+        let mut file = fs::File::create(&temporary)?;
+        let initial = &initial[..initial.len().min(length)];
+        file.write_all(initial)?;
+        let remaining = (length - initial.len()) as u64;
+        let copied = std::io::copy(&mut stream.take(remaining), &mut file)?;
+        if copied != remaining {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "upload_incomplete",
+            ));
+        }
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+/// `allow_long_idle` is called once an authenticated file transfer starts:
+/// a user may pause a Link transfer for any length of time while its
+/// connection stays open, so only those streams drop the idle timeout.
+fn handle_link_connection<S: Read + Write>(
+    app: &tauri::AppHandle,
+    mut stream: S,
+    allow_long_idle: impl Fn(&S),
+) {
     let mut buffer = Vec::with_capacity(8192);
     let mut chunk = [0_u8; 4096];
     let header_end = loop {
@@ -4352,29 +4507,37 @@ fn handle_link_connection<S: Read + Write>(app: &tauri::AppHandle, mut stream: S
             }
         }
         let length = bridge_content_length(&headers);
-        let Ok(mut file) = fs::File::create(path) else {
-            bridge_response(&mut stream, "403 Forbidden", None, "");
-            return;
-        };
         let body_start = header_end + 4;
-        let initial = &buffer[body_start..];
-        if file.write_all(initial).is_err() {
-            return;
+        allow_long_idle(&stream);
+        match receive_link_upload(&path, &buffer[body_start..], &mut stream, length) {
+            Ok(()) => bridge_response(&mut stream, "200 OK", None, "{\"ok\":true}"),
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                bridge_response(&mut stream, "403 Forbidden", None, "")
+            }
+            Err(_) => bridge_response(
+                &mut stream,
+                "400 Bad Request",
+                None,
+                "{\"error\":\"upload_incomplete\"}",
+            ),
         }
-        let remaining = length.saturating_sub(initial.len());
-        if std::io::copy(
-            &mut std::io::Read::by_ref(&mut stream).take(remaining as u64),
-            &mut file,
-        )
-        .is_err()
-        {
-            return;
-        }
-        bridge_response(&mut stream, "200 OK", None, "{\"ok\":true}");
         return;
     }
     let length = bridge_content_length(&headers);
     let body_start = header_end + 4;
+    // Every request below (auth, list, mobile add) carries a small JSON body
+    // and the body is buffered before authentication. Without a ceiling, an
+    // unauthenticated peer on the LAN could declare a multi-gigabyte
+    // Content-Length and stream data until the process ran out of memory.
+    if length > MAX_LINK_JSON_BODY {
+        bridge_response(
+            &mut stream,
+            "413 Payload Too Large",
+            None,
+            "{\"error\":\"request_too_large\"}",
+        );
+        return;
+    }
     while buffer.len() < body_start + length {
         let Ok(count) = stream.read(&mut chunk) else {
             return;
@@ -4521,6 +4684,7 @@ fn handle_link_connection<S: Read + Write>(app: &tauri::AppHandle, mut stream: S
             return;
         };
         let header = format!("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", metadata.len());
+        allow_long_idle(&stream);
         if stream.write_all(header.as_bytes()).is_ok() {
             let _ = std::io::copy(&mut file, &mut stream);
         }
@@ -4576,13 +4740,28 @@ fn run_link_server(app: tauri::AppHandle, listener: TcpListener, tls_config: Arc
     for stream in listener.incoming().flatten() {
         let app = app.clone();
         let tls_config = tls_config.clone();
+        // One thread per connection: without an idle timeout an
+        // unauthenticated peer that connects and never completes the TLS
+        // handshake or its request pinned that thread forever, so idle
+        // sockets from the LAN accumulated threads without bound. This bounds
+        // idleness per read/write call; authenticated file transfers lift it
+        // (see handle_link_connection) because a paused transfer stays open.
+        let _ = stream.set_read_timeout(Some(LINK_SOCKET_IDLE_TIMEOUT));
+        let _ = stream.set_write_timeout(Some(LINK_SOCKET_IDLE_TIMEOUT));
         let _ = std::thread::Builder::new()
             .name("apocalipse-link-client".into())
             .spawn(move || {
                 let Ok(connection) = ServerConnection::new(tls_config) else {
                     return;
                 };
-                handle_link_connection(&app, StreamOwned::new(connection, stream));
+                handle_link_connection(
+                    &app,
+                    StreamOwned::new(connection, stream),
+                    |stream: &StreamOwned<ServerConnection, TcpStream>| {
+                        let _ = stream.sock.set_read_timeout(None);
+                        let _ = stream.sock.set_write_timeout(None);
+                    },
+                );
             });
     }
 }
@@ -4972,11 +5151,54 @@ async fn inspect_media_formats(
     })
 }
 
+/// Replaces `path` with `data` through a sibling temporary file and a rename,
+/// so a crash, power loss or full disk mid-write leaves either the previous
+/// complete file or the new complete file - never a truncated one. A plain
+/// `fs::write` truncates first; queue.json/settings.json are rewritten on
+/// every task state change, so an interrupted write used to leave invalid
+/// JSON behind, which the loaders then replaced with an empty queue/default
+/// settings (and immediately persisted), silently erasing the user's
+/// download list, host rules, shares and pinned Link certificates.
+fn write_file_atomically(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    let file_name = path.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "path_has_no_file_name")
+    })?;
+    let mut temporary_name = file_name.to_os_string();
+    temporary_name.push(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
+    let temporary = path.with_file_name(temporary_name);
+    let result = (|| {
+        let mut file = fs::File::create(&temporary)?;
+        file.write_all(data)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+/// Reads a JSON state file. When the file exists but cannot be parsed, it is
+/// moved aside as `<name>.corrupt-<epoch>` before the caller falls back to a
+/// default, so that fallback never overwrites the only copy of the data.
+fn read_json_state_file<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
+    let data = fs::read(path).ok()?;
+    match serde_json::from_slice(&data) {
+        Ok(value) => Some(value),
+        Err(_) => {
+            if let Some(file_name) = path.file_name() {
+                let mut preserved = file_name.to_os_string();
+                preserved.push(format!(".corrupt-{}", epoch_seconds()));
+                let _ = fs::rename(path, path.with_file_name(preserved));
+            }
+            None
+        }
+    }
+}
+
 fn load_queue(path: &Path) -> Vec<DownloadTask> {
-    let mut queue: Vec<DownloadTask> = fs::read(path)
-        .ok()
-        .and_then(|data| serde_json::from_slice(&data).ok())
-        .unwrap_or_default();
+    let mut queue: Vec<DownloadTask> = read_json_state_file(path).unwrap_or_default();
     let mut recovered = false;
     for task in &mut queue {
         if matches!(
@@ -4994,7 +5216,7 @@ fn load_queue(path: &Path) -> Vec<DownloadTask> {
     }
     if recovered {
         if let Ok(data) = serde_json::to_vec_pretty(&queue) {
-            let _ = fs::write(path, data);
+            let _ = write_file_atomically(path, &data);
         }
     }
     queue
@@ -5056,17 +5278,14 @@ fn save_queue(state: &AppState, queue: &[DownloadTask]) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let data = serde_json::to_vec_pretty(queue).map_err(|error| error.to_string())?;
-    let result = fs::write(&state.queue_path, data).map_err(|error| error.to_string());
+    let result = write_file_atomically(&state.queue_path, &data).map_err(|error| error.to_string());
     state.diagnostics.record("queue.persisted", if result.is_ok() { "INFO" } else { "ERROR" }, None, None,
         serde_json::json!({"ok":result.is_ok(),"taskCount":queue.len(),"taskRefs":queue.iter().take(24).map(|t|t.id.to_string()).collect::<Vec<_>>(),"truncated":queue.len()>24}));
     result
 }
 
 fn load_settings(path: &Path) -> Result<UserSettings, String> {
-    let mut settings: UserSettings = fs::read(path)
-        .ok()
-        .and_then(|data| serde_json::from_slice(&data).ok())
-        .unwrap_or_default();
+    let mut settings: UserSettings = read_json_state_file(path).unwrap_or_default();
     if settings.aria2_release_repo == "FerroDownload/aria2-static-builds" {
         settings.aria2_release_repo = default_aria2_release_repo();
     }
@@ -5145,7 +5364,7 @@ fn write_settings(path: &Path, settings: &UserSettings) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let data = serde_json::to_vec_pretty(settings).map_err(|error| error.to_string())?;
-    fs::write(path, data).map_err(|error| error.to_string())
+    write_file_atomically(path, &data).map_err(|error| error.to_string())
 }
 
 fn save_settings(state: &AppState, settings: &UserSettings) -> Result<(), String> {
@@ -5631,19 +5850,22 @@ async fn run_download(
     let mut previous_perf_rate: Option<u64> = None;
     let mut sustainable_peak = 0_u64;
     let mut completed_ok = false;
-    let engine_result = match network {
+    let build_engine = |network: &Option<(
+        Option<(Option<String>, Option<String>, Option<String>)>,
+        Vec<std::net::IpAddr>,
+    )>| match network {
         Some((proxy, dns)) => {
-            let (url, username, password) = proxy.unwrap_or_default();
+            let (url, username, password) = proxy.clone().unwrap_or_default();
             DownloadEngine::with_network(
                 url.as_deref(),
                 username.as_deref(),
                 password.as_deref(),
-                &dns,
+                dns,
             )
         }
         None => DownloadEngine::new(),
     };
-    let engine = match engine_result {
+    let engine = match build_engine(&network) {
         Ok(engine) => engine,
         Err(error) => {
             diagnostic_log(
@@ -5661,11 +5883,22 @@ async fn run_download(
         }
     };
     let (events, mut receiver) = mpsc::channel(64);
+    let retry_request = request.clone();
+    let retry_mirrors = mirrors.clone();
     let mut download = Box::pin(download_with_mirrors(engine, request, mirrors, events));
     let mut was_cancelled = false;
     let mut active_connections = 1_usize;
     let mut perf_last_at = Instant::now();
     let mut perf_last_bytes = 0_u64;
+    // 429 from the remote host is near-certain to be transient (the host's own
+    // request-rate policy, not a problem with this download), and some hosts
+    // trip it on their own: uupdump.net's get.php can rate-limit the real
+    // download request if the browser extension's own prehook probe of the
+    // same URL moments earlier counted against the same window. Previously
+    // this left the task sitting in Failed until a person clicked retry by
+    // hand - often succeeding instantly once the host's window passed, which
+    // a short backoff can just as well wait out automatically.
+    let mut rate_limit_retries_remaining: u8 = 3;
     loop {
         tokio::select! {
             biased;
@@ -5687,6 +5920,33 @@ async fn run_download(
                         maybe_auto_extract_completed(&app, id);
                     },
                     Err(error) => {
+                        let is_rate_limited = is_rate_limited_error(&error);
+                        if is_rate_limited && rate_limit_retries_remaining > 0 {
+                            rate_limit_retries_remaining -= 1;
+                            diagnostic_log(&app.state::<AppState>(), "WARN", "http.rate_limited_retry", &format!("task={id} error={error} retries_remaining={rate_limit_retries_remaining}"));
+                            tokio::select! {
+                                biased;
+                                _ = &mut cancellation => {
+                                    was_cancelled = true;
+                                    break;
+                                }
+                                _ = tokio::time::sleep(Duration::from_secs(8)) => {}
+                            }
+                            let (retry_events, retry_receiver) = mpsc::channel(64);
+                            receiver = retry_receiver;
+                            let retry_engine = match build_engine(&network) {
+                                Ok(engine) => engine,
+                                Err(error) => {
+                                    diagnostic_log(&app.state::<AppState>(), "ERROR", "http.engine", &format!("task={id} error={error}"));
+                                    update_task(&app, id, true, |task| {
+                                        task.state = DownloadState::Failed { message: error.to_string() }
+                                    });
+                                    break;
+                                }
+                            };
+                            download = Box::pin(download_with_mirrors(retry_engine, retry_request.clone(), retry_mirrors.clone(), retry_events));
+                            continue;
+                        }
                         diagnostic_log(&app.state::<AppState>(), "ERROR", "http.failed", &format!("task={id} error={error}"));
                         update_task(&app, id, true, |task| {
                             task.state = DownloadState::Failed { message: error.to_string() };
@@ -5808,6 +6068,21 @@ async fn run_download(
         }
         start_next_queued(&app);
     }
+}
+
+/// True only for an actual HTTP 429 response. Matching "429" anywhere in the
+/// error text also matched the request URL that reqwest embeds in every
+/// status error (`.../file-14290.zip`, `?id=4291`) and byte counts in
+/// `incomplete download: received 4290 of ...`, so an ordinary 404 or a
+/// truncated transfer was retried three times with 8 s waits.
+fn is_rate_limited_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<reqwest::Error>()
+            .and_then(reqwest::Error::status)
+            .is_some_and(|status| status == reqwest::StatusCode::TOO_MANY_REQUESTS)
+            || cause.to_string().contains("status 429 Too Many Requests")
+    })
 }
 
 async fn download_with_mirrors(
@@ -6133,7 +6408,7 @@ async fn run_aria2_download(
             gid
         }
         None => {
-            let is_http = matches!(kind, DownloadKind::Http | DownloadKind::AcceleratedHttp);
+            let is_http = kind == DownloadKind::Http;
             let add_uri_started_at = Instant::now();
             let added = if is_bittorrent && context.proxy_required {
                 Err("aria2_bittorrent_proxy_unsupported".to_owned())
@@ -6236,7 +6511,7 @@ async fn run_aria2_download(
     // almost immediately without keeping the RPC hot for the entire transfer.
     let mut startup_fast_polling = true;
     let mut interval = tokio::time::interval(Duration::from_millis(100));
-    let mut terminal = false;
+    let mut status_failing_since: Option<Instant> = None;
     loop {
         tokio::select! {
             biased;
@@ -6247,9 +6522,34 @@ async fn run_aria2_download(
             }
             _ = interval.tick() => {
                 let status = match endpoint.status(&gid).await {
-                    Ok(status) => status,
+                    Ok(status) => {
+                        status_failing_since = None;
+                        status
+                    }
                     Err(error) => {
-                        diagnostic_log(&state, "WARN", "aria2.status_failed", &format!("task={id} error={error}"));
+                        // The runtime this loop captured can disappear under it:
+                        // changing the RPC port/token, updating aria2 in Tools and
+                        // a network change all stop it. Retrying forever used to
+                        // leave the task frozen in Downloading, hold its worker
+                        // slot (blocking the queue) and log a WARN every 350 ms.
+                        let first_failure = status_failing_since.is_none();
+                        let failing_since = *status_failing_since.get_or_insert_with(Instant::now);
+                        if aria2_status_outage_exceeded(failing_since.elapsed()) {
+                            diagnostic_log(&state, "ERROR", "aria2.status_unreachable", &format!("task={id} gid={gid} error={error}"));
+                            // Keep the GID: a retry reconnects to aria2's restored
+                            // session entry, or detects it stale and recreates it.
+                            update_task(&app, id, true, |item| {
+                                item.state = DownloadState::Failed {
+                                    message: format!("aria2_rpc_unreachable:{error}"),
+                                };
+                                item.download_speed = Some(0);
+                                item.upload_speed = Some(0);
+                            });
+                            break;
+                        }
+                        if first_failure {
+                            diagnostic_log(&state, "WARN", "aria2.status_failed", &format!("task={id} error={error}"));
+                        }
                         continue;
                     }
                 };
@@ -6369,7 +6669,6 @@ async fn run_aria2_download(
                             if let Ok(mut items) = state.aria2_tasks.lock() {
                                 items.remove(&id);
                             }
-                            terminal = true;
                             break;
                         }
                         if is_bittorrent && status.selected_file_bytes > status.total {
@@ -6391,7 +6690,6 @@ async fn run_aria2_download(
                             if let Ok(mut items) = state.aria2_tasks.lock() {
                                 items.remove(&id);
                             }
-                            terminal = true;
                             break;
                         }
                         update_task(&app, id, true, |item| {
@@ -6409,7 +6707,6 @@ async fn run_aria2_download(
                         if let Ok(mut items) = state.aria2_tasks.lock() {
                             items.remove(&id);
                         }
-                        terminal = true;
                         break;
                     }
                     "error" | "removed" => {
@@ -6439,7 +6736,6 @@ async fn run_aria2_download(
                         if let Ok(mut items) = state.aria2_tasks.lock() {
                             items.remove(&id);
                         }
-                        terminal = true;
                         break;
                     }
                     "paused" => {
@@ -6448,7 +6744,6 @@ async fn run_aria2_download(
                             item.download_speed = Some(0);
                             item.upload_speed = Some(0);
                         });
-                        terminal = true;
                         break;
                     }
                     _ => {}
@@ -6456,12 +6751,19 @@ async fn run_aria2_download(
             }
         }
     }
-    if terminal {
-        if let Ok(mut workers) = state.workers.lock() {
-            workers.remove(&id);
-        }
-        start_next_queued(&app);
+    if let Ok(mut workers) = state.workers.lock() {
+        workers.remove(&id);
     }
+    start_next_queued(&app);
+}
+
+/// How long aria2's status RPC may fail continuously before a running task
+/// is released as Failed. Long enough to ride out a busy engine (each call
+/// already has a 15 s timeout), short enough not to freeze the queue.
+const ARIA2_STATUS_OUTAGE_LIMIT: Duration = Duration::from_secs(30);
+
+fn aria2_status_outage_exceeded(failing_for: Duration) -> bool {
+    failing_for >= ARIA2_STATUS_OUTAGE_LIMIT
 }
 
 async fn run_external_download(
@@ -6507,10 +6809,7 @@ async fn run_external_download(
         item.download_speed = Some(0);
         item.upload_speed = Some(0);
         item.resume_supported = Some(match kind {
-            DownloadKind::Torrent
-            | DownloadKind::Magnet
-            | DownloadKind::Ftp
-            | DownloadKind::AcceleratedHttp => true,
+            DownloadKind::Torrent | DownloadKind::Magnet | DownloadKind::Ftp => true,
             DownloadKind::MediaPage => true,
             DownloadKind::Hls => !task
                 .format_selection
@@ -6520,11 +6819,6 @@ async fn run_external_download(
         });
     });
     let directory = task.destination.parent().unwrap_or_else(|| Path::new("."));
-    let file_name = task
-        .destination
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("download");
     let media_work_directory = (kind == DownloadKind::MediaPage).then(|| {
         app.state::<AppState>()
             .queue_path
@@ -10250,7 +10544,7 @@ fn enqueue_download_impl(
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-fn enqueue_download(
+async fn enqueue_download(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     url: String,
@@ -10265,6 +10559,23 @@ fn enqueue_download(
     auto_extract: Option<bool>,
     context: Option<DownloadContext>,
 ) -> Result<DownloadTask, String> {
+    // Only for hosts that publish their own official mirror-selection
+    // mechanism (Apache's closer.lua, GNU's ftpmirror.gnu.org) - never a
+    // third-party guess at "another copy of this file somewhere". Bounded to
+    // a few seconds and entirely best-effort: any failure just means no
+    // extra mirrors, never a blocked or failed enqueue.
+    let auto_mirrors = discover_official_mirrors(&url).await;
+    let mirrors = if auto_mirrors.is_empty() {
+        mirrors
+    } else {
+        let mut merged = mirrors.unwrap_or_default();
+        for candidate in auto_mirrors {
+            if !merged.contains(&candidate) {
+                merged.push(candidate);
+            }
+        }
+        Some(merged)
+    };
     enqueue_download_impl(
         app,
         &state,
@@ -10628,28 +10939,30 @@ fn start_download(
             });
     let aria2_http_network_compatible =
         !limits.dns_enabled && (!limits.proxy_enabled || aria2_http_proxy_url(&limits).is_some());
+    let needs_native_integrity = native_http_integrity_route(&task);
     let native_http_compatibility = kind == DownloadKind::Http
         && (requires_native_http_compatibility(&task.source)
             || special_http_request
-            || !aria2_http_network_compatible);
+            || !aria2_http_network_compatible
+            || needs_native_integrity);
     if native_http_compatibility {
         diagnostic_log(
             state,
             "INFO",
             "http.native_compatibility_route",
             &format!(
-                "task={} reason=aria2_rpc_compatibility host={}",
+                "task={} reason={} host={}",
                 task.id,
+                if needs_native_integrity {
+                    "mirrors_or_sha256"
+                } else {
+                    "aria2_rpc_compatibility"
+                },
                 host_from_url(&task.source).unwrap_or_default()
             ),
         );
     }
-    if !native_http_compatibility
-        && matches!(
-            kind,
-            DownloadKind::Http | DownloadKind::AcceleratedHttp | DownloadKind::Ftp
-        )
-    {
+    if !native_http_compatibility && matches!(kind, DownloadKind::Http | DownloadKind::Ftp) {
         diagnostic_log(
             state,
             "INFO",
@@ -10788,6 +11101,22 @@ fn start_download(
         ));
     }
     Ok(())
+}
+
+/// Mirrors and an expected SHA-256 are only honored by the native HTTP
+/// engine: the aria2 route hands `aria2.addUri` the primary URL alone and no
+/// `checksum` option. Before this, an HTTP task (the default aria2 route)
+/// silently dropped its mirrors - manual ones, Metalink ones and the
+/// auto-discovered Apache/GNU ones - and a Metalink file's SHA-256 was never
+/// checked, yet the task still ended "Completed". The native engine probes
+/// each mirror's identity before striping across it and refuses to promote
+/// a `.part` whose digest does not match.
+fn native_http_integrity_route(task: &DownloadTask) -> bool {
+    !task.mirrors.is_empty()
+        || task
+            .sha256
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
 }
 
 fn start_next_queued(app: &tauri::AppHandle) {
@@ -13248,20 +13577,63 @@ async fn verify_download_integrity(
         Ok(format!("{:x}", hasher.finalize()))
     })
     .await
-    .map_err(|error| error.to_string())??;
-    let expected = expected_sha256
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty());
-    let verified = expected.as_ref().is_none_or(|value| value == &digest);
+    .map_err(|error| error.to_string())
+    .and_then(|result| result);
+    let digest = match digest {
+        Ok(digest) => digest,
+        Err(error) => {
+            // Never leave the task stuck in Verifying when hashing fails
+            // (file removed or unreadable mid-read): it was Completed before.
+            update_task(&app, id, true, |task| {
+                task.state = DownloadState::Completed;
+            });
+            return Err(error);
+        }
+    };
+    let mut verified = false;
     update_task(&app, id, true, |task| {
         task.state = DownloadState::Completed;
-        task.sha256 = Some(digest.clone());
-        task.integrity_verified = verified;
+        verified = apply_integrity_result(task, expected_sha256.as_deref(), &digest);
     });
-    if verified {
+    if verified
+        || expected_sha256
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+    {
         Ok(digest)
     } else {
         Err(format!("checksum_mismatch:{digest}"))
+    }
+}
+
+/// Records the outcome of a manual SHA-256 check on a task.
+///
+/// `integrity_verified` is only set when an expected digest was supplied and
+/// matched; a calculate-only run is not a verification and leaves the task's
+/// expected digest untouched. On a mismatch the
+/// task keeps the *expected* digest: storing the actual (wrong) digest there
+/// would pre-fill the next prompt with it, letting a second click "verify"
+/// the corrupt file against itself, and would make a redownload of the task
+/// demand the corrupt file's hash and reject a good copy.
+fn apply_integrity_result(task: &mut DownloadTask, expected: Option<&str>, digest: &str) -> bool {
+    let expected = expected
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty());
+    match expected {
+        Some(expected) => {
+            let verified = expected == digest;
+            task.sha256 = Some(expected);
+            task.integrity_verified = verified;
+            verified
+        }
+        None => {
+            // `sha256` is the *expected* digest: redownloads inherit it and
+            // the native engine refuses any file that does not match it. A
+            // calculate-only run must not turn the current file's digest into
+            // that requirement (the digest is still returned to the UI).
+            task.integrity_verified = false;
+            false
+        }
     }
 }
 
@@ -13768,9 +14140,24 @@ async fn remove_downloads(
                     classify_url(&task.source),
                     Some(DownloadKind::Torrent | DownloadKind::Magnet)
                 ) && path == task.destination;
-                let hls_workspace = matches!(classify_url(&task.source), Some(DownloadKind::Hls))
-                    && hls_workspace_path(task).as_ref() == Some(&path);
-                remove_path_with_retry(&path, torrent_root || hls_workspace).await?;
+                remove_path_with_retry(&path, torrent_root).await?;
+            }
+            for path in derived_output_candidates(task) {
+                let Ok(metadata) = fs::metadata(&path) else {
+                    continue;
+                };
+                if !produced_after_task_creation(&metadata, task.created_at) {
+                    state.diagnostics.record(
+                        "task.removal_preserved_unrelated",
+                        "INFO",
+                        Some(&removal_trace),
+                        Some(&task.id.to_string()),
+                        serde_json::json!({"directory": metadata.is_dir()}),
+                    );
+                    continue;
+                }
+                let hls_workspace = hls_workspace_path(task).as_ref() == Some(&path);
+                remove_path_with_retry(&path, hls_workspace).await?;
             }
             if delete_torrent_metadata {
                 if let Some(path) = task.torrent_metadata_path.as_deref() {
@@ -13918,6 +14305,25 @@ fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
     if task.source.ends_with(".recording.webm") && recording_source.is_absolute() {
         paths.push(recording_source);
     }
+    paths
+}
+
+/// Paths an external engine *may* have produced next to the destination
+/// under a different extension (N_m3u8DL-RE/yt-dlp pick the container) plus
+/// the HLS segment workspace. These are guesses by name, so they are only
+/// considered for the kinds that produce them, and the caller only deletes
+/// one that `produced_after_task_creation` confirms is not an older file.
+///
+/// Previously every task - a plain HTTP `song.flac` or a torrent named
+/// `Movie` included - swept `<stem>.mp4/.mkv/.mp3/...` in the same folder,
+/// so "remove from disk" also deleted the user's own unrelated files that
+/// merely shared the name.
+fn derived_output_candidates(task: &DownloadTask) -> Vec<PathBuf> {
+    let kind = classify_url(&task.source);
+    if !matches!(kind, Some(DownloadKind::Hls | DownloadKind::MediaPage)) {
+        return Vec::new();
+    }
+    let mut candidates = Vec::new();
     let stem = task
         .destination
         .file_stem()
@@ -13927,19 +14333,38 @@ fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
             "mp4", "mkv", "ts", "webm", "m4a", "mp3", "wav", "flac", "opus", "aac",
         ] {
             let candidate = parent.join(format!("{stem}.{extension}"));
-            if !paths.contains(&candidate) {
-                paths.push(candidate);
+            if candidate != task.destination && !candidates.contains(&candidate) {
+                candidates.push(candidate);
             }
         }
     }
-    if matches!(classify_url(&task.source), Some(DownloadKind::Hls)) {
+    if kind == Some(DownloadKind::Hls) {
         if let Some(workspace) = hls_workspace_path(task) {
-            if !paths.contains(&workspace) {
-                paths.push(workspace);
+            if !candidates.contains(&workspace) {
+                candidates.push(workspace);
             }
         }
     }
-    paths
+    candidates
+}
+
+/// True unless the path demonstrably predates the task (older than its
+/// creation, with a little slack for clock granularity). Files use their
+/// modification time; directories their creation time where the platform
+/// reports it, since adding entries updates a directory's mtime.
+fn produced_after_task_creation(metadata: &std::fs::Metadata, created_at: u64) -> bool {
+    let timestamp = if metadata.is_dir() {
+        metadata.created().ok()
+    } else {
+        metadata.modified().ok()
+    };
+    let Some(seconds) = timestamp
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs())
+    else {
+        return true;
+    };
+    created_at == 0 || seconds.saturating_add(5) >= created_at
 }
 
 fn hls_workspace_path(task: &DownloadTask) -> Option<PathBuf> {
@@ -14321,6 +14746,64 @@ mod tests {
             "http://github.com/linuxhell/apocalipse-download-manager/releases"
         )
         .is_none());
+    }
+
+    #[test]
+    fn apache_mirror_path_info_recognizes_the_handful_of_apache_hosts_only() {
+        let dlcdn = url::Url::parse("https://dlcdn.apache.org/httpd/httpd-2.4.62.tar.gz").unwrap();
+        assert_eq!(
+            apache_mirror_path_info(&dlcdn).as_deref(),
+            Some("httpd/httpd-2.4.62.tar.gz")
+        );
+        let archive =
+            url::Url::parse("https://archive.apache.org/dist/httpd/httpd-2.4.62.tar.gz").unwrap();
+        assert_eq!(
+            apache_mirror_path_info(&archive).as_deref(),
+            Some("httpd/httpd-2.4.62.tar.gz")
+        );
+        let unrelated = url::Url::parse("https://example.com/httpd/httpd-2.4.62.tar.gz").unwrap();
+        assert!(apache_mirror_path_info(&unrelated).is_none());
+    }
+
+    #[test]
+    fn gnu_ftpmirror_url_rewrites_only_real_gnu_hosts() {
+        let ftp = url::Url::parse("https://ftp.gnu.org/gnu/wget/wget-1.21.4.tar.gz").unwrap();
+        assert_eq!(
+            gnu_ftpmirror_url(&ftp).as_deref(),
+            Some("https://ftpmirror.gnu.org/gnu/wget/wget-1.21.4.tar.gz")
+        );
+        let unrelated = url::Url::parse("https://example.com/gnu/wget/wget-1.21.4.tar.gz").unwrap();
+        assert!(gnu_ftpmirror_url(&unrelated).is_none());
+    }
+
+    #[test]
+    fn apache_closer_response_parses_the_documented_as_json_shape() {
+        // Real response captured from
+        // https://www.apache.org/dyn/closer.lua/httpd/httpd-2.4.62.tar.gz?as_json=1
+        let body = r#"{
+            "backup": [ "https://downloads.apache.org/" ],
+            "cca2": "us",
+            "http": [ "https://dlcdn.apache.org/" ],
+            "in_attic": false,
+            "in_dist": false,
+            "ipv6": false,
+            "path_info": "httpd/httpd-2.4.62.tar.gz",
+            "preferred": "https://dlcdn.apache.org/"
+        }"#;
+        let parsed: ApacheCloserResponse = serde_json::from_str(body).unwrap();
+        assert_eq!(
+            parsed.preferred.as_deref(),
+            Some("https://dlcdn.apache.org/")
+        );
+        assert_eq!(parsed.http, vec!["https://dlcdn.apache.org/".to_owned()]);
+        assert_eq!(
+            parsed.backup,
+            vec!["https://downloads.apache.org/".to_owned()]
+        );
+        assert_eq!(
+            parsed.path_info.as_deref(),
+            Some("httpd/httpd-2.4.62.tar.gz")
+        );
     }
 
     #[test]
@@ -14923,11 +15406,62 @@ mod tests {
         let paths = download_paths(&task);
         assert!(paths.contains(&PathBuf::from("C:/Downloads/157651625.mp4")));
         assert!(paths.contains(&partial_path(&task.destination)));
-        assert!(paths.contains(&PathBuf::from("C:/Downloads/157651625")));
+        let derived = derived_output_candidates(&task);
+        assert!(derived.contains(&PathBuf::from("C:/Downloads/157651625")));
+        assert!(derived.contains(&PathBuf::from("C:/Downloads/157651625.mkv")));
         assert_eq!(
             hls_workspace_path(&task),
             Some(PathBuf::from("C:/Downloads/157651625"))
         );
+    }
+
+    #[test]
+    fn extraction_never_targets_an_existing_folder() {
+        let root = std::env::temp_dir().join(format!("adm-extract-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("src (1)")).unwrap();
+        let name = std::ffi::OsStr::new("src");
+        assert_eq!(
+            unique_extraction_directory(&root, name).unwrap(),
+            root.join("src (2)")
+        );
+        assert_eq!(
+            unique_extraction_directory(&root, std::ffi::OsStr::new("fresh")).unwrap(),
+            root.join("fresh")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn removing_a_plain_download_never_sweeps_same_named_user_files() {
+        let http = DownloadTask::new(
+            "https://example.com/music/song.flac",
+            PathBuf::from("C:/Music/song.flac"),
+        );
+        assert!(derived_output_candidates(&http).is_empty());
+        assert!(!download_paths(&http).contains(&PathBuf::from("C:/Music/song.mp3")));
+        let torrent = DownloadTask::new(
+            "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567",
+            PathBuf::from("C:/Videos/Movie"),
+        );
+        assert!(derived_output_candidates(&torrent).is_empty());
+    }
+
+    #[test]
+    fn derived_outputs_older_than_the_task_are_preserved() {
+        let root = std::env::temp_dir().join(format!("adm-derived-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("clip.mkv");
+        fs::write(&file, b"x").unwrap();
+        let metadata = fs::metadata(&file).unwrap();
+        let now = epoch_seconds();
+        // Written now, task created now: produced by the task.
+        assert!(produced_after_task_creation(&metadata, now));
+        // Task created an hour after the file was last written: unrelated.
+        assert!(!produced_after_task_creation(&metadata, now + 3600));
+        // Legacy queue entries without a creation time keep the old behavior.
+        assert!(produced_after_task_creation(&metadata, 0));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
@@ -15061,5 +15595,145 @@ mod tests {
         let parsed = parse_dns_servers(&servers).expect("valid DNS servers");
         assert_eq!(parsed.len(), 2);
         assert!(parse_dns_servers(&["not-an-address".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn only_a_real_429_counts_as_rate_limited() {
+        // reqwest embeds the URL in status errors; digits in it are not a 429.
+        assert!(!is_rate_limited_error(&anyhow::anyhow!(
+            "HTTP status client error (404 Not Found) for url (https://example.com/file-14290.zip)"
+        )));
+        assert!(!is_rate_limited_error(&anyhow::anyhow!(
+            "incomplete download: received 4290 of 8000 bytes"
+        )));
+        assert!(is_rate_limited_error(&anyhow::anyhow!(
+            "server stopped supporting byte ranges: status 429 Too Many Requests for bytes=0-9"
+        )));
+    }
+
+    #[test]
+    fn state_files_are_replaced_atomically_and_corrupt_ones_are_preserved() {
+        let root = std::env::temp_dir().join(format!("adm-state-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("queue.json");
+
+        write_file_atomically(&path, b"[1,2,3]").unwrap();
+        write_file_atomically(&path, b"[4]").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"[4]");
+        // No temporary siblings are left behind.
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        assert_eq!(read_json_state_file::<Vec<u8>>(&path), Some(vec![4]));
+
+        // A truncated file (what an interrupted plain write leaves) is moved
+        // aside rather than silently replaced by the caller's default.
+        fs::write(&path, b"[{\"id\":").unwrap();
+        assert_eq!(read_json_state_file::<Vec<u8>>(&path), None);
+        assert!(!path.exists());
+        let preserved = fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(preserved.len(), 1);
+        assert!(preserved[0].starts_with("queue.json.corrupt-"));
+
+        // A missing file is simply absent, nothing to preserve.
+        assert_eq!(
+            read_json_state_file::<Vec<u8>>(&root.join("none.json")),
+            None
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_interrupted_link_upload_never_replaces_the_existing_file() {
+        let root = std::env::temp_dir().join(format!("adm-upload-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("report.docx");
+        fs::write(&path, b"original contents").unwrap();
+
+        // Declared 20 bytes, connection drops after 9.
+        let mut truncated = std::io::Cursor::new(b"llo".to_vec());
+        let result = receive_link_upload(&path, b"he", &mut truncated, 20);
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::UnexpectedEof
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"original contents");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1, "temp file left");
+
+        // A complete body (part already buffered with the headers) replaces it.
+        let mut rest = std::io::Cursor::new(b"lo world".to_vec());
+        receive_link_upload(&path, b"hel", &mut rest, 11).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"hello world");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+
+        // Bytes past Content-Length that arrived with the headers are ignored.
+        let mut empty = std::io::Cursor::new(Vec::new());
+        receive_link_upload(&path, b"abcdef", &mut empty, 3).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"abc");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mirrors_or_an_expected_sha256_route_http_to_the_engine_that_honors_them() {
+        let mut task = DownloadTask::new("https://downloads.apache.org/x.tgz", "/tmp/x.tgz");
+        assert!(!native_http_integrity_route(&task));
+        task.mirrors = vec!["https://mirror.example/x.tgz".into()];
+        assert!(native_http_integrity_route(&task));
+        task.mirrors.clear();
+        task.sha256 = Some("e".repeat(64));
+        assert!(native_http_integrity_route(&task));
+    }
+
+    #[test]
+    fn aria2_status_outage_releases_the_task_only_after_a_sustained_failure() {
+        assert!(!aria2_status_outage_exceeded(Duration::from_secs(5)));
+        assert!(!aria2_status_outage_exceeded(Duration::from_secs(29)));
+        assert!(aria2_status_outage_exceeded(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn a_checksum_mismatch_keeps_the_expected_digest_and_is_never_verified() {
+        let good = "a".repeat(64);
+        let corrupt = "b".repeat(64);
+        let mut task = DownloadTask::new("https://example.com/file.iso", "/tmp/file.iso");
+        assert!(!apply_integrity_result(&mut task, Some(&good), &corrupt));
+        assert!(!task.integrity_verified);
+        // The prompt is pre-filled from task.sha256: it must still hold the
+        // expected digest, not the corrupt file's own.
+        assert_eq!(task.sha256.as_deref(), Some(good.as_str()));
+        // Re-running with the (unchanged) pre-filled value still fails.
+        let prefilled = task.sha256.clone();
+        assert!(!apply_integrity_result(
+            &mut task,
+            prefilled.as_deref(),
+            &corrupt
+        ));
+        assert!(!task.integrity_verified);
+    }
+
+    #[test]
+    fn a_matching_checksum_verifies_and_a_calculate_only_run_does_not() {
+        let digest = "c".repeat(64);
+        let mut task = DownloadTask::new("https://example.com/file.iso", "/tmp/file.iso");
+        assert!(!apply_integrity_result(&mut task, None, &digest));
+        assert!(!task.integrity_verified);
+        // Calculating is not an expectation: redownloads must not inherit it.
+        assert_eq!(task.sha256, None);
+
+        assert!(apply_integrity_result(
+            &mut task,
+            Some(&format!("  {}  ", digest.to_ascii_uppercase())),
+            &digest
+        ));
+        assert!(task.integrity_verified);
+
+        // Calculate-only never overwrites an expected digest the task already
+        // carries (from Metalink, the add dialog or an earlier check).
+        let expected = "d".repeat(64);
+        task.sha256 = Some(expected.clone());
+        assert!(!apply_integrity_result(&mut task, Some("   "), &digest));
+        assert_eq!(task.sha256.as_deref(), Some(expected.as_str()));
     }
 }

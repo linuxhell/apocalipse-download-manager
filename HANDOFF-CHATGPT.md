@@ -51,6 +51,11 @@ Isso não devia ser possível: `pairingToken` vem do mesmo `chrome.storage.local
 
 Dado novo, não conclusivo: nos dois testes controlados de velocidade mais recentes (item de performance abaixo, ISOs ARM64 e x64 Insider), o handoff do download direto pro ADM funcionou limpo (`extension.popup.download_handed_off`, sem `not_paired`). Isso **não prova que o bug foi corrigido** — só que essas duas tentativas específicas não bateram nele. Continue tratando como aberto até aparecer (ou deixar de aparecer) de forma consistente em mais rodadas.
 
+### 5. uupdump.net: 429 real na primeira tentativa, resolvido só com retry manual (commit `069827e`, 01/10)
+Bundle real (`07c2608b-uupdump.zip`, build desktop 0.4.77, extensão 0.3.187 — já com o fix do item 3 aplicado): o erro **não é mais** `expected size mismatch` — esse ficou corrigido. Agora é um 429 genuíno do próprio uupdump.net: o prehook da extensão sonda a mesma URL `get.php?id=...` (POST, pega `expected_size`) e ~5 segundos depois o desktop faz sua própria requisição real pra baixar — duas batidas na mesma URL perto o bastante pra bater num rate-limit do lado do uupdump.net. A tarefa ficava em `Failed` esperando alguém clicar "repetir" manualmente; o usuário clicou ~11s depois e funcionou na hora (o load `task.resumed` no log bate exatamente com isso).
+
+Causa: `run_download` em `main.rs` não tinha NENHUM retry/backoff — qualquer erro, incluindo um 429 claramente transitório, ia direto pra `DownloadState::Failed`. Fix: até 3 tentativas automáticas especificamente quando o erro contém "429", com backoff de 8s (cancelável), antes de desistir e marcar Failed como antes. Qualquer outro tipo de erro continua falhando na hora, sem retry — não mexe em nada além desse caso específico. **Ainda não testado contra um build novo** — fix feito a partir da análise do log, não confirmado em campo ainda.
+
 ## Investigação fechada: "ADM mais lento que aria2 puro" — era variância de rede/CDN, não bug
 
 Histórico rápido (pra quem só olhar o `git log` deste arquivo): a hipótese começou com um teste não controlado (ISO x64, `teste.log`) que mostrou 73.68s no CLI vs 90.96s no ADM (~24% mais lento), e uma rampa de vazão real e mensurável nos primeiros ~5-7s do lado do ADM. Duas hipóteses foram levantadas e **descartadas** com evidência do próprio usuário:
@@ -111,3 +116,25 @@ Validação local: node --test tests/*.test.cjs, cargo test -p apocalipse-core e
 - Novo desktop tem versão distinta, application.build com SHA/caminho do executável/classificação Reddit.
 - CI de artefatos executa o binário release com --verify-media-routing e confirma MediaPage/yt_dlp para o link exato antes de empacotar; build-verification.json acompanha pacote.
 - Ao atualizar, encerrar ADM da bandeja: nova instância normalmente ativa a instância que já detém a porta da ponte e sai. Regravar funciona segundo usuário; não alterar gravação.
+
+## Auditoria completa de código — commit f65c8c7, extensão 0.3.188 (merged em prep-aria2-ultra)
+Pedido do usuário: "faça auditória no código para bugs e recursos poderosos ausentes e implemente" + "e para lixos para remoção". Rodei um agente de auditoria em background num worktree isolado (`/home/user/apocalipse-audit-wt`, a partir de HEAD `32b4230`) e depois **revisei linha a linha cada hunk eu mesmo** antes de mesclar — nada foi aceito só pelo relatório do agente. Rodei de novo, nesta árvore de trabalho real, `cargo fmt --check`, `cargo check -p apocalipse-core -p apocalipse-desktop`, `cargo test -p apocalipse-core` (47 passando), `cargo test -p apocalipse-desktop` (87 passando, 1 ignorado por depender de FFmpeg) e `node --test tests/*.test.cjs` (311 passando) — todos verdes contra o diff exato que foi commitado.
+
+Corrigidos (ver mensagem do commit f65c8c7 para detalhe técnico de cada um):
+- `verified_sources()`: um mirror morto abortava o loop inteiro e descartava mirrors saudáveis já confirmados, em vez de só pular o morto.
+- `queue.json`/`settings.json`: agora gravados via temp-file+rename+`sync_all()`; um JSON corrompido é posto de lado (`.corrupt-<epoch>`) em vez de ser silenciosamente substituído por estado vazio/default — um crash no meio da escrita apagava a fila e as regras de host permanentemente.
+- Upload do Apocalipse Link (porta 17655): interrompido no meio não trunca mais o arquivo original; corpo de requisição agora tem limite de 1 MiB antes de bufferizar (fechava vetor de exaustão de memória não autenticado); socket ocioso agora tem timeout de 120s (liberado durante uma transferência autenticada em andamento) — fechava vazamento de thread.
+- `is_rate_limited_error`: trocado o match ingênuo de substring "429" (podia dar falso positivo num nome de arquivo ou contagem de bytes) por checagem do status HTTP real — esse era um bug introduzido por mim mesmo no commit `069827e` desta sessão.
+- Polling do aria2: desiste após 30s de falhas contínuas de `tellStatus` (aria2 reiniciado/porta RPC trocada) em vez de girar pra sempre segurando um worker.
+- Extração automática de arquivo não sobrescreve mais uma pasta existente com mesmo nome; agora usa "nome (N)".
+- Tarefas HTTP com mirrors ou SHA-256 esperado agora roteiam para o motor nativo em vez do aria2, que nunca recebia os mirrors nem checksum e ainda assim marcava a tarefa como Completed.
+- Verificação de integridade: um mismatch não sobrescreve mais o hash esperado da tarefa com o hash do arquivo corrompido (o que fazia a próxima checagem "passar" contra o mesmo arquivo ruim); rodar só "calcular" sem hash esperado não marca mais como verificado.
+- "Remover do disco" não varre mais arquivos de mídia por mesmo nome (`.mp3/.flac/...`) pra qualquer tipo de tarefa — só pra tarefas HLS/media-page e só arquivos mais novos que a própria tarefa. Antes podia apagar um arquivo não relacionado do usuário que só coincidia no nome.
+- Lixo removido: `isChatGPTLibraryDownload` morto na extensão, `advertised_set` sempre-verdadeiro em `verified_sources`, construtor `with_proxy` nunca chamado.
+
+**Itens em aberto que o agente encontrou mas eu decidi não implementar sozinho — precisam de decisão do usuário ou do ChatGPT:**
+- Bugs identificados mas não corrigidos: mirrors não verificados ainda podem ser misturados num único arquivo (precisa redesenho pequeno de API); inconsistência de size-hint entre caminho single-connection e multi-connection é uma decisão de política, não bug óbvio; race estreita na remoção de worker.
+- Recursos propositalmente não implementados: passar mirrors+checksum direto pro aria2 (rejeitado — vazaria credenciais pro processo aria2 RPC; por isso optei pelo roteamento pro motor nativo em vez disso, ver acima); enforcement de agendamento no backend; assinatura de atualização de ferramentas/app.
+- ~820 linhas de módulos do `apocalipse-core` (`credentials.rs`, `private_cache.rs`, `signed_update.rs`, `preview.rs`, `media.rs`, `i18n.rs`, `tools.rs`) que parecem não ter nenhum chamador fora dos próprios testes — não apaguei nada disso sem confirmação; pode ser código morto ou pode ser infraestrutura pronta pra feature ainda não ligada.
+
+Extensão bumped pra 0.3.188 (todos os testes com assert de versão hardcoded sincronizados).

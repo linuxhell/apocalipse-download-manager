@@ -1264,7 +1264,9 @@ function renderDownloads(force = false) {
         verify.disabled = true;
         try {
           const digest = await invoke("verify_download_integrity", { id: task.id, expectedSha256: expectedSha256 || null });
-          window.alert(`${t("integrityOk")}: ${digest}`);
+          // Blank input means "calculate only": nothing was compared, so do
+          // not claim the file was verified.
+          window.alert(`${expectedSha256.trim() ? t("integrityOk") : "SHA-256"}: ${digest}`);
           await refreshDownloads();
         } catch (error) { window.alert(String(error)); }
         finally { verify.disabled = false; }
