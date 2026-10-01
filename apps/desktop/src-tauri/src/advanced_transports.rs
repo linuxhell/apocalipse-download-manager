@@ -174,8 +174,12 @@ pub(super) fn download_link_file(
     let remote = (host.as_str(), ticket.port)
         .to_socket_addrs()
         .map_err(|e| e.to_string())?
-        .find(|addr| addr.is_ipv4())
-        .ok_or("quic_ipv4_address_required")?;
+        .find(|addr| addr.is_ipv4());
+    // The optional QUIC endpoint currently binds IPv4. IPv6-only peers
+    // retain the existing HTTPS transport instead of failing the download.
+    let Some(remote) = remote else {
+        return download_link_file_http_to(state, id, password, path, destination, reporter);
+    };
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
