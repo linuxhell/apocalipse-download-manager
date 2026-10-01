@@ -3,6 +3,7 @@ on:
   pull_request:
     paths: ['experiments/transport-lab/**', '.github/workflows/transport-lab.yml']
   push:
+    branches: [main, codex/transport-macos-validation]
     paths: ['experiments/transport-lab/**', '.github/workflows/transport-lab.yml']
 permissions:
   contents: read
@@ -18,6 +19,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: experiments/transport-lab -> target
+      - name: Assign the secondary macOS loopback source
+        if: runner.os == 'macOS'
+        run: sudo ifconfig lo0 alias 127.0.0.2 up
       - name: Format
         run: cargo fmt --manifest-path experiments/transport-lab/Cargo.toml --check
       - name: Test transport prototypes
