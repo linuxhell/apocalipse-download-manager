@@ -51,6 +51,11 @@ Isso não devia ser possível: `pairingToken` vem do mesmo `chrome.storage.local
 
 Dado novo, não conclusivo: nos dois testes controlados de velocidade mais recentes (item de performance abaixo, ISOs ARM64 e x64 Insider), o handoff do download direto pro ADM funcionou limpo (`extension.popup.download_handed_off`, sem `not_paired`). Isso **não prova que o bug foi corrigido** — só que essas duas tentativas específicas não bateram nele. Continue tratando como aberto até aparecer (ou deixar de aparecer) de forma consistente em mais rodadas.
 
+### 5. uupdump.net: 429 real na primeira tentativa, resolvido só com retry manual (commit `069827e`, 01/10)
+Bundle real (`07c2608b-uupdump.zip`, build desktop 0.4.77, extensão 0.3.187 — já com o fix do item 3 aplicado): o erro **não é mais** `expected size mismatch` — esse ficou corrigido. Agora é um 429 genuíno do próprio uupdump.net: o prehook da extensão sonda a mesma URL `get.php?id=...` (POST, pega `expected_size`) e ~5 segundos depois o desktop faz sua própria requisição real pra baixar — duas batidas na mesma URL perto o bastante pra bater num rate-limit do lado do uupdump.net. A tarefa ficava em `Failed` esperando alguém clicar "repetir" manualmente; o usuário clicou ~11s depois e funcionou na hora (o load `task.resumed` no log bate exatamente com isso).
+
+Causa: `run_download` em `main.rs` não tinha NENHUM retry/backoff — qualquer erro, incluindo um 429 claramente transitório, ia direto pra `DownloadState::Failed`. Fix: até 3 tentativas automáticas especificamente quando o erro contém "429", com backoff de 8s (cancelável), antes de desistir e marcar Failed como antes. Qualquer outro tipo de erro continua falhando na hora, sem retry — não mexe em nada além desse caso específico. **Ainda não testado contra um build novo** — fix feito a partir da análise do log, não confirmado em campo ainda.
+
 ## Investigação fechada: "ADM mais lento que aria2 puro" — era variância de rede/CDN, não bug
 
 Histórico rápido (pra quem só olhar o `git log` deste arquivo): a hipótese começou com um teste não controlado (ISO x64, `teste.log`) que mostrou 73.68s no CLI vs 90.96s no ADM (~24% mais lento), e uma rampa de vazão real e mensurável nos primeiros ~5-7s do lado do ADM. Duas hipóteses foram levantadas e **descartadas** com evidência do próprio usuário:
