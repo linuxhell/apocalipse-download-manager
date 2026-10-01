@@ -2845,7 +2845,7 @@ document.querySelector("#analyze").onclick = async () => {
       option(select, "original", pendingMediaKind === "audio" ? "Original (MP4/M4A)" : t("bestQuality"));
       for (const format of ["mp3", "m4a", "opus", "flac", "wav"])
         option(select, `audio:${format}`, `${t("audioOnly")} · ${format.toUpperCase()}`);
-      const audioHls = pendingMediaKind === "audio";
+      const audioHls = pendingMediaKind === "audio" && showDirectAudioConversion(url.value, fileName.value, pendingMediaKind);
       select.hidden = audioHls;
       document.querySelector("#hls-audio-conversion").hidden = !audioHls;
       document.querySelector("#hls-convert-audio").checked = false;
