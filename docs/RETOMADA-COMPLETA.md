@@ -1,10 +1,41 @@
 # Apocalipse Download Manager — Retomada Completa
 
-Atualizado em: 2026-09-24
-Branch de trabalho: `claude/stoic-ramanujan-icyww8`
-Último commit nesta atualização: `f75c081` (ver Seção 0 para o histórico da reversão).
+Atualizado em: 2026-10-01
+Branch de trabalho: `arena/01a0f8c4-apocalipse-download-manager` (sessão Arena), baseada na `main` em `f90f371`.
+Última atualização por: sessão Arena (ver a seção de atualização no topo). A versão anterior deste arquivo (2026-09-24, commit `f75c081`) está no histórico do git.
 
 > **Aviso para quem continuar**: esta branch recebeu commits de **múltiplas sessões de IA em paralelo** e do **próprio dono do repositório (`linuxhell`) diretamente via push**. Antes de assumir que algo "não foi feito" ou "já está pronto", rode `git log --oneline -40` e leia o histórico — o estado muda rápido e pode ser revertido por decisão humana sem aviso prévio na conversa.
+
+## Atualização 2026-10-01 (sessão Arena) — leia antes de tudo
+
+Esta seção corrige o que ficou desatualizado nas Seções 1–4 e registra o estado do trabalho em andamento. **Onde ela divergir do texto abaixo, ela vence.**
+
+### Motor de download: agora é `aria2-ultra` (a Seção 1 está errada nesse ponto)
+A Seção 1 descreve `aria2` clássico (`aria2c`, de `FerroDownload/aria2-static-builds`). Isso mudou em 29/09, **depois** da versão anterior deste arquivo: a branch `prep-aria2-ultra` (PR #101, merged) trocou o motor para **`linuxhell/aria2-ultra`** (commits `82fc8ad`, `861cf2a`; repo padrão em `apps/desktop/src-tauri/src/main.rs:482`, logs/telemetria emitem `backend=aria2-ultra`). O atualizador de ferramentas aponta para esse fork. eD2K/aria2-next continuam **inexistentes** no código (confirmado por grep em todo o repositório) — a Seção 0 permanece válida.
+
+### Release publicado
+`main` está em **`f90f371` — ADM 0.4.78, extensão 0.3.188** (01/10), resultado da auditoria completa `f65c8c7`. Detalhes trilingues no `CHANGELOG.md` e no `HANDOFF-CHATGPT.md` (seção "Auditoria completa de código").
+
+### PR #102 — `codex/transport-lab` → `main`, aberto, NÃO pode merged ainda
+ADM 0.4.79 + extensão 0.3.189: conversão FFmpeg pós-download para áudio direto, QUIC experimental no Apocalipse Link (só recebimento; upload segue HTTPS), download por dicionário RFC 9842, captura MoQ (`.admmoq`), saúde de log/persistência nos diagnósticos e sanitização de segredos reforçada. 10 commits, 46 arquivos, +7315/−147. Crate novo `experiments/transport-lab` (edition 2024, `noq`/`moq-net`/`moq-tokio`), excluído do workspace e consumido pelo desktop via path com a feature `moqt`.
+
+**Bloqueio encontrado e corrigido**: o CI do #102 falhava **6 jobs** (Linux/Windows/macOS nos dois workflows portáteis) e só no passo de validação. Causa: `cargo fmt --all -- --check` rejeitava o módulo novo `log_sanitization_tests` em `apps/desktop/src-tauri/src/main.rs` — uma chamada de 182 colunas a `sanitize_log_detail` e um array de chaves de 100 colunas. Como o passo roda sob `bash -e`, o fmt abortava antes de `cargo test --workspace` e tudo depois (FFmpeg, builds, empacotamento, upload) ficava `skipped` nos três SOs.
+
+Fix: commit **`114f86b`** na branch da sessão Arena (rustfmt puro, +14/−3, nenhum literal ou comportamento alterado), construído sobre o head do #102 (`4bbe115`) com `main` (`f90f371`) como ancestral. Como esta sessão não pode empurrar para `codex/transport-lab`, o CI foi disparado por um **PR veículo: #103** (branch `arena/01a0f8c4-...` → `main`).
+
+**Resultado: 11/11 checks verdes** — `Test build artifacts` (4/4), `Validate portable candidates` (7/7) e `Experimental transport lab` (3/3). Artefatos de teste gerados e **aprovados pelo dono do repositório** em 01/10:
+
+- `apocalipse-download-manager-windows-x64-portable` (67,7 MB), `linux-x64-portable` (72,5 MB), `linux-x64-appimage` (94,6 MB), `macos-x64-portable` (22,9 MB), `apocalipse-browser-extensions-test` (extensão 0.3.189) — run [36910575188](https://github.com/linuxhell/apocalipse-download-manager/actions/runs/36910575188#artifacts);
+- candidatos do `validate-portable`: linux 153,6 MB, windows 63,7 MB, macos 20,3 MB, extensões — run [36910575107](https://github.com/linuxhell/apocalipse-download-manager/actions/runs/36910575107#artifacts).
+
+Os artefatos do GitHub Actions expiram em 14 dias (≈15/10/2026).
+
+**Próximo passo (uma linha):** cherry-pick de `114f86b` na `codex/transport-lab` para o CI do #102 ficar verde; depois fechar o #103 (que existe só para rodar o CI e nunca deve ir para `main`).
+
+### Nota de ambiente (importante para a próxima sessão)
+Neste sandbox **não há `cargo`/`rustc`** e o acesso a `static.rust-lang.org`, `crates.io` e mirrors está bloqueado (npm e PyPI funcionam). Para checar formato localmente foi usado um **rustfmt compilado para WASM** (npm `@scalar/rust-fmt`), **calibrado contra a `main`** (0 divergências em 27 arquivos, que passam no CI) antes de ser usado como régua no #102. Nenhum `cargo test`/build real foi executado localmente — essas verificações vieram do CI. `gh workflow run` também está sem permissão (`actions:write`); para disparar CI, use o caminho do `pull_request`.
+
+---
 
 ## 0. Reversão importante — leia isto primeiro
 
@@ -29,6 +60,8 @@ Estado dos testes no commit `f75c081`: `cargo test --workspace` → 117/117, `no
 ---
 
 ## 1. Estado atual do motor de download (pós-reversão)
+
+> **⚠️ Desatualizado no motor: leia a seção de atualização no topo deste arquivo.** Desde 29/09 o motor é `aria2-ultra`, não o aria2 clássico descrito abaixo.
 
 - Torrent/magnet: **aria2 clássico** (`aria2c`), binário baixado de `FerroDownload/aria2-static-builds`, exatamente como era antes de toda a migração para aria2-next.
 - HTTP direto: motor nativo Rust (segmentação, HTTP/3 com fallback, retomada por identidade remota, ETag/Last-Modified, DNS/proxy customizados, verificação SHA-256).
@@ -59,6 +92,8 @@ Reportados com 2 ZIPs de diagnóstico + 3 screenshots: imagem nova da página "S
 - Múltiplas sessões (humanas e de IA) editam esta branch concorrentemente. Sempre `git fetch` + checar `git log` antes de assumir o estado atual, e esperar rebases/força de conflito ao dar push.
 
 ## 4. Próximos passos recomendados
+
+> **Atualização 01/10 (ver a seção de atualização no topo):** item 2 ficou obsoleto — o motor virou `aria2-ultra`, a investigação de metadados foi refeita do zero e o tema ganhou diagnóstico dedicado na extensão 0.3.185; o `RETOMADA` antigo sobre aria2 clássico não se aplica. Item 1 foi coberto pelas releases 0.4.77/0.4.78 (o fix de CSS do "Sobre" está no código), mas continua sem confirmação visual registrada do dono. Item 3 (UX do botão "Analisar") **segue em aberto**: confirmado no código atual que o botão é singleton (`if (analyzeButton.disabled) return` em `app.js`), então uma captura nova durante análise ativa ainda não enfileira nem dá feedback. Item 4 segue valendo.
 
 1. Pedir ao usuário para testar uma build fresca a partir do commit atual e confirmar se a imagem da página "Sobre" aparece corretamente agora.
 2. Pedir para reproduzir o teste de torrent/magnet **usando aria2 clássico** (motor atual) para saber se "metadados não carregam" ainda acontece aqui, já que a causa raiz documentada antes era específica do libtorrent do aria2-next.
