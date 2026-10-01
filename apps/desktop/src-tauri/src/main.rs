@@ -5631,19 +5631,22 @@ async fn run_download(
     let mut previous_perf_rate: Option<u64> = None;
     let mut sustainable_peak = 0_u64;
     let mut completed_ok = false;
-    let engine_result = match network {
+    let build_engine = |network: &Option<(
+        Option<(Option<String>, Option<String>, Option<String>)>,
+        Vec<std::net::IpAddr>,
+    )>| match network {
         Some((proxy, dns)) => {
-            let (url, username, password) = proxy.unwrap_or_default();
+            let (url, username, password) = proxy.clone().unwrap_or_default();
             DownloadEngine::with_network(
                 url.as_deref(),
                 username.as_deref(),
                 password.as_deref(),
-                &dns,
+                dns,
             )
         }
         None => DownloadEngine::new(),
     };
-    let engine = match engine_result {
+    let engine = match build_engine(&network) {
         Ok(engine) => engine,
         Err(error) => {
             diagnostic_log(
@@ -5661,11 +5664,22 @@ async fn run_download(
         }
     };
     let (events, mut receiver) = mpsc::channel(64);
+    let retry_request = request.clone();
+    let retry_mirrors = mirrors.clone();
     let mut download = Box::pin(download_with_mirrors(engine, request, mirrors, events));
     let mut was_cancelled = false;
     let mut active_connections = 1_usize;
     let mut perf_last_at = Instant::now();
     let mut perf_last_bytes = 0_u64;
+    // 429 from the remote host is near-certain to be transient (the host's own
+    // request-rate policy, not a problem with this download), and some hosts
+    // trip it on their own: uupdump.net's get.php can rate-limit the real
+    // download request if the browser extension's own prehook probe of the
+    // same URL moments earlier counted against the same window. Previously
+    // this left the task sitting in Failed until a person clicked retry by
+    // hand - often succeeding instantly once the host's window passed, which
+    // a short backoff can just as well wait out automatically.
+    let mut rate_limit_retries_remaining: u8 = 3;
     loop {
         tokio::select! {
             biased;
@@ -5687,6 +5701,33 @@ async fn run_download(
                         maybe_auto_extract_completed(&app, id);
                     },
                     Err(error) => {
+                        let is_rate_limited = error.to_string().contains("429");
+                        if is_rate_limited && rate_limit_retries_remaining > 0 {
+                            rate_limit_retries_remaining -= 1;
+                            diagnostic_log(&app.state::<AppState>(), "WARN", "http.rate_limited_retry", &format!("task={id} error={error} retries_remaining={rate_limit_retries_remaining}"));
+                            tokio::select! {
+                                biased;
+                                _ = &mut cancellation => {
+                                    was_cancelled = true;
+                                    break;
+                                }
+                                _ = tokio::time::sleep(Duration::from_secs(8)) => {}
+                            }
+                            let (retry_events, retry_receiver) = mpsc::channel(64);
+                            receiver = retry_receiver;
+                            let retry_engine = match build_engine(&network) {
+                                Ok(engine) => engine,
+                                Err(error) => {
+                                    diagnostic_log(&app.state::<AppState>(), "ERROR", "http.engine", &format!("task={id} error={error}"));
+                                    update_task(&app, id, true, |task| {
+                                        task.state = DownloadState::Failed { message: error.to_string() }
+                                    });
+                                    break;
+                                }
+                            };
+                            download = Box::pin(download_with_mirrors(retry_engine, retry_request.clone(), retry_mirrors.clone(), retry_events));
+                            continue;
+                        }
                         diagnostic_log(&app.state::<AppState>(), "ERROR", "http.failed", &format!("task={id} error={error}"));
                         update_task(&app, id, true, |task| {
                             task.state = DownloadState::Failed { message: error.to_string() };
