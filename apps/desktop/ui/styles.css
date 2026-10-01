@@ -728,7 +728,7 @@ dialog input:focus {
   overflow-y: auto;
 }
 #settings-dialog form { grid-template-rows: auto minmax(0, 1fr) auto; }
-#tools-dialog form { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+#tools-dialog form { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
 .settings-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; min-height: 0; }
 .settings-columns > div { min-width: 0; height: 100%; max-height: none; overflow-y: auto; padding-right: 7px; }
 .settings-columns > div + div { padding-left: 24px; border-left: 1px solid var(--line); }
@@ -1421,6 +1421,8 @@ body.link-window .link-identity,
 body.link-window .link-connect {
   gap: 7px;
   padding: 13px 16px;
+  max-height: max(240px, calc(100vh - 460px));
+  overflow-y: auto;
 }
 body.link-window .link-identity input,
 body.link-window .link-connect input {
@@ -1479,3 +1481,5 @@ body.link-window #link-share-list {
 .advanced-transport-form input:not([type="checkbox"]) { width: 100%; min-height: 36px; }
 .advanced-transport-form button { min-height: 36px; margin: 6px 4px 6px 0; }
 .advanced-transport-form [role="status"] { overflow-wrap: anywhere; }
+.advanced-transport-form label:has(input[type="checkbox"]) { display: flex; flex-direction: row; align-items: center; }
+.advanced-transport-form input[type="checkbox"] { flex: 0 0 18px; width: 18px; height: 18px; margin: 0; padding: 0; }
