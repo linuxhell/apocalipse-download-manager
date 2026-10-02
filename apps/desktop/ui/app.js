@@ -742,7 +742,7 @@ Object.assign(catalogs.en, {originalAudio: "Original audio"});
 Object.assign(catalogs["pt-BR"], {originalAudio: "Áudio original"});
 Object.assign(catalogs["zh-CN"], {originalAudio: "原始音频"});
 let locale = localStorage.getItem("apocalipse.language") || "en";
-const valid = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost"];
+const valid = ["void","nebula","ember","jade","plasma","glacier","amber","abyss","rust","venom","wine","linen","sky","blossom","sage","sand","lilac","mist","citrus","coral","frost","cyberpunk","blade-runner","sexy","samurai","futuro","fantasia","pandora"];
 const applyTheme = (theme) => {
   document.documentElement.dataset.theme = valid.includes(theme) ? theme : "void";
 };
@@ -971,30 +971,52 @@ function visibleDownloads() {
 const thumbnailDataCache = new Map();
 const thumbnailPending = new Map();
 const thumbnailRetryAfter = new Map();
+const DEFAULT_THUMBNAIL = "assets/apocalipse-alien.png";
+
+function thumbnailCandidateUrls(url) {
+  const candidates = [url];
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (!(host === "i.ytimg.com" || host === "img.youtube.com" || host.endsWith(".ytimg.com"))) {
+      return candidates;
+    }
+    const match = parsed.pathname.match(/^\/vi(?:_webp)?\/([A-Za-z0-9_-]+)\/[^/]+$/);
+    if (!match) return candidates;
+    const id = match[1];
+    for (const name of ["maxresdefault.jpg", "sddefault.jpg", "hqdefault.jpg", "mqdefault.jpg", "default.jpg"]) {
+      candidates.push(`https://i.ytimg.com/vi/${id}/${name}`);
+    }
+  } catch {}
+  return [...new Set(candidates)];
+}
 
 async function resolveCachedThumbnail(url) {
-  if (!url) return null;
-  if (/^data:image\//i.test(url)) return url;
+  if (!url) return DEFAULT_THUMBNAIL;
+  if (/^data:image\//i.test(url) || /^assets\//i.test(url)) return url;
   if (thumbnailDataCache.has(url)) return thumbnailDataCache.get(url);
-  if ((thumbnailRetryAfter.get(url) || 0) > Date.now()) return null;
+  if ((thumbnailRetryAfter.get(url) || 0) > Date.now()) return DEFAULT_THUMBNAIL;
   if (thumbnailPending.has(url)) return thumbnailPending.get(url);
 
-  const pending = invoke("resolve_thumbnail", { url })
-    .then((resolved) => {
-      if (resolved) {
-        thumbnailDataCache.set(url, resolved);
-        thumbnailRetryAfter.delete(url);
-        return resolved;
+  const pending = (async () => {
+    let lastError = null;
+    for (const candidate of thumbnailCandidateUrls(url)) {
+      try {
+        const resolved = await invoke("resolve_thumbnail", { url: candidate });
+        if (resolved) {
+          thumbnailDataCache.set(url, resolved);
+          thumbnailRetryAfter.delete(url);
+          return resolved;
+        }
+      } catch (error) {
+        lastError = error;
       }
-      thumbnailRetryAfter.set(url, Date.now() + 60_000);
-      return null;
-    })
-    .catch((error) => {
-      reportUiError("main", "thumbnail-cache", error, "WARN");
-      thumbnailRetryAfter.set(url, Date.now() + 60_000);
-      return null;
-    })
-    .finally(() => thumbnailPending.delete(url));
+    }
+    if (lastError) reportUiError("main", "thumbnail-cache", lastError, "WARN");
+    thumbnailRetryAfter.set(url, Date.now() + 60_000);
+    return DEFAULT_THUMBNAIL;
+  })().finally(() => thumbnailPending.delete(url));
+
   thumbnailPending.set(url, pending);
   return pending;
 }
@@ -1003,17 +1025,24 @@ function loadPreviewThumbnail(image, url) {
   image.dataset.thumbnailSource = url || "";
   image.hidden = true;
   image.removeAttribute("src");
-  if (!url) return;
   resolveCachedThumbnail(url).then((resolved) => {
-    if (!resolved || image.dataset.thumbnailSource !== url) return;
+    if (!resolved || image.dataset.thumbnailSource !== (url || "")) return;
     image.src = resolved;
     image.hidden = false;
     image.onerror = () => {
-      if (image.dataset.thumbnailSource !== url) return;
-      image.hidden = true;
-      image.removeAttribute("src");
-      thumbnailDataCache.delete(url);
-      thumbnailRetryAfter.set(url, Date.now() + 60_000);
+      if (image.dataset.thumbnailSource !== (url || "")) return;
+      image.onerror = null;
+      if (resolved !== DEFAULT_THUMBNAIL) {
+        image.src = DEFAULT_THUMBNAIL;
+        image.hidden = false;
+      } else {
+        image.hidden = true;
+        image.removeAttribute("src");
+      }
+      if (url) {
+        thumbnailDataCache.delete(url);
+        thumbnailRetryAfter.set(url, Date.now() + 60_000);
+      }
     };
   });
 }
