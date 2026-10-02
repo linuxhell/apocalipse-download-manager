@@ -6,7 +6,11 @@
     <title>Apocalipse Download Manager</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
+  <body data-page="downloads">
+    <div class="app-titlebar">
+      <div id="window-drag-region"><span class="title-logo">A</span><span>Apocalipse Download Manager</span></div>
+      <div class="window-controls"><button type="button" data-window-action="minimize" data-i18n-aria="windowMinimize" aria-label="Minimize">−</button><button type="button" data-window-action="maximize" data-i18n-aria="windowMaximize" aria-label="Maximize / restore">□</button><button type="button" data-window-action="close" data-i18n-aria="windowClose" aria-label="Close">×</button></div>
+    </div>
     <aside>
       <div class="brand">
         <img src="assets/apocalipse-alien.png" alt="" />
@@ -48,7 +52,7 @@
     <main>
       <header>
         <div>
-          <p data-i18n="overview">OVERVIEW</p>
+
           <h1 data-i18n="downloads">Downloads</h1>
           <p id="page-description" class="page-description" data-i18n="downloadsDescription">Manage direct downloads, progress, speed and completed files.</p>
         </div>
@@ -114,30 +118,38 @@
         <div id="log-event-list" class="log-event-list"></div>
         <p id="log-empty" data-i18n="emptyLog">No diagnostic events recorded yet.</p>
       </section>
-      <section id="themes-panel" class="appearance-page" hidden>
-        <section class="appearance-card">
-          <h2 data-i18n="chooseTheme">Choose theme</h2>
-          <label for="theme" data-i18n="appearanceTheme">Interface theme</label>
-          <select id="theme">
-            <option value="void">Alien Void</option><option value="nebula">Nebula</option><option value="ember">Ember</option>
-            <option value="jade">Jade</option><option value="plasma">Plasma</option><option value="glacier">Glacier</option>
-            <option value="amber">Amber</option><option value="abyss">Abyss</option><option value="rust">Rust</option>
-            <option value="venom">Venom</option><option value="wine">Wine</option>
-            <option value="linen">Linho</option><option value="sky">Céu</option><option value="blossom">Flor de Cerejeira</option>
-            <option value="sage">Sálvia</option><option value="sand">Areia</option><option value="lilac">Lilás</option>
-            <option value="mist">Neblina</option><option value="citrus">Cítrico</option><option value="coral">Coral</option>
-            <option value="frost">Geada</option>
-          </select>
-          <small data-i18n="themeHint">Colors and text contrast are adjusted together for readability.</small>
+      <section id="themes-panel" class="appearance-page theme-studio" hidden>
+        <section class="appearance-card theme-gallery-panel">
+          <div class="theme-gallery-head"><h2 data-i18n="themeGallery">Theme gallery</h2><small id="theme-count"></small></div>
+          <input id="theme-search" type="search" data-i18n-placeholder="themeSearch" placeholder="Search themes…" />
+          <select id="theme" aria-label="Interface theme" class="theme-select-fallback"><option value="cyberpunk">Cyberpunk</option><option value="bladerunner">Blade Runner</option><option value="sexy">Sexy</option><option value="samurai">Samurai</option><option value="future">Futuro</option><option value="fantasy">Fantasia</option><option value="pandora">Pandora</option><option value="void">Alien Void</option><option value="nebula">Nebula</option><option value="ember">Ember</option><option value="jade">Jade</option><option value="plasma">Plasma</option><option value="glacier">Glacier</option><option value="amber">Amber</option><option value="abyss">Abyss</option><option value="rust">Rust</option><option value="venom">Venom</option><option value="wine">Wine</option><option value="linen">Linho</option><option value="sky">Céu</option><option value="blossom">Flor de Cerejeira</option><option value="sage">Sálvia</option><option value="sand">Areia</option><option value="lilac">Lilás</option><option value="mist">Neblina</option><option value="citrus">Cítrico</option><option value="coral">Coral</option><option value="frost">Geada</option></select>
+          <div id="theme-gallery" class="theme-gallery"></div><p id="theme-no-results" data-i18n="themeNoResults" hidden></p>
         </section>
-        <section class="appearance-card appearance-options">
-          <h2 data-i18n="themeOptions">Theme options</h2>
-          <label class="appearance-toggle"><span><b data-i18n="windowTransparency">Window transparency</b><small data-i18n="windowTransparencyHint">Make the application window transparent</small></span><input id="transparency-enabled" type="checkbox" /></label>
-          <label class="appearance-range"><span><b data-i18n="transparencyLevel">Transparency level</b><output id="transparency-value">30%</output></span><input id="transparency-level" type="range" min="0" max="70" value="30" /></label>
-          <label class="appearance-toggle"><span><b data-i18n="roundedCorners">Rounded corners</b><small data-i18n="roundedCornersHint">Use rounded corners on windows, panels and controls</small></span><input id="rounded-enabled" type="checkbox" checked /></label>
-          <label class="appearance-range"><span><b data-i18n="cornerRadius">Corner radius</b><output id="corner-radius-value">10 px</output></span><input id="corner-radius" type="range" min="0" max="28" value="10" /></label>
-          <label class="appearance-select"><span><b data-i18n="interfaceSize">Interface size</b><small data-i18n="interfaceSizeHint">Adjust text and element sizes</small></span><select id="interface-size"><option value="compact" data-i18n="compact">Compact</option><option value="normal" data-i18n="normal">Normal</option><option value="large" data-i18n="large">Large</option></select></label>
-        </section>
+        <div class="theme-detail-column">
+          <section class="appearance-card theme-preview-panel">
+            <h2 data-i18n="themeLivePreview">Live preview</h2>
+            <div id="theme-live-preview" class="theme-live-preview">
+              <div class="preview-title"><b>△ APOCALIPSE</b><span>− □ ×</span></div>
+              <div class="preview-toolbar"><span>＋</span><span>▶</span><span>Ⅱ</span><span>■</span></div>
+              <div class="preview-task"><span class="preview-file-icon">⇩</span><div><strong id="theme-preview-file"></strong><div class="preview-progress"><i id="theme-preview-progress"></i></div><small id="theme-preview-percent"></small></div><span>Ⅱ</span></div>
+              <small id="theme-preview-example" class="preview-example" data-i18n="themeExample">Preview example</small>
+            </div>
+            <h3 id="theme-preview-name"></h3><small id="theme-preview-description"></small>
+          </section>
+          <section class="appearance-card appearance-options">
+            <h2 data-i18n="themeCustomize">Customize</h2>
+            <label class="appearance-toggle"><span><b data-i18n="windowTransparency">Glass / transparency</b><small data-i18n="windowTransparencyHint"></small></span><input id="transparency-enabled" type="checkbox" /></label>
+            <label class="appearance-range"><span><b data-i18n="transparencyLevel">Transparency level</b><output id="transparency-value">65%</output></span><input id="transparency-level" type="range" min="0" max="70" value="65" /></label>
+            <label class="appearance-range"><span><b data-i18n="themeBrightness">Background brightness</b><output id="brightness-value">75%</output></span><input id="background-brightness" type="range" min="25" max="100" value="75" /></label>
+            <label class="appearance-toggle"><span><b data-i18n="themeAero">Aero effect</b></span><input id="aero-enabled" type="checkbox" checked /></label>
+            <label class="appearance-toggle"><span><b data-i18n="themeAnimations">Smooth animations</b></span><input id="animations-enabled" type="checkbox" checked /></label>
+            <label class="appearance-toggle"><span><b data-i18n="roundedCorners">Rounded corners</b></span><input id="rounded-enabled" type="checkbox" checked /></label>
+            <label class="appearance-range"><span><b data-i18n="cornerRadius">Corner radius</b><output id="corner-radius-value">12 px</output></span><input id="corner-radius" type="range" min="0" max="28" value="12" /></label>
+            <label class="appearance-select"><span><b data-i18n="interfaceSize">Interface size</b></span><select id="interface-size"><option value="compact" data-i18n="compact">Compact</option><option value="normal" data-i18n="normal">Normal</option><option value="large" data-i18n="large">Large</option></select></label>
+          </section>
+          <div class="theme-studio-actions"><button id="theme-apply" class="primary" type="button" data-i18n="themeApply">Apply theme</button><button id="theme-reset" type="button" data-i18n="themeReset">Restore default</button><button id="theme-cancel" type="button" data-i18n="cancel">Cancel</button></div>
+          <small id="theme-save-status" role="status" aria-live="polite"></small>
+        </div>
       </section>
       <section id="about-panel" class="about-page" hidden>
         <article class="about-card">
@@ -618,6 +630,7 @@
     <script src="dialog-scrollbar.js"></script>
     <script src="task-list-state.js"></script>
     <script src="audio-format-policy.js"></script>
+    <script src="theme-studio.js"></script>
     <script src="app.js"></script>
     <script src="diagnostics-panel.js"></script>
   </body>

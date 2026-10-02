@@ -8103,15 +8103,61 @@ fn set_application_language(state: State<'_, AppState>, language: String) -> Res
 }
 
 #[tauri::command]
+fn control_main_window(app: tauri::AppHandle, action: String) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("main_window_missing")?;
+    let result = match action.as_str() {
+        "minimize" => window.minimize(),
+        "maximize" => {
+            if window.is_maximized().map_err(|error| error.to_string())? {
+                window.unmaximize()
+            } else {
+                window.maximize()
+            }
+        }
+        "close" => window.close(),
+        "drag" => window.start_dragging(),
+        _ => return Err("unsupported_window_action".to_owned()),
+    };
+    result.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn set_application_theme(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     theme: String,
 ) -> Result<(), String> {
     const THEMES: &[&str] = &[
-        "void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom",
-        "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral",
+        "void",
+        "nebula",
+        "ember",
+        "jade",
+        "plasma",
+        "glacier",
+        "amber",
+        "abyss",
+        "rust",
+        "venom",
+        "wine",
+        "linen",
+        "sky",
+        "blossom",
+        "sage",
+        "sand",
+        "lilac",
+        "mist",
+        "citrus",
+        "coral",
         "frost",
+        "cyberpunk",
+        "bladerunner",
+        "sexy",
+        "samurai",
+        "future",
+        "fantasy",
+        "pandora",
     ];
     if !THEMES.contains(&theme.as_str()) {
         return Err("unsupported_theme".to_owned());
@@ -14846,6 +14892,7 @@ fn main() {
             record_diagnostics_ui,
             record_ui_diagnostic,
             set_application_language,
+            control_main_window,
             set_application_theme,
             get_application_theme,
             get_log_editor,

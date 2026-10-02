@@ -86,7 +86,7 @@ const catalogs = {
     webMirror: "HTTP mirror",
     locateFile: "Locate file…",
     locateFileHint: "If you moved the partial file to another folder or drive, point the app at it to resume from there instead of starting over.",
-    openFolder: "Open folder",
+    openFolder: "Open folder", taskDetails: "Details",
     preview: "Preview",
     stopRecording: "Stop and save",
     recordingActive: "Recording",
@@ -204,7 +204,7 @@ const catalogs = {
     automatic: "Automatic",
     taskConnections: "Threads for this download",
     taskConnectionsHint: "Only changes this task. Use 1 on sites that reject segmented downloads.",
-    downloadBandwidthLimit: "This download limit", megabytesPerSecond: "MB/s", unlimited: "Unlimited", smartAutomation: "Smart automation", bandwidthPanel: "Bandwidth", adaptiveEfficiency: "Adaptive efficiency", adaptiveEfficiencyHint: "Optimizes queue order and connection use for the current workload.", scheduler: "Download schedule", schedulerHint: "Automatically pauses outside the permitted local time window.", scheduleStart: "Start", scheduleEnd: "End", bandwidthPanelHint: "Set limits without changing the window size.", currentBandwidth: "Current usage", globalBandwidthLimit: "Global download limit",
+    downloadBandwidthLimit: "This download limit", megabytesPerSecond: "MB/s", unlimited: "Unlimited", smartAutomation: "Smart automation", bandwidthAction: "Speed limit", bandwidthPanel: "Bandwidth", adaptiveEfficiency: "Adaptive efficiency", adaptiveEfficiencyHint: "Optimizes queue order and connection use for the current workload.", scheduler: "Download schedule", schedulerHint: "Automatically pauses outside the permitted local time window.", scheduleStart: "Start", scheduleEnd: "End", bandwidthPanelHint: "Set limits without changing the window size.", currentBandwidth: "Current usage", globalBandwidthLimit: "Global download limit",
     defaults: "Default",
     extensionPairing: "Browser extension pairing",
     pairingToken: "Pairing token",
@@ -330,7 +330,7 @@ const catalogs = {
     webMirror: "mirror HTTP",
     locateFile: "Localizar arquivo…",
     locateFileHint: "Se você moveu o arquivo parcial para outra pasta ou disco, indique o novo local para continuar de onde parou em vez de começar do zero.",
-    openFolder: "Abrir pasta",
+    openFolder: "Abrir pasta", taskDetails: "Detalhes",
     preview: "Pré-visualizar",
     stopRecording: "Parar e salvar",
     recordingActive: "Gravando",
@@ -448,7 +448,7 @@ const catalogs = {
     automatic: "Automático",
     taskConnections: "Threads para este download",
     taskConnectionsHint: "Altera somente esta tarefa. Use 1 em sites que não aceitam downloads segmentados.",
-    downloadBandwidthLimit: "Limite deste download", megabytesPerSecond: "MB/s", unlimited: "Ilimitado", smartAutomation: "Automação inteligente", bandwidthPanel: "Banda", adaptiveEfficiency: "Eficiência adaptativa", adaptiveEfficiencyHint: "Otimiza a ordem da fila e o uso de conexões para a carga atual.", scheduler: "Agendamento de downloads", schedulerHint: "Pausa automaticamente fora do horário local permitido.", scheduleStart: "Início", scheduleEnd: "Fim", bandwidthPanelHint: "Defina limites sem alterar o tamanho da janela.", currentBandwidth: "Uso atual", globalBandwidthLimit: "Limite global de download",
+    downloadBandwidthLimit: "Limite deste download", megabytesPerSecond: "MB/s", unlimited: "Ilimitado", smartAutomation: "Automação inteligente", bandwidthAction: "Limitar velocidade", bandwidthPanel: "Banda", adaptiveEfficiency: "Eficiência adaptativa", adaptiveEfficiencyHint: "Otimiza a ordem da fila e o uso de conexões para a carga atual.", scheduler: "Agendamento de downloads", schedulerHint: "Pausa automaticamente fora do horário local permitido.", scheduleStart: "Início", scheduleEnd: "Fim", bandwidthPanelHint: "Defina limites sem alterar o tamanho da janela.", currentBandwidth: "Uso atual", globalBandwidthLimit: "Limite global de download",
     defaults: "Padrão",
     extensionPairing: "Conexão com a extensão",
     pairingToken: "Token de pareamento",
@@ -574,7 +574,7 @@ const catalogs = {
     webMirror: "HTTP 镜像",
     locateFile: "定位文件…",
     locateFileHint: "如果您已将部分下载的文件移动到其他文件夹或磁盘，请指定新位置以从原进度继续，而不是重新开始。",
-    openFolder: "打开文件夹",
+    openFolder: "打开文件夹", taskDetails: "详情",
     preview: "预览",
     stopRecording: "停止并保存",
     recordingActive: "正在录制",
@@ -692,7 +692,7 @@ const catalogs = {
     automatic: "自动",
     taskConnections: "此下载的线程数",
     taskConnectionsHint: "仅更改此任务。对于不允许分段下载的网站，请使用 1。",
-    downloadBandwidthLimit: "此下载的限制", megabytesPerSecond: "MB/秒", unlimited: "不限速", smartAutomation: "智能自动化", bandwidthPanel: "带宽", adaptiveEfficiency: "自适应效率", adaptiveEfficiencyHint: "根据当前负载优化队列顺序和连接使用。", scheduler: "下载计划", schedulerHint: "在允许的本地时间之外自动暂停。", scheduleStart: "开始", scheduleEnd: "结束", bandwidthPanelHint: "无需改变窗口大小即可设置限制。", currentBandwidth: "当前使用量", globalBandwidthLimit: "全局下载限制",
+    downloadBandwidthLimit: "此下载的限制", megabytesPerSecond: "MB/秒", unlimited: "不限速", smartAutomation: "智能自动化", bandwidthAction: "限速", bandwidthPanel: "带宽", adaptiveEfficiency: "自适应效率", adaptiveEfficiencyHint: "根据当前负载优化队列顺序和连接使用。", scheduler: "下载计划", schedulerHint: "在允许的本地时间之外自动暂停。", scheduleStart: "开始", scheduleEnd: "结束", bandwidthPanelHint: "无需改变窗口大小即可设置限制。", currentBandwidth: "当前使用量", globalBandwidthLimit: "全局下载限制",
     defaults: "默认",
     extensionPairing: "浏览器扩展配对",
     pairingToken: "配对令牌",
@@ -741,18 +741,23 @@ Object.assign(catalogs["zh-CN"], {"linkQuic": "使用 QUIC 接收共享文件（
 Object.assign(catalogs.en, {originalAudio: "Original audio"});
 Object.assign(catalogs["pt-BR"], {originalAudio: "Áudio original"});
 Object.assign(catalogs["zh-CN"], {originalAudio: "原始音频"});
+Object.assign(catalogs["en"], {"themeGallery": "Theme gallery", "themeSearch": "Search themes…", "themeLivePreview": "Live preview", "themeCustomize": "Customize", "themeBrightness": "Background brightness", "themeAero": "Aero effect", "themeAnimations": "Smooth animations", "themeApply": "Apply theme", "themeReset": "Restore default", "themeApplied": "Theme applied.", "themeSaveFailed": "Could not save theme", "themeNoResults": "No matching themes.", "themeExampleFile": "Example file.iso", "themeExample": "Preview example", "themesDescription": "Choose the scenery of your Apocalipse.", "windowTransparency": "Glass / transparency", "windowTransparencyHint": "Control how clearly panels and controls stand out over the scenery.", "windowMinimize": "Minimize", "windowMaximize": "Maximize / restore", "windowClose": "Close", "taskDestination": "Destination", "taskEngine": "Engine", "taskEta": "Remaining", "taskConnectionsLabel": "Connections"});
+Object.assign(catalogs["pt-BR"], {"themeGallery": "Galeria de temas", "themeSearch": "Buscar tema…", "themeLivePreview": "Prévia em tempo real", "themeCustomize": "Personalizar", "themeBrightness": "Brilho do fundo", "themeAero": "Efeito Aero", "themeAnimations": "Animações suaves", "themeApply": "Aplicar tema", "themeReset": "Restaurar padrão", "themeApplied": "Tema aplicado.", "themeSaveFailed": "Não foi possível salvar o tema", "themeNoResults": "Nenhum tema encontrado.", "themeExampleFile": "Arquivo de exemplo.iso", "themeExample": "Exemplo de prévia", "themesDescription": "Escolha o cenário do seu Apocalipse.", "windowTransparency": "Vidro / transparência", "windowTransparencyHint": "Controle o destaque dos painéis e controles sobre o cenário.", "windowMinimize": "Minimizar", "windowMaximize": "Maximizar / restaurar", "windowClose": "Fechar", "taskDestination": "Destino", "taskEngine": "Motor", "taskEta": "Restante", "taskConnectionsLabel": "Conexões"});
+Object.assign(catalogs["zh-CN"], {"themeGallery": "主题库", "themeSearch": "搜索主题…", "themeLivePreview": "实时预览", "themeCustomize": "个性化", "themeBrightness": "背景亮度", "themeAero": "毛玻璃效果", "themeAnimations": "平滑动画", "themeApply": "应用主题", "themeReset": "恢复默认", "themeApplied": "已应用主题。", "themeSaveFailed": "无法保存主题", "themeNoResults": "未找到主题。", "themeExampleFile": "示例文件.iso", "themeExample": "预览示例", "themesDescription": "为您的 Apocalipse 选择风景。", "windowTransparency": "玻璃 / 透明度", "windowTransparencyHint": "调整风景上面板和控件的可见程度。", "windowMinimize": "最小化", "windowMaximize": "最大化 / 还原", "windowClose": "关闭", "taskDestination": "位置", "taskEngine": "引擎", "taskEta": "剩余时间", "taskConnectionsLabel": "连接"});
 let locale = localStorage.getItem("apocalipse.language") || "en";
-const valid = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost"];
+const valid = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost", "cyberpunk", "bladerunner", "sexy", "samurai", "future", "fantasy", "pandora"];
 const applyTheme = (theme) => {
   document.documentElement.dataset.theme = valid.includes(theme) ? theme : "void";
+  ThemeStudio.applyPresentation(document.documentElement.dataset.theme, readAppearance());
 };
-applyTheme(localStorage.getItem("apocalipse.theme") || "void");
-const appearanceDefaults = { transparencyEnabled: false, transparencyLevel: 30, roundedEnabled: true, cornerRadius: 10, interfaceSize: "normal" };
+const appearanceDefaults = ThemeStudio.defaults;
 function readAppearance() {
   try { return { ...appearanceDefaults, ...JSON.parse(localStorage.getItem("apocalipse.appearance") || "{}") }; }
   catch { return { ...appearanceDefaults }; }
 }
 function applyAppearance(settings = readAppearance()) {
+  settings = ThemeStudio.normalize(settings);
+  ThemeStudio.applyPresentation(document.documentElement.dataset.theme, settings);
   const transparency = Math.max(0, Math.min(70, Number(settings.transparencyLevel) || 0));
   const radius = Math.max(0, Math.min(28, Number(settings.cornerRadius) || 0));
   document.documentElement.dataset.transparency = settings.transparencyEnabled ? "on" : "off";
@@ -761,6 +766,7 @@ function applyAppearance(settings = readAppearance()) {
   document.documentElement.style.setProperty("--window-opacity-percent", settings.transparencyEnabled ? `${100 - transparency}%` : "100%");
   document.documentElement.style.setProperty("--corner-radius", settings.roundedEnabled ? `${radius}px` : "0px");
 }
+applyTheme(localStorage.getItem("apocalipse.theme") || "void");
 applyAppearance();
 let pendingDiagnosticTrace = null;
 let pendingReferer = null;
@@ -1033,6 +1039,8 @@ function renderDownloads(force = false) {
   });
   if (!force && signature === lastDownloadRenderSignature) return;
   lastDownloadRenderSignature = signature;
+  const previousScrollTop = list.scrollTop;
+  const expandedTaskIds = new Set([...list.querySelectorAll(".task-details[open]")].map(node => node.closest(".download-row").dataset.taskId));
   list.replaceChildren();
   list.hidden = visible.length === 0;
   for (const task of visible) {
@@ -1136,11 +1144,14 @@ function renderDownloads(force = false) {
     });
     const name = document.createElement("strong");
     name.textContent = task.display_title || task.destination.split(/[\\/]/).pop();
-    name.title = task.display_title || "";
+    name.title = task.display_title || task.destination.split(/[\\/]/).pop();
     const source = document.createElement("small");
     source.textContent = task.source;
     source.title = task.source;
-    info.append(name, source);
+    const titleLine = document.createElement("div");
+    titleLine.className = "task-title-line";
+    titleLine.append(name);
+    info.append(titleLine);
     const progress = document.createElement("div");
     progress.className = "task-progress";
     const bar = document.createElement("i");
@@ -1180,7 +1191,7 @@ function renderDownloads(force = false) {
         : t("resumeChecking");
     resumeCapability.textContent = `${t("resumeCapability")} ${resumeValue}`;
     resumeCapability.dataset.supported = task.resume_supported === true ? "true" : task.resume_supported === false ? "false" : "unknown";
-    info.append(resumeCapability);
+
     const failureMessage = typeof task.state === "object" ? task.state.failed?.message || "" : "";
     const state = Object.assign(document.createElement("span"), {
       className: "download-state",
@@ -1203,6 +1214,19 @@ function renderDownloads(force = false) {
       const button = document.createElement("button");
       button.className = "task-action";
       button.textContent = label;
+      button.dataset.command = command;
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      const icons = {
+        pause_download: '<path d="M8 5v14M16 5v14"/>',
+        resume_download: '<path d="m8 5 11 7-11 7z"/>',
+        stop_recording: '<path d="M6 6h12v12H6z"/>',
+        reveal_download: '<path fill="#ffc84a" stroke="#b98112" d="M3 6h7l2 3h9v10H3z"/><path fill="#ffdc75" stroke="#b98112" d="M3 11h19l-3 8H2z"/>',
+      };
+      if (icons[command]) {
+        button.classList.add("task-icon-action");
+        button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${icons[command]}</svg>`;
+      }
       const execute = async () => {
         if (busyIds.has(task.id)) return;
         busyIds.add(task.id);
@@ -1315,13 +1339,52 @@ function renderDownloads(force = false) {
       };
       actions.append(bandwidth);
     }
+    const removeButton = document.createElement("button");
+    removeButton.className = "task-action task-icon-action task-remove-action";
+    removeButton.title = t("removeSelected");
+    removeButton.setAttribute("aria-label", t("removeSelected"));
+    removeButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#e94558" stroke-width="2" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg>';
+    removeButton.onclick = () => {
+      selectedIds.clear();
+      selectedIds.add(task.id);
+      renderDownloads(true);
+      clearDialog.showModal();
+    };
+    actions.append(removeButton);
     addAction(t("openFolder"), "reveal_download");
     const status = document.createElement("div");
     status.className = "task-status";
-    status.append(state, actions);
+    const primaryActions = document.createElement("div");
+    primaryActions.className = "task-primary-actions";
+    for (const button of [...actions.querySelectorAll('.task-icon-action')]) primaryActions.append(button);
+    titleLine.append(primaryActions);
+    const taskDetails = document.createElement("details");
+    taskDetails.className = "task-details";
+    taskDetails.open = expandedTaskIds.has(task.id);
+    const detailsSummary = document.createElement("summary");
+    detailsSummary.textContent = t("taskDetails");
+    const detailsBody = document.createElement("div");
+    detailsBody.className = "task-details-body";
+    detailsBody.append(state, source, resumeCapability, actions);
+    taskDetails.append(detailsSummary, detailsBody);
+    status.append(taskDetails);
     row.append(select, icon, info, status);
+    const scenicDetails = document.createElement("div");
+    scenicDetails.className = "task-scenic-details";
+    const detailValues = [[t("taskDestination"), task.destination.replace(/[\\/][^\\/]*$/, "")],
+      [t("taskEngine"), task.engine || ""],
+      [t("taskConnectionsLabel"), task.connections_override || ""],
+      [t("taskEta"), task.torrent_eta || (speed > 0 && task.total > task.received ? `${Math.ceil((task.total - task.received) / speed)} s` : "")]];
+    for (const [label, value] of detailValues) {
+      if (!value) continue;
+      const entry = document.createElement("span"); entry.textContent = label;
+      const text = document.createElement("b"); text.textContent = String(value);
+      entry.append(text); scenicDetails.append(entry);
+    }
+    if (scenicDetails.childElementCount) detailsBody.append(scenicDetails);
     list.append(row);
   }
+  list.scrollTop = previousScrollTop;
   document.querySelector(".metrics article:nth-child(4) strong").textContent =
     downloads.filter((task) => task.state === "queued").length;
   document.querySelector(".metrics article:nth-child(3) strong").textContent =
@@ -1355,6 +1418,7 @@ function translate() {
   document
     .querySelectorAll("[data-i18n-placeholder]")
     .forEach((element) => (element.placeholder = t(element.dataset.i18nPlaceholder)));
+  document.querySelectorAll("[data-i18n-aria]").forEach((node) => node.setAttribute("aria-label", t(node.dataset.i18nAria)));
   document.querySelectorAll("[data-language-choice]").forEach((button) =>
     button.classList.toggle("active", button.dataset.languageChoice === locale));
   if (!taskConnectionsManuallyChanged) {
@@ -1364,6 +1428,7 @@ function translate() {
   if (activeNavigation) document.querySelector("main > header h1").textContent = activeNavigation.querySelector("b")?.textContent || t("downloads");
   document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
   renderDownloads(true);
+  if (typeof themeStudio !== "undefined") themeStudio.refresh();
   if (activePage === "link") {
     document.querySelector("#link-local-path").textContent = linkLocalPath || t("linkDrives");
     document.querySelector("#link-remote-path").textContent = linkRemotePath || t("linkDrives");
@@ -1509,7 +1574,10 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
       invoke("record_ui_diagnostic", { level: "INFO", event: "link_window_requested", detail: "source=main_navigation" }).catch(() => {});
       return;
     }
+    if (activePage === "themes") themeStudio.leave();
     activePage = button.dataset.page;
+    document.body.dataset.page = activePage;
+    if (activePage === "themes") themeStudio.open();
     document.querySelector("#moq-capture-panel").hidden = activePage !== "recordings";
     document.querySelectorAll("nav [data-page]").forEach((item) => item.classList.toggle("active", item === button));
     const heading = button.querySelector("b")?.textContent || t("downloads");
@@ -1520,7 +1588,7 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector("#themes-panel").hidden = activePage !== "themes";
     document.querySelector("#language-panel").hidden = activePage !== "language";
     document.querySelector("#about-panel").hidden = activePage !== "about";
-    document.querySelector("#add").hidden = activePage === "about";
+    document.querySelector("#add").hidden = ["about", "themes", "language", "logs"].includes(activePage);
     document.querySelector("#torrent-store-controls").hidden = activePage !== "torrents";
     document.querySelector("#clear-torrent-store").hidden = activePage !== "torrents";
     if (activePage === "torrents") refreshTorrentStoreControls().catch(error => reportUiError("main", "clear-torrent-store", error));
@@ -2385,41 +2453,27 @@ document.querySelector("#aria2-rpc-regenerate-token").onclick = async () => {
     button.disabled = false;
   }
 };
-document.querySelector("#theme").onchange = (event) => {
-  localStorage.setItem("apocalipse.theme", event.target.value);
-  applyTheme(event.target.value);
-  invoke("set_application_theme", { theme: event.target.value }).catch(error => reportUiError("main", "theme", error));
-};
-function syncAppearanceControls() {
-  const settings = readAppearance();
-  document.querySelector("#transparency-enabled").checked = settings.transparencyEnabled;
-  document.querySelector("#transparency-level").value = settings.transparencyLevel;
-  document.querySelector("#transparency-level").disabled = !settings.transparencyEnabled;
-  document.querySelector("#transparency-value").textContent = `${settings.transparencyLevel}%`;
-  document.querySelector("#rounded-enabled").checked = settings.roundedEnabled;
-  document.querySelector("#corner-radius").value = settings.cornerRadius;
-  document.querySelector("#corner-radius").disabled = !settings.roundedEnabled;
-  document.querySelector("#corner-radius-value").textContent = `${settings.cornerRadius} px`;
-  document.querySelector("#interface-size").value = settings.interfaceSize;
-}
-function saveAppearanceFromControls() {
-  const settings = {
-    transparencyEnabled: document.querySelector("#transparency-enabled").checked,
-    transparencyLevel: Number(document.querySelector("#transparency-level").value),
-    roundedEnabled: document.querySelector("#rounded-enabled").checked,
-    cornerRadius: Number(document.querySelector("#corner-radius").value),
-    interfaceSize: document.querySelector("#interface-size").value,
-  };
-  localStorage.setItem("apocalipse.appearance", JSON.stringify(settings));
-  applyAppearance(settings);
-  syncAppearanceControls();
-  invoke("record_ui_diagnostic", { level: "INFO", event: "appearance_changed", detail: `transparency=${settings.transparencyEnabled} level=${settings.transparencyLevel} rounded=${settings.roundedEnabled} radius=${settings.cornerRadius} size=${settings.interfaceSize}` }).catch(() => {});
-}
-["transparency-enabled", "transparency-level", "rounded-enabled", "corner-radius", "interface-size"].forEach((id) => {
-  document.querySelector(`#${id}`).oninput = saveAppearanceFromControls;
-  document.querySelector(`#${id}`).onchange = saveAppearanceFromControls;
+const themeStudio = ThemeStudio.init({
+  translate: t, language: () => locale, applyTheme, applyAppearance, readAppearance,
+  downloads: () => downloads,
+  commit: async (theme, appearance) => {
+    await invoke("set_application_theme", { theme });
+    localStorage.setItem("apocalipse.theme", theme);
+    localStorage.setItem("apocalipse.appearance", JSON.stringify(appearance));
+    applyTheme(theme); applyAppearance(appearance);
+    invoke("record_ui_diagnostic", { level: "INFO", event: "appearance_changed",
+      detail: `theme=${theme} transparency=${appearance.transparencyLevel} brightness=${appearance.backgroundBrightness}` }).catch(() => {});
+  },
 });
-syncAppearanceControls();
+function syncAppearanceControls() { themeStudio.refresh(); }
+for (const button of document.querySelectorAll('[data-window-action]')) {
+  button.onclick = () => invoke("control_main_window", { action: button.dataset.windowAction })
+    .catch(error => reportUiError("main", "window-control", error));
+}
+document.querySelector('#window-drag-region').onmousedown = event => {
+  if (event.button === 0 && event.detail === 1) invoke("control_main_window", { action: "drag" }).catch(() => {});
+};
+document.querySelector('#window-drag-region').ondblclick = () => invoke("control_main_window", { action: "maximize" }).catch(() => {});
 document.querySelector("#save-settings").onclick = async () => {
   const button = document.querySelector("#save-settings");
   const directory = document.querySelector("#default-directory");
@@ -3089,9 +3143,9 @@ window.__TAURI__?.event?.listen?.("browser-assisted-ready", consumeBrowserAssist
 
 window.__TAURI__?.event?.listen?.("theme-changed", (event) => {
   const theme = event.payload;
-  if (typeof theme === "string") {
+  if (typeof theme === "string" && valid.includes(theme)) {
     localStorage.setItem("apocalipse.theme", theme);
-    applyTheme(theme);
+    applyTheme(theme); applyAppearance();
   }
 }).catch(error => reportUiError("main", "consumeBrowserAssistedDownload", error));
 

@@ -103,3 +103,11 @@ header #settings-toggle,.language select,.shortcuts select,nav button,.diag-cont
 nav button.active{background:color-mix(in srgb,var(--p-accent) 18%,var(--p-surface));color:var(--p-accent)}
 article{background:var(--p-surface);border-color:var(--p-line)} article b{color:var(--p-text)} article small,#empty,#bulk-actions label,.shortcuts label,.diag-controls p,.diag-controls small{color:var(--p-muted)}
 main{scrollbar-color:var(--p-accent) var(--p-surface)} .row-actions .external-preview{background:var(--p-surface-2);color:var(--p-text)}
+
+:root[data-theme="cyberpunk"] { --p-accent:#25d9ef; --p-bg:#080e16; --p-surface:#111b29; --p-text:#f3f8ff; --p-muted:#c1cede; --p-line:#334355; }
+:root[data-theme="bladerunner"] { --p-accent:#ffb347; --p-bg:#080e16; --p-surface:#111b29; --p-text:#f3f8ff; --p-muted:#c1cede; --p-line:#334355; }
+:root[data-theme="sexy"] { --p-accent:#f16a9a; --p-bg:#080e16; --p-surface:#111b29; --p-text:#f3f8ff; --p-muted:#c1cede; --p-line:#334355; }
+:root[data-theme="samurai"] { --p-accent:#ff596d; --p-bg:#080e16; --p-surface:#111b29; --p-text:#f3f8ff; --p-muted:#c1cede; --p-line:#334355; }
+:root[data-theme="future"] { --p-accent:#69caff; --p-bg:#080e16; --p-surface:#111b29; --p-text:#f3f8ff; --p-muted:#c1cede; --p-line:#334355; }
+:root[data-theme="fantasy"] { --p-accent:#77e8b0; --p-bg:#080e16; --p-surface:#111b29; --p-text:#f3f8ff; --p-muted:#c1cede; --p-line:#334355; }
+:root[data-theme="pandora"] { --p-accent:#62ddf5; --p-bg:#080e16; --p-surface:#111b29; --p-text:#f3f8ff; --p-muted:#c1cede; --p-line:#334355; }

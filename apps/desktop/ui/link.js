@@ -174,8 +174,8 @@ const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) 
 // names from before the 25-to-20-theme overhaul (commit 9958df1),
 // none of which exist in styles.css anymore, so every theme the main
 // window could actually be set to fell through to "void" here.
-const validThemes = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost"];
-const appearanceDefaults = { transparencyEnabled: false, transparencyLevel: 30, roundedEnabled: true, cornerRadius: 10, interfaceSize: "normal" };
+const validThemes = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost", "cyberpunk", "bladerunner", "sexy", "samurai", "future", "fantasy", "pandora"];
+const appearanceDefaults = ThemeStudio.defaults;
 
 function syncPresentation() {
   locale = localStorage.getItem("apocalipse.language") || "en";
@@ -184,6 +184,7 @@ function syncPresentation() {
   document.documentElement.dataset.theme = validThemes.includes(theme) ? theme : "void";
   let appearance = { ...appearanceDefaults };
   try { appearance = { ...appearance, ...JSON.parse(localStorage.getItem("apocalipse.appearance") || "{}") }; } catch {}
+  ThemeStudio.applyPresentation(document.documentElement.dataset.theme, appearance);
   const transparency = Math.max(0, Math.min(70, Number(appearance.transparencyLevel) || 0));
   const radius = Math.max(0, Math.min(28, Number(appearance.cornerRadius) || 0));
   document.documentElement.dataset.transparency = appearance.transparencyEnabled ? "on" : "off";
