@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/branding/apocalipse-alien.png" width="280" alt="Apocalipse Download Manager alien logo">
+  <img src="assets/branding/apocalipse-a-blue.svg" width="240" alt="Apocalipse Download Manager modern blue A logo">
 </p>
 
 <h1 align="center">Apocalipse Download Manager</h1>
@@ -35,11 +35,11 @@
 > FROM A SEED, SOMETHING MAGNIFICENT IS BORN! · DE UMA SEMENTE NASCE ALGO GRANDIOSO! · 一颗种子，孕育出非凡之物！
 
 > [!IMPORTANT]
-> **Download the new Apocalipse Download Manager 0.4.78, install browser extension 0.3.188, and update aria2 in Tools to benefit from these improvements.**
+> **Download Apocalipse Download Manager 0.4.83, install browser extension 0.3.190, and update aria2 in Tools to use the current release.**
 
-### What's new in 0.4.78 / 0.3.188
+### What's new in 0.4.83 / 0.3.190
 
-A full code audit, reviewed line by line with the entire test suite re-run before publishing. Highlights: `queue.json`/`settings.json` are now written atomically so a crash mid-write can no longer erase the download queue; an interrupted Apocalipse Link upload no longer destroys the original file; a single unreachable mirror no longer discards the other healthy ones found in the same probe; HTTP downloads with mirrors or an expected SHA-256 now actually use them instead of silently ignoring both; "remove from disk" no longer deletes unrelated same-named files; and a false-positive bug in 429 (rate limit) detection from an earlier release is fixed. Full list in [CHANGELOG.md](CHANGELOG.md).
+ADM 0.4.83 introduces Cinema Premium: 28 HD visual themes with adjustable transparency and palette-aware contrast, compact Downloads/Torrents/Recordings queues, persistent pause/remove/reveal controls, balanced Logs panes and the modern blue A branding. Browser extension 0.3.190 follows the selected palette, and the Firefox XPI included with the release is Mozilla-signed. Full list in [CHANGELOG.md](CHANGELOG.md).
 
 ### Performance
 
@@ -68,7 +68,7 @@ Apocalipse combines fast resumable downloads, media discovery, streaming capture
 - Resumable HTTP/HTTPS downloads, HLS capture, yt-dlp, FFmpeg and torrent/magnet downloads (aria2, with DHT, Peer Exchange, Local Peer Discovery, encrypted peer connections, multi-tracker and WebSeeding support, file selection, peer info and player preview)
 - Apocalipse Link for authenticated, TLS-encrypted file transfers between two computers
 - Progressive browser recording with later MP4/AAC export
-- 21 visual themes (light and dark), with configurable corner rounding and window transparency
+- 28 visual themes (light and dark), with configurable corner rounding and window transparency
 - Native interface and browser extension available in English, Brazilian Portuguese and Simplified Chinese
 - Open source, privacy-conscious and built in Rust
 
@@ -154,11 +154,11 @@ If Apocalipse helps you, [donate via PayPal](https://www.paypal.com/cgi-bin/webs
 ## Português do Brasil
 
 > [!IMPORTANT]
-> **Baixe o novo Apocalipse Download Manager 0.4.78, instale a extensão 0.3.188 e atualize o aria2 em Ferramentas para usufruir dos benefícios.**
+> **Baixe o Apocalipse Download Manager 0.4.83, instale a extensão 0.3.190 e atualize o aria2 em Ferramentas para usar a versão atual.**
 
-### Novidades da 0.4.78 / 0.3.188
+### Novidades da 0.4.83 / 0.3.190
 
-Uma auditoria completa de código, revisada linha a linha e com toda a suíte de testes rodada novamente antes da publicação. Destaques: `queue.json`/`settings.json` agora são gravados de forma atômica, então um travamento no meio da escrita não apaga mais a fila de downloads; um upload interrompido pelo Apocalipse Link não destrói mais o arquivo original; um mirror fora do ar não descarta mais os outros mirrors saudáveis já confirmados na mesma busca; downloads HTTP com mirrors ou SHA-256 esperado agora realmente usam esses dados em vez de ignorá-los silenciosamente; "remover do disco" não apaga mais arquivos não relacionados de mesmo nome; e foi corrigido um bug de falso positivo na detecção do erro 429 (limite de taxa) introduzido numa versão anterior. Lista completa em [CHANGELOG.md](CHANGELOG.md).
+O ADM 0.4.83 traz o Cinema Premium: 28 temas visuais em HD, transparência ajustável e contraste adaptado à paleta, filas compactas em Downloads/Torrents/Gravações, controles persistentes de pausar/remover/revelar, painéis de Logs equilibrados e a identidade com o A azul moderno. A extensão 0.3.190 acompanha a paleta selecionada, e o XPI do Firefox incluído na release é assinado pela Mozilla. Lista completa em [CHANGELOG.md](CHANGELOG.md).
 
 ### Desempenho
 
@@ -185,7 +185,7 @@ O Apocalipse é um gerenciador de downloads livre para Windows, Linux e macOS. E
 - Ao remover um torrent, opção de apagar também o arquivo `.torrent` original salvo pelo aplicativo
 - Apocalipse Link para transferência de arquivos autenticada e criptografada (TLS) entre dois computadores
 - Gravação progressiva de mídia do navegador com exportação posterior em MP4/AAC
-- 21 temas visuais (claros e escuros), cantos arredondados e transparência de janela configuráveis
+- 28 temas visuais (claros e escuros), cantos arredondados e transparência de janela configuráveis
 - Melhor vídeo e melhor áudio selecionados por padrão
 - Pausa, retomada, filas, temas, proxy e DNS personalizado
 - Fila inteligente, pesquisa no histórico, importação de listas, espelhos e verificação SHA-256
@@ -197,11 +197,11 @@ Se o Apocalipse for útil para você, [faça uma doação pelo PayPal](https://w
 ## 简体中文
 
 > [!IMPORTANT]
-> **请下载新版 Apocalipse Download Manager 0.4.78，安装浏览器扩展 0.3.188，并在“工具”中更新 aria2，以享受这些改进。**
+> **请下载 Apocalipse Download Manager 0.4.83，安装浏览器扩展 0.3.190，并在“工具”中更新 aria2，以使用当前版本。**
 
-### 0.4.78 / 0.3.188 更新内容
+### 0.4.83 / 0.3.190 更新内容
 
-本次发布基于一次完整的代码审计：逐行审查，并在发布前重新运行了全部测试套件。重点变化：`queue.json`/`settings.json` 现在以原子方式写入，写入过程中崩溃不会再清空下载队列；Apocalipse Link 上传中途断开不再破坏原始文件；单个失效的镜像不再导致同一次探测中已确认健康的其他镜像被丢弃；带有镜像或预期 SHA-256 的 HTTP 下载现在会真正使用这些信息，而不是静默忽略；"从磁盘删除"不再删除无关的同名文件；并修复了早期版本中 429（限速）检测的一个误报缺陷。完整列表见 [CHANGELOG.md](CHANGELOG.md)。
+ADM 0.4.83 带来 Cinema Premium：28 个高清视觉主题、可调透明度与随配色自动适配的对比度；下载、种子和录制队列更加紧凑；暂停、移除和定位文件控件保持清晰可见；日志面板布局更加均衡，并采用现代蓝色 A 品牌标识。浏览器扩展 0.3.190 会跟随所选配色，发布包中的 Firefox XPI 已由 Mozilla 签名。完整列表见 [CHANGELOG.md](CHANGELOG.md)。
 
 ### 性能
 
@@ -228,7 +228,7 @@ Apocalipse 是一款适用于 Windows、Linux 和 macOS 的自由开源下载管
 - 删除种子任务时，可选择同时删除应用保存的原始 `.torrent` 文件
 - Apocalipse Link：两台电脑之间经过身份验证、TLS 加密的文件传输
 - 渐进式浏览器录制，支持后续导出为 MP4/AAC
-- 21 种视觉主题（深色和浅色），可自定义圆角和窗口透明度
+- 28 种视觉主题（深色和浅色），可自定义圆角和窗口透明度
 - 默认选择最佳视频和最佳音频
 - 支持暂停、继续、队列、主题、代理和自定义 DNS
 - 智能优先级队列、历史搜索、网址列表导入、镜像故障转移和 SHA-256 验证
