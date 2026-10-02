@@ -48,7 +48,7 @@ const server = http.createServer((request, response) => {
       } } };
     });
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
-    await page.locator('.download-row').waitFor();
+    await page.locator('.download-row').first().waitFor();
     await page.screenshot({ path: path.join(output, 'downloads-cyberpunk.png'), fullPage: true });
     await page.locator('nav [data-page="themes"]').click();
     await page.locator('#theme-gallery .theme-card').first().waitFor();
