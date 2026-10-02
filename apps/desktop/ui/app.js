@@ -879,6 +879,13 @@ const invoke = (command, args = {}) => {
     throw error;
   });
 };
+const currentDesktopWindow = () => window.__TAURI__?.window?.getCurrentWindow?.();
+const minimizeButton = document.querySelector("#window-minimize");
+const maximizeButton = document.querySelector("#window-maximize");
+const closeButton = document.querySelector("#window-close");
+if (minimizeButton) minimizeButton.onclick = () => currentDesktopWindow()?.minimize?.().catch?.(() => {});
+if (maximizeButton) maximizeButton.onclick = () => currentDesktopWindow()?.toggleMaximize?.().catch?.(() => {});
+if (closeButton) closeButton.onclick = () => currentDesktopWindow()?.close?.().catch?.(() => {});
 invoke("set_application_theme", { theme: localStorage.getItem("apocalipse.theme") || "void" }).catch(error => reportUiError("main", "applyAppearance", error));
 invoke("get_app_version").then((version) => {
   document.querySelector("#app-version").textContent = `v${version}`;
@@ -1197,7 +1204,11 @@ function renderDownloads(force = false) {
       speed && task.state === "downloading"
         ? `${progressText} · ↓ ${formatBytes(speed)}/s · ↑ ${formatBytes(uploadSpeed)}/s${torrentStats}`
         : `${progressText}${torrentStats}`;
-    progress.append(bar);
+    const progressLabel = Object.assign(document.createElement("span"), {
+      className: "task-progress-label",
+      textContent: `${percent.toFixed(percent >= 10 ? 0 : 1)}%`,
+    });
+    progress.append(bar, progressLabel);
     info.append(progress, details);
     const resumeCapability = document.createElement("strong");
     resumeCapability.className = "resume-capability";
