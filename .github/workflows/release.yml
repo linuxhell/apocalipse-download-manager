@@ -84,11 +84,13 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then binary="$binary.exe"; fi
           "$binary" --verify-media-routing "$RUNNER_TEMP/media-routing.json"
           python3 - "$RUNNER_TEMP/media-routing.json" <<'PYVERIFY'
-          import json, sys
+          import json, sys, tomllib
           with open(sys.argv[1], encoding="utf-8") as stream:
               report = json.load(stream)
           assert report["verified"] is True, report
-          assert report["version"] == "0.4.79", report
+          with open("Cargo.toml", "rb") as cargo:
+              expected_version = tomllib.load(cargo)["workspace"]["package"]["version"]
+          assert report["version"] == expected_version, report
           assert report["engine"] == "yt_dlp", report
           print(json.dumps(report))
           PYVERIFY
