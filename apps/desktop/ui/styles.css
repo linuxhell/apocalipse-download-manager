@@ -1578,3 +1578,176 @@ body.link-window #link-share-list {
 :root:is([data-theme="cyberpunk"],[data-theme="blade-runner"],[data-theme="sexy"],[data-theme="samurai"],[data-theme="future"],[data-theme="fantasy"],[data-theme="pandora"]) #about-panel {
   background: var(--app-bg);
 }
+
+
+/* 0.4.80 visual identity: every theme owns its scene and its A mark. */
+:root[data-theme="void"]{--theme-scene:url("assets/themes/void.webp");}
+:root[data-theme="nebula"]{--theme-scene:url("assets/themes/nebula.webp");}
+:root[data-theme="ember"]{--theme-scene:url("assets/themes/ember.webp");}
+:root[data-theme="jade"]{--theme-scene:url("assets/themes/jade.webp");}
+:root[data-theme="plasma"]{--theme-scene:url("assets/themes/plasma.webp");}
+:root[data-theme="glacier"]{--theme-scene:url("assets/themes/glacier.webp");}
+:root[data-theme="amber"]{--theme-scene:url("assets/themes/amber.webp");}
+:root[data-theme="abyss"]{--theme-scene:url("assets/themes/abyss.webp");}
+:root[data-theme="rust"]{--theme-scene:url("assets/themes/rust.webp");}
+:root[data-theme="venom"]{--theme-scene:url("assets/themes/venom.webp");}
+:root[data-theme="wine"]{--theme-scene:url("assets/themes/wine.webp");}
+:root[data-theme="linen"]{--theme-scene:url("assets/themes/linen.webp");}
+:root[data-theme="sky"]{--theme-scene:url("assets/themes/sky.webp");}
+:root[data-theme="blossom"]{--theme-scene:url("assets/themes/blossom.webp");}
+:root[data-theme="sage"]{--theme-scene:url("assets/themes/sage.webp");}
+:root[data-theme="sand"]{--theme-scene:url("assets/themes/sand.webp");}
+:root[data-theme="lilac"]{--theme-scene:url("assets/themes/lilac.webp");}
+:root[data-theme="mist"]{--theme-scene:url("assets/themes/mist.webp");}
+:root[data-theme="citrus"]{--theme-scene:url("assets/themes/citrus.webp");}
+:root[data-theme="coral"]{--theme-scene:url("assets/themes/coral.webp");}
+:root[data-theme="frost"]{--theme-scene:url("assets/themes/frost.webp");}
+:root[data-theme="cyberpunk"]{--theme-scene:url("assets/themes/cyberpunk.webp");}
+:root[data-theme="blade-runner"]{--theme-scene:url("assets/themes/blade-runner.webp");}
+:root[data-theme="sexy"]{--theme-scene:url("assets/themes/sexy.webp");}
+:root[data-theme="samurai"]{--theme-scene:url("assets/themes/samurai.webp");}
+:root[data-theme="future"]{--theme-scene:url("assets/themes/future.webp");}
+:root[data-theme="fantasy"]{--theme-scene:url("assets/themes/fantasy.webp");}
+:root[data-theme="pandora"]{--theme-scene:url("assets/themes/pandora.webp");}
+
+body{
+  height:100vh;
+  min-height:100vh;
+  overflow:hidden;
+  grid-template-columns:240px 1fr;
+  grid-template-rows:38px minmax(0,1fr);
+  position:relative;
+  isolation:isolate;
+}
+#app-titlebar{
+  grid-column:1 / -1;
+  grid-row:1;
+  height:38px;
+  min-height:38px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding-left:10px;
+  border-bottom:1px solid color-mix(in srgb,var(--accent) 34%,var(--line));
+  background:
+    linear-gradient(90deg,
+      color-mix(in srgb,var(--accent) 20%,var(--app-bg)),
+      color-mix(in srgb,var(--surface) 94%,var(--app-bg)) 42%,
+      color-mix(in srgb,var(--accent-2) 13%,var(--app-bg)));
+  box-shadow:0 1px 12px color-mix(in srgb,var(--accent) 16%,transparent);
+  color:var(--text);
+  z-index:20;
+  user-select:none;
+}
+.titlebar-brand{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;letter-spacing:.2px;min-width:0;}
+.titlebar-brand span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.apocalipse-mark{width:34px;height:34px;display:inline-grid;place-items:center;color:var(--accent);filter:drop-shadow(0 0 7px color-mix(in srgb,var(--accent) 70%,transparent));flex:0 0 auto;}
+.apocalipse-mark svg{width:100%;height:100%;display:block;overflow:visible;}
+.apocalipse-mark path:nth-child(1),.apocalipse-mark path:nth-child(2){fill:currentColor;}
+.apocalipse-mark path:nth-child(3){fill:color-mix(in srgb,var(--accent-2) 70%,white);}
+.window-controls{align-self:stretch;display:flex;margin-left:auto;}
+.window-controls button{
+  width:46px;
+  height:100%;
+  padding:0;
+  border:0;
+  border-left:1px solid #272727;
+  border-radius:0;
+  background:#050505 !important;
+  color:#fff !important;
+  font:700 17px/1 "Segoe UI Symbol","Segoe UI",sans-serif;
+  display:grid;
+  place-items:center;
+  cursor:pointer;
+}
+.window-controls button:hover{background:#1b1b1b !important;color:#fff !important;}
+#window-close:hover{background:#2b0d0d !important;}
+aside{grid-column:1;grid-row:2;height:calc(100vh - 38px);top:38px;padding-top:18px;}
+main{grid-column:2;grid-row:2;height:calc(100vh - 38px);min-height:0;overflow:auto;}
+.brand .apocalipse-mark{width:44px;height:44px;}
+.brand strong{color:var(--accent);}
+
+:root[data-theme]:not([data-page="about"]) body::before{
+  content:"";
+  position:fixed;
+  inset:38px 0 0;
+  z-index:-2;
+  background-image:var(--theme-scene);
+  background-repeat:no-repeat;
+  background-position:center;
+  background-size:cover;
+  filter:saturate(1.08) contrast(1.04);
+}
+:root[data-theme]:not([data-page="about"]) body::after{
+  content:"";
+  position:fixed;
+  inset:38px 0 0;
+  z-index:-1;
+  pointer-events:none;
+  background:
+    linear-gradient(90deg,
+      color-mix(in srgb,var(--app-bg) 88%,transparent) 0 19%,
+      color-mix(in srgb,var(--app-bg) 52%,transparent) 40%,
+      color-mix(in srgb,var(--app-bg) 33%,transparent) 72%,
+      color-mix(in srgb,var(--app-bg) 58%,transparent) 100%),
+    linear-gradient(180deg,color-mix(in srgb,var(--app-bg) 18%,transparent),color-mix(in srgb,var(--app-bg) 44%,transparent));
+}
+:root[data-page="about"] body::before,:root[data-page="about"] body::after{display:none !important;}
+
+:root[data-theme]:not([data-page="about"]) aside{
+  background:color-mix(in srgb,var(--sidebar) 90%,transparent);
+  backdrop-filter:blur(11px) saturate(1.08);
+}
+:root[data-theme]:not([data-page="about"]) :is(.panel,.metrics article,.engine,.appearance-card,.logs-panel,.link-panel>div){
+  background:color-mix(in srgb,var(--surface) 86%,transparent);
+  backdrop-filter:blur(9px) saturate(1.04);
+}
+
+/* One elegant, theme-aware progress component is shared by downloads, torrents and recordings. */
+.task-progress{
+  position:relative;
+  height:18px;
+  margin-top:9px;
+  overflow:hidden;
+  border:1px solid color-mix(in srgb,var(--accent) 34%,var(--line));
+  border-radius:999px;
+  background:color-mix(in srgb,var(--app-bg) 72%,var(--surface-2));
+  box-shadow:inset 0 1px 4px #0008,0 0 0 1px color-mix(in srgb,var(--accent) 6%,transparent);
+}
+.task-progress i{
+  position:absolute;
+  inset:0 auto 0 0;
+  display:block;
+  height:100%;
+  border-radius:inherit;
+  background:linear-gradient(90deg,var(--accent),var(--accent-2));
+  box-shadow:0 0 12px color-mix(in srgb,var(--accent) 58%,transparent);
+  transition:width .25s ease;
+}
+.task-progress::after{
+  content:"";
+  position:absolute;
+  inset:1px;
+  border-radius:inherit;
+  pointer-events:none;
+  background:linear-gradient(180deg,#ffffff25,transparent 42%);
+}
+.task-progress-label{
+  position:absolute;
+  inset:0 8px;
+  z-index:2;
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  color:#fff;
+  font-size:10px;
+  line-height:1;
+  font-weight:800;
+  letter-spacing:.2px;
+  text-shadow:0 1px 3px #000,0 0 4px #000;
+  pointer-events:none;
+}
+@media(max-width:950px){
+  body{grid-template-rows:38px minmax(0,1fr);}
+  .brand .apocalipse-mark{width:48px;height:48px;}
+}
