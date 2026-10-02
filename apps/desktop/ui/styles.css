@@ -41,6 +41,93 @@ html { background: transparent; }
 :root[data-theme="coral"] { color-scheme:light; --app-bg:#fff8f6; --app-glow:#ffd8cc; --sidebar:#fffdfced; --panel:#ffffff; --surface:#ffffff; --surface-2:#ffece6; --input:#fffaf8; --text:#3d2620; --muted:#8a6a60; --line:#f2d3c8; --cyan:#c14e37; --accent:#e0654f; --accent-2:#f2a084; }
 :root[data-theme="frost"] { color-scheme:light; --app-bg:#f5fdfd; --app-glow:#c2ecec; --sidebar:#fcffffed; --panel:#ffffff; --surface:#ffffff; --surface-2:#e8f7f7; --input:#f8fefe; --text:#123638; --muted:#57787a; --line:#c8e6e6; --cyan:#157d84; --accent:#1b8f96; --accent-2:#5fc9cf; }
 
+:root[data-theme="cyberpunk"] { --app-bg:#06030d; --app-glow:#3e0d69; --sidebar:#090512f0; --surface:#10091b; --surface-2:#181027; --input:#090611; --text:#f7ecff; --muted:#b29bc5; --line:#3b2553; --cyan:#00f2ff; --accent:#00eaff; --accent-2:#ff2bd6; }
+:root[data-theme="blade-runner"] { --app-bg:#0b0705; --app-glow:#633117; --sidebar:#0f0a08f2; --surface:#17100d; --surface-2:#211713; --input:#0b0806; --text:#fff1df; --muted:#c39a7a; --line:#4b2d1f; --cyan:#ffb000; --accent:#ff9d2e; --accent-2:#36d7ff; }
+:root[data-theme="sexy"] { --app-bg:#12040c; --app-glow:#6c123a; --sidebar:#160711f2; --surface:#210d18; --surface-2:#301322; --input:#12070d; --text:#fff0f6; --muted:#d09aad; --line:#55223a; --cyan:#ff5d9e; --accent:#ff4e9b; --accent-2:#ff9f6b; }
+:root[data-theme="samurai"] { --app-bg:#0a0807; --app-glow:#4b1111; --sidebar:#0e0b09f2; --surface:#17110e; --surface-2:#231714; --input:#0c0907; --text:#f9efe9; --muted:#bda79c; --line:#493028; --cyan:#ef3d3d; --accent:#e23b3b; --accent-2:#f0c36a; }
+:root[data-theme="future"] { --app-bg:#050b10; --app-glow:#0b4d63; --sidebar:#071017f2; --surface:#0b1820; --surface-2:#10232d; --input:#071017; --text:#ecfbff; --muted:#91b5c1; --line:#244757; --cyan:#53f6ff; --accent:#45e6ff; --accent-2:#8d7dff; }
+:root[data-theme="fantasy"] { --app-bg:#06100b; --app-glow:#1e5a37; --sidebar:#08140ef2; --surface:#0d1c13; --surface-2:#14271b; --input:#08120d; --text:#f0fff4; --muted:#9fc1a9; --line:#2a4a36; --cyan:#74e8a2; --accent:#63d995; --accent-2:#b38cff; }
+:root[data-theme="pandora"] { --app-bg:#041019; --app-glow:#15517a; --sidebar:#06141ef2; --surface:#0a1d28; --surface-2:#102b39; --input:#07141c; --text:#ecfbff; --muted:#96bdcb; --line:#285166; --cyan:#66e7ff; --accent:#57dfff; --accent-2:#8affc7; }
+
+:root:is([data-theme="cyberpunk"],[data-theme="blade-runner"],[data-theme="sexy"],[data-theme="samurai"],[data-theme="future"],[data-theme="fantasy"],[data-theme="pandora"]) body {
+  position: relative;
+  isolation: isolate;
+}
+:root:is([data-theme="cyberpunk"],[data-theme="blade-runner"],[data-theme="sexy"],[data-theme="samurai"],[data-theme="future"],[data-theme="fantasy"],[data-theme="pandora"]):not([data-page="about"]) body::before {
+  content:"";
+  position: fixed;
+  inset:0;
+  z-index:-2;
+  background-size:cover;
+  background-position:center;
+  filter:saturate(1.08) contrast(1.04);
+}
+:root:is([data-theme="cyberpunk"],[data-theme="blade-runner"],[data-theme="sexy"],[data-theme="samurai"],[data-theme="future"],[data-theme="fantasy"],[data-theme="pandora"]):not([data-page="about"]) body::after {
+  content:"";
+  position:fixed;
+  inset:0;
+  z-index:-1;
+  pointer-events:none;
+  background:linear-gradient(90deg, color-mix(in srgb,var(--app-bg) 78%,transparent) 0 24%, color-mix(in srgb,var(--app-bg) 48%,transparent) 45%, color-mix(in srgb,var(--app-bg) 62%,transparent) 100%);
+}
+:root[data-theme="cyberpunk"]:not([data-page="about"]) body::before {
+  background:
+    radial-gradient(circle at 74% 18%, #ff2bd655 0 7%, transparent 22%),
+    radial-gradient(circle at 82% 62%, #00eaff66 0 5%, transparent 22%),
+    repeating-linear-gradient(90deg, transparent 0 5.6%, #ff2bd615 5.8% 6.1%, transparent 6.3% 11.5%),
+    linear-gradient(180deg,#16052a 0 18%,#0c0a25 40%,#07111d 65%,#04060c 100%);
+}
+:root[data-theme="blade-runner"]:not([data-page="about"]) body::before {
+  background:
+    linear-gradient(180deg, transparent 0 58%, #0008 59% 100%),
+    repeating-linear-gradient(92deg, transparent 0 8%, #ff9d2e16 8.2% 8.5%, transparent 8.8% 14%),
+    radial-gradient(circle at 78% 28%,#ffb00066 0 5%,transparent 20%),
+    linear-gradient(180deg,#3f1d0e 0,#1d1618 32%,#0b0d12 70%,#050609 100%);
+}
+:root[data-theme="sexy"]:not([data-page="about"]) body::before {
+  background:
+    radial-gradient(ellipse at 78% 38%,#ffd1df88 0 5%,#ff7fab66 6% 12%,transparent 13%),
+    radial-gradient(ellipse at 76% 56%,#ff7fab55 0 9%,transparent 10%),
+    radial-gradient(circle at 70% 16%,#ff4e9b55 0 8%,transparent 28%),
+    linear-gradient(135deg,#2f061e,#120511 58%,#06050a);
+}
+:root[data-theme="samurai"]:not([data-page="about"]) body::before {
+  background:
+    radial-gradient(circle at 80% 18%,#ffefc999 0 6%,transparent 7%),
+    linear-gradient(115deg,transparent 0 69%,#0a0a0acc 70% 74%,transparent 75%),
+    linear-gradient(65deg,transparent 0 77%,#d8d8d866 77.5% 78%,transparent 78.5%),
+    radial-gradient(ellipse at 77% 62%,#080808 0 8%,transparent 9%),
+    linear-gradient(180deg,#2a0a0a 0,#130a0b 42%,#070809 100%);
+}
+:root[data-theme="future"]:not([data-page="about"]) body::before {
+  background:
+    radial-gradient(circle at 80% 26%,#61f6ff88 0 3%,transparent 4%),
+    linear-gradient(100deg,transparent 0 73%,#56f5ff55 73.5% 74.2%,transparent 75%),
+    radial-gradient(ellipse at 78% 48%,#9a8cff55 0 10%,transparent 11%),
+    repeating-linear-gradient(0deg,transparent 0 28px,#53f6ff10 29px 30px),
+    linear-gradient(180deg,#071d2b,#08131d 45%,#04090d);
+}
+:root[data-theme="fantasy"]:not([data-page="about"]) body::before {
+  background:
+    radial-gradient(circle at 82% 25%,#d6fff899 0 2%,transparent 3%),
+    radial-gradient(circle at 72% 20%,#ffefff88 0 1.4%,transparent 2.4%),
+    radial-gradient(circle at 88% 38%,#fff2ff88 0 1.2%,transparent 2.2%),
+    linear-gradient(160deg,transparent 0 63%,#83d9ff33 64% 68%,transparent 69%),
+    radial-gradient(ellipse at 78% 58%,#d7f4d133 0 7%,transparent 8%),
+    linear-gradient(180deg,#153c28 0,#0f2b20 37%,#081910 70%,#051008 100%);
+}
+:root[data-theme="pandora"]:not([data-page="about"]) body::before {
+  background:
+    radial-gradient(ellipse at 78% 32%,#244f5666 0 6%,transparent 7%),
+    radial-gradient(ellipse at 88% 24%,#315c6666 0 5%,transparent 6%),
+    radial-gradient(ellipse at 72% 18%,#1c465266 0 4%,transparent 5%),
+    linear-gradient(100deg,transparent 0 76%,#a7f4ff55 76.4% 77.2%,transparent 77.5%),
+    linear-gradient(102deg,transparent 0 86%,#a7f4ff44 86.2% 87%,transparent 87.2%),
+    radial-gradient(circle at 82% 70%,#54ffd855 0 4%,transparent 20%),
+    linear-gradient(180deg,#0a3047 0,#0b2134 44%,#061721 100%);
+}
+
+
 :root:is([data-theme="linen"],[data-theme="sky"],[data-theme="blossom"],[data-theme="sage"],[data-theme="sand"],[data-theme="lilac"],[data-theme="mist"],[data-theme="citrus"],[data-theme="coral"],[data-theme="frost"]) body { color:var(--text); }
 :root:is([data-theme="linen"],[data-theme="sky"],[data-theme="blossom"],[data-theme="sage"],[data-theme="sand"],[data-theme="lilac"],[data-theme="mist"],[data-theme="citrus"],[data-theme="coral"],[data-theme="frost"]) :is(.engine,.metrics article,.panel,.appearance-card,.settings-group,.tool-settings,.log-event,.media-inspection,.download-row) { background:var(--surface); color:var(--text); border-color:var(--line); }
 :root:is([data-theme="linen"],[data-theme="sky"],[data-theme="blossom"],[data-theme="sage"],[data-theme="sand"],[data-theme="lilac"],[data-theme="mist"],[data-theme="citrus"],[data-theme="coral"],[data-theme="frost"]) :is(input,select,textarea,dialog input,dialog>form>select,.media-inspection select) { background:var(--input); color:var(--text); border-color:var(--line); }
@@ -1483,3 +1570,11 @@ body.link-window #link-share-list {
 .advanced-transport-form [role="status"] { overflow-wrap: anywhere; }
 .advanced-transport-form label:has(input[type="checkbox"]) { display: flex; flex-direction: row; align-items: center; }
 .advanced-transport-form input[type="checkbox"] { flex: 0 0 18px; width: 18px; height: 18px; margin: 0; padding: 0; }
+
+:root:is([data-theme="cyberpunk"],[data-theme="blade-runner"],[data-theme="sexy"],[data-theme="samurai"],[data-theme="future"],[data-theme="fantasy"],[data-theme="pandora"]):not([data-page="about"]) :is(.panel,.appearance-card,.engine,.metrics article,.logs-panel,.link-panel>div) {
+  background: color-mix(in srgb,var(--surface) 88%,transparent);
+  backdrop-filter: blur(10px);
+}
+:root:is([data-theme="cyberpunk"],[data-theme="blade-runner"],[data-theme="sexy"],[data-theme="samurai"],[data-theme="future"],[data-theme="fantasy"],[data-theme="pandora"]) #about-panel {
+  background: var(--app-bg);
+}
