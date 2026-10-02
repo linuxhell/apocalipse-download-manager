@@ -93,6 +93,14 @@ article button { min-width: 88px; height: 34px; padding: 0 10px; border: 0; bord
 :root[data-theme="citrus"]{--p-bg:#fffcf2;--p-head:#fffef7;--p-surface:#fffef9;--p-surface-2:#fff5da;--p-input:#fffdf4;--p-text:#3a2f0f;--p-muted:#8a7a44;--p-line:#f0dda0;--p-accent:#d68910}
 :root[data-theme="coral"]{--p-bg:#fff8f6;--p-head:#fffdfc;--p-surface:#fff;--p-surface-2:#ffece6;--p-input:#fffaf8;--p-text:#3d2620;--p-muted:#8a6a60;--p-line:#f2d3c8;--p-accent:#e0654f}
 :root[data-theme="frost"]{--p-bg:#f5fdfd;--p-head:#fcffff;--p-surface:#fff;--p-surface-2:#e8f7f7;--p-input:#f8fefe;--p-text:#123638;--p-muted:#57787a;--p-line:#c8e6e6;--p-accent:#1b8f96}
+
+:root[data-theme="cyberpunk"]{--p-bg:#06030d;--p-head:#0a0613;--p-surface:#10091b;--p-surface-2:#181027;--p-input:#090611;--p-text:#f7ecff;--p-muted:#b29bc5;--p-line:#3b2553;--p-accent:#00eaff}
+:root[data-theme="blade-runner"]{--p-bg:#0b0705;--p-head:#100a07;--p-surface:#17100d;--p-surface-2:#211713;--p-input:#0b0806;--p-text:#fff1df;--p-muted:#c39a7a;--p-line:#4b2d1f;--p-accent:#ff9d2e}
+:root[data-theme="sexy"]{--p-bg:#12040c;--p-head:#180711;--p-surface:#210d18;--p-surface-2:#301322;--p-input:#12070d;--p-text:#fff0f6;--p-muted:#d09aad;--p-line:#55223a;--p-accent:#ff4e9b}
+:root[data-theme="samurai"]{--p-bg:#0a0807;--p-head:#0f0b09;--p-surface:#17110e;--p-surface-2:#231714;--p-input:#0c0907;--p-text:#f9efe9;--p-muted:#bda79c;--p-line:#493028;--p-accent:#e23b3b}
+:root[data-theme="future"]{--p-bg:#050b10;--p-head:#071017;--p-surface:#0b1820;--p-surface-2:#10232d;--p-input:#071017;--p-text:#ecfbff;--p-muted:#91b5c1;--p-line:#244757;--p-accent:#45e6ff}
+:root[data-theme="fantasy"]{--p-bg:#06100b;--p-head:#08140e;--p-surface:#0d1c13;--p-surface-2:#14271b;--p-input:#08120d;--p-text:#f0fff4;--p-muted:#9fc1a9;--p-line:#2a4a36;--p-accent:#63d995}
+:root[data-theme="pandora"]{--p-bg:#041019;--p-head:#06141e;--p-surface:#0a1d28;--p-surface-2:#102b39;--p-input:#07141c;--p-text:#ecfbff;--p-muted:#96bdcb;--p-line:#285166;--p-accent:#57dfff}
 body{background:var(--p-bg);color:var(--p-text)}
 header{background:linear-gradient(120deg,var(--p-surface),var(--p-head));border-bottom:1px solid var(--p-line)}
 header strong{color:var(--p-accent)} header small,header .connection{color:var(--p-muted)}
