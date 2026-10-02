@@ -741,18 +741,23 @@ Object.assign(catalogs["zh-CN"], {"linkQuic": "使用 QUIC 接收共享文件（
 Object.assign(catalogs.en, {originalAudio: "Original audio"});
 Object.assign(catalogs["pt-BR"], {originalAudio: "Áudio original"});
 Object.assign(catalogs["zh-CN"], {originalAudio: "原始音频"});
+Object.assign(catalogs["en"], {"themeGallery": "Theme gallery", "themeSearch": "Search themes…", "themeLivePreview": "Live preview", "themeCustomize": "Customize", "themeBrightness": "Background brightness", "themeAero": "Aero effect", "themeAnimations": "Smooth animations", "themeApply": "Apply theme", "themeReset": "Restore default", "themeApplied": "Theme applied.", "themeSaveFailed": "Could not save theme", "themeNoResults": "No matching themes.", "themeExampleFile": "Example file.iso", "themeExample": "Preview example", "themesDescription": "Choose the scenery of your Apocalipse.", "windowTransparency": "Glass / transparency", "windowTransparencyHint": "Control how clearly panels and controls stand out over the scenery.", "windowMinimize": "Minimize", "windowMaximize": "Maximize / restore", "windowClose": "Close", "taskDestination": "Destination", "taskEngine": "Engine", "taskEta": "Remaining", "taskConnectionsLabel": "Connections"});
+Object.assign(catalogs["pt-BR"], {"themeGallery": "Galeria de temas", "themeSearch": "Buscar tema…", "themeLivePreview": "Prévia em tempo real", "themeCustomize": "Personalizar", "themeBrightness": "Brilho do fundo", "themeAero": "Efeito Aero", "themeAnimations": "Animações suaves", "themeApply": "Aplicar tema", "themeReset": "Restaurar padrão", "themeApplied": "Tema aplicado.", "themeSaveFailed": "Não foi possível salvar o tema", "themeNoResults": "Nenhum tema encontrado.", "themeExampleFile": "Arquivo de exemplo.iso", "themeExample": "Exemplo de prévia", "themesDescription": "Escolha o cenário do seu Apocalipse.", "windowTransparency": "Vidro / transparência", "windowTransparencyHint": "Controle o destaque dos painéis e controles sobre o cenário.", "windowMinimize": "Minimizar", "windowMaximize": "Maximizar / restaurar", "windowClose": "Fechar", "taskDestination": "Destino", "taskEngine": "Motor", "taskEta": "Restante", "taskConnectionsLabel": "Conexões"});
+Object.assign(catalogs["zh-CN"], {"themeGallery": "主题库", "themeSearch": "搜索主题…", "themeLivePreview": "实时预览", "themeCustomize": "个性化", "themeBrightness": "背景亮度", "themeAero": "毛玻璃效果", "themeAnimations": "平滑动画", "themeApply": "应用主题", "themeReset": "恢复默认", "themeApplied": "已应用主题。", "themeSaveFailed": "无法保存主题", "themeNoResults": "未找到主题。", "themeExampleFile": "示例文件.iso", "themeExample": "预览示例", "themesDescription": "为您的 Apocalipse 选择风景。", "windowTransparency": "玻璃 / 透明度", "windowTransparencyHint": "调整风景上面板和控件的可见程度。", "windowMinimize": "最小化", "windowMaximize": "最大化 / 还原", "windowClose": "关闭", "taskDestination": "位置", "taskEngine": "引擎", "taskEta": "剩余时间", "taskConnectionsLabel": "连接"});
 let locale = localStorage.getItem("apocalipse.language") || "en";
-const valid = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost"];
+const valid = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost", "cyberpunk", "bladerunner", "sexy", "samurai", "future", "fantasy", "pandora"];
 const applyTheme = (theme) => {
   document.documentElement.dataset.theme = valid.includes(theme) ? theme : "void";
+  ThemeStudio.applyPresentation(document.documentElement.dataset.theme, readAppearance());
 };
-applyTheme(localStorage.getItem("apocalipse.theme") || "void");
-const appearanceDefaults = { transparencyEnabled: false, transparencyLevel: 30, roundedEnabled: true, cornerRadius: 10, interfaceSize: "normal" };
+const appearanceDefaults = ThemeStudio.defaults;
 function readAppearance() {
   try { return { ...appearanceDefaults, ...JSON.parse(localStorage.getItem("apocalipse.appearance") || "{}") }; }
   catch { return { ...appearanceDefaults }; }
 }
 function applyAppearance(settings = readAppearance()) {
+  settings = ThemeStudio.normalize(settings);
+  ThemeStudio.applyPresentation(document.documentElement.dataset.theme, settings);
   const transparency = Math.max(0, Math.min(70, Number(settings.transparencyLevel) || 0));
   const radius = Math.max(0, Math.min(28, Number(settings.cornerRadius) || 0));
   document.documentElement.dataset.transparency = settings.transparencyEnabled ? "on" : "off";
@@ -761,6 +766,7 @@ function applyAppearance(settings = readAppearance()) {
   document.documentElement.style.setProperty("--window-opacity-percent", settings.transparencyEnabled ? `${100 - transparency}%` : "100%");
   document.documentElement.style.setProperty("--corner-radius", settings.roundedEnabled ? `${radius}px` : "0px");
 }
+applyTheme(localStorage.getItem("apocalipse.theme") || "void");
 applyAppearance();
 let pendingDiagnosticTrace = null;
 let pendingReferer = null;
@@ -1320,6 +1326,19 @@ function renderDownloads(force = false) {
     status.className = "task-status";
     status.append(state, actions);
     row.append(select, icon, info, status);
+    const scenicDetails = document.createElement("div");
+    scenicDetails.className = "task-scenic-details";
+    const detailValues = [[t("taskDestination"), task.destination.replace(/[\\/][^\\/]*$/, "")],
+      [t("taskEngine"), task.engine || ""],
+      [t("taskConnectionsLabel"), task.connections_override || ""],
+      [t("taskEta"), task.torrent_eta || (speed > 0 && task.total > task.received ? `${Math.ceil((task.total - task.received) / speed)} s` : "")]];
+    for (const [label, value] of detailValues) {
+      if (!value) continue;
+      const entry = document.createElement("span"); entry.textContent = label;
+      const text = document.createElement("b"); text.textContent = String(value);
+      entry.append(text); scenicDetails.append(entry);
+    }
+    if (scenicDetails.childElementCount) row.append(scenicDetails);
     list.append(row);
   }
   document.querySelector(".metrics article:nth-child(4) strong").textContent =
@@ -1355,6 +1374,7 @@ function translate() {
   document
     .querySelectorAll("[data-i18n-placeholder]")
     .forEach((element) => (element.placeholder = t(element.dataset.i18nPlaceholder)));
+  document.querySelectorAll("[data-i18n-aria]").forEach((node) => node.setAttribute("aria-label", t(node.dataset.i18nAria)));
   document.querySelectorAll("[data-language-choice]").forEach((button) =>
     button.classList.toggle("active", button.dataset.languageChoice === locale));
   if (!taskConnectionsManuallyChanged) {
@@ -1364,6 +1384,7 @@ function translate() {
   if (activeNavigation) document.querySelector("main > header h1").textContent = activeNavigation.querySelector("b")?.textContent || t("downloads");
   document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
   renderDownloads(true);
+  if (typeof themeStudio !== "undefined") themeStudio.refresh();
   if (activePage === "link") {
     document.querySelector("#link-local-path").textContent = linkLocalPath || t("linkDrives");
     document.querySelector("#link-remote-path").textContent = linkRemotePath || t("linkDrives");
@@ -1509,7 +1530,10 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
       invoke("record_ui_diagnostic", { level: "INFO", event: "link_window_requested", detail: "source=main_navigation" }).catch(() => {});
       return;
     }
+    if (activePage === "themes") themeStudio.leave();
     activePage = button.dataset.page;
+    document.body.dataset.page = activePage;
+    if (activePage === "themes") themeStudio.open();
     document.querySelector("#moq-capture-panel").hidden = activePage !== "recordings";
     document.querySelectorAll("nav [data-page]").forEach((item) => item.classList.toggle("active", item === button));
     const heading = button.querySelector("b")?.textContent || t("downloads");
@@ -1520,7 +1544,7 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
     document.querySelector("#themes-panel").hidden = activePage !== "themes";
     document.querySelector("#language-panel").hidden = activePage !== "language";
     document.querySelector("#about-panel").hidden = activePage !== "about";
-    document.querySelector("#add").hidden = activePage === "about";
+    document.querySelector("#add").hidden = ["about", "themes", "language", "logs"].includes(activePage);
     document.querySelector("#torrent-store-controls").hidden = activePage !== "torrents";
     document.querySelector("#clear-torrent-store").hidden = activePage !== "torrents";
     if (activePage === "torrents") refreshTorrentStoreControls().catch(error => reportUiError("main", "clear-torrent-store", error));
@@ -2385,41 +2409,27 @@ document.querySelector("#aria2-rpc-regenerate-token").onclick = async () => {
     button.disabled = false;
   }
 };
-document.querySelector("#theme").onchange = (event) => {
-  localStorage.setItem("apocalipse.theme", event.target.value);
-  applyTheme(event.target.value);
-  invoke("set_application_theme", { theme: event.target.value }).catch(error => reportUiError("main", "theme", error));
-};
-function syncAppearanceControls() {
-  const settings = readAppearance();
-  document.querySelector("#transparency-enabled").checked = settings.transparencyEnabled;
-  document.querySelector("#transparency-level").value = settings.transparencyLevel;
-  document.querySelector("#transparency-level").disabled = !settings.transparencyEnabled;
-  document.querySelector("#transparency-value").textContent = `${settings.transparencyLevel}%`;
-  document.querySelector("#rounded-enabled").checked = settings.roundedEnabled;
-  document.querySelector("#corner-radius").value = settings.cornerRadius;
-  document.querySelector("#corner-radius").disabled = !settings.roundedEnabled;
-  document.querySelector("#corner-radius-value").textContent = `${settings.cornerRadius} px`;
-  document.querySelector("#interface-size").value = settings.interfaceSize;
-}
-function saveAppearanceFromControls() {
-  const settings = {
-    transparencyEnabled: document.querySelector("#transparency-enabled").checked,
-    transparencyLevel: Number(document.querySelector("#transparency-level").value),
-    roundedEnabled: document.querySelector("#rounded-enabled").checked,
-    cornerRadius: Number(document.querySelector("#corner-radius").value),
-    interfaceSize: document.querySelector("#interface-size").value,
-  };
-  localStorage.setItem("apocalipse.appearance", JSON.stringify(settings));
-  applyAppearance(settings);
-  syncAppearanceControls();
-  invoke("record_ui_diagnostic", { level: "INFO", event: "appearance_changed", detail: `transparency=${settings.transparencyEnabled} level=${settings.transparencyLevel} rounded=${settings.roundedEnabled} radius=${settings.cornerRadius} size=${settings.interfaceSize}` }).catch(() => {});
-}
-["transparency-enabled", "transparency-level", "rounded-enabled", "corner-radius", "interface-size"].forEach((id) => {
-  document.querySelector(`#${id}`).oninput = saveAppearanceFromControls;
-  document.querySelector(`#${id}`).onchange = saveAppearanceFromControls;
+const themeStudio = ThemeStudio.init({
+  translate: t, language: () => locale, applyTheme, applyAppearance, readAppearance,
+  downloads: () => downloads,
+  commit: async (theme, appearance) => {
+    await invoke("set_application_theme", { theme });
+    localStorage.setItem("apocalipse.theme", theme);
+    localStorage.setItem("apocalipse.appearance", JSON.stringify(appearance));
+    applyTheme(theme); applyAppearance(appearance);
+    invoke("record_ui_diagnostic", { level: "INFO", event: "appearance_changed",
+      detail: `theme=${theme} transparency=${appearance.transparencyLevel} brightness=${appearance.backgroundBrightness}` }).catch(() => {});
+  },
 });
-syncAppearanceControls();
+function syncAppearanceControls() { themeStudio.refresh(); }
+for (const button of document.querySelectorAll('[data-window-action]')) {
+  button.onclick = () => invoke("control_main_window", { action: button.dataset.windowAction })
+    .catch(error => reportUiError("main", "window-control", error));
+}
+document.querySelector('#window-drag-region').onmousedown = event => {
+  if (event.button === 0 && event.detail === 1) invoke("control_main_window", { action: "drag" }).catch(() => {});
+};
+document.querySelector('#window-drag-region').ondblclick = () => invoke("control_main_window", { action: "maximize" }).catch(() => {});
 document.querySelector("#save-settings").onclick = async () => {
   const button = document.querySelector("#save-settings");
   const directory = document.querySelector("#default-directory");
@@ -3089,9 +3099,9 @@ window.__TAURI__?.event?.listen?.("browser-assisted-ready", consumeBrowserAssist
 
 window.__TAURI__?.event?.listen?.("theme-changed", (event) => {
   const theme = event.payload;
-  if (typeof theme === "string") {
+  if (typeof theme === "string" && valid.includes(theme)) {
     localStorage.setItem("apocalipse.theme", theme);
-    applyTheme(theme);
+    applyTheme(theme); applyAppearance();
   }
 }).catch(error => reportUiError("main", "consumeBrowserAssistedDownload", error));
 

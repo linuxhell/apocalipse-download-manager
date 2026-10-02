@@ -15,7 +15,7 @@ const appJs = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8")
 const currentThemes = [
   "void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss",
   "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand",
-  "lilac", "mist", "citrus", "coral", "frost",
+  "lilac", "mist", "citrus", "coral", "frost", "cyberpunk", "bladerunner", "sexy", "samurai", "future", "fantasy", "pandora",
 ];
 
 test("app.js still defines exactly the theme list this test locks in", () => {

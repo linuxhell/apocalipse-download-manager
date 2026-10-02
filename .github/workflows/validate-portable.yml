@@ -29,6 +29,18 @@ jobs:
         run: |
           for file in browser-extension/*.js apps/desktop/ui/*.js; do node --check "$file"; done
           node --test tests/*.test.cjs
+      - name: Verify Cinema Premium interface
+        run: |
+          npm install --no-save --prefix "$RUNNER_TEMP/cinema-ui" playwright@1.62.1
+          node "$RUNNER_TEMP/cinema-ui/node_modules/playwright/cli.js" install --with-deps chromium
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/cinema-ui/node_modules/playwright" node scripts/check-cinema-ui.cjs
+      - name: Upload interface previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cinema-premium-interface-previews
+          path: dist/cinema-ui/*.png
+          if-no-files-found: ignore
       - name: Package extension candidates
         shell: python
         run: |

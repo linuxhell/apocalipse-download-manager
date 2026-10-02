@@ -994,7 +994,7 @@
     return { record: "● Record", stop: "■ Stop and save", uploading: "Uploading…", done: "Recording saved", unavailable: "This video cannot be recorded by the browser" };
   };
   const overlayThemeColors = () => {
-    const accents = { nebula:"#7c5cff",ember:"#ff7a3d",jade:"#2fe6a0",plasma:"#ff4fb8",glacier:"#4fd4ff",amber:"#ffb347",abyss:"#6fe7dd",rust:"#e0754a",venom:"#9be15d",wine:"#e0527a",linen:"#b5651d",sky:"#2f80c9",blossom:"#d6497d",sage:"#3f8f5f",sand:"#c96a3b",lilac:"#8b5fc9",mist:"#3f7ea6",citrus:"#d68910",coral:"#e0654f",frost:"#1b8f96",void:"#25d9ef" };
+    const accents = { nebula:"#7c5cff",ember:"#ff7a3d",jade:"#2fe6a0",plasma:"#ff4fb8",glacier:"#4fd4ff",amber:"#ffb347",abyss:"#6fe7dd",rust:"#e0754a",venom:"#9be15d",wine:"#e0527a",linen:"#b5651d",sky:"#2f80c9",blossom:"#d6497d",sage:"#3f8f5f",sand:"#c96a3b",lilac:"#8b5fc9",mist:"#3f7ea6",citrus:"#d68910",coral:"#e0654f",frost:"#1b8f96",void:"#25d9ef",cyberpunk:"#25d9ef",bladerunner:"#ffb347",sexy:"#f16a9a",samurai:"#ff596d",future:"#69caff",fantasy:"#77e8b0",pandora:"#62ddf5" };
     return accents[interfaceTheme] || accents.void;
   };
   const clockLabel = (seconds) => {

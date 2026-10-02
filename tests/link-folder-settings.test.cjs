@@ -251,7 +251,7 @@ test("About page is localized, sits immediately below PayPal and keeps the main 
   assert.match(rust, /include_bytes!\("\.\.\/assets\/about-theme\.mp4"\)/);
   assert.match(app, /backgroundDataUrl/);
   assert.match(css, /var\(--about-background\)/);
-  assert.match(app, /document\.querySelector\("#add"\)\.hidden = activePage === "about"/);
+  assert.match(app, /document\.querySelector\("#add"\)\.hidden = \["about", "themes", "language", "logs"\]\.includes\(activePage\)/);
   assert.match(html, /class="about-toolbar"[\s\S]*about-audio-controls[\s\S]*about-creator-line[\s\S]*about-creator-photo/);
   assert.match(html, /class="about-scene"/);
   assert.match(css, /\.about-creator-line[\s\S]*font-size: clamp\(12px, 1vw, 15px\)/);
