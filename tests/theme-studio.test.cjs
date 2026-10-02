@@ -34,7 +34,7 @@ test('maximum transparency retains a contrast backing, and light themes retain a
   studio.applyPresentation('cyberpunk', { transparencyLevel: 70 }, dark);
   studio.applyPresentation('linen', { transparencyLevel: 70 }, light);
   assert.ok(Number(dark.style.values['--glass-opacity']) >= .46);
-  assert.ok(Number(light.style.values['--glass-opacity']) >= .74);
+  assert.ok(Number(light.style.values['--glass-opacity']) >= .88);
   assert.match(dark.style.values['--theme-background'], /cyberpunk\.webp/);
   assert.ok(!('opacity' in dark.style.values), 'text must not fade with the scenery');
 });

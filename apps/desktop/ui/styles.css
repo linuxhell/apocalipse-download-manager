@@ -1625,3 +1625,29 @@ body:not(.link-window) main { height:calc(100vh - 42px); min-height:0; overflow:
 .theme-live-preview { aspect-ratio:auto; height:clamp(150px,22vh,220px); }
 .theme-studio-actions { position:sticky; bottom:0; z-index:2; padding:8px 0; background:rgba(var(--glass-rgb),.9); border-radius:var(--corner-radius); }
 .theme-studio-actions button { white-space:nowrap; }
+/* Compact queues reserve the right side for the theme's character. */
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) main > :is(header,.panel,.advanced-transport-form) { width:min(760px,64%); max-width:100%; }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) main > header { flex-wrap:wrap; align-items:start; gap:12px; }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) main > header > div { min-width:0; }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) .toolbar { padding:10px; gap:8px; }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) .list-actions { flex-wrap:wrap; min-width:0; width:100%; gap:7px; }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) .history-search { flex:1 1 180px; width:180px; min-width:120px; max-width:240px; }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) .list-action-button { padding:8px 10px; min-height:34px; }
+:root[data-scenic="on"] .download-row { grid-template-columns:22px 48px minmax(0,1fr); padding:14px 12px; gap:10px 12px; }
+:root[data-scenic="on"] .download-row:has(.download-thumbnail) { grid-template-columns:22px 86px minmax(0,1fr); }
+:root[data-scenic="on"] .task-status { grid-column:3 / -1; justify-items:start; text-align:left; }
+:root[data-scenic="on"] .task-actions { justify-content:flex-start; max-width:none; }
+:root[data-scenic="on"] .task-progress { width:min(100%,400px); }
+:root[data-scenic="on"] .task-scenic-details { gap:10px 18px; padding-top:10px; }
+:root[data-scenic="on"] .task-scenic-details span { min-width:0; max-width:100%; }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) :is(.metrics,footer) { right:auto; width:min(760px,calc((100vw - 250px) * .64)); }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) .metrics { flex-wrap:wrap; }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) .metrics article { min-width:135px; padding:8px; }
+:root[data-scenic="on"] .advanced-transport-form { background:rgba(var(--glass-rgb),var(--glass-opacity)); backdrop-filter:blur(var(--glass-blur)); color:var(--text); border-color:var(--line); }
+:root:is([data-theme="linen"],[data-theme="sky"],[data-theme="blossom"],[data-theme="sage"],[data-theme="sand"],[data-theme="lilac"],[data-theme="mist"],[data-theme="citrus"],[data-theme="coral"],[data-theme="frost"])[data-scenic="on"] { --text:#101820; --muted:#263442; --line:#7b8d9b; }
+:root:is([data-theme="linen"],[data-theme="sky"],[data-theme="blossom"],[data-theme="sage"],[data-theme="sand"],[data-theme="lilac"],[data-theme="mist"],[data-theme="citrus"],[data-theme="coral"],[data-theme="frost"])[data-scenic="on"] :is(.advanced-transport-form p,.advanced-transport-form label,.advanced-transport-form summary,.download-info strong,.download-info small,.resume-capability) { color:var(--text); font-weight:600; }
+:root:is([data-theme="linen"],[data-theme="sky"],[data-theme="blossom"],[data-theme="sage"],[data-theme="sand"],[data-theme="lilac"],[data-theme="mist"],[data-theme="citrus"],[data-theme="coral"],[data-theme="frost"])[data-scenic="on"] main > header > div:first-child { background:rgba(var(--glass-rgb),.9); border-radius:var(--corner-radius); padding:10px 12px; }
+:root:is([data-theme="linen"],[data-theme="sky"],[data-theme="blossom"],[data-theme="sage"],[data-theme="sand"],[data-theme="lilac"],[data-theme="mist"],[data-theme="citrus"],[data-theme="coral"],[data-theme="frost"])[data-scenic="on"] :is(.page-description,.advanced-transport-form [role="status"]) { color:var(--text); font-weight:600; }
+@media(max-width:1050px) {
+ body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) :is(.metrics,footer) { width:min(760px,calc((100vw - 118px) * .64)); }
+}

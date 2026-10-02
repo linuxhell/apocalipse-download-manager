@@ -31,7 +31,7 @@
     target.style.setProperty('--background-brightness', settings.backgroundBrightness / 100);
     // Keep a dark glass backing even at maximum transparency, rather than fading text.
     const light = ['linen','sky','blossom','sage','sand','lilac','mist','citrus','coral','frost'].includes(theme[0]);
-    const opacity = settings.transparencyEnabled ? Math.max(light ? 0.74 : 0.46, 0.92 - settings.transparencyLevel * 0.0065) : 0.98;
+    const opacity = settings.transparencyEnabled ? Math.max(light ? 0.88 : 0.46, 0.92 - settings.transparencyLevel * 0.0065) : 0.98;
     target.style.setProperty('--glass-opacity', opacity.toFixed(3));
     target.style.setProperty('--glass-blur', settings.aeroEnabled ? '8px' : '0px');
     target.style.setProperty('--corner-radius', settings.roundedEnabled ? `${settings.cornerRadius}px` : '0px');

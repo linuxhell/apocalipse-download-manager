@@ -85,7 +85,7 @@ jobs:
           with open(sys.argv[1], encoding="utf-8") as stream:
               report = json.load(stream)
           assert report["verified"] is True, report
-          assert report["version"] == "0.4.80", report
+          assert report["version"] == "0.4.81", report
           assert report["engine"] == "yt_dlp", report
           print(json.dumps(report))
           PYVERIFY

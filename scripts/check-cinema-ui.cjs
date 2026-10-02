@@ -30,8 +30,12 @@ const server = http.createServer((request, response) => {
         window.qaCommands.push({ command, args });
         if (command === 'list_downloads') return [{ id: 'qa-task', source: 'https://example.test/windows.iso', destination: 'D:\\Downloads\\Windows_11.iso',
           state: 'downloading', received: 3640000000, total: 6500000000, download_speed: 42300000,
-          progress_percent: 56, resume_supported: true, connections_override: 16 }];
-        if (command === 'get_app_version') return '0.4.80';
+          progress_percent: 56, resume_supported: true, connections_override: 16 },
+          { id: 'qa-torrent', source: 'magnet:?xt=urn:btih:0123456789012345678901234567890123456789', destination: 'D:\\Downloads\\Movie.mkv',
+            state: 'downloading', received: 3640000000, total: 6500000000, download_speed: 42300000, progress_percent: 56, resume_supported: true },
+          { id: 'qa-recording', source: 'https://example.test/live', destination: 'D:\\Downloads\\Live.recording.webm',
+            state: 'downloading', received: 3640000000, total: 6500000000, download_speed: 42300000, progress_percent: 56, resume_supported: true }];
+        if (command === 'get_app_version') return '0.4.81';
         if (command === 'default_download_directory') return 'D:\\Downloads';
         if (command === 'get_application_theme') return 'cyberpunk';
         if (command === 'get_bridge_pairing') return { connected: false, paired: false };
@@ -79,6 +83,30 @@ const server = http.createServer((request, response) => {
     await page.locator('#window-drag-region').dispatchEvent('mousedown', { button: 0, detail: 1 });
     const actions = await page.evaluate(() => window.qaCommands.filter(item => item.command === 'control_main_window').map(item => item.args.action));
     for (const action of ['minimize', 'maximize', 'close', 'drag']) assert.ok(actions.includes(action), action);
+    // Queue controls and all three task types leave the right-hand scenery exposed.
+    await page.setViewportSize({ width: 1280, height: 850 });
+    for (const section of ['downloads', 'torrents', 'recordings']) {
+      await page.locator(`nav [data-page="${section}"]`).click();
+      await page.locator('.download-row').first().waitFor();
+      const compact = await page.evaluate(() => {
+        const main = document.querySelector('main').getBoundingClientRect();
+        const panel = document.querySelector('main > .panel').getBoundingClientRect();
+        return { ratio: panel.width / (main.width - 40), bars: [...document.querySelectorAll('.task-progress')].map(n => n.getBoundingClientRect().width) };
+      });
+      assert.ok(compact.ratio <= .65, `${section} preserves the right side`);
+      assert.ok(compact.bars.every(width => width <= 401), `${section} has compact progress bars`);
+      await page.screenshot({ path: path.join(output, `${section}-compact-cyberpunk.png`), fullPage: true });
+    }
+    await page.locator('nav [data-page="themes"]').click();
+    await page.locator('[data-theme-choice="sky"]').click();
+    await page.locator('#theme-apply').click();
+    await page.waitForFunction(() => localStorage.getItem('apocalipse.theme') === 'sky');
+    await page.locator('nav [data-page="recordings"]').click();
+    const light = await page.locator('#moq-capture-panel').evaluate(node => ({ color: getComputedStyle(node).color, backing: getComputedStyle(node).backgroundColor }));
+    assert.equal(light.color, 'rgb(16, 24, 32)');
+    assert.ok(Number(light.backing.match(/, ([\d.]+)\)$/)?.[1] || 1) >= .88, 'Light capture form has a contrast backing');
+    await page.screenshot({ path: path.join(output, 'recordings-compact-light.png'), fullPage: true });
+    await page.locator('nav [data-page="themes"]').click();
     await page.setViewportSize({ width: 1000, height: 700 });
     await page.screenshot({ path: path.join(output, 'themes-small-window.png'), fullPage: true });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
