@@ -6,6 +6,9 @@ const normalizeDesktopLanguage = (language) => language === "pt-BR" ? "pt_BR" : 
 const applyPopupTheme = (theme) => {
   interfaceTheme = popupThemes.has(theme) ? theme : "void";
   document.documentElement.dataset.theme = interfaceTheme;
+  try {
+    chrome.runtime.sendMessage({ type: "APOCALIPSE_THEME_ICON", theme: interfaceTheme }, () => void chrome.runtime.lastError);
+  } catch {}
 };
 const selectedUrls = new Set();
 const SOCIAL_TRACK_PAIR_WINDOW_MS = 8_000;
