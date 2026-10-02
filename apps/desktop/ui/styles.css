@@ -1618,3 +1618,10 @@ body[data-page="themes"] .engine { display:none; }
 :root[data-scenic="on"] body:not(.link-window) main > .panel { background:transparent; backdrop-filter:none; border:0; }
 :root[data-scenic="on"] body:not(.link-window) main > .panel > .toolbar { background:rgba(var(--glass-rgb),var(--glass-opacity)); backdrop-filter:blur(var(--glass-blur)); border:1px solid var(--line); border-radius:var(--corner-radius); }
 :root[data-scenic="on"] .download-row { background:rgba(var(--glass-rgb),var(--glass-opacity)); }
+/* Keep native chrome and scenery anchored while long sections scroll inside. */
+body:not(.link-window) { height:100vh; overflow:hidden; }
+body:not(.link-window) main { height:calc(100vh - 42px); min-height:0; overflow:auto; }
+.theme-detail-column { max-height:calc(100vh - 190px); overflow:auto; padding:0 2px 12px 0; scrollbar-color:var(--accent) transparent; }
+.theme-live-preview { aspect-ratio:auto; height:clamp(150px,22vh,220px); }
+.theme-studio-actions { position:sticky; bottom:0; z-index:2; padding:8px 0; background:rgba(var(--glass-rgb),.9); border-radius:var(--corner-radius); }
+.theme-studio-actions button { white-space:nowrap; }

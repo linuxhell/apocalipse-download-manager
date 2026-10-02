@@ -57,6 +57,7 @@ const server = http.createServer((request, response) => {
     await page.locator('#theme-apply').click();
     await page.waitForFunction(() => localStorage.getItem('apocalipse.theme') === 'fantasy');
     await page.locator('[data-theme-choice="cyberpunk"]').click();
+    await page.evaluate(() => { document.querySelector("main").scrollTop = 0; document.querySelector(".theme-detail-column").scrollTop = 0; });
     await page.screenshot({ path: path.join(output, 'themes-cinema-premium.png'), fullPage: true });
     await page.locator('#theme-search').fill('samurai');
     assert.equal(await page.locator('#theme-gallery .theme-card').count(), 1);
@@ -81,6 +82,9 @@ const server = http.createServer((request, response) => {
     await page.setViewportSize({ width: 1000, height: 700 });
     await page.screenshot({ path: path.join(output, 'themes-small-window.png'), fullPage: true });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    const bounds = await page.locator(".app-titlebar").boundingBox();
+    assert.equal(bounds.y, 0, "Native titlebar stays at the top");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight), true);
     assert.deepEqual(errors, []);
     console.log('Cinema UI: gallery, apply/cancel, search, transparency, titlebar actions and small window passed.');
   } finally { await browser.close(); server.close(); }
