@@ -1655,3 +1655,10 @@ body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"])
 :root[data-scenic="on"] :is(.theme-card strong,.preview-task strong) { color:#fff; }
 /* About follows the palette while keeping its own presentation. */
 :root[data-scenic="on"] body[data-page="about"]::before { background-image:none; background-color:var(--app-bg); filter:none; }
+
+/* Diagnostics and events share the available Logs space equally. */
+body[data-page="logs"] .logs-panel { flex:1 0 0; min-height:0; grid-template-rows:auto minmax(0,1fr) auto minmax(0,1fr); }
+.logs-panel > .diagnostics-panel { grid-row:2; min-height:0; margin:0; overflow:auto; }
+.logs-panel > .log-toolbar { grid-row:3; }
+.logs-panel > .log-event-list { grid-row:4; min-height:0; max-height:none; align-content:start; }
+.logs-panel > #log-empty { grid-row:4; grid-column:1; align-self:start; pointer-events:none; }

@@ -117,6 +117,14 @@ const server = http.createServer((request, response) => {
     for (const selector of ['.theme-card strong', '.preview-task strong']) {
       assert.equal(await page.locator(selector).first().evaluate(node => getComputedStyle(node).color), 'rgb(255, 255, 255)', 'Photo labels remain white in light themes');
     }
+    await page.locator('nav [data-page="about"]').click();
+    assert.equal(await page.evaluate(() => getComputedStyle(document.body, '::before').backgroundImage), 'none');
+    await page.screenshot({ path: path.join(output, 'about-theme-colors.png'), fullPage: true });
+    await page.locator('nav [data-page="logs"]').click();
+    const panes = await page.evaluate(() => ['.diagnostics-panel', '.log-event-list'].map(selector => document.querySelector(selector).getBoundingClientRect().height));
+    assert.ok(panes[0] > 100 && Math.abs(panes[0] - panes[1]) < 2, `Logs panes share the height: ${panes}`);
+    await page.screenshot({ path: path.join(output, 'logs-equal-panes.png'), fullPage: true });
+    await page.locator('nav [data-page="themes"]').click();
     await page.setViewportSize({ width: 1000, height: 700 });
     await page.screenshot({ path: path.join(output, 'themes-small-window.png'), fullPage: true });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
