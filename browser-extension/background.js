@@ -1,3 +1,33 @@
+const APOCALIPSE_THEME_ACCENTS = {
+  void:"#25d9ef",nebula:"#7c5cff",ember:"#ff7a3d",jade:"#2fe6a0",plasma:"#ff4fb8",glacier:"#4fd4ff",amber:"#ffb347",abyss:"#6fe7dd",rust:"#e0754a",venom:"#9be15d",wine:"#e0527a",linen:"#b5651d",sky:"#2f80c9",blossom:"#d6497d",sage:"#3f8f5f",sand:"#c96a3b",lilac:"#8b5fc9",mist:"#3f7ea6",citrus:"#d68910",coral:"#e0654f",frost:"#1b8f96",cyberpunk:"#00eaff","blade-runner":"#ff9d2e",sexy:"#ff4e9b",samurai:"#e23b3b",future:"#45e6ff",fantasy:"#63d995",pandora:"#57dfff"
+};
+async function applyActionThemeIcon(theme) {
+  if (!chrome.action?.setIcon || typeof OffscreenCanvas === "undefined") return;
+  const accent = APOCALIPSE_THEME_ACCENTS[theme] || APOCALIPSE_THEME_ACCENTS.void;
+  const rgb = accent.match(/[a-f\d]{2}/gi)?.map(v => parseInt(v,16)) || [37,217,239];
+  const images = {};
+  for (const size of [16,32,48]) {
+    const canvas = new OffscreenCanvas(size,size);
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0,0,size,size);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = Math.max(2,size*.13);
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = size*.12;
+    ctx.beginPath(); ctx.moveTo(size*.23,size*.82); ctx.lineTo(size*.48,size*.18); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(size*.52,size*.18); ctx.lineTo(size*.78,size*.82); ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = `rgb(${Math.min(255,rgb[0]+45)},${Math.min(255,rgb[1]+45)},${Math.min(255,rgb[2]+45)})`;
+    ctx.lineWidth = Math.max(2,size*.10);
+    ctx.beginPath(); ctx.moveTo(size*.36,size*.58); ctx.lineTo(size*.66,size*.58); ctx.stroke();
+    images[size] = ctx.getImageData(0,0,size,size);
+  }
+  await chrome.action.setIcon({ imageData: images }).catch(() => {});
+}
+chrome.storage.local.get({ desktopTheme:"void" }).then(({desktopTheme}) => applyActionThemeIcon(desktopTheme)).catch(() => {});
+
 try { if (typeof importScripts === "function") importScripts("diagnostics-core.js", "diagnostics-worker.js"); }
 catch { console.warn("ADM diagnostics modules unavailable; download handling is preserved."); }
 
@@ -1246,6 +1276,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     });
     return true;
   }
+  if (message?.type === "APOCALIPSE_THEME_ICON") {
+    void applyActionThemeIcon(String(message.theme || "void"));
+    reply({ ok: true });
+    return;
+  }
   if (message?.type === "APOCALIPSE_PAIR") {
     const token = String(message.token || "").trim();
     if (!token) {
@@ -1281,6 +1316,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (stored.language !== language || stored.desktopTheme !== theme) {
           await chrome.storage.local.set({ language, desktopTheme: theme });
         }
+        await applyActionThemeIcon(theme);
         reply({ language, theme });
       })
       .catch((error) => reply({ error: String(error) }));
