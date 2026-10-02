@@ -1684,3 +1684,23 @@ body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"])
 @media(max-width:1050px) {
  body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) { --queue-width:min(460px,calc((100vw - 118px) * .41)); }
 }
+
+/* Keep secondary task information available without stretching the cards. */
+.task-title-line { display:flex; align-items:center; gap:6px; min-width:0; }
+.task-title-line > strong { flex:1; min-width:0; }
+.task-primary-actions { display:flex; flex-shrink:0; gap:4px; }
+.task-primary-actions .task-icon-action { width:30px; height:30px; min-width:30px; min-height:30px; padding:5px; }
+.task-details { width:100%; min-width:0; }
+.task-details summary { cursor:pointer; color:var(--muted); font-size:12px; }
+.task-details-body { display:grid; gap:7px; padding-top:8px; overflow-wrap:anywhere; }
+.task-details-body > small { color:var(--muted); word-break:break-all; }
+.task-details-body .task-actions { flex-wrap:wrap; }
+:root[data-scenic="on"] .download-row { grid-template-columns:20px 32px minmax(0,1fr); }
+:root[data-scenic="on"] .download-row:has(.download-thumbnail) { grid-template-columns:20px 48px minmax(0,1fr); }
+:root[data-scenic="on"] .download-icon { width:32px; height:40px; font-size:20px; border-width:1px; }
+:root[data-scenic="on"] .download-icon.has-thumbnail { width:48px; height:40px; }
+:root[data-scenic="on"] .download-info > small { white-space:normal; }
+:root[data-scenic="on"] .task-status { gap:0; }
+#download-list::-webkit-scrollbar { width:9px; }
+#download-list::-webkit-scrollbar-track { background:var(--surface); border-radius:8px; }
+#download-list::-webkit-scrollbar-thumb { background:var(--accent); border:2px solid var(--surface); border-radius:8px; }

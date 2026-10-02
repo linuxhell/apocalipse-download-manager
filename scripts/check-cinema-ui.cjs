@@ -112,6 +112,11 @@ const server = http.createServer((request, response) => {
       const taskId = await folder.evaluate(node => node.closest('.download-row').dataset.taskId);
       await folder.click();
       assert.equal(await page.evaluate(() => window.qaCommands.filter(item => item.command === 'reveal_download').at(-1).args.id), taskId);
+      const details = page.locator('.task-details').first();
+      await details.locator('summary').click();
+      await page.evaluate(() => renderDownloads(true));
+      assert.equal(await details.evaluate(node => node.open), true);
+      await details.locator('summary').click();
       await page.locator('.task-remove-action').first().click();
       assert.equal(await page.locator('#clear-dialog').evaluate(node => node.open), true);
       await page.locator('#clear-dialog').evaluate(node => node.close());

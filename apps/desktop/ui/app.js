@@ -86,7 +86,7 @@ const catalogs = {
     webMirror: "HTTP mirror",
     locateFile: "Locate file…",
     locateFileHint: "If you moved the partial file to another folder or drive, point the app at it to resume from there instead of starting over.",
-    openFolder: "Open folder",
+    openFolder: "Open folder", taskDetails: "Details",
     preview: "Preview",
     stopRecording: "Stop and save",
     recordingActive: "Recording",
@@ -330,7 +330,7 @@ const catalogs = {
     webMirror: "mirror HTTP",
     locateFile: "Localizar arquivo…",
     locateFileHint: "Se você moveu o arquivo parcial para outra pasta ou disco, indique o novo local para continuar de onde parou em vez de começar do zero.",
-    openFolder: "Abrir pasta",
+    openFolder: "Abrir pasta", taskDetails: "Detalhes",
     preview: "Pré-visualizar",
     stopRecording: "Parar e salvar",
     recordingActive: "Gravando",
@@ -574,7 +574,7 @@ const catalogs = {
     webMirror: "HTTP 镜像",
     locateFile: "定位文件…",
     locateFileHint: "如果您已将部分下载的文件移动到其他文件夹或磁盘，请指定新位置以从原进度继续，而不是重新开始。",
-    openFolder: "打开文件夹",
+    openFolder: "打开文件夹", taskDetails: "详情",
     preview: "预览",
     stopRecording: "停止并保存",
     recordingActive: "正在录制",
@@ -1040,6 +1040,7 @@ function renderDownloads(force = false) {
   if (!force && signature === lastDownloadRenderSignature) return;
   lastDownloadRenderSignature = signature;
   const previousScrollTop = list.scrollTop;
+  const expandedTaskIds = new Set([...list.querySelectorAll(".task-details[open]")].map(node => node.closest(".download-row").dataset.taskId));
   list.replaceChildren();
   list.hidden = visible.length === 0;
   for (const task of visible) {
@@ -1143,11 +1144,14 @@ function renderDownloads(force = false) {
     });
     const name = document.createElement("strong");
     name.textContent = task.display_title || task.destination.split(/[\\/]/).pop();
-    name.title = task.display_title || "";
+    name.title = task.display_title || task.destination.split(/[\\/]/).pop();
     const source = document.createElement("small");
     source.textContent = task.source;
     source.title = task.source;
-    info.append(name, source);
+    const titleLine = document.createElement("div");
+    titleLine.className = "task-title-line";
+    titleLine.append(name);
+    info.append(titleLine);
     const progress = document.createElement("div");
     progress.className = "task-progress";
     const bar = document.createElement("i");
@@ -1187,7 +1191,7 @@ function renderDownloads(force = false) {
         : t("resumeChecking");
     resumeCapability.textContent = `${t("resumeCapability")} ${resumeValue}`;
     resumeCapability.dataset.supported = task.resume_supported === true ? "true" : task.resume_supported === false ? "false" : "unknown";
-    info.append(resumeCapability);
+
     const failureMessage = typeof task.state === "object" ? task.state.failed?.message || "" : "";
     const state = Object.assign(document.createElement("span"), {
       className: "download-state",
@@ -1350,7 +1354,20 @@ function renderDownloads(force = false) {
     addAction(t("openFolder"), "reveal_download");
     const status = document.createElement("div");
     status.className = "task-status";
-    status.append(state, actions);
+    const primaryActions = document.createElement("div");
+    primaryActions.className = "task-primary-actions";
+    for (const button of [...actions.querySelectorAll('.task-icon-action')]) primaryActions.append(button);
+    titleLine.append(primaryActions);
+    const taskDetails = document.createElement("details");
+    taskDetails.className = "task-details";
+    taskDetails.open = expandedTaskIds.has(task.id);
+    const detailsSummary = document.createElement("summary");
+    detailsSummary.textContent = t("taskDetails");
+    const detailsBody = document.createElement("div");
+    detailsBody.className = "task-details-body";
+    detailsBody.append(state, source, resumeCapability, actions);
+    taskDetails.append(detailsSummary, detailsBody);
+    status.append(taskDetails);
     row.append(select, icon, info, status);
     const scenicDetails = document.createElement("div");
     scenicDetails.className = "task-scenic-details";
@@ -1364,7 +1381,7 @@ function renderDownloads(force = false) {
       const text = document.createElement("b"); text.textContent = String(value);
       entry.append(text); scenicDetails.append(entry);
     }
-    if (scenicDetails.childElementCount) row.append(scenicDetails);
+    if (scenicDetails.childElementCount) detailsBody.append(scenicDetails);
     list.append(row);
   }
   list.scrollTop = previousScrollTop;
