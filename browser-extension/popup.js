@@ -1,7 +1,7 @@
 globalThis.ADM_DIAG?.register("popup.js");
 let media = [], selected = "video", locale = "en", activePageUrl = "", interfaceTheme = "void";
 let activeMediaTab = null, mediaRefreshRunning = false, mediaFingerprint = "";
-const popupThemes = new Set(["void","nebula","ember","jade","plasma","glacier","amber","abyss","rust","venom","wine","linen","sky","blossom","sage","sand","lilac","mist","citrus","coral","frost"]);
+const popupThemes = new Set(["void","nebula","ember","jade","plasma","glacier","amber","abyss","rust","venom","wine","linen","sky","blossom","sage","sand","lilac","mist","citrus","coral","frost","cyberpunk","blade-runner","sexy","samurai","future","fantasy","pandora"]);
 const normalizeDesktopLanguage = (language) => language === "pt-BR" ? "pt_BR" : language === "zh-CN" ? "zh_CN" : ["en","pt_BR","zh_CN"].includes(language) ? language : "en";
 const applyPopupTheme = (theme) => {
   interfaceTheme = popupThemes.has(theme) ? theme : "void";
