@@ -35,7 +35,7 @@ const server = http.createServer((request, response) => {
             state: 'downloading', received: 3640000000, total: 6500000000, download_speed: 42300000, progress_percent: 56, resume_supported: true },
           { id: 'qa-recording', source: 'https://example.test/live', destination: 'D:\\Downloads\\Live.recording.webm',
             state: 'downloading', received: 3640000000, total: 6500000000, download_speed: 42300000, progress_percent: 56, resume_supported: true }];
-        if (command === 'get_app_version') return '0.4.81';
+        if (command === 'get_app_version') return '0.4.82';
         if (command === 'default_download_directory') return 'D:\\Downloads';
         if (command === 'get_application_theme') return 'cyberpunk';
         if (command === 'get_bridge_pairing') return { connected: false, paired: false };

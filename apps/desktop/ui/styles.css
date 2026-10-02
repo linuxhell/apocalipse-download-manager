@@ -1653,3 +1653,5 @@ body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"])
 }
 :root:is([data-theme="linen"],[data-theme="sky"],[data-theme="blossom"],[data-theme="sage"],[data-theme="sand"],[data-theme="lilac"],[data-theme="mist"],[data-theme="citrus"],[data-theme="coral"],[data-theme="frost"])[data-scenic="on"] #download-list .download-row .task-action { background:rgba(250,252,255,.95); color:#101820; border-color:#718797; font-weight:650; }
 :root[data-scenic="on"] :is(.theme-card strong,.preview-task strong) { color:#fff; }
+/* About follows the palette while keeping its own presentation. */
+:root[data-scenic="on"] body[data-page="about"]::before { background-image:none; background-color:var(--app-bg); filter:none; }
