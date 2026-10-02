@@ -111,3 +111,11 @@ header #settings-toggle,.language select,.shortcuts select,nav button,.diag-cont
 nav button.active{background:color-mix(in srgb,var(--p-accent) 18%,var(--p-surface));color:var(--p-accent)}
 article{background:var(--p-surface);border-color:var(--p-line)} article b{color:var(--p-text)} article small,#empty,#bulk-actions label,.shortcuts label,.diag-controls p,.diag-controls small{color:var(--p-muted)}
 main{scrollbar-color:var(--p-accent) var(--p-surface)} .row-actions .external-preview{background:var(--p-surface-2);color:var(--p-text)}
+
+.extension-brand{display:flex;align-items:center;gap:8px;min-width:0}
+.extension-brand-copy{display:flex;align-items:baseline;min-width:0}
+.apocalipse-mark{width:34px;height:34px;display:inline-grid;place-items:center;color:var(--p-accent);filter:drop-shadow(0 0 7px color-mix(in srgb,var(--p-accent) 70%,transparent));flex:0 0 auto}
+.apocalipse-mark svg{width:100%;height:100%;display:block}
+.apocalipse-mark path:nth-child(1),.apocalipse-mark path:nth-child(2){fill:currentColor}
+.apocalipse-mark path:nth-child(3){fill:color-mix(in srgb,var(--p-accent) 65%,white)}
+header strong{color:var(--p-accent)!important}
