@@ -15,13 +15,14 @@ const appJs = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8")
 const currentThemes = [
   "void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss",
   "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand",
-  "lilac", "mist", "citrus", "coral", "frost",
+  "lilac", "mist", "citrus", "coral", "frost", "cyberpunk", "blade-runner",
+  "sexy", "samurai", "future", "fantasy", "pandora",
 ];
 
 test("app.js still defines exactly the theme list this test locks in", () => {
   const match = appJs.match(/const valid = \[([^\]]+)\];/);
   assert.ok(match, "expected to find app.js's `valid` theme array");
-  const declared = match[1].match(/"([a-z]+)"/g).map((s) => s.slice(1, -1));
+  const declared = match[1].match(/"([a-z-]+)"/g).map((s) => s.slice(1, -1));
   assert.deepEqual(declared, currentThemes);
 });
 
@@ -33,7 +34,7 @@ test("browser extension popup accepts every current desktop theme, not a retired
   // extension, never the theme.
   const setMatch = popupJs.match(/const popupThemes = new Set\(\[([^\]]+)\]\);/);
   assert.ok(setMatch, "expected to find popup.js's popupThemes Set");
-  const declared = setMatch[1].match(/"([a-z]+)"/g).map((s) => s.slice(1, -1));
+  const declared = setMatch[1].match(/"([a-z-]+)"/g).map((s) => s.slice(1, -1));
   assert.deepEqual(new Set(declared), new Set(currentThemes));
   assert.doesNotMatch(popupJs, /"inferno"|"synthwave"|"whiteaurora"|"pearlblue"/);
 });
@@ -54,7 +55,8 @@ test("content.js overlay accent colors track the current theme names", () => {
   const accentsMatch = contentJs.match(/const accents = \{([^}]+)\};/);
   assert.ok(accentsMatch, "expected to find content.js's overlayThemeColors accents map");
   for (const theme of currentThemes) {
-    assert.match(accentsMatch[1], new RegExp(`\\b${theme}:`));
+    const escaped = theme.replace(/[.*+?^${}()|[\\]\\]/g, "\\    assert.match(accentsMatch[1], new RegExp(`\\b${theme}:`));");
+    assert.match(accentsMatch[1], new RegExp(`(?:\\b${escaped}:|"${escaped}"\\s*:)`));
   }
   assert.doesNotMatch(accentsMatch[1], /\binferno:|\bsynthwave:|\bwhiteaurora:/);
 });
