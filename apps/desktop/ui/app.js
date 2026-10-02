@@ -742,7 +742,7 @@ Object.assign(catalogs.en, {originalAudio: "Original audio"});
 Object.assign(catalogs["pt-BR"], {originalAudio: "Áudio original"});
 Object.assign(catalogs["zh-CN"], {originalAudio: "原始音频"});
 let locale = localStorage.getItem("apocalipse.language") || "en";
-const valid = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost"];
+const valid = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost", "cyberpunk", "blade-runner", "sexy", "samurai", "future", "fantasy", "pandora"];
 const applyTheme = (theme) => {
   document.documentElement.dataset.theme = valid.includes(theme) ? theme : "void";
 };
@@ -784,6 +784,7 @@ let downloads = [];
 const downloadListState = createTaskListState();
 let activeFilter = "all";
 let activePage = "downloads";
+document.documentElement.dataset.page = activePage;
 let overallSpeed = 0;
 let overallUploadSpeed = 0;
 let lastClipboardLink = "";
@@ -999,21 +1000,48 @@ async function resolveCachedThumbnail(url) {
   return pending;
 }
 
+function youtubeThumbnailCandidates(url) {
+  if (!url) return [];
+  const candidates = [url];
+  try {
+    const parsed = new URL(url);
+    if (/^(?:i|img)\.ytimg\.com$/i.test(parsed.hostname)) {
+      const path = parsed.pathname;
+      for (const variant of ["maxresdefault", "sddefault", "hqdefault", "mqdefault"]) {
+        const candidatePath = path.replace(/(?:maxresdefault|sddefault|hqdefault|mqdefault)(?=\.(?:jpg|webp)$)/i, variant);
+        const candidate = new URL(parsed.toString());
+        candidate.pathname = candidatePath;
+        const value = candidate.toString();
+        if (!candidates.includes(value)) candidates.push(value);
+      }
+    }
+  } catch {}
+  return candidates;
+}
+
+async function resolveThumbnailWithFallback(url) {
+  for (const candidate of youtubeThumbnailCandidates(url)) {
+    const resolved = await resolveCachedThumbnail(candidate);
+    if (resolved) return { resolved, candidate };
+  }
+  return null;
+}
+
 function loadPreviewThumbnail(image, url) {
   image.dataset.thumbnailSource = url || "";
   image.hidden = true;
   image.removeAttribute("src");
   if (!url) return;
-  resolveCachedThumbnail(url).then((resolved) => {
-    if (!resolved || image.dataset.thumbnailSource !== url) return;
-    image.src = resolved;
+  resolveThumbnailWithFallback(url).then((result) => {
+    if (!result || image.dataset.thumbnailSource !== url) return;
+    image.src = result.resolved;
     image.hidden = false;
     image.onerror = () => {
       if (image.dataset.thumbnailSource !== url) return;
       image.hidden = true;
       image.removeAttribute("src");
-      thumbnailDataCache.delete(url);
-      thumbnailRetryAfter.set(url, Date.now() + 60_000);
+      thumbnailDataCache.delete(result.candidate);
+      thumbnailRetryAfter.set(result.candidate, Date.now() + 60_000);
     };
   });
 }
@@ -1510,6 +1538,7 @@ document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data
       return;
     }
     activePage = button.dataset.page;
+    document.documentElement.dataset.page = activePage;
     document.querySelector("#moq-capture-panel").hidden = activePage !== "recordings";
     document.querySelectorAll("nav [data-page]").forEach((item) => item.classList.toggle("active", item === button));
     const heading = button.querySelector("b")?.textContent || t("downloads");
