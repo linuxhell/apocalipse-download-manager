@@ -131,18 +131,18 @@
     }
   ],
   "icons": {
-    "16": "icons/alien-16.png",
-    "32": "icons/alien-32.png",
-    "48": "icons/alien-48.png",
-    "128": "icons/alien-128.png"
+    "16": "icons/apocalipse-a-16.png",
+    "32": "icons/apocalipse-a-32.png",
+    "48": "icons/apocalipse-a-48.png",
+    "128": "icons/apocalipse-a-128.png"
   },
   "action": {
     "default_popup": "popup.html",
     "default_title": "Apocalipse",
     "default_icon": {
-      "16": "icons/alien-16.png",
-      "32": "icons/alien-32.png",
-      "48": "icons/alien-48.png"
+      "16": "icons/apocalipse-a-16.png",
+      "32": "icons/apocalipse-a-32.png",
+      "48": "icons/apocalipse-a-48.png"
     }
   },
   "version_name": "0.3.190 - Themes and thumbnail fix"
