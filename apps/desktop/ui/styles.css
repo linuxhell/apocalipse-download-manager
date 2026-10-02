@@ -1651,3 +1651,4 @@ body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"])
 @media(max-width:1050px) {
  body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) :is(.metrics,footer) { width:min(760px,calc((100vw - 118px) * .64)); }
 }
+:root:is([data-theme="linen"],[data-theme="sky"],[data-theme="blossom"],[data-theme="sage"],[data-theme="sand"],[data-theme="lilac"],[data-theme="mist"],[data-theme="citrus"],[data-theme="coral"],[data-theme="frost"])[data-scenic="on"] .download-row .task-action { background:rgba(250,252,255,.95); color:#101820; border-color:#718797; font-weight:650; }

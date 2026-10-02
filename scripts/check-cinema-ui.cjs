@@ -83,6 +83,9 @@ const server = http.createServer((request, response) => {
     await page.locator('#window-drag-region').dispatchEvent('mousedown', { button: 0, detail: 1 });
     const actions = await page.evaluate(() => window.qaCommands.filter(item => item.command === 'control_main_window').map(item => item.args.action));
     for (const action of ['minimize', 'maximize', 'close', 'drag']) assert.ok(actions.includes(action), action);
+    await page.locator('[data-theme-choice="cyberpunk"]').click();
+    await page.locator('#theme-apply').click();
+    await page.waitForFunction(() => localStorage.getItem('apocalipse.theme') === 'cyberpunk');
     // Queue controls and all three task types leave the right-hand scenery exposed.
     await page.setViewportSize({ width: 1280, height: 850 });
     for (const section of ['downloads', 'torrents', 'recordings']) {
@@ -102,9 +105,13 @@ const server = http.createServer((request, response) => {
     await page.locator('#theme-apply').click();
     await page.waitForFunction(() => localStorage.getItem('apocalipse.theme') === 'sky');
     await page.locator('nav [data-page="recordings"]').click();
+    await page.locator('#moq-capture-panel').evaluate(node => { node.open = true; });
     const light = await page.locator('#moq-capture-panel').evaluate(node => ({ color: getComputedStyle(node).color, backing: getComputedStyle(node).backgroundColor }));
     assert.equal(light.color, 'rgb(16, 24, 32)');
     assert.ok(Number(light.backing.match(/, ([\d.]+)\)$/)?.[1] || 1) >= .88, 'Light capture form has a contrast backing');
+    const lightButton = await page.locator('.download-row .task-action').first().evaluate(node => ({ color: getComputedStyle(node).color, background: getComputedStyle(node).backgroundColor }));
+    assert.equal(lightButton.color, 'rgb(16, 24, 32)');
+    assert.ok(lightButton.background.includes('250, 252, 255'), 'Light task buttons use a light backing');
     await page.screenshot({ path: path.join(output, 'recordings-compact-light.png'), fullPage: true });
     await page.locator('nav [data-page="themes"]').click();
     await page.setViewportSize({ width: 1000, height: 700 });
