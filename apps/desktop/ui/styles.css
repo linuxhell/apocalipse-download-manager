@@ -1547,9 +1547,9 @@ body[data-page="themes"] .engine { display:none; }
 #theme-count { border:1px solid var(--line); border-radius:99px; padding:4px 10px; color:var(--muted); white-space:nowrap; }
 #theme-search { width:100%; background:rgba(var(--glass-rgb),.8); color:var(--text); padding:10px 12px; border:1px solid var(--line); border-radius:var(--corner-radius); }
 .theme-select-fallback { display:none; }
-.theme-gallery { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; max-height:calc(100vh - 260px); min-height:260px; overflow:auto; padding:4px; scrollbar-color:var(--accent) transparent; }
-.theme-card { position:relative; aspect-ratio:1.7; min-width:0; overflow:hidden; border:1px solid #526575; border-radius:var(--corner-radius); padding:0; background:#0b121a; cursor:pointer; text-align:left; }
-.theme-card img { width:100%; height:100%; object-fit:cover; display:block; }
+.theme-gallery { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; max-height:calc(100vh - 260px); min-height:260px; grid-auto-rows:max-content; align-content:start; overflow:auto; padding:4px; scrollbar-color:var(--accent) transparent; }
+.theme-card { position:relative; aspect-ratio:1.7; width:100%; min-height:110px; min-width:0; overflow:hidden; border:1px solid #526575; border-radius:var(--corner-radius); padding:0; background:#0b121a; cursor:pointer; text-align:left; }
+.theme-card img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
 .theme-card::before { content:""; position:absolute; inset:40% 0 0; background:linear-gradient(transparent,#000e); }
 .theme-card strong { position:absolute; bottom:12px; left:12px; right:30px; color:#fff; font-size:17px; text-shadow:0 1px 3px #000; }
 .theme-card.selected { outline:3px solid var(--accent); outline-offset:-3px; box-shadow:0 0 16px color-mix(in srgb,var(--accent) 30%,transparent); }
@@ -1613,3 +1613,8 @@ body[data-page="themes"] .engine { display:none; }
 :root[data-ui-size="large"] .download-info strong { font-size:20px; }
 :root[data-ui-size="large"] .download-info small { font-size:16px; }
 :root[data-ui-size="large"] .theme-studio .appearance-toggle,:root[data-ui-size="large"] .theme-studio .appearance-range,:root[data-ui-size="large"] .theme-studio .appearance-select { font-size:16px; }
+
+/* Let scenery remain sharp between queue controls and cards. */
+:root[data-scenic="on"] body:not(.link-window) main > .panel { background:transparent; backdrop-filter:none; border:0; }
+:root[data-scenic="on"] body:not(.link-window) main > .panel > .toolbar { background:rgba(var(--glass-rgb),var(--glass-opacity)); backdrop-filter:blur(var(--glass-blur)); border:1px solid var(--line); border-radius:var(--corner-radius); }
+:root[data-scenic="on"] .download-row { background:rgba(var(--glass-rgb),var(--glass-opacity)); }

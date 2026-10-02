@@ -8104,7 +8104,9 @@ fn set_application_language(state: State<'_, AppState>, language: String) -> Res
 
 #[tauri::command]
 fn control_main_window(app: tauri::AppHandle, action: String) -> Result<(), String> {
-    let window = app.get_webview_window("main").ok_or("main_window_missing")?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or("main_window_missing")?;
     let result = match action.as_str() {
         "minimize" => window.minimize(),
         "maximize" => {
@@ -8128,9 +8130,34 @@ fn set_application_theme(
     theme: String,
 ) -> Result<(), String> {
     const THEMES: &[&str] = &[
-        "void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom",
-        "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral",
-        "frost", "cyberpunk", "bladerunner", "sexy", "samurai", "future", "fantasy", "pandora",
+        "void",
+        "nebula",
+        "ember",
+        "jade",
+        "plasma",
+        "glacier",
+        "amber",
+        "abyss",
+        "rust",
+        "venom",
+        "wine",
+        "linen",
+        "sky",
+        "blossom",
+        "sage",
+        "sand",
+        "lilac",
+        "mist",
+        "citrus",
+        "coral",
+        "frost",
+        "cyberpunk",
+        "bladerunner",
+        "sexy",
+        "samurai",
+        "future",
+        "fantasy",
+        "pandora",
     ];
     if !THEMES.contains(&theme.as_str()) {
         return Err("unsupported_theme".to_owned());
