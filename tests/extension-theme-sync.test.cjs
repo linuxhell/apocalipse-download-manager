@@ -52,11 +52,11 @@ test("popup.css has a rendered palette for every current non-void theme", () => 
 });
 
 test("content.js overlay accent colors track the current theme names", () => {
-  const accentsMatch = contentJs.match(/const accents = \\{([^}]+)\\};/);
+  const accentsMatch = contentJs.match(/const accents = \{([^}]+)\};/);
   assert.ok(accentsMatch, "expected to find app overlay accents map");
   for (const theme of currentThemes) {
-    const escaped = theme.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&");
-    assert.match(accentsMatch[1], new RegExp(`(?:\\\\b${escaped}:|"${escaped}"\\\\s*:)`));
+    const keyPattern = theme.includes("-") ? `"${theme}"\\s*:` : `\\b${theme}:`;
+    assert.match(accentsMatch[1], new RegExp(keyPattern));
   }
-  assert.doesNotMatch(accentsMatch[1], /\\binferno:|\\bsynthwave:|\\bwhiteaurora:/);
+  assert.doesNotMatch(accentsMatch[1], /\binferno:|\bsynthwave:|\bwhiteaurora:/);
 });
