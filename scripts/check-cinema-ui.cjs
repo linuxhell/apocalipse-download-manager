@@ -114,6 +114,9 @@ const server = http.createServer((request, response) => {
     assert.ok(lightButton.background.includes('250, 252, 255'), 'Light task buttons use a light backing');
     await page.screenshot({ path: path.join(output, 'recordings-compact-light.png'), fullPage: true });
     await page.locator('nav [data-page="themes"]').click();
+    for (const selector of ['.theme-card strong', '.preview-task strong']) {
+      assert.equal(await page.locator(selector).first().evaluate(node => getComputedStyle(node).color), 'rgb(255, 255, 255)', 'Photo labels remain white in light themes');
+    }
     await page.setViewportSize({ width: 1000, height: 700 });
     await page.screenshot({ path: path.join(output, 'themes-small-window.png'), fullPage: true });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
