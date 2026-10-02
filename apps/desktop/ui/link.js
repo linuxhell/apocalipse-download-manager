@@ -174,7 +174,7 @@ const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) 
 // names from before the 25-to-20-theme overhaul (commit 9958df1),
 // none of which exist in styles.css anymore, so every theme the main
 // window could actually be set to fell through to "void" here.
-const validThemes = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost"];
+const validThemes = ["void","nebula","ember","jade","plasma","glacier","amber","abyss","rust","venom","wine","linen","sky","blossom","sage","sand","lilac","mist","citrus","coral","frost","cyberpunk","blade-runner","sexy","samurai","futuro","fantasia","pandora"];
 const appearanceDefaults = { transparencyEnabled: false, transparencyLevel: 30, roundedEnabled: true, cornerRadius: 10, interfaceSize: "normal" };
 
 function syncPresentation() {
