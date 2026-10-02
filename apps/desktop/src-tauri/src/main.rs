@@ -8111,7 +8111,7 @@ fn set_application_theme(
     const THEMES: &[&str] = &[
         "void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom",
         "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral",
-        "frost",
+        "frost", "cyberpunk", "blade-runner", "sexy", "samurai", "futuro", "fantasia", "pandora",
     ];
     if !THEMES.contains(&theme.as_str()) {
         return Err("unsupported_theme".to_owned());
