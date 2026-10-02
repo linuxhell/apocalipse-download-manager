@@ -1039,6 +1039,7 @@ function renderDownloads(force = false) {
   });
   if (!force && signature === lastDownloadRenderSignature) return;
   lastDownloadRenderSignature = signature;
+  const previousScrollTop = list.scrollTop;
   list.replaceChildren();
   list.hidden = visible.length === 0;
   for (const task of visible) {
@@ -1209,6 +1210,19 @@ function renderDownloads(force = false) {
       const button = document.createElement("button");
       button.className = "task-action";
       button.textContent = label;
+      button.dataset.command = command;
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      const icons = {
+        pause_download: '<path d="M8 5v14M16 5v14"/>',
+        resume_download: '<path d="m8 5 11 7-11 7z"/>',
+        stop_recording: '<path d="M6 6h12v12H6z"/>',
+        reveal_download: '<path fill="#ffc84a" stroke="#b98112" d="M3 6h7l2 3h9v10H3z"/><path fill="#ffdc75" stroke="#b98112" d="M3 11h19l-3 8H2z"/>',
+      };
+      if (icons[command]) {
+        button.classList.add("task-icon-action");
+        button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${icons[command]}</svg>`;
+      }
       const execute = async () => {
         if (busyIds.has(task.id)) return;
         busyIds.add(task.id);
@@ -1321,6 +1335,18 @@ function renderDownloads(force = false) {
       };
       actions.append(bandwidth);
     }
+    const removeButton = document.createElement("button");
+    removeButton.className = "task-action task-icon-action task-remove-action";
+    removeButton.title = t("removeSelected");
+    removeButton.setAttribute("aria-label", t("removeSelected"));
+    removeButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#e94558" stroke-width="2" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg>';
+    removeButton.onclick = () => {
+      selectedIds.clear();
+      selectedIds.add(task.id);
+      renderDownloads(true);
+      clearDialog.showModal();
+    };
+    actions.append(removeButton);
     addAction(t("openFolder"), "reveal_download");
     const status = document.createElement("div");
     status.className = "task-status";
@@ -1341,6 +1367,7 @@ function renderDownloads(force = false) {
     if (scenicDetails.childElementCount) row.append(scenicDetails);
     list.append(row);
   }
+  list.scrollTop = previousScrollTop;
   document.querySelector(".metrics article:nth-child(4) strong").textContent =
     downloads.filter((task) => task.state === "queued").length;
   document.querySelector(".metrics article:nth-child(3) strong").textContent =

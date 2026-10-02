@@ -34,8 +34,8 @@ const server = http.createServer((request, response) => {
           { id: 'qa-torrent', source: 'magnet:?xt=urn:btih:0123456789012345678901234567890123456789', destination: 'D:\\Downloads\\Movie.mkv',
             state: 'downloading', received: 3640000000, total: 6500000000, download_speed: 42300000, progress_percent: 56, resume_supported: true },
           { id: 'qa-recording', source: 'https://example.test/live', destination: 'D:\\Downloads\\Live.recording.webm',
-            state: 'downloading', received: 3640000000, total: 6500000000, download_speed: 42300000, progress_percent: 56, resume_supported: true }];
-        if (command === 'get_app_version') return '0.4.82';
+            state: 'downloading', received: 3640000000, total: 6500000000, download_speed: 42300000, progress_percent: 56, resume_supported: true }].flatMap(task => Array.from({ length: 8 }, (_, index) => ({ ...task, id: `${task.id}-${index}` })));
+        if (command === 'get_app_version') return '0.4.83';
         if (command === 'default_download_directory') return 'D:\\Downloads';
         if (command === 'get_application_theme') return 'cyberpunk';
         if (command === 'get_bridge_pairing') return { connected: false, paired: false };
@@ -96,7 +96,25 @@ const server = http.createServer((request, response) => {
         const panel = document.querySelector('main > .panel').getBoundingClientRect();
         return { ratio: panel.width / (main.width - 40), bars: [...document.querySelectorAll('.task-progress')].map(n => n.getBoundingClientRect().width) };
       });
-      assert.ok(compact.ratio <= .65, `${section} preserves the right side`);
+      assert.ok(compact.ratio <= .42, `${section} preserves the fairy and feet`);
+      const queue = await page.evaluate(() => {
+        const list = document.querySelector('#download-list');
+        const widths = ['main > .panel', '.metrics', 'footer'].map(selector => document.querySelector(selector).getBoundingClientRect().width);
+        list.scrollTop = 100;
+        renderDownloads(true);
+        return { widths, scrollHeight: list.scrollHeight, height: list.clientHeight, scrollTop: list.scrollTop, overflow: getComputedStyle(list).overflowY };
+      });
+      assert.ok(queue.widths.every(width => Math.abs(width - queue.widths[0]) < 2), `${section} uses matching panel widths`);
+      assert.ok(queue.scrollHeight > queue.height && queue.overflow === 'auto', `${section} scrolls inside its list`);
+      assert.equal(queue.scrollTop, 100, `${section} preserves scroll when progress refreshes`);
+      await page.locator('#download-list').evaluate(node => { node.scrollTop = 0; });
+      const folder = page.locator('.task-action[data-command="reveal_download"]').first();
+      const taskId = await folder.evaluate(node => node.closest('.download-row').dataset.taskId);
+      await folder.click();
+      assert.equal(await page.evaluate(() => window.qaCommands.filter(item => item.command === 'reveal_download').at(-1).args.id), taskId);
+      await page.locator('.task-remove-action').first().click();
+      assert.equal(await page.locator('#clear-dialog').evaluate(node => node.open), true);
+      await page.locator('#clear-dialog').evaluate(node => node.close());
       assert.ok(compact.bars.every(width => width <= 401), `${section} has compact progress bars`);
       await page.screenshot({ path: path.join(output, `${section}-compact-cyberpunk.png`), fullPage: true });
     }
@@ -117,6 +135,11 @@ const server = http.createServer((request, response) => {
     for (const selector of ['.theme-card strong', '.preview-task strong']) {
       assert.equal(await page.locator(selector).first().evaluate(node => getComputedStyle(node).color), 'rgb(255, 255, 255)', 'Photo labels remain white in light themes');
     }
+    await page.locator('[data-theme-choice="fantasy"]').click();
+    await page.locator('#theme-apply').click();
+    await page.waitForFunction(() => localStorage.getItem('apocalipse.theme') === 'fantasy');
+    await page.locator('nav [data-page="downloads"]').click();
+    await page.screenshot({ path: path.join(output, 'downloads-compact-fantasy.png'), fullPage: true });
     await page.locator('nav [data-page="about"]').click();
     assert.equal(await page.evaluate(() => getComputedStyle(document.body, '::before').backgroundImage), 'none');
     await page.screenshot({ path: path.join(output, 'about-theme-colors.png'), fullPage: true });

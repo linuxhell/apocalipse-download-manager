@@ -1662,3 +1662,25 @@ body[data-page="logs"] .logs-panel { flex:1 0 0; min-height:0; grid-template-row
 .logs-panel > .log-toolbar { grid-row:3; }
 .logs-panel > .log-event-list { grid-row:4; grid-column:1; min-height:0; max-height:none; align-content:start; }
 .logs-panel > #log-empty { grid-row:4; grid-column:1; align-self:start; pointer-events:none; }
+
+/* A shared narrow queue column leaves the character and feet visible. */
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) { --queue-width:min(460px,calc((100vw - 250px) * .41)); }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) main { padding-bottom:150px; }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) main > :is(header,.panel,.advanced-transport-form) { width:var(--queue-width); flex-shrink:0; }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) main > .panel { display:flex; flex-direction:column; flex:1 1 0; min-height:120px; overflow:hidden; }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) .toolbar { flex-shrink:0; }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) #download-list { flex:1 1 0; min-height:0; overflow-y:auto; overflow-x:hidden; scrollbar-gutter:stable; scrollbar-color:var(--accent) var(--surface); }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) :is(.metrics,footer) { width:var(--queue-width); }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) .metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) .metrics article { min-width:0; padding:7px 10px; }
+.task-icon-action { width:36px; height:36px; min-width:36px; padding:7px; display:inline-grid; place-items:center; }
+.task-icon-action svg { width:20px; height:20px; }
+#download-list .download-row .task-remove-action { color:#e94558; }
+:root[data-scenic="on"] .download-row { padding:10px; margin-bottom:8px; gap:7px 9px; }
+:root[data-scenic="on"] .download-info strong { font-size:15px; }
+:root[data-scenic="on"] .download-info small { font-size:13px; }
+:root[data-scenic="on"] .task-progress { height:8px; margin-top:8px; }
+:root[data-scenic="on"] .task-scenic-details { gap:6px 12px; padding-top:7px; font-size:12px; }
+@media(max-width:1050px) {
+ body:is([data-page="downloads"],[data-page="torrents"],[data-page="recordings"]) { --queue-width:min(460px,calc((100vw - 118px) * .41)); }
+}
