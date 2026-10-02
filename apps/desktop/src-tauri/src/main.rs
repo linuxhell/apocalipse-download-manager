@@ -8102,6 +8102,57 @@ fn set_application_language(state: State<'_, AppState>, language: String) -> Res
     Ok(())
 }
 
+fn theme_accent_rgb(theme: &str) -> (u8, u8, u8) {
+    match theme {
+        "nebula" => (124, 92, 255), "ember" => (255, 122, 61), "jade" => (47, 230, 160),
+        "plasma" => (255, 79, 184), "glacier" => (79, 212, 255), "amber" => (255, 179, 71),
+        "abyss" => (111, 231, 221), "rust" => (224, 117, 74), "venom" => (155, 225, 93),
+        "wine" => (224, 82, 122), "linen" => (181, 101, 29), "sky" => (47, 128, 201),
+        "blossom" => (214, 73, 125), "sage" => (63, 143, 95), "sand" => (201, 106, 59),
+        "lilac" => (139, 95, 201), "mist" => (63, 126, 166), "citrus" => (214, 137, 16),
+        "coral" => (224, 101, 79), "frost" => (27, 143, 150), "cyberpunk" => (0, 234, 255),
+        "blade-runner" => (255, 157, 46), "sexy" => (255, 78, 155), "samurai" => (226, 59, 59),
+        "future" => (69, 230, 255), "fantasy" => (99, 217, 149), "pandora" => (87, 223, 255),
+        _ => (37, 217, 239),
+    }
+}
+
+fn point_segment_distance(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
+    let abx = bx - ax;
+    let aby = by - ay;
+    let denom = abx * abx + aby * aby;
+    let t = if denom > 0.0 {
+        (((px - ax) * abx + (py - ay) * aby) / denom).clamp(0.0, 1.0)
+    } else { 0.0 };
+    let dx = px - (ax + t * abx);
+    let dy = py - (ay + t * aby);
+    (dx * dx + dy * dy).sqrt()
+}
+
+fn theme_tray_icon(theme: &str) -> Image<'static> {
+    let size = 32usize;
+    let mut rgba = vec![0u8; size * size * 4];
+    let (r, g, b) = theme_accent_rgb(theme);
+    for y in 0..size {
+        for x in 0..size {
+            let fx = x as f32 / (size - 1) as f32;
+            let fy = y as f32 / (size - 1) as f32;
+            let left = point_segment_distance(fx, fy, 0.22, 0.82, 0.48, 0.16) <= 0.075;
+            let right = point_segment_distance(fx, fy, 0.52, 0.16, 0.79, 0.82) <= 0.075;
+            let cross = (0.34..=0.67).contains(&fx) && (0.54..=0.64).contains(&fy);
+            let glow = left || right || cross;
+            if !glow { continue; }
+            let offset = (y * size + x) * 4;
+            let highlight = cross && fy < 0.59;
+            rgba[offset] = if highlight { r.saturating_add(34) } else { r };
+            rgba[offset + 1] = if highlight { g.saturating_add(34) } else { g };
+            rgba[offset + 2] = if highlight { b.saturating_add(34) } else { b };
+            rgba[offset + 3] = 255;
+        }
+    }
+    Image::new_owned(rgba, size as u32, size as u32)
+}
+
 #[tauri::command]
 fn set_application_theme(
     app: tauri::AppHandle,
@@ -8111,7 +8162,7 @@ fn set_application_theme(
     const THEMES: &[&str] = &[
         "void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom",
         "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral",
-        "frost",
+        "frost", "cyberpunk", "blade-runner", "sexy", "samurai", "future", "fantasy", "pandora",
     ];
     if !THEMES.contains(&theme.as_str()) {
         return Err("unsupported_theme".to_owned());
@@ -8133,6 +8184,9 @@ fn set_application_theme(
     // that is already open follow it instead of staying on whatever
     // theme it happened to load with.
     let _ = app.emit("theme-changed", &theme);
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        let _ = tray.set_icon(Some(theme_tray_icon(&theme)));
+    }
     Ok(())
 }
 
@@ -14730,10 +14784,11 @@ fn main() {
                 queue_associated_source(app.handle(), source).map_err(std::io::Error::other)?;
             }
             let menu = Menu::with_items(app, &[&show, &quit])?;
-            // The detailed application artwork loses definition at the 16–24 px sizes used by
-            // system trays. Keep a simplified, high-contrast asset specifically for this role.
-            let icon = Image::new_owned(include_bytes!("../icons/tray.rgba").to_vec(), 32, 32);
-            TrayIconBuilder::new()
+            // The tray carries the same angular A identity and accent as the active theme.
+            let tray_theme = app.state::<AppState>().settings.lock()
+                .map(|settings| settings.theme.clone()).unwrap_or_else(|_| "void".to_owned());
+            let icon = theme_tray_icon(&tray_theme);
+            TrayIconBuilder::with_id("main-tray")
                 .icon(icon)
                 .tooltip("Apocalipse Download Manager")
                 .menu(&menu)
