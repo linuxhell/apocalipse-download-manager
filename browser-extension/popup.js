@@ -138,7 +138,9 @@ const translate = () => {
   document.querySelector("#extension-version").textContent = `${t("extension")} ${chrome.runtime.getManifest().version}`;
   document.querySelector("#settings-toggle").ariaLabel = t("settings");
 };
+let popupBridgeConnected = false;
 const setBridgeStatus = (connected) => {
+  popupBridgeConnected = connected;
   document.querySelector("#bridge-dot").classList.toggle("connected", connected);
   const label = document.querySelector("#bridge-label");
   label.dataset.i18n = connected ? "connected" : "disconnected";
@@ -211,6 +213,16 @@ const showWorkerWarning = async (worker = null) => {
   if (locale === "pt_BR") label.textContent = `Desktop conectado; motor de captura indisponível (${phase}: ${reason}).`;
   else if (locale === "zh_CN") label.textContent = `桌面端已连接；捕获引擎不可用 (${phase}: ${reason}).`;
   else label.textContent = `Desktop connected; capture engine unavailable (${phase}: ${reason}).`;
+};
+
+// Automatic reconnection needs the same worker recovery as the Connect button.
+// Keep the persisted token; a worker/startup failure is not a new pairing.
+const recoverPairedWorker = async (token) => {
+  const worker = await workerSelfTest();
+  if (!worker?.ok) {
+    try { chrome.runtime.sendMessage({ type: "APOCALIPSE_PAIR", token }, () => void chrome.runtime.lastError); } catch {}
+    await showWorkerWarning(worker);
+  }
 };
 
 const showBridgeError = (error) => {
@@ -552,8 +564,7 @@ chrome.storage.local.get({ pairingToken: "" }, async ({ pairingToken }) => {
     translate();
     render();
     setBridgeStatus(true);
-    const worker = await workerSelfTest();
-    if (!worker?.ok) await showWorkerWarning(worker);
+    await recoverPairedWorker(pairingToken);
   } catch (error) {
     setBridgeStatus(false);
     showBridgeError(String(error));
@@ -589,7 +600,9 @@ setInterval(async () => {
       translate();
       render();
     }
+    const reconnected = !popupBridgeConnected;
     setBridgeStatus(true);
+    if (reconnected) await recoverPairedWorker(pairingToken);
   } catch (error) {
     setBridgeStatus(false);
     showBridgeError(String(error));
@@ -610,11 +623,7 @@ document.querySelector("#connect").onclick = async () => {
     await chrome.storage.local.set({ pairingToken: token });
     setBridgeStatus(true);
     // Wake/synchronize the worker, but never make the button depend on it.
-    const worker = await workerSelfTest();
-    if (!worker?.ok) {
-      try { chrome.runtime.sendMessage({ type: "APOCALIPSE_PAIR", token }, () => void chrome.runtime.lastError); } catch {}
-      await showWorkerWarning(worker);
-    }
+    await recoverPairedWorker(token);
   } catch (error) {
     setBridgeStatus(false);
     showBridgeError(String(error));

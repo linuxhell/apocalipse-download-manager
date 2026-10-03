@@ -884,7 +884,16 @@ const invoke = (command, args = {}) => {
     throw error;
   });
 };
-invoke("set_application_theme", { theme: localStorage.getItem("apocalipse.theme") || "void" }).catch(error => reportUiError("main", "applyAppearance", error));
+// settings.json is authoritative; a missing/stale webview cache must never
+// overwrite the persisted theme when a window or the operating system restarts.
+const applicationThemeReady = invoke("get_application_theme").then((theme) => {
+  if (typeof theme !== "string" || !valid.includes(theme)) throw new Error("unsupported_saved_theme");
+  localStorage.setItem("apocalipse.theme", theme);
+  applyTheme(theme);
+  applyAppearance();
+  themeStudio.leave();
+  syncAppearanceControls();
+}).catch(error => reportUiError("main", "restoreApplicationTheme", error));
 invoke("get_app_version").then((version) => {
   document.querySelector("#app-version").textContent = `v${version}`;
 }).catch(() => {});
@@ -2457,6 +2466,7 @@ const themeStudio = ThemeStudio.init({
   translate: t, language: () => locale, applyTheme, applyAppearance, readAppearance,
   downloads: () => downloads,
   commit: async (theme, appearance) => {
+    await applicationThemeReady;
     await invoke("set_application_theme", { theme });
     localStorage.setItem("apocalipse.theme", theme);
     localStorage.setItem("apocalipse.appearance", JSON.stringify(appearance));
@@ -2480,13 +2490,14 @@ document.querySelector("#save-settings").onclick = async () => {
   if (!directory.reportValidity()) return;
   button.disabled = true;
   try {
+    await applicationThemeReady;
     const theme = document.querySelector("#theme").value;
+    await invoke("set_application_theme", { theme });
     localStorage.setItem("apocalipse.theme", theme);
     localStorage.setItem("apocalipse.schedule.enabled", String(document.querySelector("#schedule-enabled").checked));
     localStorage.setItem("apocalipse.schedule.start", document.querySelector("#schedule-start").value);
     localStorage.setItem("apocalipse.schedule.end", document.querySelector("#schedule-end").value);
     applyTheme(theme);
-    await invoke("set_application_theme", { theme });
     await invoke("set_default_download_directory", { path: directory.value });
     await invoke("set_autostart", {
       enabled: document.querySelector("#autostart").checked,
