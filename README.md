@@ -1,3 +1,7 @@
+
+
+
+
 <p align="center">
   <img src="assets/branding/apocalipse-a-blue.svg" width="220" alt="Apocalipse Download Manager modern blue A logo">
 </p>
@@ -24,7 +28,10 @@
   · <a href="https://github.com/linuxhell/apocalipse-download-manager/issues">Issues</a>
 </p>
 
-<!-- DEMO_VIDEO_0_4_83: insert the public GitHub user-attachment URL for the real 1:36 1080p demo recording here. -->
+## Demo / Demonstração / 演示
+
+
+https://github.com/user-attachments/assets/99c988c8-a2b7-4f92-b623-922a77656a69
 
 > [!IMPORTANT]
 > **Current release: ADM 0.4.83 + browser extension 0.3.190.** Cinema Premium includes **28 HD themes**, compact Downloads/Torrents/Recordings queues, persistent pause/remove/reveal controls, balanced Logs panes and the modern blue A identity. The Firefox XPI in the release is Mozilla-signed.
