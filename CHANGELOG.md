@@ -1,3 +1,11 @@
+# Apocalipse Download Manager 0.4.84 — extensão / extension / 扩展 0.3.190
+
+## 0.4.84 — 2026-10-03
+
+- PT-BR: Corrige a restauração do tema ao iniciar: o tema salvo em settings.json prevalece sobre a memória da janela. Validado pelo usuário após reiniciar o Windows com a extensão existente. A extensão 0.3.190 permanece inalterada.
+- EN: Restore the persisted desktop theme at startup instead of overwriting it with a missing or stale webview cache. User-validated after a Windows restart with the existing extension. Browser extension 0.3.190 is unchanged.
+- 简体中文：启动时恢复已保存的桌面主题，避免窗口缓存缺失或过期时覆盖配置。用户已在 Windows 重启后使用现有扩展验证。浏览器扩展 0.3.190 保持不变。
+
 # Apocalipse Download Manager 0.4.79 — extensão / extension / 扩展 0.3.189
 
 ## 0.4.79 — 2026-10-01
