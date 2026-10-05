@@ -28,7 +28,7 @@ test('Facebook extractor parse failures expose a localized recording fallback', 
 
 // Execute the real content script and its installed click handler. Only browser
 // APIs/DOM geometry are mocked; URL selection and the outgoing payload are real.
-function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false, shadow = false } = {}) {
+function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false, shadow = false, clipping = false, theme = "void" } = {}) {
   const sent = [], fetched = [], appended = [], listeners = [];
   const location = new URL(url);
   const rect = { left: 20, top: 40, right: 500, bottom: 600, width: 480, height: 560 };
@@ -46,7 +46,7 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
   const player = { closest: selector => selector === 'shreddit-post' ? redditPost : null };
   player.shadowRoot = { host: player, querySelectorAll: selector => selector === 'video' || selector === 'video,audio' ? [video] : [] };
   if (shadow) video.getRootNode = () => player.shadowRoot;
-  const element = tag => ({ tagName: tag.toUpperCase(), style: {}, dataset: {}, offsetWidth: 80,
+  const element = tag => ({ tagName: tag.toUpperCase(), style: { setProperty(name, value) { this[name] = value; } }, dataset: {}, offsetWidth: 80,
     addEventListener(type, handler) { this[type] = handler; }, remove() { this.removed = true; } });
   const document = {
     title: 'Synthetic complete reel', fullscreenElement: null,
@@ -62,7 +62,8 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
     ...(recordable ? { MediaRecorder: class {} } : {}),
     navigator: { language: 'pt-BR', userAgent: 'Synthetic browser' },
     innerHeight: 800, scrollX: 0, scrollY: 0,
-    addEventListener() {}, removeEventListener() {}, postMessage() {},
+    ...(clipping ? { getComputedStyle: () => ({ overflowX: "visible", overflowY: "auto" }) } : {}),
+    addEventListener(type, handler) { if (type === "scroll") listeners.push({ scroll: handler }); }, removeEventListener() {}, postMessage() {},
     setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {},
     MutationObserver: class { observe() {} },
     performance: { getEntriesByType: () => network.map(item => ({ name: item.url })), getEntriesByName: () => [] },
@@ -72,7 +73,7 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
       return { ok: true, blob: async () => new Blob(['synthetic track'], { type: 'video/mp4' }) };
     },
     chrome: {
-      storage: { local: { get(defaults, callback) { callback(defaults); } }, onChanged: { addListener() {} } },
+      storage: { local: { get(defaults, callback) { callback({ ...defaults, desktopTheme: theme }); } }, onChanged: { addListener() {} } },
       runtime: {
         onMessage: { addListener(handler) { listeners.push(handler); } },
         sendMessage(message, callback) {
@@ -94,6 +95,9 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
   assert.ok(button, 'the actual overlay must be installed');
   return {
     sent, fetched, location, video, appended,
+    zeroWrapper: () => { post.getBoundingClientRect = () => ({ left: 0, right: 0, top: 0, bottom: 0 }); for (const entry of listeners) entry.scroll?.(); },
+    clipTo: top => { post.getBoundingClientRect = () => ({ left: 0, right: 800, top, bottom: top + 200 }); for (const entry of listeners) entry.scroll?.(); },
+    scrollTo: top => { rect.top = top; rect.bottom = top + rect.height; for (const entry of listeners) entry.scroll?.(); },
     imageTitle: () => context.testHooks.titleInfoFor({ tagName: "IMG", closest: () => redditPost }),
     click: () => button.click({ preventDefault() {}, stopPropagation() {} }),
     scan: () => context.testHooks.collect(),
@@ -292,7 +296,7 @@ test('Facebook sponsored videos hide both Download and Record', () => {
   assert.match(script, /button\.hidden = !canDownload \|\| Boolean\(isFacebookVideo && facebookSponsoredEvidence\(element\)\)/);
   assert.match(script, /const sponsoredHomeVideo = Boolean\(isFacebookVideo && facebookSponsoredEvidence\(element\)\)/);
   assert.match(script, /button\.hidden = sponsoredHomeVideo \|\| !liveCanDownload/);
-  assert.match(script, /recordButton\.hidden = sponsoredHomeVideo \|\| rect\.width < 100 \|\| rect\.height < 55/);
+  assert.match(script, /recordButton\.hidden = sponsoredHomeVideo \|\| outsideVisibleArea/);
   assert.match(script, /sponsoredRecordOnly:/);
 });
 
@@ -352,4 +356,45 @@ test('Reddit images use their post title instead of subreddit page title', () =>
   const p = page({ url: 'https://www.reddit.com/r/UFOs/', shadow: true, permalink: '/r/UFOs/comments/abc123/title/' });
   assert.equal(p.imageTitle().title, 'Exact Reddit post title');
   assert.equal(p.imageTitle().source, 'reddit_post');
+});
+
+ test('media overlay hides offscreen players and returns when scrolled back', () => {
+  const p = page({ recordable: true });
+  const controls = p.appended.filter(node => String(node.className).includes('apocalipse-media-download'));
+  assert.equal(controls.length, 2);
+  assert.ok(controls.every(node => !node.hidden));
+  p.scrollTo(-700);
+  assert.ok(controls.every(node => node.hidden));
+  p.scrollTo(850);
+  assert.ok(controls.every(node => node.hidden));
+  p.scrollTo(40);
+  assert.ok(controls.every(node => !node.hidden));
+});
+
+test('media overlay follows clipping by an internal scroll container', () => {
+  const p = page({ recordable: true, clipping: true });
+  const controls = p.appended.filter(node => String(node.className).includes('apocalipse-media-download'));
+  p.clipTo(650);
+  assert.ok(controls.every(node => node.hidden));
+  p.clipTo(40);
+  assert.ok(controls.every(node => !node.hidden));
+});
+
+test('new overlays receive an already selected theme before any theme change', () => {
+  const p = page({ recordable: true, theme: 'samurai' });
+  const controls = p.appended.filter(node => String(node.className).includes('apocalipse-media-download'));
+  assert.equal(controls.length, 2);
+  for (const control of controls) {
+    assert.equal(control.style['--apocalipse-accent'], '#ff596d');
+    assert.equal(control.style['--apocalipse-foreground'], '#000000');
+  }
+});
+
+test('visible media stays available inside layout wrappers without a clipping box', () => {
+  const p = page({ recordable: true, clipping: true });
+  const controls = p.appended.filter(node => String(node.className).includes('apocalipse-media-download'));
+  p.zeroWrapper();
+  assert.ok(controls.every(node => !node.hidden));
+  p.scrollTo(-700);
+  assert.ok(controls.every(node => node.hidden));
 });

@@ -997,6 +997,12 @@
     const accents = { nebula:"#7c5cff",ember:"#ff7a3d",jade:"#2fe6a0",plasma:"#ff4fb8",glacier:"#4fd4ff",amber:"#ffb347",abyss:"#6fe7dd",rust:"#e0754a",venom:"#9be15d",wine:"#e0527a",linen:"#b5651d",sky:"#2f80c9",blossom:"#d6497d",sage:"#3f8f5f",sand:"#c96a3b",lilac:"#8b5fc9",mist:"#3f7ea6",citrus:"#d68910",coral:"#e0654f",frost:"#1b8f96",void:"#25d9ef",cyberpunk:"#25d9ef",bladerunner:"#ffb347",sexy:"#f16a9a",samurai:"#ff596d",future:"#69caff",fantasy:"#77e8b0",pandora:"#62ddf5" };
     return accents[interfaceTheme] || accents.void;
   };
+  const overlayThemeForeground = (accent) => {
+    const rgb = accent.match(/[a-f0-9]{2}/gi).map(value => parseInt(value, 16) / 255);
+    const linear = rgb.map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+    const luminance = .2126 * linear[0] + .7152 * linear[1] + .0722 * linear[2];
+    return luminance > .179 ? "#000000" : "#ffffff";
+  };
   const clockLabel = (seconds) => {
     const value = Math.max(0, Math.floor(seconds));
     return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
@@ -1951,20 +1957,44 @@
           ? document.querySelector("#movie_player") || element.closest("ytd-player") || element
           : element;
         const rect = anchor.getBoundingClientRect();
-        const left = Math.max(6, rect.left + scrollX + 10);
-        const top = rect.top + scrollY + 10;
+        let visibleLeft = Math.max(0, rect.left);
+        let visibleTop = Math.max(0, rect.top);
+        let visibleRight = Math.min(typeof innerWidth === "number" ? innerWidth : Infinity, rect.right);
+        let visibleBottom = Math.min(innerHeight, rect.bottom);
+        if (typeof getComputedStyle === "function") {
+          for (let parent = anchor.parentElement; parent; parent = parent.parentElement) {
+            if (parent === document.documentElement || parent === document.body) continue;
+            const style = getComputedStyle(parent);
+            if (style.display === "contents") continue;
+            const bounds = parent.getBoundingClientRect();
+            // Layout-only wrappers can have no box while their positioned
+            // player is visible. They are not a usable scroll viewport.
+            if (bounds.right <= bounds.left || bounds.bottom <= bounds.top) continue;
+            if (/auto|scroll|hidden|clip/.test(style.overflowX)) {
+              visibleLeft = Math.max(visibleLeft, bounds.left);
+              visibleRight = Math.min(visibleRight, bounds.right);
+            }
+            if (/auto|scroll|hidden|clip/.test(style.overflowY)) {
+              visibleTop = Math.max(visibleTop, bounds.top);
+              visibleBottom = Math.min(visibleBottom, bounds.bottom);
+            }
+          }
+        }
+        const outsideVisibleArea = visibleRight - visibleLeft < 100 || visibleBottom - visibleTop < 55;
+        const left = Math.max(6, visibleLeft + scrollX + 10);
+        const top = visibleTop + scrollY + 10;
         button.style.left = `${left}px`;
         button.style.top = `${Math.max(6, top)}px`;
         const liveCanDownload = canDownload || downloadReady();
         const sponsoredHomeVideo = Boolean(isFacebookVideo && facebookSponsoredEvidence(element));
-        button.hidden = sponsoredHomeVideo || !liveCanDownload || rect.width < 100 || rect.height < 55;
+        button.hidden = sponsoredHomeVideo || !liveCanDownload || outsideVisibleArea;
         if (recordButton) {
           const recordLeft = !sponsoredHomeVideo && liveCanDownload && !button.hidden
             ? left + button.offsetWidth + 8
             : left;
           recordButton.style.left = `${recordLeft}px`;
           recordButton.style.top = `${Math.max(6, top)}px`;
-          recordButton.hidden = sponsoredHomeVideo || rect.width < 100 || rect.height < 55;
+          recordButton.hidden = sponsoredHomeVideo || outsideVisibleArea;
         }
       };
       document.documentElement.append(button);
@@ -1973,16 +2003,21 @@
         button.remove();
         recordButton?.remove();
         if (positionTimer) clearInterval(positionTimer);
-        removeEventListener("scroll", position);
+        removeEventListener("scroll", position, true);
         removeEventListener("resize", position);
         delete element.dataset.apocalipseButton;
         activeOverlays.delete(element);
       };
       const refreshOverlayLanguage = () => {
         if (button.textContent.startsWith("⇩")) button.textContent = `⇩ ${downloadLabel()}`;
-        button.style.setProperty("--apocalipse-accent", overlayThemeColors());
+        const accent = overlayThemeColors();
+        const foreground = overlayThemeForeground(accent);
+        for (const control of [button, recordButton].filter(Boolean)) {
+          control.style.setProperty?.("--apocalipse-accent", accent);
+          control.style.setProperty?.("--apocalipse-foreground", foreground);
+        }
         if (recordButton) refreshRecordLabels();
-        recordButton?.style.setProperty("--apocalipse-accent", overlayThemeColors());
+
       };
       activeOverlays.set(element, {
         element,
@@ -1991,6 +2026,7 @@
         cleanup: cleanupOverlay,
         refreshLabels: refreshOverlayLanguage,
       });
+      refreshOverlayLanguage();
       const duplicateButtons = document.querySelectorAll(".apocalipse-media-download").length - activeOverlays.size * 2;
       trace("overlay_installed", "overlay", { tag: element.tagName, canDownload, canRecord, sponsoredRecordOnly: Boolean(isFacebookVideo && facebookSponsoredEvidence(element)), active: activeOverlays.size, duplicateDelta: duplicateButtons });
       if (isSocialVideo) {
@@ -2004,7 +2040,7 @@
         }, true);
       }
       position();
-      addEventListener("scroll", position, { passive: true });
+      addEventListener("scroll", position, { passive: true, capture: true });
       addEventListener("resize", position, { passive: true });
       if (isYouTubeVideo) positionTimer = setInterval(position, 1000);
     });
@@ -2059,7 +2095,7 @@
     document.addEventListener(event, scheduleOverlays, true);
   }
   const style = document.createElement("style");
-  style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:2px solid var(--apocalipse-accent,#25d9ef)!important;border-radius:8px!important;padding:8px 11px!important;background:#111a20f2!important;color:#fff!important;font:700 13px system-ui!important;box-shadow:0 3px 12px #0008!important;backdrop-filter:blur(5px)!important;cursor:pointer!important;overflow:hidden!important;isolation:isolate!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download::after{content:\"\"!important;position:absolute!important;inset:50%!important;border-radius:999px!important;background:color-mix(in srgb,var(--apocalipse-accent,#25d9ef) 42%,transparent)!important;opacity:0!important;pointer-events:none!important;transform:translate(-50%,-50%) scale(0)!important}.apocalipse-media-download.apocalipse-click-feedback{animation:apocalipse-overlay-press .34s cubic-bezier(.2,.8,.2,1)!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:apocalipse-overlay-wave .34s ease-out!important}@keyframes apocalipse-overlay-press{0%{transform:scale(1)}42%{transform:scale(.92);filter:brightness(1.3)}100%{transform:scale(1)}}@keyframes apocalipse-overlay-wave{0%{opacity:.85;transform:translate(-50%,-50%) scale(0)}100%{opacity:0;transform:translate(-50%,-50%) scale(5)}}.apocalipse-media-download:hover{background:#15262ef8!important;box-shadow:0 3px 14px var(--apocalipse-accent,#25d9ef)!important}.apocalipse-media-download:disabled{cursor:wait!important;opacity:.85!important}.apocalipse-media-record{color:#fff!important;background:#35151cf2!important}.apocalipse-media-record:hover{background:#4a1922f8!important}@media (prefers-reduced-motion:reduce){.apocalipse-media-download.apocalipse-click-feedback{animation-duration:.12s!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:none!important}}";
+  style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:2px solid var(--apocalipse-accent,#25d9ef)!important;border-radius:8px!important;padding:8px 11px!important;background:var(--apocalipse-accent,#25d9ef)!important;color:var(--apocalipse-foreground,#071014)!important;font:700 13px system-ui!important;box-shadow:0 3px 12px #0008!important;backdrop-filter:blur(5px)!important;cursor:pointer!important;overflow:hidden!important;isolation:isolate!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download::after{content:\"\"!important;position:absolute!important;inset:50%!important;border-radius:999px!important;background:color-mix(in srgb,var(--apocalipse-accent,#25d9ef) 42%,transparent)!important;opacity:0!important;pointer-events:none!important;transform:translate(-50%,-50%) scale(0)!important}.apocalipse-media-download.apocalipse-click-feedback{animation:apocalipse-overlay-press .34s cubic-bezier(.2,.8,.2,1)!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:apocalipse-overlay-wave .34s ease-out!important}@keyframes apocalipse-overlay-press{0%{transform:scale(1)}42%{transform:scale(.92);filter:brightness(1.3)}100%{transform:scale(1)}}@keyframes apocalipse-overlay-wave{0%{opacity:.85;transform:translate(-50%,-50%) scale(0)}100%{opacity:0;transform:translate(-50%,-50%) scale(5)}}.apocalipse-media-download:hover{background:var(--apocalipse-accent,#25d9ef)!important;filter:brightness(1.08)!important;box-shadow:0 3px 14px var(--apocalipse-accent,#25d9ef)!important}.apocalipse-media-download:disabled{cursor:wait!important;opacity:.85!important}.apocalipse-media-record{color:var(--apocalipse-foreground,#071014)!important;background:var(--apocalipse-accent,#25d9ef)!important}@media (prefers-reduced-motion:reduce){.apocalipse-media-download.apocalipse-click-feedback{animation-duration:.12s!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:none!important}}";
   document.documentElement.append(style);
   const restartOverlayButtonFeedback = (button) => {
     if (!button || button.disabled) return;

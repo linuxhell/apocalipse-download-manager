@@ -58,3 +58,22 @@ test("content.js overlay accent colors track the current theme names", () => {
   }
   assert.doesNotMatch(accentsMatch[1], /\binferno:|\bsynthwave:|\bwhiteaurora:/);
 });
+
+test("overlay foreground keeps readable contrast across every theme", () => {
+  const vm = require("node:vm");
+  const helper = contentJs.match(/const overlayThemeForeground = \(accent\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(helper);
+  const foregroundFor = vm.runInNewContext(`(accent) => {${helper[1]}}`);
+  const accents = vm.runInNewContext(`({${contentJs.match(/const accents = \{([^}]+)\};/)[1]}})`);
+  const luminance = hex => {
+    const rgb = hex.match(/[a-f0-9]{2}/gi).map(value => parseInt(value, 16) / 255)
+      .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+    return .2126 * rgb[0] + .7152 * rgb[1] + .0722 * rgb[2];
+  };
+  for (const [theme, accent] of Object.entries(accents)) {
+    const values = [luminance(accent), luminance(foregroundFor(accent))].sort((a, b) => a - b);
+    assert.ok((values[1] + .05) / (values[0] + .05) >= 4.5, theme);
+  }
+  assert.match(contentJs, /background:var\(--apocalipse-accent,#25d9ef\)!important;color:var\(--apocalipse-foreground,#071014\)!important/);
+  assert.doesNotMatch(contentJs, /background:#35151cf2|background:#4a1922f8|background:#111a20f2/);
+});
