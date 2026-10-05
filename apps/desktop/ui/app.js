@@ -331,7 +331,7 @@ const catalogs = {
     locateFile: "Localizar arquivo…",
     locateFileHint: "Se você moveu o arquivo parcial para outra pasta ou disco, indique o novo local para continuar de onde parou em vez de começar do zero.",
     openFolder: "Abrir pasta", taskDetails: "Detalhes",
-    preview: "Pré-visualizar",
+    preview: "Visualizar",
     stopRecording: "Parar e salvar",
     recordingActive: "Gravando",
     linkThisComputer: "Este computador",
@@ -749,6 +749,14 @@ const valid = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", 
 const applyTheme = (theme) => {
   document.documentElement.dataset.theme = valid.includes(theme) ? theme : "void";
   ThemeStudio.applyPresentation(document.documentElement.dataset.theme, readAppearance());
+  const color = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+  const match = color.match(/^#([0-9a-f]{6})$/i);
+  if (match) {
+    const channels = match[1].match(/../g).map(value => parseInt(value, 16) / 255)
+      .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+    const luminance = channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
+    document.documentElement.style.setProperty("--accent-foreground", luminance > .179 ? "#071014" : "#ffffff");
+  }
 };
 const appearanceDefaults = ThemeStudio.defaults;
 function readAppearance() {
@@ -1217,6 +1225,7 @@ function renderDownloads(force = false) {
           ? t("networkWaitingHint")
           : failureMessage;
     }
+    titleLine.append(state.cloneNode(true));
     const actions = document.createElement("div");
     actions.className = "task-actions";
     const addAction = (label, command) => {
@@ -1327,8 +1336,13 @@ function renderDownloads(force = false) {
       };
       actions.append(verify);
     }
-    if (/^(?:magnet:)|\.torrent(?:$|[?#])/i.test(task.source) && ["downloading", "paused", "completed"].includes(key))
-      addAction(t("preview"), "preview_torrent");
+    addAction(t("preview"), "preview_torrent");
+    const previewButton = actions.lastElementChild;
+    previewButton.classList.add("task-preview-action");
+    previewButton.disabled = true;
+    invoke("can_preview_download", { id: task.id }).then((available) => {
+      if (previewButton.isConnected) previewButton.disabled = available !== true;
+    }).catch(() => {});
     if (["queued", "inspecting", "downloading", "paused"].includes(key)) {
       const bandwidth = document.createElement("button");
       bandwidth.className = "task-action";
@@ -1365,19 +1379,22 @@ function renderDownloads(force = false) {
     status.className = "task-status";
     const primaryActions = document.createElement("div");
     primaryActions.className = "task-primary-actions";
-    for (const button of [...actions.querySelectorAll('.task-icon-action')]) primaryActions.append(button);
-    titleLine.append(primaryActions);
+    for (const button of [...actions.querySelectorAll('.task-icon-action,.task-preview-action')]) primaryActions.append(button);
+    row.append(primaryActions);
     const taskDetails = document.createElement("details");
     taskDetails.className = "task-details";
     taskDetails.open = expandedTaskIds.has(task.id);
     const detailsSummary = document.createElement("summary");
-    detailsSummary.textContent = t("taskDetails");
+    detailsSummary.textContent = "⋯";
+    detailsSummary.title = t("taskDetails");
+    detailsSummary.setAttribute("aria-label", t("taskDetails"));
     const detailsBody = document.createElement("div");
     detailsBody.className = "task-details-body";
     detailsBody.append(state, source, resumeCapability, actions);
     taskDetails.append(detailsSummary, detailsBody);
     status.append(taskDetails);
-    row.append(select, icon, info, status);
+    row.prepend(select, icon, info);
+    row.append(status);
     const scenicDetails = document.createElement("div");
     scenicDetails.className = "task-scenic-details";
     const detailValues = [[t("taskDestination"), task.destination.replace(/[\\/][^\\/]*$/, "")],
@@ -1404,6 +1421,7 @@ function renderDownloads(force = false) {
   if (bandwidthCurrent) bandwidthCurrent.textContent = `${formatBytes(overallSpeed)}/s`;
   document.querySelector(".metrics article:nth-child(2) strong").textContent =
     `${formatBytes(overallUploadSpeed)}/s`;
+  document.body.dataset.hasSelection = selectedIds.size ? "true" : "false";
   updateSelectionControls();
 }
 
@@ -3313,3 +3331,12 @@ document.querySelector("#moq-stop").onclick = async event => {
     document.querySelector("#moq-status").textContent = t("moqStopping");
   } catch (error) { document.querySelector("#moq-status").textContent = String(error); event.currentTarget.disabled = !moqCaptureJob; }
 };
+
+// Reveal the list scrollbar during wheel, touch and keyboard scrolling.
+let listScrollTimer;
+document.querySelector("#download-list").addEventListener("scroll", () => {
+  const list = document.querySelector("#download-list");
+  list.classList.add("is-scrolling");
+  clearTimeout(listScrollTimer);
+  listScrollTimer = setTimeout(() => list.classList.remove("is-scrolling"), 900);
+}, { passive: true });

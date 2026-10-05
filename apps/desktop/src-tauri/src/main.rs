@@ -9275,7 +9275,21 @@ fn is_previewable_video_path(path: &Path) -> bool {
         .is_some_and(|extension| {
             matches!(
                 extension,
-                "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "ts"
+                "mp4"
+                    | "mkv"
+                    | "webm"
+                    | "avi"
+                    | "mov"
+                    | "m4v"
+                    | "ts"
+                    | "mp3"
+                    | "m4a"
+                    | "aac"
+                    | "flac"
+                    | "wav"
+                    | "ogg"
+                    | "opus"
+                    | "wma"
             )
         })
 }
@@ -9468,6 +9482,33 @@ fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
     best.filter(|(size, _)| *size > 0).map(|(_, path)| path)
 }
 
+fn previewable_task_media(root: &Path) -> Option<PathBuf> {
+    let media = if root.is_file() && is_previewable_video_path(root) {
+        Some(root.to_path_buf())
+    } else if root.is_dir() {
+        find_video_file(root, 0)
+    } else {
+        None
+    }?;
+    media.metadata().ok().filter(|m| m.len() > 0).map(|_| media)
+}
+
+#[tauri::command]
+async fn can_preview_download(state: State<'_, AppState>, id: DownloadId) -> Result<bool, String> {
+    let destination = {
+        let queue = state.queue.lock().map_err(|error| error.to_string())?;
+        queue
+            .iter()
+            .find(|task| task.id == id)
+            .ok_or("download_not_found")?
+            .destination
+            .clone()
+    };
+    tauri::async_runtime::spawn_blocking(move || previewable_task_media(&destination).is_some())
+        .await
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), String> {
     let (root, player) = {
@@ -9476,26 +9517,10 @@ fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
             .iter()
             .find(|task| task.id == id)
             .ok_or_else(|| "download_not_found".to_owned())?;
-        if !matches!(
-            classify_url(&task.source),
-            Some(DownloadKind::Torrent | DownloadKind::Magnet)
-        ) {
-            return Err("not_a_torrent".to_owned());
-        }
         let settings = state.settings.lock().map_err(|error| error.to_string())?;
         (task.destination.clone(), settings.media_player_path.clone())
     };
-    let video = if root.is_file() {
-        root
-    } else if root.is_dir() {
-        find_video_file(&root, 0).ok_or_else(|| "torrent_video_not_available".to_owned())?
-    } else {
-        active_torrent_video(root.parent().unwrap_or(Path::new(".")))
-            .ok_or_else(|| "torrent_video_not_available".to_owned())?
-    };
-    if video.metadata().map(|metadata| metadata.len()).unwrap_or(0) == 0 {
-        return Err("torrent_video_not_available".to_owned());
-    }
+    let video = previewable_task_media(&root).ok_or_else(|| "media_not_available".to_owned())?;
     let player =
         player.unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "vlc.exe" } else { "vlc" }));
     diagnostic_log(
@@ -14871,6 +14896,7 @@ fn main() {
             resolve_thumbnail,
             set_media_player,
             preview_torrent,
+            can_preview_download,
             download_tool,
             update_tool,
             advanced_transports::get_link_transport_options,
@@ -14953,6 +14979,23 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn task_preview_accepts_only_own_audio_or_video_payload() {
+        let directory = tempfile::tempdir().unwrap();
+        let audio = directory.path().join("song.mp3");
+        let video = directory.path().join("movie.mkv.part");
+        let archive = directory.path().join("files.zip");
+        fs::write(&audio, b"audio").unwrap();
+        fs::write(&video, b"video").unwrap();
+        fs::write(&archive, b"archive").unwrap();
+        assert!(previewable_task_media(&audio).is_some());
+        assert!(previewable_task_media(&video).is_some());
+        assert!(previewable_task_media(&archive).is_none());
+        assert!(previewable_task_media(&directory.path().join("missing.mp4")).is_none());
+        fs::write(&audio, b"").unwrap();
+        assert!(previewable_task_media(&audio).is_none());
+    }
+
     #[test]
     fn release_links_are_restricted_to_the_official_apocalipse_repository() {
         assert!(valid_apocalipse_release_url(

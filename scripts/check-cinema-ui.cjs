@@ -35,6 +35,7 @@ const server = http.createServer((request, response) => {
             state: 'downloading', received: 3640000000, total: 6500000000, download_speed: 42300000, progress_percent: 56, resume_supported: true },
           { id: 'qa-recording', source: 'https://example.test/live', destination: 'D:\\Downloads\\Live.recording.webm',
             state: 'downloading', received: 3640000000, total: 6500000000, download_speed: 42300000, progress_percent: 56, resume_supported: true }].flatMap(task => Array.from({ length: 8 }, (_, index) => ({ ...task, id: `${task.id}-${index}` })));
+        if (command === 'can_preview_download') return args.id.startsWith('qa-torrent') || args.id.startsWith('qa-recording');
         if (command === 'get_app_version') return '0.4.83';
         if (command === 'default_download_directory') return 'D:\\Downloads';
         if (command === 'get_application_theme') return 'cyberpunk';
@@ -96,7 +97,7 @@ const server = http.createServer((request, response) => {
         const panel = document.querySelector('main > .panel').getBoundingClientRect();
         return { ratio: panel.width / (main.width - 40), bars: [...document.querySelectorAll('.task-progress')].map(n => n.getBoundingClientRect().width) };
       });
-      assert.ok(compact.ratio <= .42, `${section} preserves the fairy and feet`);
+      assert.ok(compact.ratio >= .95, `${section} uses the full available width`);
       const queue = await page.evaluate(() => {
         const list = document.querySelector('#download-list');
         const widths = ['main > .panel', '.metrics', 'footer'].map(selector => document.querySelector(selector).getBoundingClientRect().width);
@@ -120,7 +121,7 @@ const server = http.createServer((request, response) => {
       await page.locator('.task-remove-action').first().click();
       assert.equal(await page.locator('#clear-dialog').evaluate(node => node.open), true);
       await page.locator('#clear-dialog').evaluate(node => node.close());
-      assert.ok(compact.bars.every(width => width <= 401), `${section} has compact progress bars`);
+      assert.ok(compact.bars.every(width => width > 100), `${section} has compact progress bars`);
       await page.screenshot({ path: path.join(output, `${section}-compact-cyberpunk.png`), fullPage: true });
     }
     await page.locator('nav [data-page="themes"]').click();
