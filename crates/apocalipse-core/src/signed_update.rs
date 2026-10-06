@@ -84,6 +84,43 @@ pub fn verify_update_manifest(
     Ok(envelope.signed)
 }
 
+/// Manifest target naming for a managed tool: `<tool>/<platform>-<architecture>`,
+/// e.g. `yt-dlp/windows-x86_64`. The artifact hash is the SHA-256 of the exact
+/// release asset the app downloads (the archive when the tool ships as one).
+pub fn tool_artifact_target(tool: &str, platform: &str, architecture: &str) -> String {
+    format!("{tool}/{platform}-{architecture}")
+}
+
+/// Verifies a downloaded tool asset against a signed manifest: the signature,
+/// anti-rollback sequence and expiry are checked first, then the asset's size
+/// and SHA-256 must match the entry for `target`. Returns the manifest sequence
+/// so the caller can persist it as the new rollback floor.
+pub fn verify_tool_download(
+    encoded_manifest: &[u8],
+    trusted_public_keys: &[String],
+    minimum_sequence: u64,
+    now: u64,
+    target: &str,
+    bytes: &[u8],
+) -> Result<u64> {
+    use sha2::{Digest, Sha256};
+    let manifest =
+        verify_update_manifest(encoded_manifest, trusted_public_keys, minimum_sequence, now)?;
+    let artifact = manifest
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.target == target)
+        .with_context(|| format!("{target} is not listed in the signed manifest"))?;
+    if artifact.length != bytes.len() as u64 {
+        bail!("{target} size does not match the signed manifest")
+    }
+    let actual = format!("{:x}", Sha256::digest(bytes));
+    if !artifact.sha256.eq_ignore_ascii_case(&actual) {
+        bail!("{target} SHA-256 does not match the signed manifest")
+    }
+    Ok(manifest.sequence)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,5 +176,73 @@ mod tests {
             1_000
         )
         .is_err());
+    }
+
+    fn signed_tool(bytes: &[u8], sequence: u64) -> (Vec<u8>, String) {
+        use sha2::{Digest, Sha256};
+        let key = SigningKey::from_bytes(&[9; 32]);
+        let manifest = UpdateManifest {
+            schema: 1,
+            sequence,
+            version: "tools-1".into(),
+            expires_at: 5_000,
+            artifacts: vec![UpdateArtifact {
+                target: tool_artifact_target("yt-dlp", "windows", "x86_64"),
+                url: "https://github.com/yt-dlp/yt-dlp/releases/download/x/yt-dlp.exe".into(),
+                length: bytes.len() as u64,
+                sha256: format!("{:x}", Sha256::digest(bytes)),
+            }],
+        };
+        let signature = key.sign(&serde_json::to_vec(&manifest).unwrap());
+        let envelope = SignedUpdateManifest {
+            signed: manifest,
+            signatures: vec![STANDARD.encode(signature.to_bytes())],
+        };
+        (
+            serde_json::to_vec(&envelope).unwrap(),
+            STANDARD.encode(key.verifying_key().to_bytes()),
+        )
+    }
+
+    #[test]
+    fn tool_download_must_match_the_signed_hash_and_size() {
+        let payload = vec![7u8; 64];
+        let (encoded, key) = signed_tool(&payload, 3);
+        let target = tool_artifact_target("yt-dlp", "windows", "x86_64");
+        assert_eq!(
+            verify_tool_download(&encoded, &[key.clone()], 3, 1_000, &target, &payload).unwrap(),
+            3
+        );
+        let mut tampered = payload.clone();
+        tampered[0] ^= 1;
+        assert!(
+            verify_tool_download(&encoded, &[key.clone()], 0, 1_000, &target, &tampered).is_err()
+        );
+        assert!(
+            verify_tool_download(&encoded, &[key.clone()], 0, 1_000, &target, &payload[..32])
+                .is_err()
+        );
+        assert!(verify_tool_download(
+            &encoded,
+            &[key.clone()],
+            0,
+            1_000,
+            "ffmpeg/windows-x86_64",
+            &payload
+        )
+        .is_err());
+        assert!(
+            verify_tool_download(&encoded, &[key.clone()], 4, 1_000, &target, &payload).is_err()
+        );
+        assert!(verify_tool_download(&encoded, &[key], 0, 5_000, &target, &payload).is_err());
+    }
+
+    #[test]
+    fn tool_download_rejects_an_untrusted_signer() {
+        let payload = vec![1u8; 16];
+        let (encoded, _) = signed_tool(&payload, 1);
+        let other = STANDARD.encode(SigningKey::from_bytes(&[3; 32]).verifying_key().to_bytes());
+        let target = tool_artifact_target("yt-dlp", "windows", "x86_64");
+        assert!(verify_tool_download(&encoded, &[other], 0, 1_000, &target, &payload).is_err());
     }
 }

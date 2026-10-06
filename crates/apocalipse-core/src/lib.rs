@@ -25,7 +25,8 @@ pub use model::{DownloadId, DownloadState, DownloadTask};
 pub use preview::{launch_player, PlayerConfig, PreviewReadiness, TorrentPreviewPolicy};
 pub use private_cache::EncryptedChunkCache;
 pub use signed_update::{
-    verify_update_manifest, SignedUpdateManifest, UpdateArtifact, UpdateManifest,
+    tool_artifact_target, verify_tool_download, verify_update_manifest, SignedUpdateManifest,
+    UpdateArtifact, UpdateManifest,
 };
 pub use strategy::{contextual_media_page, plan_download, Capabilities, Engine, StrategyPlan};
 pub use validation::{validate_payload, PayloadExpectation};

@@ -27,12 +27,13 @@
   Transport is already TLS-encrypted with certificate pinning, but a
   first-time remote connection is accepted on password match alone —
   there is no user-facing approval step before it's granted.
-- Wire `signed_update.rs`'s manifest/signature/checksum verification into
-  the actual tool-update path. The verifier (ed25519 signatures, anti-rollback
-  sequencing, expiry, SHA-256 artifact checks) is implemented and unit-tested,
-  but `verify_update_manifest` is never called from the real download flow —
-  `update_tool`/`download_tool` fetch straight from the GitHub "latest
-  release" API and only sanity-check the binary by running `--version`.
+- Provision the tool-update signing key. `signed_update.rs` verification is now
+  wired into `download_tool`/`update_tool` (signed manifest, anti-rollback
+  sequence, expiry and SHA-256 + size of each downloaded asset), but it stays
+  dormant while `TRUSTED_TOOL_UPDATE_KEYS` in `main.rs` is empty. To enable it:
+  generate a key with `cargo run -p apocalipse-core --example tools_manifest -- keygen`,
+  put the public key in that list, and publish a signed `tools-manifest.json`
+  with each release (see `docs/tool-update-signing.md`).
 - Make Apocalipse Link transfers resumable with integrity checks. Today
   pause/resume only holds an in-memory flag on the live transfer task;
   `download_link_file_to` truncates the destination and re-requests the

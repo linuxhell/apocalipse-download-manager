@@ -15,6 +15,7 @@ use apocalipse_core::{
     partial_path, plan_download, BandwidthLimiter, Capabilities, DownloadEngine, DownloadEvent,
     DownloadId, DownloadKind, DownloadRequest, DownloadState, DownloadTask,
 };
+use apocalipse_core::{tool_artifact_target, verify_tool_download};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rustls::{
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
@@ -7405,83 +7406,116 @@ async fn run_external_download(
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     command.kill_on_drop(true);
-    let mut result = match command.spawn() {
-        Ok(mut child) => {
-            let mut stdout = child.stdout.take();
-            let mut stderr = child.stderr.take();
-            let output_app = app.clone();
-            let error_app = app.clone();
-            let output = tokio::spawn(async move {
-                match stdout.take() {
-                    Some(stream) => read_process_tail(stream, Some((output_app, id, kind))).await,
-                    None => Vec::new(),
-                }
-            });
-            let errors = tokio::spawn(async move {
-                match stderr.take() {
-                    Some(stream) => read_process_tail(stream, Some((error_app, id, kind))).await,
-                    None => Vec::new(),
-                }
-            });
-            let status = tokio::select! {
-                biased;
-                _ = &mut cancellation => {
-                    terminate_process_tree(&mut child).await;
-                    return;
-                }
-                status = child.wait() => status,
-            };
-            let mut text = String::from_utf8_lossy(&output.await.unwrap_or_default()).into_owned();
-            text.push_str(&String::from_utf8_lossy(&errors.await.unwrap_or_default()));
-            status
-                .map_err(|error| error.to_string())
-                .and_then(|status| {
-                    let engine = engine_log_name(kind, &task);
-                    if let Some(path) = write_engine_diagnostic(
-                        &app,
-                        id,
-                        engine,
-                        &text,
-                        status.code(),
-                        status.success(),
-                    ) {
+    // Some CDNs answer 403 to a client whose TLS fingerprint is not a browser's.
+    // yt-dlp can impersonate one when curl_cffi is available; retry once with it
+    // after a 403 instead of forcing impersonation (slower) on every request.
+    let mut impersonation_retry_available = kind == DownloadKind::MediaPage;
+    let mut result = loop {
+        let mut tls_fingerprint_blocked = false;
+        let attempt = match command.spawn() {
+            Ok(mut child) => {
+                let mut stdout = child.stdout.take();
+                let mut stderr = child.stderr.take();
+                let output_app = app.clone();
+                let error_app = app.clone();
+                let output = tokio::spawn(async move {
+                    match stdout.take() {
+                        Some(stream) => {
+                            read_process_tail(stream, Some((output_app, id, kind))).await
+                        }
+                        None => Vec::new(),
+                    }
+                });
+                let errors = tokio::spawn(async move {
+                    match stderr.take() {
+                        Some(stream) => {
+                            read_process_tail(stream, Some((error_app, id, kind))).await
+                        }
+                        None => Vec::new(),
+                    }
+                });
+                let status = tokio::select! {
+                    biased;
+                    _ = &mut cancellation => {
+                        terminate_process_tree(&mut child).await;
+                        return;
+                    }
+                    status = child.wait() => status,
+                };
+                let mut text =
+                    String::from_utf8_lossy(&output.await.unwrap_or_default()).into_owned();
+                text.push_str(&String::from_utf8_lossy(&errors.await.unwrap_or_default()));
+                status
+                    .map_err(|error| error.to_string())
+                    .and_then(|status| {
+                        tls_fingerprint_blocked =
+                            !status.success() && looks_like_tls_fingerprint_block(&text);
+                        let engine = engine_log_name(kind, &task);
+                        if let Some(path) = write_engine_diagnostic(
+                            &app,
+                            id,
+                            engine,
+                            &text,
+                            status.code(),
+                            status.success(),
+                        ) {
+                            diagnostic_log(
+                                &app.state::<AppState>(),
+                                "INFO",
+                                "external.engine_report",
+                                &format!(
+                                    "task={id} engine={engine} success={} exit_code={} file={}",
+                                    status.success(),
+                                    status.code().unwrap_or(-1),
+                                    path.display()
+                                ),
+                            );
+                        }
+                        if status.success() {
+                            return Ok(());
+                        }
+                        let detail = external_error_detail(&text, status.code());
                         diagnostic_log(
                             &app.state::<AppState>(),
-                            "INFO",
-                            "external.engine_report",
+                            "ERROR",
+                            "external.failure_detail",
                             &format!(
-                                "task={id} engine={engine} success={} exit_code={} file={}",
-                                status.success(),
-                                status.code().unwrap_or(-1),
-                                path.display()
+                                "task={id} engine={} detail={}",
+                                engine_log_name(kind, &task),
+                                sanitize_log_detail(&detail)
                             ),
                         );
-                    }
-                    if status.success() {
-                        return Ok(());
-                    }
-                    let detail = external_error_detail(&text, status.code());
-                    diagnostic_log(
-                        &app.state::<AppState>(),
-                        "ERROR",
-                        "external.failure_detail",
-                        &format!(
-                            "task={id} engine={} detail={}",
-                            engine_log_name(kind, &task),
-                            sanitize_log_detail(&detail)
-                        ),
-                    );
-                    if kind == DownloadKind::MediaPage
-                        && task.source.contains("facebook.com/")
-                        && text.to_ascii_lowercase().contains("cannot parse data")
-                    {
-                        Err("facebook_direct_download_unavailable_use_recording".to_owned())
-                    } else {
-                        Err(detail)
-                    }
-                })
+                        if kind == DownloadKind::MediaPage
+                            && task.source.contains("facebook.com/")
+                            && text.to_ascii_lowercase().contains("cannot parse data")
+                        {
+                            Err("facebook_direct_download_unavailable_use_recording".to_owned())
+                        } else {
+                            Err(detail)
+                        }
+                    })
+            }
+            Err(error) => Err(format!("external_engine_unavailable: {error}")),
+        };
+        if attempt.is_err() && tls_fingerprint_blocked && impersonation_retry_available {
+            impersonation_retry_available = false;
+            let yt_dlp = tools.1.clone();
+            let target = tokio::task::spawn_blocking(move || yt_dlp_impersonation_target(&yt_dlp))
+                .await
+                .ok()
+                .flatten();
+            if let Some(target) = target {
+                diagnostic_log(
+                    &app.state::<AppState>(),
+                    "INFO",
+                    "external.impersonation_retry",
+                    &format!("task={id} engine=yt-dlp target={target}"),
+                );
+                command = command_with_extra_args(&command, &["--impersonate", target]);
+                continue;
+            }
         }
-        Err(error) => Err(format!("external_engine_unavailable: {error}")),
+        break attempt;
     };
     if result.is_ok() {
         if let Some(work_directory) = media_work_directory.as_deref() {
@@ -7526,6 +7560,75 @@ async fn run_external_download(
         workers.remove(&id);
     }
     start_next_queued(&app);
+}
+
+/// A 403 from the site is the signature of TLS-fingerprint blocking (Cloudflare
+/// and similar). yt-dlp also names `--impersonate` itself when it suspects it.
+fn looks_like_tls_fingerprint_block(output: &str) -> bool {
+    let output = output.to_ascii_lowercase();
+    output.contains("http error 403") || output.contains("--impersonate")
+}
+
+/// Picks a browser target from `yt-dlp --list-impersonate-targets` output. The
+/// listing marks targets whose backend (curl_cffi) is missing as unavailable.
+fn impersonation_target_from_listing(output: &str) -> Option<&'static str> {
+    output
+        .lines()
+        .map(str::to_ascii_lowercase)
+        .any(|line| {
+            line.contains("chrome") && line.contains("curl_cffi") && !line.contains("unavailable")
+        })
+        .then_some("chrome")
+}
+
+/// Asks the configured yt-dlp which impersonation targets it can really use. The
+/// official standalone builds bundle curl_cffi; a custom or zipimport build may not.
+fn yt_dlp_impersonation_target(yt_dlp: &Path) -> Option<&'static str> {
+    let mut command = Command::new(yt_dlp);
+    command.arg("--list-impersonate-targets");
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let output = command.output().ok()?;
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    impersonation_target_from_listing(&text)
+}
+
+/// Rebuilds a process command (tokio's `Command` is not `Clone`) with extra
+/// trailing arguments, preserving program, arguments, environment, working
+/// directory and the stdio/process-group setup used for external engines.
+fn command_with_extra_args(
+    command: &tokio::process::Command,
+    extra: &[&str],
+) -> tokio::process::Command {
+    let original = command.as_std();
+    let mut rebuilt = tokio::process::Command::new(original.get_program());
+    rebuilt.args(original.get_args()).args(extra);
+    for (key, value) in original.get_envs() {
+        match value {
+            Some(value) => rebuilt.env(key, value),
+            None => rebuilt.env_remove(key),
+        };
+    }
+    if let Some(directory) = original.get_current_dir() {
+        rebuilt.current_dir(directory);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        rebuilt.as_std_mut().creation_flags(0x08000000);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        rebuilt.as_std_mut().process_group(0);
+    }
+    rebuilt.stdout(Stdio::piped()).stderr(Stdio::piped());
+    rebuilt.kill_on_drop(true);
+    rebuilt
 }
 
 #[cfg(target_os = "windows")]
@@ -9619,6 +9722,67 @@ async fn github_latest_release(
         .map_err(|error| error.to_string())
 }
 
+/// Public keys allowed to sign `tools-manifest.json`. While this list is empty
+/// the tool-update path behaves as before (SHA-256 sidecar for aria2, `--version`
+/// sanity check for the rest). Once a key is added, every managed-tool download
+/// must match a signed manifest entry, or the install is refused.
+/// Generate keys and sign manifests with
+/// `cargo run -p apocalipse-core --example tools_manifest`.
+const TRUSTED_TOOL_UPDATE_KEYS: &[&str] = &[];
+const TOOL_UPDATE_MANIFEST_URL: &str =
+    "https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/tools-manifest.json";
+
+/// Verifies a downloaded tool asset against the signed manifest when signing is
+/// enabled. The highest accepted manifest sequence is persisted so an older (but
+/// validly signed) manifest cannot be replayed to roll tools back.
+async fn verify_tool_download_signature(
+    client: &reqwest::Client,
+    tool: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
+    if TRUSTED_TOOL_UPDATE_KEYS.is_empty() {
+        return Ok(());
+    }
+    let fail = |reason: String| format!("tool_update_verification_failed:{tool}:{reason}");
+    let (platform, architecture) = release_platform_architecture()?;
+    let target = tool_artifact_target(tool, platform, architecture);
+    let manifest = download_release_bytes(client, TOOL_UPDATE_MANIFEST_URL)
+        .await
+        .map_err(|error| fail(format!("manifest_unavailable:{error}")))?;
+    let sequence_path = portable_tools_directory()?.join(".update-manifest-sequence");
+    let minimum_sequence = fs::read_to_string(&sequence_path)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    let keys: Vec<String> = TRUSTED_TOOL_UPDATE_KEYS
+        .iter()
+        .map(|key| (*key).to_owned())
+        .collect();
+    let sequence = verify_tool_download(
+        &manifest,
+        &keys,
+        minimum_sequence,
+        epoch_seconds(),
+        &target,
+        bytes,
+    )
+    .map_err(|error| fail(error.to_string()))?;
+    if sequence > minimum_sequence {
+        let _ = fs::write(&sequence_path, sequence.to_string());
+    }
+    Ok(())
+}
+
+async fn download_tool_asset(
+    client: &reqwest::Client,
+    tool: &str,
+    url: &str,
+) -> Result<Vec<u8>, String> {
+    let bytes = download_release_bytes(client, url).await?;
+    verify_tool_download_signature(client, tool, &bytes).await?;
+    Ok(bytes)
+}
+
 async fn download_release_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
     Ok(client
         .get(url)
@@ -9739,7 +9903,7 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                 _ => return Err("tool_download_platform_unsupported:yt-dlp".to_owned()),
             };
             let (_, url) = release_asset(&release, |name| name == expected.to_ascii_lowercase())?;
-            let bytes = download_release_bytes(&client, &url).await?;
+            let bytes = download_tool_asset(&client, &id, &url).await?;
             let target = tool_dir.join(if cfg!(windows) {
                 "yt-dlp.exe"
             } else {
@@ -9762,7 +9926,7 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                 _ => return Err("tool_download_platform_unsupported:qjs".to_owned()),
             };
             let (_, url) = release_asset(&release, |name| name == expected)?;
-            let bytes = download_release_bytes(&client, &url).await?;
+            let bytes = download_tool_asset(&client, &id, &url).await?;
             let target = tool_dir.join(if cfg!(windows) { "qjs.exe" } else { "qjs" });
             install_validated_executable(&bytes, &target, &["--version"])?;
             target
@@ -9781,7 +9945,7 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             })?;
             let checksum_name = format!("{asset_name}.sha256");
             let (_, checksum_url) = release_asset(&release, |name| name == checksum_name)?;
-            let bytes = download_release_bytes(&client, &url).await?;
+            let bytes = download_tool_asset(&client, &id, &url).await?;
             let checksum_bytes = download_release_bytes(&client, &checksum_url).await?;
             let checksum_text =
                 String::from_utf8(checksum_bytes).map_err(|error| error.to_string())?;
@@ -9810,7 +9974,7 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                     && name.contains(arch_marker)
                     && (name.ends_with(".zip") || name.ends_with(".tar.gz"))
             })?;
-            let bytes = download_release_bytes(&client, &url).await?;
+            let bytes = download_tool_asset(&client, &id, &url).await?;
             clean_directory(&tool_dir)?;
             extract_release_archive(&bytes, &asset_name, &tool_dir)?;
             let executable_name = if cfg!(windows) {
@@ -9854,8 +10018,8 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                     release_asset(&release, |name| name == format!("ffmpeg-darwin-{suffix}"))?;
                 let (_, ffprobe_url) =
                     release_asset(&release, |name| name == format!("ffprobe-darwin-{suffix}"))?;
-                let ffmpeg_bytes = download_release_bytes(&client, &ffmpeg_url).await?;
-                let ffprobe_bytes = download_release_bytes(&client, &ffprobe_url).await?;
+                let ffmpeg_bytes = download_tool_asset(&client, "ffmpeg", &ffmpeg_url).await?;
+                let ffprobe_bytes = download_tool_asset(&client, "ffprobe", &ffprobe_url).await?;
                 let ffmpeg_target = tool_dir.join("ffmpeg");
                 let ffprobe_target = tool_dir.join("ffprobe");
                 install_validated_executable(&ffmpeg_bytes, &ffmpeg_target, &["-version"])?;
@@ -9880,7 +10044,7 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                         name.ends_with(&format!("{marker}-gpl.tar.xz")) && !name.contains("shared")
                     }
                 })?;
-                let bytes = download_release_bytes(&client, &url).await?;
+                let bytes = download_tool_asset(&client, &id, &url).await?;
                 let temporary = std::env::temp_dir()
                     .join(format!("apocalipse-tool-download-{}", uuid::Uuid::new_v4()));
                 let extracted = temporary.join("extracted");
@@ -9919,7 +10083,7 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                 let (asset_name, url) = release_asset(&release, |name| {
                     name.starts_with("7z") && name.ends_with(marker)
                 })?;
-                let bytes = download_release_bytes(&client, &url).await?;
+                let bytes = download_tool_asset(&client, &id, &url).await?;
                 if bytes.len() < 500_000 {
                     return Err(format!("downloaded_tool_payload_too_small:{asset_name}"));
                 }
@@ -9951,7 +10115,7 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                     _ => return Err("tool_download_platform_unsupported:extractor".to_owned()),
                 };
                 let (asset_name, url) = release_asset(&release, |name| name.ends_with(marker))?;
-                let bytes = download_release_bytes(&client, &url).await?;
+                let bytes = download_tool_asset(&client, &id, &url).await?;
                 clean_directory(&tool_dir)?;
                 extract_release_archive(&bytes, &asset_name, &tool_dir)?;
                 let target = find_named_file(&tool_dir, "7zz", 0)
@@ -9978,7 +10142,7 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                 let (_, url) = release_asset(&release, |name| {
                     name.ends_with(marker) && !name.ends_with(".zsync")
                 })?;
-                let bytes = download_release_bytes(&client, &url).await?;
+                let bytes = download_tool_asset(&client, &id, &url).await?;
                 let target = tool_dir.join("mpv.AppImage");
                 install_validated_executable(&bytes, &target, &["--version"])?;
                 target
@@ -10002,7 +10166,7 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                         }
                         _ => false,
                     })?;
-                let bytes = download_release_bytes(&client, &url).await?;
+                let bytes = download_tool_asset(&client, &id, &url).await?;
                 clean_directory(&tool_dir)?;
                 extract_release_archive(&bytes, &asset_name, &tool_dir)?;
                 let executable_name = if platform == "windows" {
@@ -10076,6 +10240,11 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         return Err("tool_target_must_be_a_file".to_owned());
     }
 
+    // `yt-dlp -U` verifies against yt-dlp's own checksums, not ours. With signed
+    // manifests enabled, update through the verified download path instead.
+    if id == "yt-dlp" && !TRUSTED_TOOL_UPDATE_KEYS.is_empty() {
+        return download_tool(state.clone(), id).await;
+    }
     if id == "yt-dlp" {
         let before = version_line(&executable, &["--version"])
             .ok_or_else(|| "yt_dlp_not_found".to_owned())?;
@@ -10258,6 +10427,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             .bytes()
             .await
             .map_err(|error| error.to_string())?;
+        verify_tool_download_signature(&client, &id, &bytes).await?;
         let sha256 = format!("{:x}", Sha256::digest(&bytes));
         if id == "aria2" {
             let checksum_name = format!("{asset_name}.sha256");
@@ -15680,6 +15850,56 @@ mod tests {
             ),
             "video.mkv"
         );
+    }
+
+    #[test]
+    fn impersonation_listing_requires_an_available_chrome_target() {
+        let usable = "[info] Available impersonate targets\nClient   OS       Source\nChrome   -        curl_cffi\nSafari   -        curl_cffi\n";
+        assert_eq!(impersonation_target_from_listing(usable), Some("chrome"));
+        let missing = "Client   OS       Source\nChrome   -        curl_cffi (unavailable)\n";
+        assert_eq!(impersonation_target_from_listing(missing), None);
+        assert_eq!(
+            impersonation_target_from_listing("Client OS Source\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn only_403_style_failures_trigger_an_impersonation_retry() {
+        assert!(looks_like_tls_fingerprint_block(
+            "ERROR: Unable to download webpage: HTTP Error 403: Forbidden"
+        ));
+        assert!(looks_like_tls_fingerprint_block("try --impersonate chrome"));
+        assert!(!looks_like_tls_fingerprint_block(
+            "ERROR: HTTP Error 404: Not Found"
+        ));
+    }
+
+    #[test]
+    fn rebuilt_command_keeps_arguments_and_appends_extras() {
+        let mut original = tokio::process::Command::new("yt-dlp");
+        original
+            .args(["--newline", "https://example.com/v"])
+            .env("A", "1");
+        let rebuilt = command_with_extra_args(&original, &["--impersonate", "chrome"]);
+        let args: Vec<_> = rebuilt
+            .as_std()
+            .get_args()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "--newline",
+                "https://example.com/v",
+                "--impersonate",
+                "chrome"
+            ]
+        );
+        assert!(rebuilt
+            .as_std()
+            .get_envs()
+            .any(|(key, value)| key == "A" && value.is_some()));
     }
 
     #[test]
