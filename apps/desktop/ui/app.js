@@ -978,7 +978,7 @@ function updateSpeeds(tasks) {
 const isTorrent = (task) => /^(?:magnet:)|\.torrent(?:$|[?#])/i.test(task.source);
 
 function visibleDownloads() {
-  const isRecording = (task) => /\.recording\.webm$/i.test(`${task.source} ${task.destination}`);
+  const isRecording = (task) => /\.recording(?: \(\d+\))?\.webm$/i.test(`${task.source} ${task.destination}`);
   let visible = activePage === "recordings"
     ? downloads.filter(isRecording)
     : activePage === "torrents"
@@ -1214,7 +1214,7 @@ function renderDownloads(force = false) {
       className: "download-state",
       textContent: failureMessage === "network_waiting_for_reconnect"
         ? t("networkWaiting")
-        : /\.recording\.webm$/i.test(task.destination) && stateKey(task.state) === "downloading"
+        : /\.recording(?: \(\d+\))?\.webm$/i.test(task.destination) && stateKey(task.state) === "downloading"
           ? t("recordingActive")
           : stateName(task.state),
     });
@@ -1270,7 +1270,7 @@ function renderDownloads(force = false) {
       actions.append(button);
     };
     const key = stateKey(task.state);
-    const recording = /\.recording\.webm$/i.test(task.destination);
+    const recording = /\.recording(?: \(\d+\))?\.webm$/i.test(task.destination);
     if (recording && key === "downloading") addAction(t("stopRecording"), "stop_recording");
     else if (key === "downloading" || key === "inspecting")
       addAction(t("pause"), "pause_download");
@@ -1301,7 +1301,7 @@ function renderDownloads(force = false) {
       };
       actions.append(locateButton);
     }
-    if (key === "completed" && /\.recording\.webm$/i.test(task.destination)) {
+    if (key === "completed" && /\.recording(?: \(\d+\))?\.webm$/i.test(task.destination)) {
       const exportButton = document.createElement("button");
       exportButton.className = "task-action";
       exportButton.textContent = t("export");
@@ -2656,7 +2656,9 @@ document.querySelector("#export-format").onchange = (event) => {
 };
 document.querySelector("#export-recording").onclick = async (event) => {
   const button = event.currentTarget;
+  const originalLabel = button.textContent;
   button.disabled = true;
+  button.textContent = "…";
   try {
     await invoke("export_recording", {
       id: exportTaskId,
@@ -2667,8 +2669,11 @@ document.querySelector("#export-recording").onclick = async (event) => {
     });
     exportDialog.close();
     await refreshDownloads();
-  } catch (error) { reportUiError("main", "export-recording", error); }
-  finally { button.disabled = false; }
+  } catch (error) {
+    reportUiError("main", "export-recording", error);
+    // Without a visible message the dialog looked frozen after a failed export.
+    alert(String(error?.message || error || "export_failed"));
+  } finally { button.disabled = false; button.textContent = originalLabel; }
 };
 async function refreshDiagnosticLog() {
   const output = document.querySelector("#diagnostic-log");

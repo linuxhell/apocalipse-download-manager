@@ -13884,6 +13884,22 @@ fn apply_integrity_result(task: &mut DownloadTask, expected: Option<&str>, diges
     }
 }
 
+/// Strips the `.recording.webm` suffix, including the ` (N)` that
+/// `unique_destination` inserts when a recording with the same title exists
+/// (`Title.recording (1).webm`). Returns `None` for any other file name.
+fn recording_stem(name: &str) -> Option<&str> {
+    let base = name.strip_suffix(".webm")?;
+    if let Some(stem) = base.strip_suffix(".recording") {
+        return Some(stem);
+    }
+    let without_counter = base.strip_suffix(')')?;
+    let (head, digits) = without_counter.rsplit_once(" (")?;
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    head.strip_suffix(".recording")
+}
+
 #[tauri::command]
 async fn export_recording(
     state: State<'_, AppState>,
@@ -13904,10 +13920,7 @@ async fn export_recording(
             .find(|task| task.id == id)
             .ok_or_else(|| "download_not_found".to_owned())?;
         if task.state != DownloadState::Completed
-            || !task
-                .destination
-                .to_string_lossy()
-                .ends_with(".recording.webm")
+            || recording_stem(&task.destination.to_string_lossy()).is_none()
         {
             return Err("recording_not_complete".to_owned());
         }
@@ -13927,8 +13940,8 @@ async fn export_recording(
     let stem = source
         .file_name()
         .and_then(|value| value.to_str())
-        .unwrap_or("recording.recording.webm")
-        .trim_end_matches(".recording.webm");
+        .and_then(recording_stem)
+        .unwrap_or("recording");
     let output_directory = PathBuf::from(output_directory);
     if !output_directory.is_dir() {
         return Err("export_directory_not_found".to_owned());
@@ -15667,6 +15680,15 @@ mod tests {
             ),
             "video.mkv"
         );
+    }
+
+    #[test]
+    fn recording_stem_accepts_numbered_duplicates() {
+        assert_eq!(recording_stem("A.recording.webm"), Some("A"));
+        assert_eq!(recording_stem("A.recording (1).webm"), Some("A"));
+        assert_eq!(recording_stem("A.recording (12).webm"), Some("A"));
+        assert_eq!(recording_stem("A.recording (x).webm"), None);
+        assert_eq!(recording_stem("A.webm"), None);
     }
 
     #[test]
