@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "0.3.200",
+  "version": "0.3.201",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -145,5 +145,5 @@
       "48": "icons/apocalipse-a-48.png"
     }
   },
-  "version_name": "0.3.200"
+  "version_name": "0.3.201"
 }

@@ -529,9 +529,19 @@ async function analyzeHls(urls, expectedDuration) {
   const items = await Promise.all((urls || []).slice(-20).map(async (url) => ({ url, ...(await hlsDuration(url).catch(() => ({ duration: null, requestUrls: [url] }))) })));
   const expected = Number(expectedDuration);
   const valid = items.filter((item) => Number.isFinite(item.duration));
-  if (Number.isFinite(expected) && expected > 0) valid.sort((a, b) => Math.abs(a.duration - expected) - Math.abs(b.duration - expected));
-  else valid.sort((a, b) => b.duration - a.duration);
-  const recommendedUrl = valid[0]?.url || items.at(-1)?.url || null;
+  let recommendedUrl = null;
+  if (Number.isFinite(expected) && expected > 0) {
+    // Single-page apps (e.g. war.gov/UFO) keep every manifest loaded so far in
+    // the Performance timeline, and their videos often share the same length.
+    // Among manifests that match the player's duration, the most recently
+    // requested one belongs to the video now on screen; picking the closest
+    // match returned an older video of nearly identical length.
+    const tolerance = Math.max(1, expected * 0.02);
+    const matching = valid.filter((item) => Math.abs(item.duration - expected) <= tolerance);
+    if (matching.length) recommendedUrl = matching.at(-1).url;
+    else valid.sort((a, b) => Math.abs(a.duration - expected) - Math.abs(b.duration - expected));
+  } else valid.sort((a, b) => b.duration - a.duration);
+  recommendedUrl = recommendedUrl || valid[0]?.url || items.at(-1)?.url || null;
   return items.map((item) => ({ ...item, recommended: item.url === recommendedUrl }));
 }
 
