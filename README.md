@@ -31,9 +31,13 @@
 ## Demo / Demonstração / 演示
 
 
-<video src="https://github.com/linuxhell/apocalipse-download-manager/raw/main/assets/demo/adm-demo.mp4" controls muted width="100%"></video>
+<p align="center">
+  <a href="https://github.com/linuxhell/apocalipse-download-manager/blob/main/assets/demo/adm-demo.mp4">
+    <img alt="Apocalipse Download Manager demo (click for the full-quality video)" src="assets/demo/adm-demo-preview.gif" width="800">
+  </a>
+</p>
 
-<sub>If the video does not play, <a href="assets/demo/adm-demo.mp4">open the file directly</a>.</sub>
+<p align="center"><sub>Click the preview to watch the full-quality video.</sub></p>
 
 > [!IMPORTANT]
 > **Current release: ADM 0.4.88 + browser extension 0.3.202.** Fixes for HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). Cinema Premium keeps its **28 HD themes** and compact queues. The Firefox XPI in the release is Mozilla-signed.
