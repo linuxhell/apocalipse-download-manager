@@ -31,7 +31,9 @@
 ## Demo / Demonstração / 演示
 
 
-https://github.com/user-attachments/assets/99c988c8-a2b7-4f92-b623-922a77656a69
+<video src="https://github.com/linuxhell/apocalipse-download-manager/raw/main/assets/demo/adm-demo.mp4" controls muted width="100%"></video>
+
+<sub>If the video does not play, <a href="assets/demo/adm-demo.mp4">open the file directly</a>.</sub>
 
 > [!IMPORTANT]
 > **Current release: ADM 0.4.83 + browser extension 0.3.191.** Cinema Premium includes **28 HD themes**, compact Downloads/Torrents/Recordings queues, persistent pause/remove/reveal controls, balanced Logs panes and the modern blue A identity. The Firefox XPI in the release is Mozilla-signed.
