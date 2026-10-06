@@ -1960,7 +1960,11 @@
           cleanupOverlay();
           return;
         }
-        const anchor = isYouTubeVideo
+        // Shorts keep several <video> players mounted and have no visible
+        // #movie_player (the watch-page player stays hidden with an empty box),
+        // so anchoring there hid the button on every Short. Use the video itself.
+        const onShorts = /^\/shorts\//.test(location.pathname);
+        const anchor = isYouTubeVideo && !onShorts
           ? document.querySelector("#movie_player") || element.closest("ytd-player") || element
           : element;
         const rect = anchor.getBoundingClientRect();
