@@ -1309,6 +1309,13 @@
     // Keep both regular videos and live streams out of the generic HLS route.
     if (youtubeExtractorUrl() || isRedditPage()) return immediate;
     const hls = hlsForPage();
+    // Some sites (e.g. PornoXO) serve manifests from URLs without ".m3u8";
+    // the background worker identifies those by Content-Type.
+    if (!hls.candidates.length && !/^https?:/i.test(String(immediate || ""))) {
+      const manifests = await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_HLS_MANIFESTS" }).catch(() => null);
+      const urls = Array.isArray(manifests?.urls) ? manifests.urls : [];
+      if (urls.length) { hls.candidates = urls; hls.fallback = urls.at(-1); }
+    }
     if (!hls.candidates.length) return immediate;
     try {
       const selected = await chrome.runtime.sendMessage({

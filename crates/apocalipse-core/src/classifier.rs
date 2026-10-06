@@ -41,7 +41,9 @@ pub fn classify_url(input: &str) -> Option<DownloadKind> {
     let path = url.path().to_ascii_lowercase();
     if path.ends_with(".torrent") {
         Some(DownloadKind::Torrent)
-    } else if path.ends_with(".m3u8") {
+    } else if path.ends_with(".m3u8") || url.fragment() == Some("adm.m3u8") {
+        // The fragment marks manifests the browser extension identified by
+        // Content-Type on URLs that carry no ".m3u8" extension.
         Some(DownloadKind::Hls)
     } else if path.ends_with(".meta4") || path.ends_with(".metalink") {
         Some(DownloadKind::Metalink)
@@ -85,6 +87,14 @@ pub fn classify_url(input: &str) -> Option<DownloadKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extensionless_manifest_marked_by_extension_is_hls() {
+        assert_eq!(
+            classify_url("https://cdn.example.com/video/abc/playlist#adm.m3u8"),
+            Some(DownloadKind::Hls)
+        );
+    }
 
     #[test]
     fn reddit_posts_use_extractor_but_images_and_feeds_remain_http() {

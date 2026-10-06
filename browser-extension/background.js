@@ -12,6 +12,8 @@ let lastShortcutMode = "normal";
 let diagnosticOutbox = [];
 const recentFileResponses = [];
 const recentMediaResponses = [];
+// HLS manifests served without a .m3u8 extension (identified by Content-Type).
+const recentHlsManifests = [];
 const thumbnailDataCache = new Map();
 const tabNavigationEpochs = new Map();
 
@@ -129,6 +131,9 @@ function resetTabMedia(tabId, url = "") {
   for (let index = recentMediaResponses.length - 1; index >= 0; index -= 1) {
     if (recentMediaResponses[index].tabId === tabId) recentMediaResponses.splice(index, 1);
   }
+  for (let index = recentHlsManifests.length - 1; index >= 0; index -= 1) {
+    if (recentHlsManifests[index].tabId === tabId) recentHlsManifests.splice(index, 1);
+  }
   mediaPickerContexts.delete(tabId);
   tabNavigationEpochs.set(tabId, { startedAt: Date.now(), url });
   void globalThis.ADM_DIAG_WORKER?.emit("capture.tab_media_reset", {
@@ -244,6 +249,11 @@ if (chrome.webRequest?.onResponseStarted) {
     const capturedMedia = mediaResponse && (socialHost || sameSiteHost);
     void globalThis.ADM_DIAG_WORKER?.network(details, capturedMedia,
       capturedMedia ? "accepted_by_capture_filter" : mediaResponse ? "host_not_in_capture_filter" : "not_classified_as_media");
+    if (/^(?:application\/(?:vnd\.apple\.mpegurl|x-mpegurl)|audio\/(?:x-)?mpegurl)\b/i.test(contentType)
+      && !/\.m3u8(?:$|[?#])/i.test(details.url)) {
+      recentHlsManifests.push({ tabId: details.tabId, url: details.url.split("#")[0] + "#adm.m3u8", capturedAt: Date.now() });
+      recentHlsManifests.splice(0, Math.max(0, recentHlsManifests.length - 100));
+    }
     if (capturedMedia) {
       recentMediaResponses.push({
         tabId: details.tabId,
@@ -1041,6 +1051,16 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       .then(result => reply(result))
       .catch(error => reply({ ok: false, error: String(error) }));
     return true;
+  }
+  if (message?.type === "APOCALIPSE_RECENT_HLS_MANIFESTS") {
+    const tabId = Number.isInteger(message.tabId) ? message.tabId : sender.tab?.id;
+    const navigationStartedAt = tabNavigationEpochs.get(tabId)?.startedAt || 0;
+    const urls = [...new Set(recentHlsManifests
+      .filter((item) => item.tabId === tabId && item.capturedAt >= navigationStartedAt)
+      .sort((left, right) => left.capturedAt - right.capturedAt)
+      .map((item) => item.url))].slice(-10);
+    reply({ urls });
+    return;
   }
   if (message?.type === "APOCALIPSE_RECENT_TAB_MEDIA") {
     const tabId = Number.isInteger(message.tabId) ? message.tabId : sender.tab?.id;
