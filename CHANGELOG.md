@@ -1,3 +1,17 @@
+# Apocalipse Download Manager 0.4.88 — Extensão 0.3.202
+
+## Português do Brasil
+
+Corrige playlists HLS sem `.m3u8` na URL (detectadas por Content-Type), o download de vídeo errado em páginas com vários vídeos de mesma duração, o botão Baixar nos YouTube Shorts e a exportação de gravações repetidas (`título.recording (1).webm`), agora com mensagem de erro visível. Após um 403 por impressão digital TLS, o yt-dlp é repetido uma vez imitando um navegador. A verificação de manifesto assinado das ferramentas foi ligada ao instalador e só é aplicada depois que uma chave pública for cadastrada (`docs/tool-update-signing.md`). Extensão 0.3.202 com XPI assinado.
+
+## English
+
+Fixes HLS playlists without `.m3u8` in the URL (detected by Content-Type), wrong-video downloads on pages with several equal-length videos, the Download button on YouTube Shorts and export of repeated recordings (`title.recording (1).webm`), now with a visible error message. After a 403 caused by TLS fingerprinting, yt-dlp is retried once impersonating a browser. Signed-manifest verification for tools is wired into the installer and enforced only once a public key is configured (`docs/tool-update-signing.md`). Extension 0.3.202 with the signed XPI.
+
+## 简体中文
+
+修复 URL 中不含 `.m3u8` 的 HLS 播放列表（按 Content-Type 检测）、多个等长视频页面下载错误视频、YouTube Shorts 下载按钮缺失，以及重复录制（`标题.recording (1).webm`）无法导出的问题，并显示错误提示。遇到因 TLS 指纹导致的 403 时，yt-dlp 会模拟浏览器重试一次。工具的已签名清单校验已接入安装器，添加受信任公钥后才强制执行（`docs/tool-update-signing.md`）。扩展 0.3.202，含已签名 XPI。
+
 # Apocalipse Download Manager 0.4.85 — Extensão 0.3.191
 
 ## Português do Brasil

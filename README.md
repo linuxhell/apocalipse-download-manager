@@ -18,7 +18,7 @@
   <a href="https://github.com/linuxhell/apocalipse-download-manager/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/linuxhell/apocalipse-download-manager?style=flat-square"></a>
   <a href="LICENSE"><img alt="GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-0aa8c2?style=flat-square"></a>
   <img alt="Windows Linux macOS" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-182533?style=flat-square">
-  <img alt="Extension 0.3.191" src="https://img.shields.io/badge/browser%20extension-0.3.191-2363ef?style=flat-square">
+  <img alt="Extension 0.3.202" src="https://img.shields.io/badge/browser%20extension-0.3.202-2363ef?style=flat-square">
 </p>
 
 <p align="center">
@@ -36,7 +36,7 @@
 <sub>If the video does not play, <a href="assets/demo/adm-demo.mp4">open the file directly</a>.</sub>
 
 > [!IMPORTANT]
-> **Current release: ADM 0.4.83 + browser extension 0.3.191.** Cinema Premium includes **28 HD themes**, compact Downloads/Torrents/Recordings queues, persistent pause/remove/reveal controls, balanced Logs panes and the modern blue A identity. The Firefox XPI in the release is Mozilla-signed.
+> **Current release: ADM 0.4.88 + browser extension 0.3.202.** Fixes for HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). Cinema Premium keeps its **28 HD themes** and compact queues. The Firefox XPI in the release is Mozilla-signed.
 
 ## Download the current release
 
@@ -45,9 +45,9 @@
 | Windows x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-windows-x64-portable.zip) |
 | Linux x64 | [AppImage](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64.AppImage) · [Portable tar.gz](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64-portable.tar.gz) |
 | macOS x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-macos-x64-portable.zip) |
-| Chrome | [Extension 0.3.191](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.191.zip) |
-| Edge | [Extension 0.3.191](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.191.zip) |
-| Firefox | [Mozilla-signed XPI 0.3.191](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.191.xpi) |
+| Chrome | [Extension 0.3.202](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.202.zip) |
+| Edge | [Extension 0.3.202](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.202.zip) |
+| Firefox | [Mozilla-signed XPI 0.3.202](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.202.xpi) |
 
 ## Quick start / Início rápido / 快速开始
 
@@ -83,25 +83,30 @@
 
 Sites protected by DRM or access controls are intentionally not bypassed. Download only content you are authorized to save.
 
-## Release 0.4.83 highlights
+## Release 0.4.88 highlights
 
-The current interface keeps Downloads, Torrents and Recordings in the same narrow, scrollable task column. Pause/resume, the red remove control and the yellow folder control stay visible on each task. On Windows and macOS, the folder action reveals the task file directly when it exists instead of opening an unrelated folder view.
+- **Capture:** HLS playlists served without `.m3u8` in the URL are detected by Content-Type; on pages with several equal-length videos the download uses the playlist of the video on screen; the Download button is back on YouTube Shorts.
+- **Recordings:** repeated recordings (`title.recording (1).webm`) now export to the chosen format, and export errors are shown.
+- **Media downloads:** after a 403 caused by TLS fingerprinting, yt-dlp is retried once impersonating a browser (`--impersonate chrome`) when the installed build supports it.
+- **Tool updates:** signed-manifest verification (signature, anti-rollback, expiry, SHA-256) is wired into the tool installer and stays dormant until a trusted key is added. See [docs/tool-update-signing.md](docs/tool-update-signing.md).
+
+The interface (introduced in 0.4.83) keeps Downloads, Torrents and Recordings in the same narrow, scrollable task column. Pause/resume, the red remove control and the yellow folder control stay visible on each task. On Windows and macOS, the folder action reveals the task file directly when it exists instead of opening an unrelated folder view.
 
 Cinema Premium adds 28 HD themes with palette-aware contrast and configurable transparency. The About page keeps the selected palette without the scenic wallpaper, while Logs use balanced diagnostic/event panes.
 
-Browser extension 0.3.191 follows the selected palette. The current release includes Chrome and Edge ZIP packages plus the Mozilla-signed Firefox XPI.
+Browser extension 0.3.202 follows the selected palette. The current release includes Chrome and Edge ZIP packages plus the Mozilla-signed Firefox XPI.
 
 ## Performance and engineering
 
 Benchmark details and limitations live in [docs/PERFORMANCE.md](docs/PERFORMANCE.md), keeping the homepage focused on downloading and using the application.
 
-For architecture, development status and security details, see [ROADMAP.md](ROADMAP.md), [SECURITY.md](SECURITY.md) and the [0.4.83 changelog](CHANGELOG.md).
+For architecture, development status and security details, see [ROADMAP.md](ROADMAP.md), [SECURITY.md](SECURITY.md) and the [changelog](CHANGELOG.md).
 
 ## Português do Brasil
 
 O Apocalipse é um gerenciador de downloads livre e portátil para Windows, Linux e macOS. Ele reúne downloads HTTP retomáveis, torrents/magnet, detecção de mídia no navegador, yt-dlp, HLS, FFmpeg, gravações progressivas e Apocalipse Link em uma única interface.
 
-A versão **0.4.83** traz o Cinema Premium com **28 temas em HD**, filas compactas e iguais em Downloads/Torrents/Gravações, rolagem interna, pausa/retomada, X vermelho e pastinha amarela sempre acessíveis. No Windows, a pastinha revela e seleciona o arquivo no Explorer quando ele existe. A extensão atual é a **0.3.191**, com XPI do Firefox assinado pela Mozilla.
+A versão **0.4.88** corrige a captura de playlists HLS sem `.m3u8` na URL, o download de vídeo errado em páginas com vários vídeos, o botão Baixar nos YouTube Shorts e a exportação de gravações repetidas. Também tenta de novo o yt-dlp imitando um navegador quando o site bloqueia com 403 e liga a verificação de atualizações de ferramentas assinadas (ativa quando uma chave for cadastrada). O Cinema Premium mantém os **28 temas em HD** e as filas compactas. A extensão atual é a **0.3.202**, com XPI do Firefox assinado pela Mozilla.
 
 Os detalhes de desempenho foram movidos para [docs/PERFORMANCE.md](docs/PERFORMANCE.md) para a página inicial ficar mais clara.
 
@@ -109,7 +114,7 @@ Os detalhes de desempenho foram movidos para [docs/PERFORMANCE.md](docs/PERFORMA
 
 Apocalipse 是适用于 Windows、Linux 和 macOS 的自由开源便携下载管理器。它把可恢复 HTTP 下载、种子/磁力链接、浏览器媒体检测、yt-dlp、HLS、FFmpeg、渐进式录制和 Apocalipse Link 集成在同一界面中。
 
-**0.4.83** 版本带来 Cinema Premium：**28 个高清主题**、下载/种子/录制页面统一的紧凑滚动队列，以及始终可见的暂停/继续、红色移除和黄色文件夹按钮。在 Windows 上，如果文件存在，黄色文件夹按钮会在资源管理器中直接定位并选中文件。当前浏览器扩展版本为 **0.3.191**，Firefox XPI 已由 Mozilla 签名。
+**0.4.88** 版本修复了 URL 中不含 `.m3u8` 的 HLS 播放列表捕获、多视频页面下载错误视频、YouTube Shorts 下载按钮缺失以及重复录制无法导出的问题。遇到 403（TLS 指纹拦截）时，yt-dlp 会模拟浏览器重试一次，并接入了已签名工具更新的校验（添加受信任密钥后启用）。Cinema Premium 保留 **28 个高清主题**与紧凑队列。当前浏览器扩展版本为 **0.3.202**，Firefox XPI 已由 Mozilla 签名。
 
 性能测试的详细数据与限制已移至 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)，使项目首页更简洁。
 
