@@ -40,7 +40,7 @@
 <p align="center"><sub>Click the preview to watch the full-quality video.</sub></p>
 
 > [!IMPORTANT]
-> **Current release: ADM 0.4.89 + browser extension 0.3.203 (Firefox: signed 0.3.202).** Steadier extension connection (bridge no longer serialized), consistent language between app and extension, fixed extension ID on Chrome/Edge. Earlier fixes: HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). Cinema Premium keeps its **28 HD themes** and compact queues. The Firefox XPI in the release is Mozilla-signed.
+> **Current release: ADM 0.4.90 + browser extension 0.3.203.** Steadier extension connection (bridge no longer serialized), consistent language between app and extension, fixed extension ID on Chrome/Edge. Earlier fixes: HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). Cinema Premium keeps its **28 HD themes** and compact queues. The Firefox XPI in the release is Mozilla-signed.
 
 ## Download the current release
 
@@ -51,7 +51,7 @@
 | macOS x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-macos-x64-portable.zip) |
 | Chrome | [Extension 0.3.203](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.203.zip) |
 | Edge | [Extension 0.3.203](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.203.zip) |
-| Firefox | [Mozilla-signed XPI 0.3.202](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.202.xpi) |
+| Firefox | [Mozilla-signed XPI 0.3.203](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.203.xpi) |
 
 ## Quick start / Início rápido / 快速开始
 
@@ -86,6 +86,10 @@
 - Portable Windows, Linux and macOS x64 builds, with no mandatory installer
 
 Sites protected by DRM or access controls are intentionally not bypassed. Download only content you are authorized to save.
+
+## Release 0.4.90 highlights
+
+This release ships the Mozilla-signed Firefox XPI 0.3.203, so Firefox gets the same connection and overlay fixes as Chrome and Edge.
 
 ## Release 0.4.89 highlights
 

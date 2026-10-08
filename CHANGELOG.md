@@ -1,3 +1,17 @@
+# Apocalipse Download Manager 0.4.90 — Extensão 0.3.203
+
+## Português do Brasil
+
+Inclui o XPI do Firefox 0.3.203 assinado pela Mozilla, com as mesmas correções de conexão e de overlay do Chrome e do Edge. O app é idêntico ao 0.4.89.
+
+## English
+
+Ships the Mozilla-signed Firefox XPI 0.3.203 with the same connection and overlay fixes as Chrome and Edge. The app is identical to 0.4.89.
+
+## 简体中文
+
+包含 Mozilla 已签名的 Firefox XPI 0.3.203，与 Chrome 和 Edge 拥有相同的连接与按钮修复。应用本身与 0.4.89 相同。
+
 # Apocalipse Download Manager 0.4.89 — Extensão 0.3.203
 
 ## Português do Brasil
