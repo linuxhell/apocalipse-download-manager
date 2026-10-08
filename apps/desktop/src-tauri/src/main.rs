@@ -8286,6 +8286,16 @@ fn set_application_theme(
 }
 
 #[tauri::command]
+fn get_application_language(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .language
+        .clone())
+}
+
+#[tauri::command]
 fn get_application_theme(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state
         .settings
@@ -13571,10 +13581,14 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
         return;
     }
     let state = app.state::<AppState>();
-    let token = match state.settings.lock() {
-        Ok(settings) => settings.bridge_token.clone(),
-        Err(_) => return,
-    };
+    // A panic elsewhere while holding the settings lock must not turn the bridge
+    // into a silent hang-up; the token itself is still intact.
+    let token = state
+        .settings
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .bridge_token
+        .clone();
     if !bridge_authorized(headers, &token) {
         diagnostic_log(
             &state,
@@ -13617,12 +13631,13 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             "bridge.health",
             "extension heartbeat authenticated",
         );
-        let (language, theme) = state
-            .settings
-            .lock()
-            .ok()
-            .map(|settings| (settings.language.clone(), settings.theme.clone()))
-            .unwrap_or_else(|| (default_language(), default_theme()));
+        let (language, theme) = {
+            let settings = state
+                .settings
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            (settings.language.clone(), settings.theme.clone())
+        };
         bridge_response(
             &mut stream,
             "200 OK",
@@ -13866,9 +13881,56 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
     }
 }
 
+/// Upper bound for simultaneously served bridge connections. Beyond it the
+/// request is refused immediately instead of queuing behind slow ones.
+const BRIDGE_MAX_CONCURRENT_CONNECTIONS: usize = 32;
+static BRIDGE_ACTIVE_CONNECTIONS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+struct BridgeConnectionSlot;
+
+impl BridgeConnectionSlot {
+    fn acquire() -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        if BRIDGE_ACTIVE_CONNECTIONS.fetch_add(1, Ordering::SeqCst)
+            >= BRIDGE_MAX_CONCURRENT_CONNECTIONS
+        {
+            BRIDGE_ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
+            return None;
+        }
+        Some(Self)
+    }
+}
+
+impl Drop for BridgeConnectionSlot {
+    fn drop(&mut self) {
+        BRIDGE_ACTIVE_CONNECTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 fn run_extension_bridge(app: tauri::AppHandle, listener: TcpListener) {
-    for stream in listener.incoming().flatten() {
-        handle_bridge_connection(&app, stream);
+    // Each connection gets its own thread. Serving them one at a time let a single
+    // slow request (a preview launch, a large blob chunk, a client that sent
+    // nothing and waited out the read timeout) or a burst of diagnostic POSTs
+    // delay the extension's heartbeat until the browser reported "disconnected".
+    for mut stream in listener.incoming().flatten() {
+        let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+        let Some(slot) = BridgeConnectionSlot::acquire() else {
+            bridge_response(
+                &mut stream,
+                "503 Service Unavailable",
+                None,
+                "{\"ok\":false}",
+            );
+            continue;
+        };
+        let connection_app = app.clone();
+        let _ = std::thread::Builder::new()
+            .name("apocalipse-bridge-request".into())
+            .spawn(move || {
+                let _slot = slot;
+                handle_bridge_connection(&connection_app, stream);
+            });
     }
 }
 
@@ -15104,6 +15166,7 @@ fn main() {
             control_main_window,
             set_application_theme,
             get_application_theme,
+            get_application_language,
             get_log_editor,
             set_log_editor,
             open_log_external,
@@ -15850,6 +15913,16 @@ mod tests {
             ),
             "video.mkv"
         );
+    }
+
+    #[test]
+    fn bridge_connection_slots_are_capped_and_released() {
+        let held: Vec<_> = (0..BRIDGE_MAX_CONCURRENT_CONNECTIONS)
+            .map(|_| BridgeConnectionSlot::acquire().expect("slot below the cap"))
+            .collect();
+        assert!(BridgeConnectionSlot::acquire().is_none());
+        drop(held);
+        assert!(BridgeConnectionSlot::acquire().is_some());
     }
 
     #[test]

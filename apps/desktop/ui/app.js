@@ -2169,6 +2169,20 @@ const selectLanguage = (language) => {
 document.querySelectorAll("[data-language-choice]").forEach((button) => {
   button.onclick = () => selectLanguage(button.dataset.languageChoice);
 });
+// settings.json is authoritative for the language, like the theme: a missing or
+// stale webview cache (localStorage is lost on some restarts) must not show a
+// different language than the one the browser extension receives from the app.
+// A backend still at the default "en" while the cache holds another language
+// means the backend never saw the choice, so heal it instead of overriding it.
+const applicationLanguageReady = invoke("get_application_language").then((saved) => {
+  const supported = ["en", "pt-BR", "zh-CN"];
+  if (!supported.includes(saved)) throw new Error("unsupported_saved_language");
+  if (saved === "en" && locale !== "en" && supported.includes(locale)) {
+    return invoke("set_application_language", { language: locale });
+  }
+  if (saved !== locale) selectLanguage(saved);
+}).catch(error => reportUiError("main", "restoreApplicationLanguage", error));
+
 document.querySelectorAll(".tabs [data-filter]").forEach((button) => {
   button.onclick = () => {
     activeFilter = button.dataset.filter;

@@ -1328,6 +1328,7 @@
   };
   let overlayTimer;
   const activeOverlays = new Map();
+  const skippedFeedPreviews = new WeakSet();
 
   // Universal social-player diagnostics. Decisions are emitted only while the
   // existing opt-in diagnostics session is active. A per-player signature
@@ -1553,7 +1554,13 @@
         return;
       }
       if (activeGenericFeedVideo && element.tagName === "VIDEO" && element !== activeGenericFeedVideo) {
-        trace("overlay_skipped_feed_preview", "overlay", { reason: "not_active_generic_feed_video" });
+        // Report each skipped preview once. This runs on every scan (DOM mutation
+        // and a 2 s timer) for every inactive video, and each trace is an HTTP POST
+        // to the desktop bridge; a feed page produced hundreds per minute.
+        if (!skippedFeedPreviews.has(element)) {
+          skippedFeedPreviews.add(element);
+          trace("overlay_skipped_feed_preview", "overlay", { reason: "not_active_generic_feed_video" });
+        }
         return;
       }
       const tikTokUrl = element.tagName === "VIDEO" ? tikTokUrlFor(element) : null;
