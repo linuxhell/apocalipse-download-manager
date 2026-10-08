@@ -273,6 +273,7 @@ jobs:
           path = sys.argv[1]
           with open(path, encoding="utf-8") as stream:
               manifest = json.load(stream)
+          manifest.pop("key", None)  # Chromium-only fixed extension ID
           worker = manifest.pop("background", {}).get("service_worker")
           if not worker:
               raise SystemExit("Chromium background service worker is missing")

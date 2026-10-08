@@ -283,8 +283,30 @@ jobs:
           if [[ ! -f "$signed" && ${#signed_parts[@]} -gt 0 ]]; then
             cat "${signed_parts[@]}" | base64 --decode > "$signed"
           fi
+          fallback_version=$(python3 - <<'PY'
+          import glob
+          import re
+
+          versions = set()
+          for path in glob.glob("packaging/firefox/apocalipse-firefox-*.xpi*"):
+              match = re.search(r"apocalipse-firefox-(\d+(?:\.\d+)*)\.xpi(?:\.b64\.part\d+)?$", path)
+              if match:
+                  versions.add(tuple(int(part) for part in match.group(1).split(".")))
+          print(".".join(str(part) for part in max(versions)) if versions else "")
+          PY
+          )
           if [[ -f "$signed" ]]; then
             cp "$signed" "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
+          elif [[ -n "$fallback_version" ]]; then
+            # An unsigned XPI cannot be installed in release Firefox. Until a signed
+            # package for this version is added, keep shipping the newest signed one.
+            fallback="packaging/firefox/apocalipse-firefox-${fallback_version}.xpi"
+            fallback_parts=(packaging/firefox/apocalipse-firefox-${fallback_version}.xpi.b64.part*)
+            if [[ ! -f "$fallback" && ${#fallback_parts[@]} -gt 0 ]]; then
+              cat "${fallback_parts[@]}" | base64 --decode > "$fallback"
+            fi
+            cp "$fallback" "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${fallback_version}.xpi"
+            echo "::warning::No signed Firefox XPI for extension ${version}; publishing the signed ${fallback_version} package."
           else
             cp -R browser-extension "$stage/firefox"
             python3 - "$stage/firefox/manifest.json" <<'PY'
@@ -294,6 +316,7 @@ jobs:
           path = sys.argv[1]
           with open(path, encoding="utf-8") as stream:
               manifest = json.load(stream)
+          manifest.pop("key", None)  # Chromium-only fixed extension ID
           worker = manifest.pop("background", {}).get("service_worker")
           if not worker:
               raise SystemExit("Chromium background service worker is missing")

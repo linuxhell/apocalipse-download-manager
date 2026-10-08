@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAj5k21JNqsYXUeH/U7B0Q4sZALt9dwmtkZUJjUCV+8xWvAH+53Elp4iGwDyXoIxrxRFkJaXnSmhT/tRSf8Dbfj8ovVqRf05GJ0A54Mea3ZCq/mo33Z9/cz1vz+XrNg2aKpQaanK4ob4ls/C0Th7/H7C8eVu68dhFMN4bhSQpZGUk4QnpnWLdSHSUFfLtII+HLMIqQv6sQEyesvaon0G9m8G1lmOsDrfQOAKV5SMgzdKkcyt9RaYsixAsIfLfX8b9euymIHEOQCHqBoow//l8aTvm9R0uEX26EtKURPEkDqhU6YP+8CRANSSjw0DhJNafcUWOPte9kV2NfhpH0IoD+mQIDAQAB",
   "name": "__MSG_extensionName__",
-  "version": "0.3.202",
+  "version": "0.3.203",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
   "permissions": [
@@ -145,5 +146,5 @@
       "48": "icons/apocalipse-a-48.png"
     }
   },
-  "version_name": "0.3.202"
+  "version_name": "0.3.203"
 }

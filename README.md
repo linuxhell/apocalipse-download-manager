@@ -18,7 +18,7 @@
   <a href="https://github.com/linuxhell/apocalipse-download-manager/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/linuxhell/apocalipse-download-manager?style=flat-square"></a>
   <a href="LICENSE"><img alt="GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-0aa8c2?style=flat-square"></a>
   <img alt="Windows Linux macOS" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-182533?style=flat-square">
-  <img alt="Extension 0.3.202" src="https://img.shields.io/badge/browser%20extension-0.3.202-2363ef?style=flat-square">
+  <img alt="Extension 0.3.203" src="https://img.shields.io/badge/browser%20extension-0.3.203-2363ef?style=flat-square">
 </p>
 
 <p align="center">
@@ -40,7 +40,7 @@
 <p align="center"><sub>Click the preview to watch the full-quality video.</sub></p>
 
 > [!IMPORTANT]
-> **Current release: ADM 0.4.88 + browser extension 0.3.202.** Fixes for HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). Cinema Premium keeps its **28 HD themes** and compact queues. The Firefox XPI in the release is Mozilla-signed.
+> **Current release: ADM 0.4.89 + browser extension 0.3.203 (Firefox: signed 0.3.202).** Steadier extension connection (bridge no longer serialized), consistent language between app and extension, fixed extension ID on Chrome/Edge. Earlier fixes: HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). Cinema Premium keeps its **28 HD themes** and compact queues. The Firefox XPI in the release is Mozilla-signed.
 
 ## Download the current release
 
@@ -49,8 +49,8 @@
 | Windows x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-windows-x64-portable.zip) |
 | Linux x64 | [AppImage](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64.AppImage) · [Portable tar.gz](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64-portable.tar.gz) |
 | macOS x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-macos-x64-portable.zip) |
-| Chrome | [Extension 0.3.202](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.202.zip) |
-| Edge | [Extension 0.3.202](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.202.zip) |
+| Chrome | [Extension 0.3.203](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.203.zip) |
+| Edge | [Extension 0.3.203](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.203.zip) |
 | Firefox | [Mozilla-signed XPI 0.3.202](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.202.xpi) |
 
 ## Quick start / Início rápido / 快速开始
@@ -87,7 +87,12 @@
 
 Sites protected by DRM or access controls are intentionally not bypassed. Download only content you are authorized to save.
 
-## Release 0.4.88 highlights
+## Release 0.4.89 highlights
+
+- **Extension connection:** the local bridge serves each connection on its own thread, the extension stops flooding it with per-scan diagnostics, and the UI restores its language from `settings.json`.
+- **Fixed extension ID** on Chrome/Edge (`lfgkfogkggkgacahaidkbhggdolpojjf`), so reinstalling from another folder keeps the same ID. The pairing token is still per install.
+
+### Earlier in 0.4.88
 
 - **Capture:** HLS playlists served without `.m3u8` in the URL are detected by Content-Type; on pages with several equal-length videos the download uses the playlist of the video on screen; the Download button is back on YouTube Shorts.
 - **Recordings:** repeated recordings (`title.recording (1).webm`) now export to the chosen format, and export errors are shown.

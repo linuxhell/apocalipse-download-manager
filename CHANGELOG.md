@@ -1,3 +1,17 @@
+# Apocalipse Download Manager 0.4.89 — Extensão 0.3.203
+
+## Português do Brasil
+
+A ponte local atende cada conexão em uma thread própria, evitando que requisições lentas ou rajadas de diagnósticos atrasem o heartbeat da extensão. O idioma salvo no `settings.json` é restaurado na abertura, como o tema. A extensão deixa de registrar cada vídeo de prévia ignorado a cada varredura e, no Chrome e no Edge, passa a ter ID fixo (`lfgkfogkggkgacahaidkbhggdolpojjf`). Firefox continua com o XPI assinado 0.3.202.
+
+## English
+
+The local bridge serves each connection on its own thread so slow requests or diagnostic bursts cannot delay the extension heartbeat. The language saved in `settings.json` is restored on startup, like the theme. The extension no longer reports every skipped preview video on every scan and now has a fixed ID on Chrome and Edge (`lfgkfogkggkgacahaidkbhggdolpojjf`). Firefox keeps the signed 0.3.202 XPI.
+
+## 简体中文
+
+本地桥为每个连接使用独立线程，避免缓慢请求或诊断请求激增延迟扩展心跳。启动时恢复 `settings.json` 中保存的语言（与主题一致）。扩展不再在每次扫描时上报每个被跳过的预览视频，并在 Chrome 和 Edge 上使用固定 ID（`lfgkfogkggkgacahaidkbhggdolpojjf`）。Firefox 继续使用已签名的 0.3.202 XPI。
+
 # Apocalipse Download Manager 0.4.88 — Extensão 0.3.202
 
 ## Português do Brasil
