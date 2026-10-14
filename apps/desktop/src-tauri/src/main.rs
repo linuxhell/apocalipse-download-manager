@@ -6468,6 +6468,60 @@ fn aria2_request_context(
     )
 }
 
+/// True when two URLs belong to the same site (same last two host labels).
+fn same_registrable_site(left: &str, right: &str) -> bool {
+    let site = |value: &str| {
+        let host = url::Url::parse(value)
+            .ok()?
+            .host_str()?
+            .to_ascii_lowercase();
+        let labels: Vec<&str> = host.split('.').collect();
+        Some(labels[labels.len().saturating_sub(2)..].join("."))
+    };
+    matches!((site(left), site(right)), (Some(a), Some(b)) if a == b)
+}
+
+/// Some CDNs (video.twimg.com) answer 403 when the request carries the Referer of
+/// the third-party page that embedded the media, although the browser played it
+/// without one (`referrerpolicy="no-referrer"`). Probe once before handing the URL
+/// to the engine, and report true only when dropping the Referer is what turns a
+/// 403 into a success, so sites that need the Referer keep receiving it.
+async fn referer_causes_forbidden(url: &str, headers: &HashMap<String, String>) -> bool {
+    let Some(referer) = headers.get("Referer") else {
+        return false;
+    };
+    if same_registrable_site(url, referer) {
+        return false;
+    }
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+    else {
+        return false;
+    };
+    async fn probe(
+        client: &reqwest::Client,
+        url: &str,
+        headers: &HashMap<String, String>,
+        include_referer: bool,
+    ) -> Option<u16> {
+        let mut request = client.get(url).header("Range", "bytes=0-0");
+        for (name, value) in headers {
+            if !include_referer && name.eq_ignore_ascii_case("referer") {
+                continue;
+            }
+            request = request.header(name.as_str(), value.as_str());
+        }
+        request
+            .send()
+            .await
+            .ok()
+            .map(|response| response.status().as_u16())
+    }
+    probe(&client, url, headers, true).await == Some(403)
+        && matches!(probe(&client, url, headers, false).await, Some(200 | 206))
+}
+
 async fn run_aria2_download(
     app: tauri::AppHandle,
     id: DownloadId,
@@ -6561,6 +6615,25 @@ async fn run_aria2_download(
         None => {
             let is_http = kind == DownloadKind::Http;
             let add_uri_started_at = Instant::now();
+            let mut context = context.clone();
+            if is_http
+                && !context.proxy_required
+                && context.proxy_url.is_none()
+                && (context.method.is_empty() || context.method.eq_ignore_ascii_case("GET"))
+                && referer_causes_forbidden(&task.source, &context.headers).await
+            {
+                context.headers.remove("Referer");
+                diagnostic_log(
+                    &state,
+                    "INFO",
+                    "aria2.referer_dropped",
+                    &format!(
+                        "task={id} reason=403_with_referer_only url={}",
+                        redact_url(&task.source)
+                    ),
+                );
+                update_task(&app, id, true, |item| item.referer = None);
+            }
             let added = if is_bittorrent && context.proxy_required {
                 Err("aria2_bittorrent_proxy_unsupported".to_owned())
             } else if is_bittorrent {
@@ -8226,6 +8299,119 @@ fn control_main_window(app: tauri::AppHandle, action: String) -> Result<(), Stri
     result.map_err(|error| error.to_string())
 }
 
+/// Accent colour of every theme (the `--accent` value in the UI stylesheets),
+/// used to tint the window/taskbar icon.
+const THEME_ACCENTS: &[(&str, u32)] = &[
+    ("void", 0x25d9ef),
+    ("nebula", 0x7c5cff),
+    ("ember", 0xff7a3d),
+    ("jade", 0x2fe6a0),
+    ("plasma", 0xff4fb8),
+    ("glacier", 0x4fd4ff),
+    ("amber", 0xffb347),
+    ("abyss", 0x6fe7dd),
+    ("rust", 0xe0754a),
+    ("venom", 0x9be15d),
+    ("wine", 0xe0527a),
+    ("linen", 0xb5651d),
+    ("sky", 0x2f80c9),
+    ("blossom", 0xd6497d),
+    ("sage", 0x3f8f5f),
+    ("sand", 0xc96a3b),
+    ("lilac", 0x8b5fc9),
+    ("mist", 0x3f7ea6),
+    ("citrus", 0xd68910),
+    ("coral", 0xe0654f),
+    ("frost", 0x1b8f96),
+    ("cyberpunk", 0x25d9ef),
+    ("bladerunner", 0xffb347),
+    ("sexy", 0xf16a9a),
+    ("samurai", 0xff596d),
+    ("future", 0x69caff),
+    ("fantasy", 0x77e8b0),
+    ("pandora", 0x62ddf5),
+];
+
+fn theme_accent(theme: &str) -> u32 {
+    THEME_ACCENTS
+        .iter()
+        .find(|(name, _)| *name == theme)
+        .map_or(0x25d9ef, |(_, color)| *color)
+}
+
+fn point_in_polygon(polygon: &[(f32, f32)], x: f32, y: f32) -> bool {
+    let mut inside = false;
+    for index in 0..polygon.len() {
+        let (x1, y1) = polygon[index];
+        let (x2, y2) = polygon[(index + 1) % polygon.len()];
+        if (y1 > y) != (y2 > y) && x < (x2 - x1) * (y - y1) / (y2 - y1) + x1 {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+/// Renders the Apocalipse "A" (same outline as `assets/branding/apocalipse-a-blue.svg`)
+/// as RGBA, filled with a light-to-accent diagonal gradient and anti-aliased by
+/// 4x4 supersampling.
+fn render_a_icon(size: u32, accent: u32) -> Vec<u8> {
+    const OUTER: [(f32, f32); 8] = [
+        (5.0, 57.0),
+        (26.0, 7.0),
+        (38.0, 7.0),
+        (59.0, 57.0),
+        (45.0, 57.0),
+        (40.0, 44.0),
+        (24.0, 44.0),
+        (19.0, 57.0),
+    ];
+    const HOLE: [(f32, f32); 3] = [(28.0, 33.0), (36.0, 33.0), (32.0, 21.0)];
+    const SAMPLES: u32 = 4;
+    let base = [
+        ((accent >> 16) & 0xff) as f32,
+        ((accent >> 8) & 0xff) as f32,
+        (accent & 0xff) as f32,
+    ];
+    let mut pixels = Vec::with_capacity((size * size * 4) as usize);
+    for row in 0..size {
+        for column in 0..size {
+            let mut covered = 0_u32;
+            for sample_y in 0..SAMPLES {
+                for sample_x in 0..SAMPLES {
+                    let x = (column as f32 + (sample_x as f32 + 0.5) / SAMPLES as f32) * 64.0
+                        / size as f32;
+                    let y = (row as f32 + (sample_y as f32 + 0.5) / SAMPLES as f32) * 64.0
+                        / size as f32;
+                    if point_in_polygon(&OUTER, x, y) && !point_in_polygon(&HOLE, x, y) {
+                        covered += 1;
+                    }
+                }
+            }
+            if covered == 0 {
+                pixels.extend_from_slice(&[0, 0, 0, 0]);
+                continue;
+            }
+            let x = (column as f32 + 0.5) * 64.0 / size as f32;
+            let y = (row as f32 + 0.5) * 64.0 / size as f32;
+            let t = (((x - 5.0) / 54.0 + (y - 7.0) / 50.0) / 2.0).clamp(0.0, 1.0);
+            let lighten = 0.38 * (1.0 - t);
+            for channel in base {
+                pixels.push((channel + (255.0 - channel) * lighten).round() as u8);
+            }
+            pixels.push((255 * covered / (SAMPLES * SAMPLES)) as u8);
+        }
+    }
+    pixels
+}
+
+/// Tints the main window (and with it the taskbar entry) with the current theme.
+fn apply_window_icon(app: &tauri::AppHandle, theme: &str) {
+    if let Some(window) = app.get_webview_window("main") {
+        let icon = Image::new_owned(render_a_icon(128, theme_accent(theme)), 128, 128);
+        let _ = window.set_icon(icon);
+    }
+}
+
 #[tauri::command]
 fn set_application_theme(
     app: tauri::AppHandle,
@@ -8282,6 +8468,7 @@ fn set_application_theme(
     // that is already open follow it instead of staying on whatever
     // theme it happened to load with.
     let _ = app.emit("theme-changed", &theme);
+    apply_window_icon(&app, &theme);
     Ok(())
 }
 
@@ -15071,6 +15258,15 @@ fn main() {
                     }
                 })
                 .build(app)?;
+            {
+                let theme = app
+                    .state::<AppState>()
+                    .settings
+                    .lock()
+                    .map(|settings| settings.theme.clone())
+                    .unwrap_or_else(|_| default_theme());
+                apply_window_icon(app.handle(), &theme);
+            }
             if std::env::args().any(|argument| argument == "--hidden") {
                 if let Some(window) = app.get_webview_window("main") {
                     window.hide()?;
@@ -15913,6 +16109,93 @@ mod tests {
             ),
             "video.mkv"
         );
+    }
+
+    #[test]
+    fn theme_icon_is_an_a_tinted_with_the_theme_accent() {
+        let size = 64_u32;
+        let pixels = render_a_icon(size, theme_accent("samurai"));
+        assert_eq!(pixels.len(), (size * size * 4) as usize);
+        let at = |x: u32, y: u32| {
+            let index = ((y * size + x) * 4) as usize;
+            [
+                pixels[index],
+                pixels[index + 1],
+                pixels[index + 2],
+                pixels[index + 3],
+            ]
+        };
+        assert_eq!(at(0, 0)[3], 0, "corner is transparent");
+        assert_eq!(at(32, 28)[3], 0, "the A's counter is transparent");
+        let stroke = at(32, 12);
+        assert_eq!(stroke[3], 255, "the apex is opaque");
+        // samurai accent #ff596d: red dominates the tinted glyph.
+        assert!(stroke[0] > stroke[1] && stroke[0] > stroke[2]);
+        assert_ne!(render_a_icon(size, theme_accent("jade")), pixels);
+        assert_eq!(theme_accent("unknown-theme"), 0x25d9ef);
+    }
+
+    #[test]
+    fn every_theme_has_an_accent() {
+        assert_eq!(THEME_ACCENTS.len(), 28);
+        assert_eq!(theme_accent("void"), 0x25d9ef);
+    }
+
+    #[test]
+    fn same_site_detection_ignores_subdomains() {
+        assert!(same_registrable_site(
+            "https://video.twimg.com/a.mp4",
+            "https://abs.twimg.com/"
+        ));
+        assert!(!same_registrable_site(
+            "https://video.twimg.com/a.mp4",
+            "https://www.twpornstars.com/p/1"
+        ));
+    }
+
+    #[test]
+    fn a_referer_that_causes_403_is_detected_and_a_needed_one_is_kept() {
+        use std::io::{Read, Write};
+        // Server A rejects any request that has a Referer; server B requires one.
+        fn serve(reject_when_referer: bool) -> String {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            std::thread::spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    let mut stream = stream;
+                    let mut buffer = [0_u8; 4096];
+                    let read = stream.read(&mut buffer).unwrap_or(0);
+                    let request = String::from_utf8_lossy(&buffer[..read]).to_ascii_lowercase();
+                    let has_referer = request.contains("\r\nreferer:");
+                    let ok = has_referer != reject_when_referer;
+                    let status = if ok {
+                        "206 Partial Content"
+                    } else {
+                        "403 Forbidden"
+                    };
+                    let _ = stream.write_all(
+                        format!(
+                            "HTTP/1.1 {status}\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx"
+                        )
+                        .as_bytes(),
+                    );
+                }
+            });
+            format!("http://{address}/video.mp4")
+        }
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let headers = HashMap::from([(
+            "Referer".to_owned(),
+            "https://embedding-site.example/p/1".to_owned(),
+        )]);
+        let rejects = serve(true);
+        let requires = serve(false);
+        assert!(runtime.block_on(referer_causes_forbidden(&rejects, &headers)));
+        assert!(!runtime.block_on(referer_causes_forbidden(&requires, &headers)));
+        assert!(!runtime.block_on(referer_causes_forbidden(&rejects, &HashMap::new())));
     }
 
     #[test]
