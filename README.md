@@ -40,7 +40,7 @@
 <p align="center"><sub>Click the preview to watch the full-quality video.</sub></p>
 
 > [!IMPORTANT]
-> **Current release: ADM 0.4.90 + browser extension 0.3.203.** Steadier extension connection (bridge no longer serialized), consistent language between app and extension, fixed extension ID on Chrome/Edge. Earlier fixes: HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). Cinema Premium keeps its **28 HD themes** and compact queues. The Firefox XPI in the release is Mozilla-signed.
+> **Current release: ADM 0.4.91 + browser extension 0.3.203.** Steadier extension connection (bridge no longer serialized), consistent language between app and extension, fixed extension ID on Chrome/Edge. Earlier fixes: HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). Cinema Premium keeps its **28 HD themes** and compact queues. The Firefox XPI in the release is Mozilla-signed.
 
 ## Download the current release
 
@@ -86,6 +86,11 @@
 - Portable Windows, Linux and macOS x64 builds, with no mandatory installer
 
 Sites protected by DRM or access controls are intentionally not bypassed. Download only content you are authorized to save.
+
+## Release 0.4.91 highlights
+
+- **Download button:** a Referer that makes a CDN answer 403 (e.g. `video.twimg.com`) is dropped after a 1-byte probe; sites that need it still get it.
+- **Icon:** the Apocalipse "A" replaces the alien, and the window/taskbar icon takes the current theme colour.
 
 ## Release 0.4.90 highlights
 

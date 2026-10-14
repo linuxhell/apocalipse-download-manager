@@ -1,3 +1,17 @@
+# Apocalipse Download Manager 0.4.91 — Extensão 0.3.203
+
+## Português do Brasil
+
+O download pelo botão Baixar não envia mais o Referer da página quando o servidor só aceita o pedido sem ele (caso do `video.twimg.com`). O ícone do app passa a ser o "A" do Apocalipse, e o ícone da janela/barra de tarefas segue a cor do tema atual.
+
+## English
+
+Downloads from the Download button no longer send the page Referer when the server only accepts the request without it (the `video.twimg.com` case). The app icon is now the Apocalipse "A", and the window/taskbar icon follows the current theme colour.
+
+## 简体中文
+
+当服务器仅在不带 Referer 时才接受请求（如 `video.twimg.com`），下载按钮不再发送页面 Referer。应用图标改为 Apocalipse 的“A”，窗口/任务栏图标跟随当前主题颜色。
+
 # Apocalipse Download Manager 0.4.90 — Extensão 0.3.203
 
 ## Português do Brasil
