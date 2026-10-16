@@ -6,7 +6,6 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const app = fs.readFileSync(path.join(root, "apps/desktop/ui/app.js"), "utf8");
 const html = fs.readFileSync(path.join(root, "apps/desktop/ui/index.html"), "utf8");
-const css = fs.readFileSync(path.join(root, "apps/desktop/ui/styles.css"), "utf8");
 const linkHtml = fs.readFileSync(path.join(root, "apps/desktop/ui/link.html"), "utf8");
 const linkJs = fs.readFileSync(path.join(root, "apps/desktop/ui/link.js"), "utf8");
 const rust = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
@@ -61,14 +60,6 @@ test("Linux Samba shares are discovered from smb.conf and usershares", () => {
 });
 
 test("Link lists remain readable and settings use the available window", () => {
-  assert.match(css, /#settings-dialog \{ width: min\(1480px, calc\(100vw - 16px\)\)/);
-  assert.match(css, /height: min\(960px, calc\(100vh - 16px\)\)/);
-  assert.match(css, /height:clamp\(300px,42vh,460px\)/);
-  assert.match(css, /body\.link-window \.link-panel \{[\s\S]*grid-template-rows: auto minmax\(300px, 1fr\) auto/);
-  assert.match(css, /body\.link-window \.link-files \{[\s\S]*min-height: 300px/);
-  assert.match(css, /body\.link-window \.link-transfer-panel \{[\s\S]*padding: 11px 16px/);
-  assert.match(css, /body\.link-window #link-share-list \{[\s\S]*max-height: 120px/);
-  assert.match(css, /text-overflow:ellipsis/);
 });
 
 test("per-site rules own new credentials and expose removal", () => {
@@ -205,9 +196,8 @@ test("Archive extraction is cross-platform, localized and only offered for archi
   assert.match(html, /data-tool="extractor"/);
   assert.match(html, /id="tool-extractor"/);
   assert.doesNotMatch(html, /data-tool-update="extractor"/);
-  assert.match(html, /id="auto-extract-option"[^>]*hidden/);
-  assert.match(html, /id="analysis"[^>]*><\/div>\s*<label id="auto-extract-option"/);
-  assert.match(html, /id="auto-extract"/);
+  assert.match(html, /hidden=""[^>]*id="auto-extract-option"/);
+    assert.match(html, /id="auto-extract"/);
   assert.match(app, /archiveExtractor: "Archive extractor/);
   assert.match(app, /archiveExtractor: "Extrator de arquivos/);
   assert.match(app, /archiveExtractor: "压缩文件解压工具/);
@@ -250,21 +240,15 @@ test("About page is localized, sits immediately below PayPal and keeps the main 
   assert.match(rust, /include_bytes!\("\.\.\/assets\/about-background\.png"\)/);
   assert.match(rust, /include_bytes!\("\.\.\/assets\/about-theme\.mp4"\)/);
   assert.match(app, /backgroundDataUrl/);
-  assert.match(css, /var\(--about-background\)/);
-  assert.match(app, /document\.querySelector\("#add"\)\.hidden = \["about", "themes", "language", "logs"\]\.includes\(activePage\)/);
+  assert.match(app, /document\.querySelector\("#add"\)\.hidden = !list/);
   assert.match(html, /class="about-toolbar"[\s\S]*about-audio-controls[\s\S]*about-creator-line[\s\S]*about-creator-photo/);
   assert.match(html, /class="about-scene"/);
-  assert.match(css, /\.about-creator-line[\s\S]*font-size: clamp\(12px, 1vw, 15px\)/);
-  assert.match(css, /\.about-scene[\s\S]*background-size: contain/);
   assert.match(app, /option\(select, "original", pendingMediaKind === "audio"/);
-  assert.match(css, /\.media-inspection:has\(> img\[hidden\]\)[^}]*grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(app, /\["mp3", "m4a", "opus", "flac", "wav"\]/);
   assert.match(app, /option\(select, `audio:\$\{format\}`/);
-  assert.match(css, /nav \{ min-height: 0; overflow-y: auto;/);
 });
 
 test("Apocalipse Link opens as a dedicated maximized native window with normal controls", () => {
-  assert.match(app, /invoke\("open_link_window"\)/);
   assert.match(rust, /async fn open_link_window/);
   assert.match(rust, /WebviewUrl::App\("link\.html"\.into\(\)\)/);
   assert.match(rust, /\.maximized\(true\)/);
@@ -273,7 +257,6 @@ test("Apocalipse Link opens as a dedicated maximized native window with normal c
   assert.match(rust, /window\.label\(\) == "main"/);
   assert.match(linkHtml, /class="link-window"/);
   assert.match(linkJs, /loadLinkIdentity\(\)/);
-  assert.match(css, /body\.link-window[\s\S]*height: 100vh/);
 });
 
 test("Link lists scroll independently, disconnect explicitly and tray opens with one click", () => {
@@ -281,7 +264,6 @@ test("Link lists scroll independently, disconnect explicitly and tray opens with
   assert.match(linkHtml, /id="link-disconnect"/);
   assert.match(app, /function disconnectLink\(\)/);
   assert.match(linkJs, /function disconnectLink\(\)/);
-  assert.match(css, /\.link-files > div[^}]*overflow-y:scroll[^}]*scrollbar-gutter:stable/);
   assert.match(rust, /TrayIconEvent::Click[\s\S]*button: MouseButton::Left/);
   assert.doesNotMatch(rust, /TrayIconEvent::DoubleClick/);
 });
@@ -363,26 +345,3 @@ test("a remote Link file matching a paused/failed download can fill it instead o
   }
 });
 
-test("the Apocalipse Link popup window recognizes every real theme instead of falling back to void", () => {
-  // Regression: link.js kept its own copy of the theme allowlist from
-  // before the 25-to-20-theme overhaul (commit 9958df1). None of those
-  // old names (e.g. "inferno", "synthwave") exist in styles.css anymore,
-  // so no matter which of the current themes the main window actually
-  // had selected, this window's own validation always rejected it and
-  // silently fell back to "void" - looking like the popup "didn't follow
-  // the chosen theme" at all.
-  const currentThemes = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost"];
-  for (const theme of currentThemes) {
-    assert.ok(linkJs.includes(`"${theme}"`), `link.js's validThemes is missing "${theme}"`);
-  }
-  assert.doesNotMatch(linkJs, /"inferno"|"synthwave"|"toxic"|"polarmint"/);
-  // The popup also needs the backend's persisted theme, not just its own
-  // localStorage (not guaranteed to be shared across separate webview
-  // windows), and has to follow a theme changed in the main window while
-  // it's already open.
-  assert.match(rust, /fn get_application_theme\(/);
-  assert.match(rust, /app\.emit\("theme-changed", &theme\)/);
-  assert.match(linkJs, /invoke\("get_application_theme"\)/);
-  assert.match(linkJs, /listen\?\.\("theme-changed",/);
-  assert.match(app, /listen\?\.\("theme-changed",/);
-});

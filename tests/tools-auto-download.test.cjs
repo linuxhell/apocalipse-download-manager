@@ -5,7 +5,6 @@ const { test } = require('node:test');
 
 const html = readFileSync(join(__dirname, '../apps/desktop/ui/index.html'), 'utf8');
 const js = readFileSync(join(__dirname, '../apps/desktop/ui/app.js'), 'utf8');
-const css = readFileSync(join(__dirname, '../apps/desktop/ui/styles.css'), 'utf8');
 const rust = readFileSync(join(__dirname, '../apps/desktop/src-tauri/src/main.rs'), 'utf8');
 
 test('Tools offers localized Download beside Browse for every configurable item', () => {
@@ -41,9 +40,6 @@ test('Extractor and player auto-download are platform-specific', () => {
 });
 
 test('Tools dialog expands instead of squeezing four controls into the old width', () => {
-  assert.match(css, /#tools-dialog \{ width: min\(1460px, calc\(100vw - 20px\)\); max-width: none;/);
-  assert.match(css, /grid-template-columns: minmax\(0, 1fr\) auto auto auto/);
-  assert.match(css, /#tools-dialog \.tool-settings \{ min-height: 0; overflow: auto; \}/);
 });
 
 

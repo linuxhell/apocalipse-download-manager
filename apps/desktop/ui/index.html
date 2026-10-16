@@ -1,637 +1,453 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Apocalipse Download Manager</title>
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body data-page="downloads">
-    <div class="app-titlebar">
-      <div id="window-drag-region"><span class="title-logo">A</span><span>Apocalipse Download Manager</span></div>
-      <div class="window-controls"><button type="button" data-window-action="minimize" data-i18n-aria="windowMinimize" aria-label="Minimize">−</button><button type="button" data-window-action="maximize" data-i18n-aria="windowMaximize" aria-label="Maximize / restore">□</button><button type="button" data-window-action="close" data-i18n-aria="windowClose" aria-label="Close">×</button></div>
-    </div>
-    <aside>
-      <div class="brand">
-        <img src="assets/apocalipse-alien.png" alt="" />
-        <div><strong>APOCALIPSE</strong><small>DOWNLOAD MANAGER</small></div>
-      </div>
-      <nav>
-        <button class="active" data-page="downloads">
-          <span>⇩</span><b data-i18n="downloads">Downloads</b>
-        </button>
-        <button data-page="recordings">
-          <span>●</span><b data-i18n="recordings">Recordings</b>
-        </button>
-        <button data-page="torrents">
-          <span>◉</span><b data-i18n="torrents">Torrents</b>
-        </button>
-        <button data-page="link"><span>↔</span><b>Apocalipse Link</b></button>
-        <button data-page="tools">
-          <span>⌁</span><b data-i18n="tools">Tools</b>
-        </button>
-        <button data-page="themes"><span>◐</span><b data-i18n="themes">Themes</b></button>
-        <button data-page="language"><span>A</span><b data-i18n="language">Language</b></button>
-        <button data-page="logs"><span>▤</span><b data-i18n="logs">Logs</b></button>
-        <button data-settings-target="general"><span>⚙</span><b data-i18n="settings">Settings</b></button>
-        <button id="donate-paypal" type="button">
-          <span>♥</span><b data-i18n="donatePaypal">Donate via PayPal</b>
-        </button>
-        <button data-page="about">
-          <span>ⓘ</span><b data-i18n="about">About</b>
-        </button>
-      </nav>
-      <div class="engine">
-        <i></i
-        ><span
-          ><b data-i18n="engineReady">Engine ready</b
-          ><small>Rust Core · Native</small></span
-        >
-      </div>
-    </aside>
-    <main>
-      <header>
-        <div>
+<!DOCTYPE html>
 
-          <h1 data-i18n="downloads">Downloads</h1>
-          <p id="page-description" class="page-description" data-i18n="downloadsDescription">Manage direct downloads, progress, speed and completed files.</p>
-        </div>
-        <div class="actions">
-          <label id="torrent-store-controls" class="setting-toggle compact-toggle" hidden>
-            <input id="save-torrent-metadata" type="checkbox" />
-            <span><b data-i18n="saveTorrentMetadata">Save .torrent in data/torrents</b></span>
-          </label>
-          <button id="clear-torrent-store" type="button" hidden>
-            <span data-i18n="clearTorrentStore">Clear .torrents in data/torrents</span>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1" name="viewport"/>
+<title>Apocalipse Download Manager</title>
+<link href="classic.css" rel="stylesheet"/>
+</head>
+<body data-page="downloads">
+<div class="app-titlebar">
+<div id="window-drag-region"><span class="title-logo">A</span><span>Apocalipse Download Manager</span></div>
+<div class="window-controls"><button aria-label="Minimize" data-i18n-aria="windowMinimize" data-window-action="minimize" type="button">−</button><button aria-label="Maximize / restore" data-i18n-aria="windowMaximize" data-window-action="maximize" type="button">□</button><button aria-label="Close" data-i18n-aria="windowClose" data-window-action="close" type="button">×</button></div>
+</div>
+<aside><nav><button class="active" data-page="downloads"><b data-i18n="downloads">Downloads</b></button><button data-page="torrents"><b data-i18n="torrents">Torrents</b></button><button data-page="recordings"><b data-i18n="recordings">Recordings</b></button><button data-page="settings"><b data-i18n="settings">Settings</b></button><div class="nav-spacer"></div><button id="donate-paypal" type="button"><b data-i18n="donate">Donate</b></button><button data-page="about"><b data-i18n="about">About</b></button></nav></aside>
+<main>
+<header>
+<div>
+<h1 data-i18n="downloads">Downloads</h1>
+<p class="page-description" data-i18n="downloadsDescription" hidden id="page-description">Manage direct downloads, progress, speed and completed files.</p>
+</div>
+<div class="actions">
+<label class="setting-toggle compact-toggle" hidden="" id="torrent-store-controls">
+<input id="save-torrent-metadata" type="checkbox"/>
+<span><b data-i18n="saveTorrentMetadata">Save .torrent in data/torrents</b></span>
+</label>
+<button hidden="" id="clear-torrent-store" type="button">
+<span data-i18n="clearTorrentStore">Clear .torrents in data/torrents</span>
+</button>
+<button class="primary" id="add">
+<span>＋</span><b data-i18n="addDownload">Add download</b>
+</button>
+</div>
+</header>
+<details class="advanced-transport-form" hidden="" id="moq-capture-panel">
+<summary data-i18n="moqTitle">MoQ object capture (experimental)</summary>
+<p data-i18n="moqHint"></p>
+<label><span data-i18n="moqRelay"></span><input id="moq-relay" placeholder="https://relay.example/" type="url"/></label>
+<label><span data-i18n="moqBroadcast"></span><input id="moq-broadcast" type="text"/></label>
+<label><span data-i18n="moqTrack"></span><input id="moq-track" type="text"/></label>
+<label><span data-i18n="moqSeconds"></span><input id="moq-seconds" max="3600" min="1" type="number" value="60"/></label>
+<button data-i18n="moqStart" id="moq-start" type="button"></button>
+<button data-i18n="moqStop" disabled="" id="moq-stop" type="button"></button>
+<p id="moq-status" role="status"></p>
+</details>
+
+
+
+
+<section class="settings-page" hidden id="settings-panel"><div class="settings-tabs" role="tablist"><button class="active" data-settings-tab="general" role="tab" type="button"><span data-i18n="settingsGeneral">General</span></button><button data-settings-tab="language" role="tab" type="button"><span data-i18n="language">Language</span></button><button data-settings-tab="tools" role="tab" type="button"><span data-i18n="tools">Tools</span></button><button data-settings-tab="network" role="tab" type="button"><span data-i18n="settingsNetwork">Network and proxy</span></button><button data-settings-tab="extension" role="tab" type="button"><span data-i18n="settingsExtension">Browser extension</span></button><button data-settings-tab="link" role="tab" type="button"><span data-i18n="settingsLink">Apocalipse Link</span></button><button data-settings-tab="logs" role="tab" type="button"><span data-i18n="logs">Logs</span></button></div><div class="settings-body"><div class="pane" data-pane="general"><label class="setting-toggle">
+<input id="autostart" type="checkbox"/>
+<span><b data-i18n="startWithSystem">Start with the system</b><small data-i18n="startHidden">Open hidden in the system tray</small></span>
+</label><section class="pairing-settings">
+<b data-i18n="smartAutomation">Smart automation</b>
+<button data-i18n="bandwidthPanel" id="open-bandwidth-panel" type="button">Bandwidth</button>
+<label class="setting-toggle compact-toggle"><input id="adaptive-efficiency" type="checkbox"/><span><b data-i18n="adaptiveEfficiency">Adaptive efficiency</b><small data-i18n="adaptiveEfficiencyHint">Optimizes queue order and connection use for the current workload.</small></span></label>
+<label class="setting-toggle compact-toggle"><input id="schedule-enabled" type="checkbox"/><span><b data-i18n="scheduler">Download schedule</b><small data-i18n="schedulerHint">Automatically pauses outside the permitted local time window.</small></span></label>
+<div class="credential-grid"><label><span data-i18n="scheduleStart">Start</span><input id="schedule-start" type="time" value="00:00"/></label><label><span data-i18n="scheduleEnd">End</span><input id="schedule-end" type="time" value="23:59"/></label></div>
+</section><label class="setting-toggle">
+<input id="capture-clipboard" type="checkbox"/>
+<span><b data-i18n="captureClipboard">Capture clipboard links</b><small data-i18n="captureClipboardHint">Open recognized HTTP, HLS, magnet and media links automatically</small></span>
+</label><section class="pairing-settings association-settings">
+<b data-i18n="associations">File and link associations</b>
+<small data-i18n="associationsHint">Choose individually what the system should open with Apocalipse.</small>
+<label class="setting-toggle compact-toggle"><input data-association="m3u8" type="checkbox"/><span><b>.m3u8</b><small>HLS playlists</small></span></label>
+<label class="setting-toggle compact-toggle"><input data-association="torrent" type="checkbox"/><span><b>.torrent</b><small>BitTorrent files</small></span></label>
+<label class="setting-toggle compact-toggle"><input data-association="magnet" type="checkbox"/><span><b>magnet:</b><small>Magnet links</small></span></label>
+<label class="setting-toggle compact-toggle"><input data-association="ftp" type="checkbox"/><span><b>ftp:</b><small>FTP links</small></span></label>
+<label class="setting-toggle compact-toggle"><input data-association="sftp" type="checkbox"/><span><b>sftp:</b><small>SFTP links</small></span></label>
+</section><label data-i18n="defaultDirectory" for="default-directory">Default download directory</label><div class="path-picker">
+<input id="default-directory" required="" type="text"/><button data-i18n="browse" data-pick-for="default-directory" type="button">
+            Browse…
           </button>
-          <button id="add" class="primary">
-            <span>＋</span><b data-i18n="addDownload">Add download</b>
-          </button>
-        </div>
-      </header>
-      <details id="moq-capture-panel" class="advanced-transport-form" hidden>
-        <summary data-i18n="moqTitle">MoQ object capture (experimental)</summary>
-        <p data-i18n="moqHint"></p>
-        <label><span data-i18n="moqRelay"></span><input id="moq-relay" type="url" placeholder="https://relay.example/" /></label>
-        <label><span data-i18n="moqBroadcast"></span><input id="moq-broadcast" type="text" /></label>
-        <label><span data-i18n="moqTrack"></span><input id="moq-track" type="text" /></label>
-        <label><span data-i18n="moqSeconds"></span><input id="moq-seconds" type="number" value="60" min="1" max="3600" /></label>
-        <button id="moq-start" type="button" data-i18n="moqStart"></button>
-        <button id="moq-stop" type="button" data-i18n="moqStop" disabled></button>
-        <p id="moq-status" role="status"></p>
-      </details>
-      <section class="metrics">
-        <article>
-          <span class="cyan">↓</span>
-          <div>
-            <small data-i18n="downloadSpeed">DOWNLOAD SPEED</small
-            ><strong>0 B/s</strong>
-          </div>
-        </article>
-        <article>
-          <span class="violet">↑</span>
-          <div>
-            <small data-i18n="uploadSpeed">UPLOAD SPEED</small
-            ><strong>0 B/s</strong>
-          </div>
-        </article>
-        <article>
-          <span class="green">✓</span>
-          <div>
-            <small data-i18n="completed">COMPLETED</small><strong>0</strong>
-          </div>
-        </article>
-        <article>
-          <span class="orange">≋</span>
-          <div><small data-i18n="queue">IN QUEUE</small><strong>0</strong></div>
-        </article>
-      </section>
-      <section id="apocalipse-link-panel" class="link-panel" hidden>
-        <div class="link-identity"><b data-i18n="linkThisComputer">This computer</b><label>ID<input id="link-own-id" readonly /></label><small data-i18n="linkShareNotice">Share a file, folder or mapped drive and choose its permission for it to appear in Apocalipse Link.</small><small data-i18n="linkAccessNotice">Only explicitly shared files, folders and drives are exposed.</small><div class="link-share-actions"><button id="link-share-file" type="button" data-i18n="linkShareFile">Share file</button><button id="link-share-folder" type="button" data-i18n="linkShareFolder">Share folder or drive</button></div><div id="link-share-list"></div></div>
-        <div class="link-connect"><b data-i18n="linkRemoteControl">Remote connection</b><label><span data-i18n="linkRemoteId">Remote IP / host</span><input id="link-remote-id" placeholder="127.0.0.1:17655" /></label><small data-i18n="linkRemoteAddressExamples">Use the same connection flow for this PC (127.0.0.1), a local-network IP or a public Internet IP/host.</small><label><span data-i18n="linkRemoteUsername">Operating-system username</span><input id="link-remote-username" autocomplete="username" placeholder="juliano" /></label><label><span data-i18n="linkRemoteSystemPassword">System account password</span><input id="link-remote-password" type="password" autocomplete="current-password" /></label><div class="link-connection-actions"><button id="link-connect" class="primary" type="button" data-i18n="linkConnect">Connect</button><button id="link-disconnect" type="button" data-i18n="linkDisconnect" disabled>Disconnect</button></div><small data-i18n="linkRemoteShareNotice">Only files, folders and drives shared by the other user appear below.</small><small data-i18n="linkRemoteAuthPlan">Remote access uses one login: IP/host + operating-system username + account password.</small><small data-i18n="linkRemoteAccountFormats">Windows account formats include MicrosoftAccount, hotmail.com, AzureAD and PC-NAME prefixes.</small><small data-i18n="linkRemoteSecurityNotice">The system password is never saved and is only used with encrypted native authentication.</small><small id="link-status"></small></div>
-        <div class="link-files"><header><b data-i18n="linkThisComputer">This computer</b><span><button id="link-upload-local" type="button" data-i18n="linkSend" disabled>Send →</button><button id="link-local-up" type="button">↑</button></span></header><small id="link-local-path">/</small><div id="link-local-files"></div></div>
-        <div class="link-files"><header><b data-i18n="linkRemoteComputer">Remote computer</b><span><button id="link-delete-remote" type="button" data-i18n="linkDelete" disabled>Delete</button><button id="link-download-remote" type="button" data-i18n="linkDownload" disabled>← Download</button><button id="link-remote-up" type="button">↑</button></span></header><small id="link-remote-path">/</small><div id="link-remote-files"></div></div>
-      </section>
-      <section id="logs-panel" class="logs-panel" hidden>
-        <header><div><b data-i18n="logs">Logs</b><small data-i18n="logsDescription">End-to-end diagnostics for extension, shortcuts, bridge and downloads.</small></div><span class="log-actions"><button id="export-logs" class="primary" type="button" data-i18n="exportLog">Export log</button><button id="clear-logs" type="button" data-i18n="clearLog">Clear log</button></span></header>
-        <div class="log-toolbar"><input id="log-search" type="search" data-i18n-placeholder="searchLogs" placeholder="Search events…" /><select id="log-level"><option value="" data-i18n="allLevels">All levels</option><option>ERROR</option><option>WARN</option><option>INFO</option><option>DEBUG</option></select></div>
-        <div id="log-event-list" class="log-event-list"></div>
-        <p id="log-empty" data-i18n="emptyLog">No diagnostic events recorded yet.</p>
-      </section>
-      <section id="themes-panel" class="appearance-page theme-studio" hidden>
-        <section class="appearance-card theme-gallery-panel">
-          <div class="theme-gallery-head"><h2 data-i18n="themeGallery">Theme gallery</h2><small id="theme-count"></small></div>
-          <input id="theme-search" type="search" data-i18n-placeholder="themeSearch" placeholder="Search themes…" />
-          <select id="theme" aria-label="Interface theme" class="theme-select-fallback"><option value="cyberpunk">Cyberpunk</option><option value="bladerunner">Blade Runner</option><option value="sexy">Sexy</option><option value="samurai">Samurai</option><option value="future">Futuro</option><option value="fantasy">Fantasia</option><option value="pandora">Pandora</option><option value="void">Alien Void</option><option value="nebula">Nebula</option><option value="ember">Ember</option><option value="jade">Jade</option><option value="plasma">Plasma</option><option value="glacier">Glacier</option><option value="amber">Amber</option><option value="abyss">Abyss</option><option value="rust">Rust</option><option value="venom">Venom</option><option value="wine">Wine</option><option value="linen">Linho</option><option value="sky">Céu</option><option value="blossom">Flor de Cerejeira</option><option value="sage">Sálvia</option><option value="sand">Areia</option><option value="lilac">Lilás</option><option value="mist">Neblina</option><option value="citrus">Cítrico</option><option value="coral">Coral</option><option value="frost">Geada</option></select>
-          <div id="theme-gallery" class="theme-gallery"></div><p id="theme-no-results" data-i18n="themeNoResults" hidden></p>
-        </section>
-        <div class="theme-detail-column">
-          <section class="appearance-card theme-preview-panel">
-            <h2 data-i18n="themeLivePreview">Live preview</h2>
-            <div id="theme-live-preview" class="theme-live-preview">
-              <div class="preview-title"><b>△ APOCALIPSE</b><span>− □ ×</span></div>
-              <div class="preview-toolbar"><span>＋</span><span>▶</span><span>Ⅱ</span><span>■</span></div>
-              <div class="preview-task"><span class="preview-file-icon">⇩</span><div><strong id="theme-preview-file"></strong><div class="preview-progress"><i id="theme-preview-progress"></i></div><small id="theme-preview-percent"></small></div><span>Ⅱ</span></div>
-              <small id="theme-preview-example" class="preview-example" data-i18n="themeExample">Preview example</small>
-            </div>
-            <h3 id="theme-preview-name"></h3><small id="theme-preview-description"></small>
-          </section>
-          <section class="appearance-card appearance-options">
-            <h2 data-i18n="themeCustomize">Customize</h2>
-            <label class="appearance-toggle"><span><b data-i18n="windowTransparency">Glass / transparency</b><small data-i18n="windowTransparencyHint"></small></span><input id="transparency-enabled" type="checkbox" /></label>
-            <label class="appearance-range"><span><b data-i18n="transparencyLevel">Transparency level</b><output id="transparency-value">65%</output></span><input id="transparency-level" type="range" min="0" max="70" value="65" /></label>
-            <label class="appearance-range"><span><b data-i18n="themeBrightness">Background brightness</b><output id="brightness-value">75%</output></span><input id="background-brightness" type="range" min="25" max="100" value="75" /></label>
-            <label class="appearance-toggle"><span><b data-i18n="themeAero">Aero effect</b></span><input id="aero-enabled" type="checkbox" checked /></label>
-            <label class="appearance-toggle"><span><b data-i18n="themeAnimations">Smooth animations</b></span><input id="animations-enabled" type="checkbox" checked /></label>
-            <label class="appearance-toggle"><span><b data-i18n="roundedCorners">Rounded corners</b></span><input id="rounded-enabled" type="checkbox" checked /></label>
-            <label class="appearance-range"><span><b data-i18n="cornerRadius">Corner radius</b><output id="corner-radius-value">12 px</output></span><input id="corner-radius" type="range" min="0" max="28" value="12" /></label>
-            <label class="appearance-select"><span><b data-i18n="interfaceSize">Interface size</b></span><select id="interface-size"><option value="compact" data-i18n="compact">Compact</option><option value="normal" data-i18n="normal">Normal</option><option value="large" data-i18n="large">Large</option></select></label>
-          </section>
-          <div class="theme-studio-actions"><button id="theme-apply" class="primary" type="button" data-i18n="themeApply">Apply theme</button><button id="theme-reset" type="button" data-i18n="themeReset">Restore default</button><button id="theme-cancel" type="button" data-i18n="cancel">Cancel</button></div>
-          <small id="theme-save-status" role="status" aria-live="polite"></small>
-        </div>
-      </section>
-      <section id="about-panel" class="about-page" hidden>
-        <article class="about-card">
-          <audio id="about-audio" preload="auto"></audio>
-          <div class="about-toolbar">
-            <div class="about-audio-controls">
-              <button id="about-play-pause" type="button" data-i18n="aboutPause">Pause</button>
-              <button id="about-stop" type="button" data-i18n="aboutStop">Stop</button>
-              <label for="about-volume" data-i18n="aboutVolume">Volume</label>
-              <input id="about-volume" type="range" min="0" max="1" step="0.05" value="0.7" />
-            </div>
-            <div class="about-creator">
-              <p class="about-creator-line" data-i18n="aboutCreator">Creator: Juliano - Brazil</p>
-              <img id="about-creator-photo" class="about-creator-photo" alt="Juliano" />
-            </div>
-          </div>
-          <div class="about-scene" aria-hidden="true"></div>
-        </article>
-      </section>
-      <section id="language-panel" class="appearance-page language-page" hidden>
-        <section class="appearance-card">
-          <h2 data-i18n="chooseLanguage">Choose language</h2>
-          <p data-i18n="languageHint">The entire application and tray menu use the selected language.</p>
-          <div class="language-choices">
-            <button type="button" data-language-choice="pt-BR">Português (Brasil)</button>
-            <button type="button" data-language-choice="en">English</button>
-            <button type="button" data-language-choice="zh-CN">简体中文</button>
-          </div>
-        </section>
-      </section>
-      <section class="panel">
-        <div class="toolbar">
-          <div class="tabs">
-            <button class="active" data-filter="all" data-i18n="all">All</button
-            ><button data-filter="active" data-i18n="active">Active</button
-            ><button data-filter="completed" data-i18n="completed">
+</div><label data-i18n="userAgent" for="user-agent">Custom User-Agent</label><input data-i18n-placeholder="userAgentHint" id="user-agent" maxlength="1024" placeholder="Automatic — use the browser identity" type="text"/><div class="transfer-settings">
+<label>
+<span><b data-i18n="maxTasks">Maximum simultaneous tasks</b><output id="max-tasks-value">3</output></span>
+<input id="max-tasks" max="20" min="1" type="range" value="3"/>
+</label>
+<label>
+<span><b data-i18n="connections">Connections per download</b><output id="connections-value">16</output></span>
+<input id="connections" max="32" min="1" type="range" value="16"/>
+</label>
+<button data-i18n="defaults" id="default-limits" type="button">Default</button>
+</div></div><div class="pane" data-pane="language" hidden><section class="appearance-card">
+<h2 data-i18n="chooseLanguage">Choose language</h2>
+<p data-i18n="languageHint">The entire application and tray menu use the selected language.</p>
+<div class="language-choices">
+<button data-language-choice="pt-BR" type="button">Português (Brasil)</button>
+<button data-language-choice="en" type="button">English</button>
+<button data-language-choice="zh-CN" type="button">简体中文</button>
+</div>
+</section></div><div class="pane" data-pane="tools" hidden><p class="dialog-copy readable-description" data-i18n="toolsPageDescription">Manage the engines used for media, transfers, conversion and preview.</p><details class="advanced-transport-form">
+<summary data-i18n="dictionaryTitle">Download with a compression dictionary</summary>
+<p data-i18n="dictionaryHint"></p>
+<label><span data-i18n="dictionaryUrl"></span><input id="dictionary-url" type="url"/></label>
+<label><span data-i18n="artifactUrl"></span><input id="dictionary-artifact-url" type="url"/></label>
+<label><span data-i18n="expectedHash"></span><input id="dictionary-sha256" maxlength="64" type="text"/></label>
+<button data-i18n="dictionaryDownload" id="dictionary-download" type="button"></button>
+<p id="dictionary-status" role="status"></p>
+</details><section class="tool-settings">
+<b data-i18n="externalTools">Required media and transfer tools</b>
+<small data-i18n="toolsHint">Configure each executable. Apocalipse uses these exact paths for downloads.</small>
+<div id="tool-list">
+<label data-tool="ffmpeg"><span>FFmpeg <small></small></span><div><input id="tool-ffmpeg" type="text"/><button data-i18n="browse" data-tool-pick="ffmpeg" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="ffmpeg" type="button">Download</button><button data-i18n="update" data-tool-update="ffmpeg" type="button">Update</button></div></label>
+<label data-tool="yt-dlp"><span>yt-dlp <small></small></span><div><input id="tool-yt-dlp" type="text"/><button data-i18n="browse" data-tool-pick="yt-dlp" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="yt-dlp" type="button">Download</button><button data-i18n="update" data-tool-update="yt-dlp" type="button">Update</button></div></label>
+<label data-tool="qjs"><span>QuickJS (qjs) <small></small></span><div><input id="tool-qjs" type="text"/><button data-i18n="browse" data-tool-pick="qjs" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="qjs" type="button">Download</button><button data-i18n="update" data-tool-update="qjs" type="button">Update</button></div></label>
+<label data-tool="n-m3u8dl-re"><span>N_m3u8DL-RE <small></small></span><div><input id="tool-n-m3u8dl-re" type="text"/><button data-i18n="browse" data-tool-pick="n-m3u8dl-re" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="n-m3u8dl-re" type="button">Download</button><button data-i18n="update" data-tool-update="n-m3u8dl-re" type="button">Update</button></div></label>
+<label data-tool="aria2"><span><span data-i18n="aria2Backend">aria2 (HTTP/HTTPS, FTP, torrent and magnet)</span> <small></small></span><div><input id="tool-aria2" type="text"/><button data-i18n="browse" data-tool-pick="aria2" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="aria2" type="button">Download</button><button data-i18n="update" data-tool-update="aria2" type="button">Update</button></div></label>
+<label data-tool="extractor"><span><span data-i18n="archiveExtractor">Archive extractor</span> <small></small></span><div><input id="tool-extractor" type="text"/><button data-i18n="browse" data-tool-pick="extractor" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="extractor" type="button">Download</button></div></label>
+<label data-tool="player"><span><span data-i18n="mediaPlayer">mpv / media player</span> <small></small></span><div><input id="tool-player" type="text"/><button data-i18n="browse" data-tool-pick="player" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="player" type="button">Download</button></div></label>
+</div>
+</section><div class="pane-actions"><button class="primary" data-i18n="save" id="save-tools" type="button">Save</button></div></div><div class="pane" data-pane="network" hidden><section class="pairing-settings">
+<label class="setting-toggle compact-toggle">
+<input id="proxy-enabled" type="checkbox"/>
+<span><b data-i18n="proxy">Proxy</b><small data-i18n="proxyHint">Route downloads through an HTTP, HTTPS or SOCKS proxy</small></span>
+</label>
+<label data-i18n="proxyAddress" for="proxy-url">Proxy address</label>
+<input id="proxy-url" maxlength="2048" placeholder="socks5h://127.0.0.1:1080" type="text"/>
+<div class="credential-grid">
+<label><span data-i18n="proxyUsername">Username</span><input autocomplete="off" id="proxy-username" maxlength="512" type="text"/></label>
+<label><span data-i18n="proxyPassword">Password</span><input autocomplete="new-password" data-i18n-placeholder="proxyPasswordHint" id="proxy-password" maxlength="2048" placeholder="Leave blank to keep it" type="password"/></label>
+</div>
+<label class="setting-toggle compact-toggle">
+<input id="proxy-clear-password" type="checkbox"/>
+<span><small data-i18n="proxyClearPassword">Remove the saved proxy password</small></span>
+</label>
+<small data-i18n="proxyPortableWarning">The proxy configuration is saved in the portable data/settings.json file.</small>
+</section><section class="pairing-settings host-rules-settings">
+<b data-i18n="hostRules">Per-site transfer rules</b>
+<small data-i18n="hostRulesHint">Apply exact hosts or wildcard subdomains and optionally save credentials, connections, speed and User-Agent in one rule.</small>
+<div class="website-credential-form">
+<label><span data-i18n="hostRulePattern">Host pattern</span><input autocomplete="off" data-i18n-placeholder="hostRulePatternHint" id="host-rule-pattern" maxlength="255" placeholder="*.example.com" type="text"/></label>
+<label><span data-i18n="proxyUsername">Username</span><input autocomplete="off" id="host-rule-username" maxlength="512" type="text"/></label>
+<label><span data-i18n="proxyPassword">Password</span><input autocomplete="new-password" data-i18n-placeholder="hostRulePasswordHint" id="host-rule-password" maxlength="2048" placeholder="Leave blank to keep saved password" type="password"/></label>
+<label><span data-i18n="userAgent">User-Agent</span><input autocomplete="off" id="host-rule-user-agent" maxlength="1024" type="text"/></label>
+<label><span data-i18n="connections">Connections per download</span><input id="host-rule-connections" max="32" min="1" step="1" type="number"/></label>
+<label><span data-i18n="hostRuleBandwidth">Speed limit (MB/s)</span><input data-i18n-placeholder="hostRuleUnlimitedHint" id="host-rule-bandwidth" min="0" placeholder="0 or empty = unlimited" step="0.1" type="number"/></label>
+<label class="setting-toggle compact-toggle">
+<input id="host-rule-clear-password" type="checkbox"/>
+<span><small data-i18n="hostRuleClearPassword">Remove the saved password for this rule</small></span>
+</label>
+<button data-i18n="hostRuleAdd" id="save-host-rule" type="button">Add or update rule</button>
+</div>
+<div class="website-credential-list" id="host-rule-list"></div>
+<small data-i18n="hostRulesVaultWarning">Passwords are kept in the operating system credential vault, not in settings.json.</small>
+</section><section class="pairing-settings">
+<label class="setting-toggle compact-toggle">
+<input id="dns-enabled" type="checkbox"/>
+<span><b data-i18n="customDns">Custom DNS</b><small data-i18n="customDnsHint">Resolve native downloads without changing the operating system DNS</small></span>
+</label>
+<label data-i18n="dnsProvider" for="dns-preset">Provider</label>
+<select id="dns-preset">
+<option data-i18n="dnsCustom" value="custom">Custom</option>
+<option value="1.1.1.1,1.0.0.1">Cloudflare</option>
+<option value="8.8.8.8,8.8.4.4">Google</option>
+<option value="9.9.9.9,149.112.112.112">Quad9</option>
+</select>
+<label data-i18n="dnsServers" for="dns-servers">DNS servers</label>
+<input id="dns-servers" maxlength="400" placeholder="1.1.1.1, 1.0.0.1" type="text"/>
+<small data-i18n="dnsScopeHint">Applied to the native HTTP engine. aria2 uses the system resolver; SOCKS5H continues resolving through the proxy.</small>
+</section><section class="pairing-settings">
+<b data-i18n="aria2RpcTitle">aria2 RPC</b>
+<label class="setting-toggle compact-toggle">
+<input checked="" id="aria2-rpc-enabled" type="checkbox"/>
+<span><b data-i18n="aria2RpcEnabled">Use aria2 RPC</b><small data-i18n="aria2RpcEnabledHint">Control accelerated HTTP/HTTPS, FTP, torrent and magnet transfers through the local aria2 engine.</small></span>
+</label>
+<label class="setting-toggle compact-toggle">
+<input checked="" id="aria2-rpc-auto-start" type="checkbox"/>
+<span><b data-i18n="aria2RpcAutoStart">Start aria2 automatically when needed</b><small data-i18n="aria2RpcAutoStartHint">Keeps one local aria2 backend for the current Apocalipse session.</small></span>
+</label>
+<label data-i18n="aria2RpcPort" for="aria2-rpc-port">RPC port</label>
+<input data-i18n-placeholder="aria2RpcPortHint" id="aria2-rpc-port" max="65535" min="1024" placeholder="Automatic" step="1" type="number"/>
+<div class="bandwidth-current"><span data-i18n="aria2RpcStatus">RPC status</span><strong id="aria2-rpc-status">Disconnected</strong></div>
+<div class="diagnostic-actions">
+<button data-i18n="aria2RpcTest" id="aria2-rpc-test" type="button">Test RPC connection</button>
+<button data-i18n="aria2RpcRegenerateToken" id="aria2-rpc-regenerate-token" type="button">Regenerate RPC token</button>
+</div>
+</section></div><div class="pane" data-pane="extension" hidden><section class="pairing-settings">
+<b data-i18n="extensionPairing">Browser extension pairing</b>
+<label data-i18n="pairingToken" for="pairing-token">Pairing token</label>
+<div class="path-picker">
+<input id="pairing-token" readonly="" type="text"/>
+<button data-i18n="copy" id="copy-pairing" type="button">Copy</button>
+</div>
+<button data-i18n="regenerate" id="regenerate-pairing" type="button">Regenerate</button>
+</section></div><div class="pane" data-pane="link" hidden><section class="link-panel" id="apocalipse-link-panel">
+<div class="link-identity"><b data-i18n="linkThisComputer">This computer</b><label>ID<input id="link-own-id" readonly=""/></label><small data-i18n="linkShareNotice">Share a file, folder or mapped drive and choose its permission for it to appear in Apocalipse Link.</small><small data-i18n="linkAccessNotice">Only explicitly shared files, folders and drives are exposed.</small><div class="link-share-actions"><button data-i18n="linkShareFile" id="link-share-file" type="button">Share file</button><button data-i18n="linkShareFolder" id="link-share-folder" type="button">Share folder or drive</button></div><div id="link-share-list"></div></div>
+<div class="link-connect"><b data-i18n="linkRemoteControl">Remote connection</b><label><span data-i18n="linkRemoteId">Remote IP / host</span><input id="link-remote-id" placeholder="127.0.0.1:17655"/></label><small data-i18n="linkRemoteAddressExamples">Use the same connection flow for this PC (127.0.0.1), a local-network IP or a public Internet IP/host.</small><label><span data-i18n="linkRemoteUsername">Operating-system username</span><input autocomplete="username" id="link-remote-username" placeholder="juliano"/></label><label><span data-i18n="linkRemoteSystemPassword">System account password</span><input autocomplete="current-password" id="link-remote-password" type="password"/></label><div class="link-connection-actions"><button class="primary" data-i18n="linkConnect" id="link-connect" type="button">Connect</button><button data-i18n="linkDisconnect" disabled="" id="link-disconnect" type="button">Disconnect</button></div><small data-i18n="linkRemoteShareNotice">Only files, folders and drives shared by the other user appear below.</small><small data-i18n="linkRemoteAuthPlan">Remote access uses one login: IP/host + operating-system username + account password.</small><small data-i18n="linkRemoteAccountFormats">Windows account formats include MicrosoftAccount, hotmail.com, AzureAD and PC-NAME prefixes.</small><small data-i18n="linkRemoteSecurityNotice">The system password is never saved and is only used with encrypted native authentication.</small><small id="link-status"></small></div>
+<div class="link-files"><header><b data-i18n="linkThisComputer">This computer</b><span><button data-i18n="linkSend" disabled="" id="link-upload-local" type="button">Send →</button><button id="link-local-up" type="button">↑</button></span></header><small id="link-local-path">/</small><div id="link-local-files"></div></div>
+<div class="link-files"><header><b data-i18n="linkRemoteComputer">Remote computer</b><span><button data-i18n="linkDelete" disabled="" id="link-delete-remote" type="button">Delete</button><button data-i18n="linkDownload" disabled="" id="link-download-remote" type="button">← Download</button><button id="link-remote-up" type="button">↑</button></span></header><small id="link-remote-path">/</small><div id="link-remote-files"></div></div>
+</section></div><div class="pane" data-pane="logs" hidden><section class="logs-panel" id="logs-panel">
+<header><div><b data-i18n="logs">Logs</b><small data-i18n="logsDescription">End-to-end diagnostics for extension, shortcuts, bridge and downloads.</small></div><span class="log-actions"><button class="primary" data-i18n="exportLog" id="export-logs" type="button">Export log</button><button data-i18n="clearLog" id="clear-logs" type="button">Clear log</button></span></header>
+<div class="log-toolbar"><input data-i18n-placeholder="searchLogs" id="log-search" placeholder="Search events…" type="search"/><select id="log-level"><option data-i18n="allLevels" value="">All levels</option><option>ERROR</option><option>WARN</option><option>INFO</option><option>DEBUG</option></select></div>
+<div class="log-event-list" id="log-event-list"></div>
+<p data-i18n="emptyLog" id="log-empty">No diagnostic events recorded yet.</p>
+</section><section class="pairing-settings">
+<b data-i18n="diagnostics">Diagnostics</b>
+<small data-i18n="diagnosticsHint">Safe activity log with credentials and URL parameters hidden</small>
+<label data-i18n="logEditor" for="log-editor">Log editor</label>
+<small data-i18n="logEditorHint">Choose an editor executable, including a portable application</small>
+<div class="path-picker">
+<input id="log-editor" readonly="" type="text"/>
+<button data-i18n="chooseEditor" id="pick-log-editor" type="button">Choose editor…</button>
+</div>
+<div class="diagnostic-actions">
+<button data-i18n="openLog" id="open-log" type="button">Open diagnostic log</button>
+<button data-i18n="clearLog" id="clear-log" type="button">Clear log</button>
+<button data-i18n="removeEditor" id="remove-log-editor" type="button">Remove editor</button>
+</div>
+</section></div></div><div class="settings-footer"><button class="primary" data-i18n="save" id="save-settings" type="button">Save</button><button data-i18n="cancel" data-settings-close="" type="button">Cancel</button></div></section><section class="about-page" hidden="" id="about-panel">
+<article class="about-card">
+<audio id="about-audio" preload="auto"></audio>
+<div class="about-toolbar">
+<div class="about-audio-controls">
+<button data-i18n="aboutPause" id="about-play-pause" type="button">Pause</button>
+<button data-i18n="aboutStop" id="about-stop" type="button">Stop</button>
+<label data-i18n="aboutVolume" for="about-volume">Volume</label>
+<input id="about-volume" max="1" min="0" step="0.05" type="range" value="0.7"/>
+</div>
+<div class="about-creator">
+<p class="about-creator-line" data-i18n="aboutCreator">Creator: Juliano - Brazil</p>
+<img alt="Juliano" class="about-creator-photo" id="about-creator-photo"/>
+</div>
+</div>
+<div aria-hidden="true" class="about-scene"></div>
+</article>
+</section>
+
+<section class="panel">
+<div class="toolbar">
+<div class="tabs">
+<button class="active" data-filter="all" data-i18n="all">All</button><button data-filter="active" data-i18n="active">Active</button><button data-filter="completed" data-i18n="completed">
               Completed
             </button>
-          </div>
-          <div class="list-actions">
-            <input id="history-search" class="history-search" type="search" data-i18n-placeholder="searchHistory" placeholder="Search downloads…" />
-            <button id="import-list" class="list-action-button" type="button">
-              <span class="list-action-icon" aria-hidden="true">⇩</span>
-              <span data-i18n="importList">Import list</span>
-            </button>
-            <label class="list-action-button list-select-button">
-              <input id="select-all" type="checkbox" />
-              <span class="list-select-indicator" aria-hidden="true"></span>
-              <span data-i18n="selectAll">Select all</span>
-            </label>
-            <button
-              id="manage-list"
-              class="list-action-button list-action-danger"
-              type="button"
-              disabled
-            >
-              <span class="list-action-icon" aria-hidden="true">×</span>
-              <span data-i18n="removeSelected">Remove selected</span>
-            </button>
-            <button
-              id="redownload-selected"
-              class="list-action-button"
-              type="button"
-              disabled
-            >
-              <span class="list-action-icon" aria-hidden="true">↻</span>
-              <span data-i18n="redownloadSelected">Download again</span>
-            </button>
-          </div>
-        </div>
-        <div id="download-list" class="download-list" hidden></div>
-      </section>
-      <footer>
-        <span class="bridge-waiting"
-          ><i></i
-          ><b data-i18n="bridgeStatus">Extension bridge not configured</b></span
-        ><span id="app-version">v…</span>
-      </footer>
-    </main>
-    <dialog id="add-dialog">
-      <form method="dialog">
-        <div class="dialog-head">
-          <div>
-            <small data-i18n="newTask">NEW TASK</small>
-            <h2 data-i18n="addDownload">Add download</h2>
-          </div>
-          <button type="button" class="close" data-dialog-close>×</button>
-        </div>
-        <div class="add-dialog-viewport">
-        <div id="add-dialog-scroll" class="add-dialog-scroll" tabindex="0" role="region" aria-label="Download options">
-        <div class="add-dialog-grid">
-        <section class="add-dialog-analysis">
-        <label data-i18n="sourceUrl">Source URL</label
-        ><input
-          id="url"
-          type="text"
-          placeholder="https://…"
-          required
-          autofocus
-        />
-        <div id="analysis" class="analysis" hidden></div>
-        <label id="auto-extract-option" class="setting-toggle compact-toggle" hidden>
-          <input id="auto-extract" type="checkbox" />
-          <span><b data-i18n="autoExtract">Extract automatically after download</b><small data-i18n="autoExtractHint">Shown only for archive files. Loose root files are kept inside a folder named after the archive.</small></span>
-        </label>
-        <section id="media-inspection" class="media-inspection" hidden>
-          <img id="media-thumbnail" alt="" hidden />
-          <div>
-            <strong id="media-title"></strong>
-            <span id="media-duration"></span>
-            <div id="media-format-control">
-              <label for="media-format" data-i18n="qualityFormat">Quality and format</label>
-              <select id="media-format"></select>
-              <div id="hls-audio-conversion" class="hls-audio-conversion" hidden>
-                <label><input id="hls-convert-audio" type="checkbox" /><span data-i18n="convertWithFfmpeg">Convert using FFmpeg after download to:</span></label>
-                <select id="hls-audio-format" aria-label="FFmpeg audio format"><option value="mp3">MP3</option><option value="m4a">M4A</option><option value="opus">OPUS</option><option value="flac">FLAC</option><option value="wav">WAV</option></select>
-              </div>
-            </div>
-          </div>
-        </section>
-        <section id="torrent-inspection" class="destination-history" hidden>
-          <div><b id="torrent-title"></b><small id="torrent-total"></small></div>
-          <div id="torrent-files"></div>
-        </section>
-        </section>
-        <section class="add-dialog-destination">
-        <label for="file-name" data-i18n="fileName">File name</label>
-        <input id="file-name" type="text" required />
-        <label for="destination" data-i18n="saveTo">Save to</label>
-        <div class="path-picker">
-          <input id="destination" type="text" required /><button
-            type="button"
-            data-pick-for="destination"
-            data-i18n="browse"
-          >
+</div>
+<div class="list-actions">
+<input class="history-search" data-i18n-placeholder="searchHistory" id="history-search" placeholder="Search downloads…" type="search"/>
+<button class="list-action-button" id="import-list" type="button">
+<span aria-hidden="true" class="list-action-icon">⇩</span>
+<span data-i18n="importList">Import list</span>
+</button>
+<label class="list-action-button list-select-button">
+<input id="select-all" type="checkbox"/>
+<span aria-hidden="true" class="list-select-indicator"></span>
+<span data-i18n="selectAll">Select all</span>
+</label>
+<button class="list-action-button list-action-danger" disabled="" id="manage-list" type="button">
+<span aria-hidden="true" class="list-action-icon">×</span>
+<span data-i18n="removeSelected">Remove selected</span>
+</button>
+<button class="list-action-button" disabled="" id="redownload-selected" type="button">
+<span aria-hidden="true" class="list-action-icon">↻</span>
+<span data-i18n="redownloadSelected">Download again</span>
+</button>
+</div>
+</div>
+<div class="download-list" hidden="" id="download-list"></div>
+</section><section class="metrics">
+<article>
+<span class="cyan">↓</span>
+<div>
+<small data-i18n="downloadSpeed">DOWNLOAD SPEED</small><strong>0 B/s</strong>
+</div>
+</article>
+<article>
+<span class="violet">↑</span>
+<div>
+<small data-i18n="uploadSpeed">UPLOAD SPEED</small><strong>0 B/s</strong>
+</div>
+</article>
+<article>
+<span class="green">✓</span>
+<div>
+<small data-i18n="completed">COMPLETED</small><strong>0</strong>
+</div>
+</article>
+<article>
+<span class="orange">≋</span>
+<div><small data-i18n="queue">IN QUEUE</small><strong>0</strong></div>
+</article>
+</section>
+<footer>
+<span class="bridge-waiting"><i></i><b data-i18n="bridgeStatus">Extension bridge not configured</b></span><span id="app-version">v…</span>
+</footer>
+</main>
+<dialog id="add-dialog">
+<form method="dialog">
+<div class="dialog-head">
+<div>
+<small data-i18n="newTask">NEW TASK</small>
+<h2 data-i18n="addDownload">Add download</h2>
+</div>
+<button class="close" data-dialog-close="" type="button">×</button>
+</div>
+<div class="add-dialog-viewport">
+<div aria-label="Download options" class="add-dialog-scroll" id="add-dialog-scroll" role="region" tabindex="0">
+<div class="add-dialog-grid">
+<section class="add-dialog-analysis">
+<label data-i18n="sourceUrl">Source URL</label><input autofocus="" id="url" placeholder="https://…" required="" type="text"/>
+<div class="analysis" hidden="" id="analysis"></div>
+<label class="setting-toggle compact-toggle" hidden="" id="auto-extract-option">
+<input id="auto-extract" type="checkbox"/>
+<span><b data-i18n="autoExtract">Extract automatically after download</b><small data-i18n="autoExtractHint">Shown only for archive files. Loose root files are kept inside a folder named after the archive.</small></span>
+</label>
+<section class="media-inspection" hidden="" id="media-inspection">
+<img alt="" hidden="" id="media-thumbnail"/>
+<div>
+<strong id="media-title"></strong>
+<span id="media-duration"></span>
+<div id="media-format-control">
+<label data-i18n="qualityFormat" for="media-format">Quality and format</label>
+<select id="media-format"></select>
+<div class="hls-audio-conversion" hidden="" id="hls-audio-conversion">
+<label><input id="hls-convert-audio" type="checkbox"/><span data-i18n="convertWithFfmpeg">Convert using FFmpeg after download to:</span></label>
+<select aria-label="FFmpeg audio format" id="hls-audio-format"><option value="mp3">MP3</option><option value="m4a">M4A</option><option value="opus">OPUS</option><option value="flac">FLAC</option><option value="wav">WAV</option></select>
+</div>
+</div>
+</div>
+</section>
+<section class="destination-history" hidden="" id="torrent-inspection">
+<div><b id="torrent-title"></b><small id="torrent-total"></small></div>
+<div id="torrent-files"></div>
+</section>
+</section>
+<section class="add-dialog-destination">
+<label data-i18n="fileName" for="file-name">File name</label>
+<input id="file-name" required="" type="text"/>
+<label data-i18n="saveTo" for="destination">Save to</label>
+<div class="path-picker">
+<input id="destination" required="" type="text"/><button data-i18n="browse" data-pick-for="destination" type="button">
             Browse…
           </button>
-        </div>
-        <section class="destination-history">
-          <div>
-            <b data-i18n="recentLocations">Download locations</b>
-            <button id="clear-destinations" type="button" data-i18n="clearLocations">Clear download locations</button>
-          </div>
-          <div id="destination-list"></div>
-        </section>
-        <details class="advanced-download">
-          <summary data-i18n="advancedOptions">Advanced options</summary>
-          <label for="mirrors" data-i18n="mirrorUrls">Mirror URLs (one per line)</label>
-          <textarea id="mirrors" rows="3" placeholder="https://mirror.example/file"></textarea>
-          <label for="priority" data-i18n="priority">Priority</label>
-          <select id="priority"><option value="10" data-i18n="priorityHigh">High</option><option value="0" selected data-i18n="priorityNormal">Normal</option><option value="-10" data-i18n="priorityLow">Low</option></select>
-          <label for="download-bandwidth-limit" data-i18n="downloadBandwidthLimit">This download limit</label>
-          <div class="bandwidth-input"><input id="download-bandwidth-limit" type="number" min="0" max="10240" step="0.1" value="0" /><span data-i18n="megabytesPerSecond">MB/s</span><small data-i18n="unlimited">Unlimited</small></div>
-        </details>
-        <section class="task-connections">
-          <label for="task-connections"><span><b data-i18n="taskConnections">Threads for this download</b><small data-i18n="taskConnectionsHint">Only changes this task. Use 1 on sites that reject segmented downloads.</small></span><output id="task-connections-value">Automatic</output></label>
-          <input id="task-connections" type="range" min="1" max="32" value="16" />
-          <div class="range-scale"><span>1</span><span>8</span><span>16</span><span>32</span></div>
-        </section>
-        </section>
-        </div>
-        </div>
-        <div id="add-dialog-scrollbar" class="add-dialog-scrollbar" role="scrollbar" tabindex="0" aria-controls="add-dialog-scroll" aria-orientation="vertical" aria-label="Scroll download options" hidden>
-          <button type="button" data-scroll-up tabindex="-1" aria-label="Scroll up">&#9650;</button>
-          <div data-scroll-area><div data-scroll-thumb></div></div>
-          <button type="button" data-scroll-down tabindex="-1" aria-label="Scroll down">&#9660;</button>
-        </div>
-        </div>
-        <div class="dialog-actions">
-          <button type="button" data-dialog-close data-i18n="cancel">
-            Cancel</button
-          ><button
-            id="analyze"
-            type="button"
-            class="primary"
-            data-i18n="analyze"
-          >
-            Analyze</button
-          ><button
-            id="enqueue"
-            type="button"
-            class="primary"
-            data-i18n="addDownload"
-            hidden
-          >
+</div>
+<section class="destination-history">
+<div>
+<b data-i18n="recentLocations">Download locations</b>
+<button data-i18n="clearLocations" id="clear-destinations" type="button">Clear download locations</button>
+</div>
+<div id="destination-list"></div>
+</section>
+<details class="advanced-download">
+<summary data-i18n="advancedOptions">Advanced options</summary>
+<label data-i18n="mirrorUrls" for="mirrors">Mirror URLs (one per line)</label>
+<textarea id="mirrors" placeholder="https://mirror.example/file" rows="3"></textarea>
+<label data-i18n="priority" for="priority">Priority</label>
+<select id="priority"><option data-i18n="priorityHigh" value="10">High</option><option data-i18n="priorityNormal" selected="" value="0">Normal</option><option data-i18n="priorityLow" value="-10">Low</option></select>
+<label data-i18n="downloadBandwidthLimit" for="download-bandwidth-limit">This download limit</label>
+<div class="bandwidth-input"><input id="download-bandwidth-limit" max="10240" min="0" step="0.1" type="number" value="0"/><span data-i18n="megabytesPerSecond">MB/s</span><small data-i18n="unlimited">Unlimited</small></div>
+</details>
+<section class="task-connections">
+<label for="task-connections"><span><b data-i18n="taskConnections">Threads for this download</b><small data-i18n="taskConnectionsHint">Only changes this task. Use 1 on sites that reject segmented downloads.</small></span><output id="task-connections-value">Automatic</output></label>
+<input id="task-connections" max="32" min="1" type="range" value="16"/>
+<div class="range-scale"><span>1</span><span>8</span><span>16</span><span>32</span></div>
+</section>
+</section>
+</div>
+</div>
+<div aria-controls="add-dialog-scroll" aria-label="Scroll download options" aria-orientation="vertical" class="add-dialog-scrollbar" hidden="" id="add-dialog-scrollbar" role="scrollbar" tabindex="0">
+<button aria-label="Scroll up" data-scroll-up="" tabindex="-1" type="button">▲</button>
+<div data-scroll-area=""><div data-scroll-thumb=""></div></div>
+<button aria-label="Scroll down" data-scroll-down="" tabindex="-1" type="button">▼</button>
+</div>
+</div>
+<div class="dialog-actions">
+<button data-dialog-close="" data-i18n="cancel" type="button">
+            Cancel</button><button class="primary" data-i18n="analyze" id="analyze" type="button">
+            Analyze</button><button class="primary" data-i18n="addDownload" hidden="" id="enqueue" type="button">
             Add download
           </button>
-        </div>
-      </form>
-    </dialog>
-    <dialog id="clear-dialog">
-      <form method="dialog">
-        <div class="dialog-head">
-          <div>
-            <small data-i18n="manageList">MANAGE LIST</small>
-            <h2 data-i18n="removeSelected">Remove selected</h2>
-          </div>
-          <button type="button" class="close" data-clear-cancel>×</button>
-        </div>
-        <p class="dialog-copy" data-i18n="removeChoice">
+</div>
+</form>
+</dialog>
+<dialog id="clear-dialog">
+<form method="dialog">
+<div class="dialog-head">
+<div>
+<small data-i18n="manageList">MANAGE LIST</small>
+<h2 data-i18n="removeSelected">Remove selected</h2>
+</div>
+<button class="close" data-clear-cancel="" type="button">×</button>
+</div>
+<p class="dialog-copy" data-i18n="removeChoice">
           What do you want to remove?
         </p>
-        <div class="remove-options">
-          <button id="clear-list-only" type="button" data-clear-mode="list">
-            <b data-i18n="listOnly">Clear from list</b>
-            <small data-i18n="keepFiles"
-              >Keep downloaded and partial files on disk</small
-            >
-          </button>
-          <button id="clear-list-and-files" type="button" class="danger" data-clear-mode="files">
-            <b data-i18n="listAndFiles">Clear list and files</b>
-            <small data-i18n="deleteFiles"
-              >Permanently delete downloaded and partial files</small
-            >
-          </button>
-        </div>
-        <div class="dialog-actions">
-          <button type="button" data-clear-cancel data-i18n="cancel">
+<div class="remove-options">
+<button data-clear-mode="list" id="clear-list-only" type="button">
+<b data-i18n="listOnly">Clear from list</b>
+<small data-i18n="keepFiles">Keep downloaded and partial files on disk</small>
+</button>
+<button class="danger" data-clear-mode="files" id="clear-list-and-files" type="button">
+<b data-i18n="listAndFiles">Clear list and files</b>
+<small data-i18n="deleteFiles">Permanently delete downloaded and partial files</small>
+</button>
+</div>
+<div class="dialog-actions">
+<button data-clear-cancel="" data-i18n="cancel" type="button">
             Cancel
           </button>
-        </div>
-      </form>
-    </dialog>
-    <dialog id="settings-dialog">
-      <form method="dialog">
-        <div class="dialog-head">
-          <div>
-            <small data-i18n="preferences">PREFERENCES</small>
-            <h2 data-i18n="settings">Settings</h2>
-          </div>
-          <button type="button" class="close" data-settings-close>×</button>
-        </div>
-        <div class="settings-columns">
-        <div>
-        <label class="setting-toggle">
-          <input id="autostart" type="checkbox" />
-          <span
-            ><b data-i18n="startWithSystem">Start with the system</b
-            ><small data-i18n="startHidden"
-              >Open hidden in the system tray</small
-            ></span
-          >
-        </label>
-        <section class="pairing-settings">
-          <b data-i18n="smartAutomation">Smart automation</b>
-          <button id="open-bandwidth-panel" type="button" data-i18n="bandwidthPanel">Bandwidth</button>
-          <label class="setting-toggle compact-toggle"><input id="adaptive-efficiency" type="checkbox" /><span><b data-i18n="adaptiveEfficiency">Adaptive efficiency</b><small data-i18n="adaptiveEfficiencyHint">Optimizes queue order and connection use for the current workload.</small></span></label>
-          <label class="setting-toggle compact-toggle"><input id="schedule-enabled" type="checkbox" /><span><b data-i18n="scheduler">Download schedule</b><small data-i18n="schedulerHint">Automatically pauses outside the permitted local time window.</small></span></label>
-          <div class="credential-grid"><label><span data-i18n="scheduleStart">Start</span><input id="schedule-start" type="time" value="00:00" /></label><label><span data-i18n="scheduleEnd">End</span><input id="schedule-end" type="time" value="23:59" /></label></div>
-        </section>
-        <label class="setting-toggle">
-          <input id="capture-clipboard" type="checkbox" />
-          <span
-            ><b data-i18n="captureClipboard">Capture clipboard links</b
-            ><small data-i18n="captureClipboardHint"
-              >Open recognized HTTP, HLS, magnet and media links automatically</small
-            ></span
-          >
-        </label>
-        <section class="pairing-settings association-settings">
-          <b data-i18n="associations">File and link associations</b>
-          <small data-i18n="associationsHint">Choose individually what the system should open with Apocalipse.</small>
-          <label class="setting-toggle compact-toggle"><input type="checkbox" data-association="m3u8" /><span><b>.m3u8</b><small>HLS playlists</small></span></label>
-          <label class="setting-toggle compact-toggle"><input type="checkbox" data-association="torrent" /><span><b>.torrent</b><small>BitTorrent files</small></span></label>
-          <label class="setting-toggle compact-toggle"><input type="checkbox" data-association="magnet" /><span><b>magnet:</b><small>Magnet links</small></span></label>
-          <label class="setting-toggle compact-toggle"><input type="checkbox" data-association="ftp" /><span><b>ftp:</b><small>FTP links</small></span></label>
-          <label class="setting-toggle compact-toggle"><input type="checkbox" data-association="sftp" /><span><b>sftp:</b><small>SFTP links</small></span></label>
-        </section>
-        <label for="default-directory" data-i18n="defaultDirectory"
-          >Default download directory</label
-        >
-        <div class="path-picker">
-          <input id="default-directory" type="text" required /><button
-            type="button"
-            data-pick-for="default-directory"
-            data-i18n="browse"
-          >
-            Browse…
-          </button>
-        </div>
-        <label for="user-agent" data-i18n="userAgent">Custom User-Agent</label>
-        <input id="user-agent" type="text" maxlength="1024" data-i18n-placeholder="userAgentHint" placeholder="Automatic — use the browser identity" />
-        </div>
-        <div>
-        <section class="pairing-settings">
-          <label class="setting-toggle compact-toggle">
-            <input id="proxy-enabled" type="checkbox" />
-            <span><b data-i18n="proxy">Proxy</b><small data-i18n="proxyHint">Route downloads through an HTTP, HTTPS or SOCKS proxy</small></span>
-          </label>
-          <label for="proxy-url" data-i18n="proxyAddress">Proxy address</label>
-          <input id="proxy-url" type="text" maxlength="2048" placeholder="socks5h://127.0.0.1:1080" />
-          <div class="credential-grid">
-            <label><span data-i18n="proxyUsername">Username</span><input id="proxy-username" type="text" maxlength="512" autocomplete="off" /></label>
-            <label><span data-i18n="proxyPassword">Password</span><input id="proxy-password" type="password" maxlength="2048" autocomplete="new-password" data-i18n-placeholder="proxyPasswordHint" placeholder="Leave blank to keep it" /></label>
-          </div>
-          <label class="setting-toggle compact-toggle">
-            <input id="proxy-clear-password" type="checkbox" />
-            <span><small data-i18n="proxyClearPassword">Remove the saved proxy password</small></span>
-          </label>
-          <small data-i18n="proxyPortableWarning">The proxy configuration is saved in the portable data/settings.json file.</small>
-        </section>
-        <section class="pairing-settings host-rules-settings">
-          <b data-i18n="hostRules">Per-site transfer rules</b>
-          <small data-i18n="hostRulesHint">Apply exact hosts or wildcard subdomains and optionally save credentials, connections, speed and User-Agent in one rule.</small>
-          <div class="website-credential-form">
-            <label><span data-i18n="hostRulePattern">Host pattern</span><input id="host-rule-pattern" type="text" maxlength="255" autocomplete="off" data-i18n-placeholder="hostRulePatternHint" placeholder="*.example.com" /></label>
-            <label><span data-i18n="proxyUsername">Username</span><input id="host-rule-username" type="text" maxlength="512" autocomplete="off" /></label>
-            <label><span data-i18n="proxyPassword">Password</span><input id="host-rule-password" type="password" maxlength="2048" autocomplete="new-password" data-i18n-placeholder="hostRulePasswordHint" placeholder="Leave blank to keep saved password" /></label>
-            <label><span data-i18n="userAgent">User-Agent</span><input id="host-rule-user-agent" type="text" maxlength="1024" autocomplete="off" /></label>
-            <label><span data-i18n="connections">Connections per download</span><input id="host-rule-connections" type="number" min="1" max="32" step="1" /></label>
-            <label><span data-i18n="hostRuleBandwidth">Speed limit (MB/s)</span><input id="host-rule-bandwidth" type="number" min="0" step="0.1" data-i18n-placeholder="hostRuleUnlimitedHint" placeholder="0 or empty = unlimited" /></label>
-            <label class="setting-toggle compact-toggle">
-              <input id="host-rule-clear-password" type="checkbox" />
-              <span><small data-i18n="hostRuleClearPassword">Remove the saved password for this rule</small></span>
-            </label>
-            <button id="save-host-rule" type="button" data-i18n="hostRuleAdd">Add or update rule</button>
-          </div>
-          <div id="host-rule-list" class="website-credential-list"></div>
-          <small data-i18n="hostRulesVaultWarning">Passwords are kept in the operating system credential vault, not in settings.json.</small>
-        </section>
-        <section class="pairing-settings">
-          <label class="setting-toggle compact-toggle">
-            <input id="dns-enabled" type="checkbox" />
-            <span><b data-i18n="customDns">Custom DNS</b><small data-i18n="customDnsHint">Resolve native downloads without changing the operating system DNS</small></span>
-          </label>
-          <label for="dns-preset" data-i18n="dnsProvider">Provider</label>
-          <select id="dns-preset">
-            <option value="custom" data-i18n="dnsCustom">Custom</option>
-            <option value="1.1.1.1,1.0.0.1">Cloudflare</option>
-            <option value="8.8.8.8,8.8.4.4">Google</option>
-            <option value="9.9.9.9,149.112.112.112">Quad9</option>
-          </select>
-          <label for="dns-servers" data-i18n="dnsServers">DNS servers</label>
-          <input id="dns-servers" type="text" maxlength="400" placeholder="1.1.1.1, 1.0.0.1" />
-          <small data-i18n="dnsScopeHint">Applied to the native HTTP engine. aria2 uses the system resolver; SOCKS5H continues resolving through the proxy.</small>
-        </section>
-        <section class="pairing-settings">
-          <b data-i18n="aria2RpcTitle">aria2 RPC</b>
-          <label class="setting-toggle compact-toggle">
-            <input id="aria2-rpc-enabled" type="checkbox" checked />
-            <span><b data-i18n="aria2RpcEnabled">Use aria2 RPC</b><small data-i18n="aria2RpcEnabledHint">Control accelerated HTTP/HTTPS, FTP, torrent and magnet transfers through the local aria2 engine.</small></span>
-          </label>
-          <label class="setting-toggle compact-toggle">
-            <input id="aria2-rpc-auto-start" type="checkbox" checked />
-            <span><b data-i18n="aria2RpcAutoStart">Start aria2 automatically when needed</b><small data-i18n="aria2RpcAutoStartHint">Keeps one local aria2 backend for the current Apocalipse session.</small></span>
-          </label>
-          <label for="aria2-rpc-port" data-i18n="aria2RpcPort">RPC port</label>
-          <input id="aria2-rpc-port" type="number" min="1024" max="65535" step="1" data-i18n-placeholder="aria2RpcPortHint" placeholder="Automatic" />
-          <div class="bandwidth-current"><span data-i18n="aria2RpcStatus">RPC status</span><strong id="aria2-rpc-status">Disconnected</strong></div>
-          <div class="diagnostic-actions">
-            <button id="aria2-rpc-test" type="button" data-i18n="aria2RpcTest">Test RPC connection</button>
-            <button id="aria2-rpc-regenerate-token" type="button" data-i18n="aria2RpcRegenerateToken">Regenerate RPC token</button>
-          </div>
-        </section>
-        <div class="transfer-settings">
-          <label>
-            <span><b data-i18n="maxTasks">Maximum simultaneous tasks</b><output id="max-tasks-value">3</output></span>
-            <input id="max-tasks" type="range" min="1" max="20" value="3" />
-          </label>
-          <label>
-            <span><b data-i18n="connections">Connections per download</b><output id="connections-value">16</output></span>
-            <input id="connections" type="range" min="1" max="32" value="16" />
-          </label>
-          <button id="default-limits" type="button" data-i18n="defaults">Default</button>
-        </div>
-        <section class="pairing-settings">
-          <b data-i18n="extensionPairing">Browser extension pairing</b>
-          <label for="pairing-token" data-i18n="pairingToken">Pairing token</label>
-          <div class="path-picker">
-            <input id="pairing-token" type="text" readonly />
-            <button id="copy-pairing" type="button" data-i18n="copy">Copy</button>
-          </div>
-          <button id="regenerate-pairing" type="button" data-i18n="regenerate">Regenerate</button>
-        </section>
-        <section class="pairing-settings">
-          <b data-i18n="diagnostics">Diagnostics</b>
-          <small data-i18n="diagnosticsHint">Safe activity log with credentials and URL parameters hidden</small>
-          <label for="log-editor" data-i18n="logEditor">Log editor</label>
-          <small data-i18n="logEditorHint">Choose an editor executable, including a portable application</small>
-          <div class="path-picker">
-            <input id="log-editor" type="text" readonly />
-            <button id="pick-log-editor" type="button" data-i18n="chooseEditor">Choose editor…</button>
-          </div>
-          <div class="diagnostic-actions">
-            <button id="open-log" type="button" data-i18n="openLog">Open diagnostic log</button>
-            <button id="clear-log" type="button" data-i18n="clearLog">Clear log</button>
-            <button id="remove-log-editor" type="button" data-i18n="removeEditor">Remove editor</button>
-          </div>
-        </section>
-        </div>
-        </div>
-        <div class="dialog-actions">
-          <button type="button" data-settings-close data-i18n="cancel">
-            Cancel
-          </button>
-          <button
-            id="save-settings"
-            type="button"
-            class="primary"
-            data-i18n="save"
-          >
-            Save
-          </button>
-        </div>
-      </form>
-    </dialog>
-    <dialog id="bandwidth-dialog" class="compact-dialog">
-      <form method="dialog">
-        <header><div><small data-i18n="smartAutomation">Smart automation</small><h2 data-i18n="bandwidthPanel">Bandwidth</h2></div><button type="button" data-bandwidth-close>×</button></header>
-        <p data-i18n="bandwidthPanelHint">Set limits without changing the window size.</p>
-        <div class="bandwidth-current"><span data-i18n="currentBandwidth">Current usage</span><strong id="bandwidth-current">0 B/s</strong></div>
-        <label><span data-i18n="globalBandwidthLimit">Global download limit</span><div class="bandwidth-input"><input id="global-bandwidth-limit" type="number" min="0" max="10240" step="0.1" value="0" /><span data-i18n="megabytesPerSecond">MB/s</span><small data-i18n="unlimited">Unlimited</small></div></label>
-        <div class="dialog-actions"><button type="button" data-bandwidth-close data-i18n="cancel">Cancel</button><button id="save-bandwidth" type="button" class="primary" data-i18n="save">Save</button></div>
-      </form>
-    </dialog>
-    <dialog id="tools-dialog">
-      <form method="dialog">
-        <div class="dialog-head"><div><small data-i18n="toolbox">TOOLBOX</small><h2 data-i18n="tools">Tools</h2></div><button type="button" class="close" data-tools-close>×</button></div>
-        <p class="dialog-copy readable-description" data-i18n="toolsPageDescription">Manage the engines used for media, transfers, conversion and preview.</p>
-        <details class="advanced-transport-form">
-          <summary data-i18n="dictionaryTitle">Download with a compression dictionary</summary>
-          <p data-i18n="dictionaryHint"></p>
-          <label><span data-i18n="dictionaryUrl"></span><input id="dictionary-url" type="url" /></label>
-          <label><span data-i18n="artifactUrl"></span><input id="dictionary-artifact-url" type="url" /></label>
-          <label><span data-i18n="expectedHash"></span><input id="dictionary-sha256" type="text" maxlength="64" /></label>
-          <button id="dictionary-download" type="button" data-i18n="dictionaryDownload"></button>
-          <p id="dictionary-status" role="status"></p>
-        </details>
-        <section class="tool-settings">
-          <b data-i18n="externalTools">Required media and transfer tools</b>
-          <small data-i18n="toolsHint">Configure each executable. Apocalipse uses these exact paths for downloads.</small>
-          <div id="tool-list">
-            <label data-tool="ffmpeg"><span>FFmpeg <small></small></span><div><input id="tool-ffmpeg" type="text" /><button type="button" data-tool-pick="ffmpeg" data-i18n="browse">Browse…</button><button type="button" data-tool-download="ffmpeg" data-i18n="downloadTool">Download</button><button type="button" data-tool-update="ffmpeg" data-i18n="update">Update</button></div></label>
-            <label data-tool="yt-dlp"><span>yt-dlp <small></small></span><div><input id="tool-yt-dlp" type="text" /><button type="button" data-tool-pick="yt-dlp" data-i18n="browse">Browse…</button><button type="button" data-tool-download="yt-dlp" data-i18n="downloadTool">Download</button><button type="button" data-tool-update="yt-dlp" data-i18n="update">Update</button></div></label>
-            <label data-tool="qjs"><span>QuickJS (qjs) <small></small></span><div><input id="tool-qjs" type="text" /><button type="button" data-tool-pick="qjs" data-i18n="browse">Browse…</button><button type="button" data-tool-download="qjs" data-i18n="downloadTool">Download</button><button type="button" data-tool-update="qjs" data-i18n="update">Update</button></div></label>
-            <label data-tool="n-m3u8dl-re"><span>N_m3u8DL-RE <small></small></span><div><input id="tool-n-m3u8dl-re" type="text" /><button type="button" data-tool-pick="n-m3u8dl-re" data-i18n="browse">Browse…</button><button type="button" data-tool-download="n-m3u8dl-re" data-i18n="downloadTool">Download</button><button type="button" data-tool-update="n-m3u8dl-re" data-i18n="update">Update</button></div></label>
-            <label data-tool="aria2"><span><span data-i18n="aria2Backend">aria2 (HTTP/HTTPS, FTP, torrent and magnet)</span> <small></small></span><div><input id="tool-aria2" type="text" /><button type="button" data-tool-pick="aria2" data-i18n="browse">Browse…</button><button type="button" data-tool-download="aria2" data-i18n="downloadTool">Download</button><button type="button" data-tool-update="aria2" data-i18n="update">Update</button></div></label>
-            <label data-tool="extractor"><span><span data-i18n="archiveExtractor">Archive extractor</span> <small></small></span><div><input id="tool-extractor" type="text" /><button type="button" data-tool-pick="extractor" data-i18n="browse">Browse…</button><button type="button" data-tool-download="extractor" data-i18n="downloadTool">Download</button></div></label>
-            <label data-tool="player"><span><span data-i18n="mediaPlayer">mpv / media player</span> <small></small></span><div><input id="tool-player" type="text" /><button type="button" data-tool-pick="player" data-i18n="browse">Browse…</button><button type="button" data-tool-download="player" data-i18n="downloadTool">Download</button></div></label>
-          </div>
-        </section>
-        <div class="dialog-actions"><button type="button" data-tools-close data-i18n="cancel">Cancel</button><button id="save-tools" type="button" class="primary" data-i18n="save">Save</button></div>
-      </form>
-    </dialog>
-    <dialog id="log-dialog">
-      <form method="dialog" class="log-viewer">
-        <div class="dialog-head">
-          <div>
-            <small data-i18n="diagnostics">Diagnostics</small>
-            <h2 data-i18n="openLog">Open diagnostic log</h2>
-          </div>
-          <button type="button" class="close" data-log-close>×</button>
-        </div>
-        <pre id="diagnostic-log"></pre>
-        <div class="dialog-actions">
-          <button id="refresh-log" type="button" data-i18n="refreshLog">Refresh</button>
-          <button id="open-log-external" type="button" data-i18n="openExternal">Open in editor</button>
-          <button type="button" data-log-close data-i18n="closeLog">Close</button>
-        </div>
-      </form>
-    </dialog>
-    <dialog id="export-dialog">
-      <form method="dialog">
-        <div class="dialog-head"><div><small>MEDIA LAB</small><h2 data-i18n="exportRecording">Export completed recording</h2></div><button type="button" class="close" data-export-close>×</button></div>
-        <p class="dialog-copy" id="export-source"></p>
-        <label for="export-destination" data-i18n="saveTo">Save to</label>
-        <div class="path-picker"><input id="export-destination" type="text" required /><button type="button" data-pick-for="export-destination" data-i18n="browse">Browse…</button></div>
-        <label for="export-format" data-i18n="outputFormat">Output format</label>
-        <select id="export-format"><option>mp4</option><option>mkv</option><option>webm</option><option>mp3</option><option>m4a</option><option>opus</option><option>flac</option><option>wav</option></select>
-        <label for="export-video-codec" data-i18n="videoCodec">Video codec</label>
-        <select id="export-video-codec"><option value="copy">Copy — original quality</option><option value="h264">H.264</option><option value="hevc">H.265 / HEVC</option><option value="vp9">VP9</option><option value="av1">AV1</option></select>
-        <label for="export-audio-codec" data-i18n="audioCodec">Audio codec</label>
-        <select id="export-audio-codec"><option value="copy">Copy — original quality</option><option value="aac">AAC</option><option value="opus">Opus</option><option value="mp3">MP3</option><option value="flac">FLAC</option></select>
-        <div class="dialog-actions"><button type="button" data-export-close data-i18n="cancel">Cancel</button><button id="export-recording" type="button" class="primary" data-i18n="export">Export</button></div>
-      </form>
-    </dialog>
-    <script src="button-feedback.js"></script>
-    <script src="dialog-scrollbar.js"></script>
-    <script src="task-list-state.js"></script>
-    <script src="audio-format-policy.js"></script>
-    <script src="theme-studio.js"></script>
-    <script src="app.js"></script>
-    <script src="diagnostics-panel.js"></script>
-  </body>
+</div>
+</form>
+</dialog>
+
+<dialog class="compact-dialog" id="bandwidth-dialog">
+<form method="dialog">
+<header><div><small data-i18n="smartAutomation">Smart automation</small><h2 data-i18n="bandwidthPanel">Bandwidth</h2></div><button data-bandwidth-close="" type="button">×</button></header>
+<p data-i18n="bandwidthPanelHint">Set limits without changing the window size.</p>
+<div class="bandwidth-current"><span data-i18n="currentBandwidth">Current usage</span><strong id="bandwidth-current">0 B/s</strong></div>
+<label><span data-i18n="globalBandwidthLimit">Global download limit</span><div class="bandwidth-input"><input id="global-bandwidth-limit" max="10240" min="0" step="0.1" type="number" value="0"/><span data-i18n="megabytesPerSecond">MB/s</span><small data-i18n="unlimited">Unlimited</small></div></label>
+<div class="dialog-actions"><button data-bandwidth-close="" data-i18n="cancel" type="button">Cancel</button><button class="primary" data-i18n="save" id="save-bandwidth" type="button">Save</button></div>
+</form>
+</dialog>
+
+<dialog id="log-dialog">
+<form class="log-viewer" method="dialog">
+<div class="dialog-head">
+<div>
+<small data-i18n="diagnostics">Diagnostics</small>
+<h2 data-i18n="openLog">Open diagnostic log</h2>
+</div>
+<button class="close" data-log-close="" type="button">×</button>
+</div>
+<pre id="diagnostic-log"></pre>
+<div class="dialog-actions">
+<button data-i18n="refreshLog" id="refresh-log" type="button">Refresh</button>
+<button data-i18n="openExternal" id="open-log-external" type="button">Open in editor</button>
+<button data-i18n="closeLog" data-log-close="" type="button">Close</button>
+</div>
+</form>
+</dialog>
+<dialog id="export-dialog">
+<form method="dialog">
+<div class="dialog-head"><div><small>MEDIA LAB</small><h2 data-i18n="exportRecording">Export completed recording</h2></div><button class="close" data-export-close="" type="button">×</button></div>
+<p class="dialog-copy" id="export-source"></p>
+<label data-i18n="saveTo" for="export-destination">Save to</label>
+<div class="path-picker"><input id="export-destination" required="" type="text"/><button data-i18n="browse" data-pick-for="export-destination" type="button">Browse…</button></div>
+<label data-i18n="outputFormat" for="export-format">Output format</label>
+<select id="export-format"><option>mp4</option><option>mkv</option><option>webm</option><option>mp3</option><option>m4a</option><option>opus</option><option>flac</option><option>wav</option></select>
+<label data-i18n="videoCodec" for="export-video-codec">Video codec</label>
+<select id="export-video-codec"><option value="copy">Copy — original quality</option><option value="h264">H.264</option><option value="hevc">H.265 / HEVC</option><option value="vp9">VP9</option><option value="av1">AV1</option></select>
+<label data-i18n="audioCodec" for="export-audio-codec">Audio codec</label>
+<select id="export-audio-codec"><option value="copy">Copy — original quality</option><option value="aac">AAC</option><option value="opus">Opus</option><option value="mp3">MP3</option><option value="flac">FLAC</option></select>
+<div class="dialog-actions"><button data-export-close="" data-i18n="cancel" type="button">Cancel</button><button class="primary" data-i18n="export" id="export-recording" type="button">Export</button></div>
+</form>
+</dialog>
+<script src="button-feedback.js"></script>
+<script src="dialog-scrollbar.js"></script>
+<script src="task-list-state.js"></script>
+<script src="audio-format-policy.js"></script>
+
+<script src="app.js"></script>
+<script src="diagnostics-panel.js"></script>
+</body>
 </html>

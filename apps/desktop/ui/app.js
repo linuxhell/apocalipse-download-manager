@@ -744,38 +744,10 @@ Object.assign(catalogs["zh-CN"], {originalAudio: "原始音频"});
 Object.assign(catalogs["en"], {"themeGallery": "Theme gallery", "themeSearch": "Search themes…", "themeLivePreview": "Live preview", "themeCustomize": "Customize", "themeBrightness": "Background brightness", "themeAero": "Aero effect", "themeAnimations": "Smooth animations", "themeApply": "Apply theme", "themeReset": "Restore default", "themeApplied": "Theme applied.", "themeSaveFailed": "Could not save theme", "themeNoResults": "No matching themes.", "themeExampleFile": "Example file.iso", "themeExample": "Preview example", "themesDescription": "Choose the scenery of your Apocalipse.", "windowTransparency": "Glass / transparency", "windowTransparencyHint": "Control how clearly panels and controls stand out over the scenery.", "windowMinimize": "Minimize", "windowMaximize": "Maximize / restore", "windowClose": "Close", "taskDestination": "Destination", "taskEngine": "Engine", "taskEta": "Remaining", "taskConnectionsLabel": "Connections"});
 Object.assign(catalogs["pt-BR"], {"themeGallery": "Galeria de temas", "themeSearch": "Buscar tema…", "themeLivePreview": "Prévia em tempo real", "themeCustomize": "Personalizar", "themeBrightness": "Brilho do fundo", "themeAero": "Efeito Aero", "themeAnimations": "Animações suaves", "themeApply": "Aplicar tema", "themeReset": "Restaurar padrão", "themeApplied": "Tema aplicado.", "themeSaveFailed": "Não foi possível salvar o tema", "themeNoResults": "Nenhum tema encontrado.", "themeExampleFile": "Arquivo de exemplo.iso", "themeExample": "Exemplo de prévia", "themesDescription": "Escolha o cenário do seu Apocalipse.", "windowTransparency": "Vidro / transparência", "windowTransparencyHint": "Controle o destaque dos painéis e controles sobre o cenário.", "windowMinimize": "Minimizar", "windowMaximize": "Maximizar / restaurar", "windowClose": "Fechar", "taskDestination": "Destino", "taskEngine": "Motor", "taskEta": "Restante", "taskConnectionsLabel": "Conexões"});
 Object.assign(catalogs["zh-CN"], {"themeGallery": "主题库", "themeSearch": "搜索主题…", "themeLivePreview": "实时预览", "themeCustomize": "个性化", "themeBrightness": "背景亮度", "themeAero": "毛玻璃效果", "themeAnimations": "平滑动画", "themeApply": "应用主题", "themeReset": "恢复默认", "themeApplied": "已应用主题。", "themeSaveFailed": "无法保存主题", "themeNoResults": "未找到主题。", "themeExampleFile": "示例文件.iso", "themeExample": "预览示例", "themesDescription": "为您的 Apocalipse 选择风景。", "windowTransparency": "玻璃 / 透明度", "windowTransparencyHint": "调整风景上面板和控件的可见程度。", "windowMinimize": "最小化", "windowMaximize": "最大化 / 还原", "windowClose": "关闭", "taskDestination": "位置", "taskEngine": "引擎", "taskEta": "剩余时间", "taskConnectionsLabel": "连接"});
+Object.assign(catalogs.en, {donate: "Donate", settingsGeneral: "General", settingsNetwork: "Network and proxy", settingsExtension: "Browser extension", settingsLink: "Apocalipse Link", openLinkWindow: "Open in a separate window"});
+Object.assign(catalogs["pt-BR"], {donate: "Doação", settingsGeneral: "Geral", settingsNetwork: "Rede e proxy", settingsExtension: "Extensão do navegador", settingsLink: "Apocalipse Link", openLinkWindow: "Abrir em janela separada"});
+Object.assign(catalogs["zh-CN"], {donate: "捐赠", settingsGeneral: "常规", settingsNetwork: "网络与代理", settingsExtension: "浏览器扩展", settingsLink: "Apocalipse Link", openLinkWindow: "在单独窗口中打开"});
 let locale = localStorage.getItem("apocalipse.language") || "en";
-const valid = ["void", "nebula", "ember", "jade", "plasma", "glacier", "amber", "abyss", "rust", "venom", "wine", "linen", "sky", "blossom", "sage", "sand", "lilac", "mist", "citrus", "coral", "frost", "cyberpunk", "bladerunner", "sexy", "samurai", "future", "fantasy", "pandora"];
-const applyTheme = (theme) => {
-  document.documentElement.dataset.theme = valid.includes(theme) ? theme : "void";
-  ThemeStudio.applyPresentation(document.documentElement.dataset.theme, readAppearance());
-  const color = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
-  const match = color.match(/^#([0-9a-f]{6})$/i);
-  if (match) {
-    const channels = match[1].match(/../g).map(value => parseInt(value, 16) / 255)
-      .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
-    const luminance = channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
-    document.documentElement.style.setProperty("--accent-foreground", luminance > .179 ? "#071014" : "#ffffff");
-  }
-};
-const appearanceDefaults = ThemeStudio.defaults;
-function readAppearance() {
-  try { return { ...appearanceDefaults, ...JSON.parse(localStorage.getItem("apocalipse.appearance") || "{}") }; }
-  catch { return { ...appearanceDefaults }; }
-}
-function applyAppearance(settings = readAppearance()) {
-  settings = ThemeStudio.normalize(settings);
-  ThemeStudio.applyPresentation(document.documentElement.dataset.theme, settings);
-  const transparency = Math.max(0, Math.min(70, Number(settings.transparencyLevel) || 0));
-  const radius = Math.max(0, Math.min(28, Number(settings.cornerRadius) || 0));
-  document.documentElement.dataset.transparency = settings.transparencyEnabled ? "on" : "off";
-  document.documentElement.dataset.rounded = settings.roundedEnabled ? "on" : "off";
-  document.documentElement.dataset.uiSize = ["compact", "normal", "large"].includes(settings.interfaceSize) ? settings.interfaceSize : "normal";
-  document.documentElement.style.setProperty("--window-opacity-percent", settings.transparencyEnabled ? `${100 - transparency}%` : "100%");
-  document.documentElement.style.setProperty("--corner-radius", settings.roundedEnabled ? `${radius}px` : "0px");
-}
-applyTheme(localStorage.getItem("apocalipse.theme") || "void");
-applyAppearance();
 let pendingDiagnosticTrace = null;
 let pendingReferer = null;
 let pendingDuration = null;
@@ -892,16 +864,6 @@ const invoke = (command, args = {}) => {
     throw error;
   });
 };
-// settings.json is authoritative; a missing/stale webview cache must never
-// overwrite the persisted theme when a window or the operating system restarts.
-const applicationThemeReady = invoke("get_application_theme").then((theme) => {
-  if (typeof theme !== "string" || !valid.includes(theme)) throw new Error("unsupported_saved_theme");
-  localStorage.setItem("apocalipse.theme", theme);
-  applyTheme(theme);
-  applyAppearance();
-  themeStudio.leave();
-  syncAppearanceControls();
-}).catch(error => reportUiError("main", "restoreApplicationTheme", error));
 invoke("get_app_version").then((version) => {
   document.querySelector("#app-version").textContent = `v${version}`;
 }).catch(() => {});
@@ -1064,6 +1026,7 @@ function renderDownloads(force = false) {
     const row = document.createElement("article");
     row.className = "download-row";
     row.dataset.taskId = task.id;
+    row.dataset.state = stateKey(task.state);
     const reorderable = ["queued", "paused"].includes(stateKey(task.state))
       && activeFilter === "all"
       && !historyQuery;
@@ -1455,7 +1418,6 @@ function translate() {
   if (activeNavigation) document.querySelector("main > header h1").textContent = activeNavigation.querySelector("b")?.textContent || t("downloads");
   document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
   renderDownloads(true);
-  if (typeof themeStudio !== "undefined") themeStudio.refresh();
   if (activePage === "link") {
     document.querySelector("#link-local-path").textContent = linkLocalPath || t("linkDrives");
     document.querySelector("#link-remote-path").textContent = linkRemotePath || t("linkDrives");
@@ -1503,8 +1465,9 @@ function acceptEnqueuedTask(task) {
 
 const dialog = document.querySelector("#add-dialog");
 const clearDialog = document.querySelector("#clear-dialog");
-const settingsDialog = document.querySelector("#settings-dialog");
-const toolsDialog = document.querySelector("#tools-dialog");
+// Settings and Tools are pages now; these keep the old dialog call sites working.
+const settingsDialog = { open: false, showModal() {}, close() { showPage("downloads"); } };
+const toolsDialog = { open: false, showModal() {}, close() {} };
 const logDialog = document.querySelector("#log-dialog");
 const exportDialog = document.querySelector("#export-dialog");
 const bandwidthDialog = document.querySelector("#bandwidth-dialog");
@@ -1593,45 +1556,58 @@ document.querySelector("#clear-torrent-store").onclick = async () => {
   }
 };
 
-document.querySelectorAll('nav [data-page]:not([data-page="settings"]):not([data-page="tools"])').forEach((button) => {
-  button.onclick = () => {
-    const openedAt = performance.now();
-    if (button.dataset.page === "link") {
-      invoke("open_link_window").catch((error) => window.alert(String(error)));
-      invoke("record_ui_diagnostic", { level: "INFO", event: "link_window_requested", detail: "source=main_navigation" }).catch(() => {});
-      return;
-    }
-    if (activePage === "themes") themeStudio.leave();
-    activePage = button.dataset.page;
-    document.body.dataset.page = activePage;
-    if (activePage === "themes") themeStudio.open();
-    document.querySelector("#moq-capture-panel").hidden = activePage !== "recordings";
-    document.querySelectorAll("nav [data-page]").forEach((item) => item.classList.toggle("active", item === button));
-    const heading = button.querySelector("b")?.textContent || t("downloads");
-    document.querySelector("header h1").textContent = heading;
-    document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
-    document.querySelector("#apocalipse-link-panel").hidden = activePage !== "link";
-    document.querySelector("#logs-panel").hidden = activePage !== "logs";
-    document.querySelector("#themes-panel").hidden = activePage !== "themes";
-    document.querySelector("#language-panel").hidden = activePage !== "language";
-    document.querySelector("#about-panel").hidden = activePage !== "about";
-    document.querySelector("#add").hidden = ["about", "themes", "language", "logs"].includes(activePage);
-    document.querySelector("#torrent-store-controls").hidden = activePage !== "torrents";
-    document.querySelector("#clear-torrent-store").hidden = activePage !== "torrents";
-    if (activePage === "torrents") refreshTorrentStoreControls().catch(error => reportUiError("main", "clear-torrent-store", error));
-    if (activePage === "about" && aboutAudio.src) {
-      aboutAudio.currentTime = 0;
-      aboutAudio.play().catch(() => {});
-    } else {
-      aboutAudio.pause();
-      aboutAudio.currentTime = 0;
-    }
-    document.querySelector(".metrics").hidden = ["link", "logs", "themes", "language", "about"].includes(activePage);
-    document.querySelector(".panel").hidden = ["link", "logs", "themes", "language", "about"].includes(activePage);
-    renderDownloads();
-    invoke("record_ui_diagnostic", { level: "INFO", event: "page_opened", detail: `page=${activePage} panel_present=${activePage === "link" ? Boolean(document.querySelector("#apocalipse-link-panel")) : activePage === "logs" ? Boolean(document.querySelector("#logs-panel")) : true} duration_ms=${Math.round(performance.now() - openedAt)}` }).catch(() => {});
-    if (activePage === "logs") refreshLogEvents().catch(error => reportUiError("main", "clear-torrent-store", error));
-  };
+let activeSettingsTab = "general";
+const settingsTabBusy = { value: false };
+async function showSettingsTab(tab) {
+  activeSettingsTab = tab;
+  document.querySelectorAll("[data-settings-tab]").forEach((button) => {
+    const on = button.dataset.settingsTab === tab;
+    button.classList.toggle("active", on);
+    button.setAttribute("aria-selected", String(on));
+  });
+  document.querySelectorAll("#settings-panel [data-pane]").forEach((pane) => { pane.hidden = pane.dataset.pane !== tab; });
+  document.querySelector(".settings-footer").hidden = !["general", "network", "extension"].includes(tab);
+  try {
+    if (tab === "tools") await refreshToolStatuses();
+    if (tab === "logs") await refreshLogEvents();
+  } catch (error) { reportUiError("main", "settings-tab", error); }
+}
+function showPage(page) {
+  const openedAt = performance.now();
+  activePage = page;
+  document.body.dataset.page = page;
+  const list = ["downloads", "recordings", "torrents"].includes(page);
+  document.querySelectorAll("nav [data-page]").forEach((item) => item.classList.toggle("active", item.dataset.page === page));
+  const button = document.querySelector(`nav [data-page="${page}"]`);
+  document.querySelector("header h1").textContent = button?.querySelector("b")?.textContent || t("downloads");
+  document.querySelector("#moq-capture-panel").hidden = page !== "recordings";
+  document.querySelector("#settings-panel").hidden = page !== "settings";
+  document.querySelector("#about-panel").hidden = page !== "about";
+  document.querySelector("#add").hidden = !list;
+  document.querySelector("#torrent-store-controls").hidden = page !== "torrents";
+  document.querySelector("#clear-torrent-store").hidden = page !== "torrents";
+  if (page === "torrents") refreshTorrentStoreControls().catch(error => reportUiError("main", "clear-torrent-store", error));
+  if (page === "about" && aboutAudio.src) {
+    aboutAudio.currentTime = 0;
+    aboutAudio.play().catch(() => {});
+  } else {
+    aboutAudio.pause();
+    aboutAudio.currentTime = 0;
+  }
+  document.querySelector(".metrics").hidden = !list;
+  document.querySelector(".panel").hidden = !list;
+  renderDownloads();
+  if (page === "settings") {
+    openSettings(activeSettingsTab).then(() => showSettingsTab(activeSettingsTab))
+      .catch(error => reportUiError("main", "open-settings", error));
+  }
+  invoke("record_ui_diagnostic", { level: "INFO", event: "page_opened", detail: `page=${page} panel_present=true duration_ms=${Math.round(performance.now() - openedAt)}` }).catch(() => {});
+}
+document.querySelectorAll("nav [data-page]").forEach((button) => {
+  button.onclick = () => showPage(button.dataset.page);
+});
+document.querySelectorAll("[data-settings-tab]").forEach((button) => {
+  button.onclick = () => showSettingsTab(button.dataset.settingsTab);
 });
 
 let logEvents = [];
@@ -2394,7 +2370,6 @@ const openSettings = async (target = "general") => {
       invoke("list_host_rules"),
     ]);
     document.querySelector("#autostart").checked = autostart.enabled;
-    document.querySelector("#theme").value = document.documentElement.dataset.theme;
     document.querySelector("#adaptive-efficiency").checked = limits.adaptiveEfficiency;
     document.querySelector("#schedule-enabled").checked = localStorage.getItem("apocalipse.schedule.enabled") === "true";
     document.querySelector("#schedule-start").value = localStorage.getItem("apocalipse.schedule.start") || "00:00";
@@ -2448,20 +2423,9 @@ const openSettings = async (target = "general") => {
     reportUiError("main", "renderAria2RpcStatus", error);
   }
 };
-document.querySelectorAll("nav [data-settings-target]").forEach((button) => {
-  button.onclick = () => {
-    document.querySelectorAll("nav button").forEach((item) => item.classList.toggle("active", item === button));
-    document.querySelector("main > header h1").textContent = button.querySelector("b")?.textContent || t("settings");
-    document.querySelector("#page-description").textContent = t("settingsDescription");
-    openSettings(button.dataset.settingsTarget).catch(error => reportUiError("main", "renderAria2RpcStatus", error));
-  };
-});
 document
   .querySelectorAll("[data-settings-close]")
-  .forEach((button) => (button.onclick = () => {
-    applyTheme(localStorage.getItem("apocalipse.theme") || "void");
-    settingsDialog.close();
-  }));
+  .forEach((button) => (button.onclick = () => settingsDialog.close()));
 document.querySelector("#aria2-rpc-test").onclick = async () => {
   const status = document.querySelector("#aria2-rpc-status");
   const button = document.querySelector("#aria2-rpc-test");
@@ -2494,20 +2458,6 @@ document.querySelector("#aria2-rpc-regenerate-token").onclick = async () => {
     button.disabled = false;
   }
 };
-const themeStudio = ThemeStudio.init({
-  translate: t, language: () => locale, applyTheme, applyAppearance, readAppearance,
-  downloads: () => downloads,
-  commit: async (theme, appearance) => {
-    await applicationThemeReady;
-    await invoke("set_application_theme", { theme });
-    localStorage.setItem("apocalipse.theme", theme);
-    localStorage.setItem("apocalipse.appearance", JSON.stringify(appearance));
-    applyTheme(theme); applyAppearance(appearance);
-    invoke("record_ui_diagnostic", { level: "INFO", event: "appearance_changed",
-      detail: `theme=${theme} transparency=${appearance.transparencyLevel} brightness=${appearance.backgroundBrightness}` }).catch(() => {});
-  },
-});
-function syncAppearanceControls() { themeStudio.refresh(); }
 for (const button of document.querySelectorAll('[data-window-action]')) {
   button.onclick = () => invoke("control_main_window", { action: button.dataset.windowAction })
     .catch(error => reportUiError("main", "window-control", error));
@@ -2522,14 +2472,9 @@ document.querySelector("#save-settings").onclick = async () => {
   if (!directory.reportValidity()) return;
   button.disabled = true;
   try {
-    await applicationThemeReady;
-    const theme = document.querySelector("#theme").value;
-    await invoke("set_application_theme", { theme });
-    localStorage.setItem("apocalipse.theme", theme);
     localStorage.setItem("apocalipse.schedule.enabled", String(document.querySelector("#schedule-enabled").checked));
     localStorage.setItem("apocalipse.schedule.start", document.querySelector("#schedule-start").value);
     localStorage.setItem("apocalipse.schedule.end", document.querySelector("#schedule-end").value);
-    applyTheme(theme);
     await invoke("set_default_download_directory", { path: directory.value });
     await invoke("set_autostart", {
       enabled: document.querySelector("#autostart").checked,
@@ -2597,12 +2542,6 @@ document.querySelector("#save-bandwidth").onclick = async (event) => {
     bandwidthDialog.close();
   } catch (error) { window.alert(String(error)); }
   finally { button.disabled = false; }
-};
-document.querySelector('[data-page="tools"]').onclick = async () => {
-  try {
-    await refreshToolStatuses();
-    toolsDialog.showModal();
-  } catch (error) { reportUiError("main", "save-bandwidth", error); }
 };
 document.querySelectorAll("[data-tools-close]").forEach((button) => button.onclick = () => toolsDialog.close());
 document.querySelector("#save-tools").onclick = async (event) => {
@@ -3188,14 +3127,6 @@ async function consumeBrowserAssistedDownload() {
 }
 setInterval(consumeBrowserAssistedDownload, 400);
 window.__TAURI__?.event?.listen?.("browser-assisted-ready", consumeBrowserAssistedDownload).catch(error => reportUiError("main", "consumeBrowserAssistedDownload", error));
-
-window.__TAURI__?.event?.listen?.("theme-changed", (event) => {
-  const theme = event.payload;
-  if (typeof theme === "string" && valid.includes(theme)) {
-    localStorage.setItem("apocalipse.theme", theme);
-    applyTheme(theme); applyAppearance();
-  }
-}).catch(error => reportUiError("main", "consumeBrowserAssistedDownload", error));
 
 let consumingBridgeDownload = false;
 async function consumeBridgeDownload() {
