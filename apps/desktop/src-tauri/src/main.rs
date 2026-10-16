@@ -12610,7 +12610,10 @@ fn show_main_window(app: &tauri::AppHandle) {
     let main_app = app.clone();
     let _ = app.run_on_main_thread(move || {
         if let Some(window) = main_app.get_webview_window("main") {
-            let _ = window.set_size(tauri::LogicalSize::new(1280.0, 850.0));
+            // Always reopen at the compact IDM size (980x620), centred.
+            let _ = window.unmaximize();
+            let _ = window.set_size(tauri::LogicalSize::new(980.0, 620.0));
+            let _ = window.center();
             let _ = window.show();
             let _ = window.unminimize();
             let _ = window.set_always_on_top(true);
