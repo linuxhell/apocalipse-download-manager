@@ -451,18 +451,12 @@ struct UserSettings {
     link_quic_local_ips: Vec<IpAddr>,
     #[serde(default = "default_language")]
     language: String,
-    #[serde(default = "default_theme")]
-    theme: String,
     #[serde(default = "default_true")]
     save_torrent_metadata: bool,
 }
 
 fn default_language() -> String {
     "en".to_owned()
-}
-
-fn default_theme() -> String {
-    "void".to_owned()
 }
 
 fn tray_labels(language: &str) -> (&'static str, &'static str) {
@@ -537,7 +531,6 @@ impl Default for UserSettings {
             link_quic_enabled: false,
             link_quic_local_ips: Vec::new(),
             language: default_language(),
-            theme: default_theme(),
             save_torrent_metadata: true,
         }
     }
@@ -8299,45 +8292,8 @@ fn control_main_window(app: tauri::AppHandle, action: String) -> Result<(), Stri
     result.map_err(|error| error.to_string())
 }
 
-/// Accent colour of every theme (the `--accent` value in the UI stylesheets),
-/// used to tint the window/taskbar icon.
-const THEME_ACCENTS: &[(&str, u32)] = &[
-    ("void", 0x25d9ef),
-    ("nebula", 0x7c5cff),
-    ("ember", 0xff7a3d),
-    ("jade", 0x2fe6a0),
-    ("plasma", 0xff4fb8),
-    ("glacier", 0x4fd4ff),
-    ("amber", 0xffb347),
-    ("abyss", 0x6fe7dd),
-    ("rust", 0xe0754a),
-    ("venom", 0x9be15d),
-    ("wine", 0xe0527a),
-    ("linen", 0xb5651d),
-    ("sky", 0x2f80c9),
-    ("blossom", 0xd6497d),
-    ("sage", 0x3f8f5f),
-    ("sand", 0xc96a3b),
-    ("lilac", 0x8b5fc9),
-    ("mist", 0x3f7ea6),
-    ("citrus", 0xd68910),
-    ("coral", 0xe0654f),
-    ("frost", 0x1b8f96),
-    ("cyberpunk", 0x25d9ef),
-    ("bladerunner", 0xffb347),
-    ("sexy", 0xf16a9a),
-    ("samurai", 0xff596d),
-    ("future", 0x69caff),
-    ("fantasy", 0x77e8b0),
-    ("pandora", 0x62ddf5),
-];
-
-fn theme_accent(theme: &str) -> u32 {
-    THEME_ACCENTS
-        .iter()
-        .find(|(name, _)| *name == theme)
-        .map_or(0x25d9ef, |(_, color)| *color)
-}
+/// Accent colour of the window/taskbar "A" icon (the UI has a single blue accent).
+const WINDOW_ICON_ACCENT: u32 = 0x25d9ef;
 
 fn point_in_polygon(polygon: &[(f32, f32)], x: f32, y: f32) -> bool {
     let mut inside = false;
@@ -8404,74 +8360,12 @@ fn render_a_icon(size: u32, accent: u32) -> Vec<u8> {
     pixels
 }
 
-/// Tints the main window (and with it the taskbar entry) with the current theme.
-fn apply_window_icon(app: &tauri::AppHandle, _theme: &str) {
-    // Themes were removed in 0.5.0: the window icon is always the blue "A",
-    // whatever theme an older version left in the settings file.
+/// Sets the window (and taskbar) icon to the Apocalipse "A".
+fn apply_window_icon(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let icon = Image::new_owned(render_a_icon(128, theme_accent("void")), 128, 128);
+        let icon = Image::new_owned(render_a_icon(128, WINDOW_ICON_ACCENT), 128, 128);
         let _ = window.set_icon(icon);
     }
-}
-
-#[tauri::command]
-fn set_application_theme(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    theme: String,
-) -> Result<(), String> {
-    const THEMES: &[&str] = &[
-        "void",
-        "nebula",
-        "ember",
-        "jade",
-        "plasma",
-        "glacier",
-        "amber",
-        "abyss",
-        "rust",
-        "venom",
-        "wine",
-        "linen",
-        "sky",
-        "blossom",
-        "sage",
-        "sand",
-        "lilac",
-        "mist",
-        "citrus",
-        "coral",
-        "frost",
-        "cyberpunk",
-        "bladerunner",
-        "sexy",
-        "samurai",
-        "future",
-        "fantasy",
-        "pandora",
-    ];
-    if !THEMES.contains(&theme.as_str()) {
-        return Err("unsupported_theme".to_owned());
-    }
-    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    settings.theme = theme.clone();
-    save_settings(&state, &settings)?;
-    drop(settings);
-    diagnostic_log(
-        &state,
-        "INFO",
-        "application.theme_changed",
-        &format!("theme={theme}"),
-    );
-    // Every window (the main window, the Apocalipse Link popup, and any
-    // future standalone window) applies the theme itself from its own
-    // localStorage, which Tauri does not share across separate webview
-    // windows on every platform. Broadcasting the change lets a window
-    // that is already open follow it instead of staying on whatever
-    // theme it happened to load with.
-    let _ = app.emit("theme-changed", &theme);
-    apply_window_icon(&app, &theme);
-    Ok(())
 }
 
 #[tauri::command]
@@ -8481,16 +8375,6 @@ fn get_application_language(state: State<'_, AppState>) -> Result<String, String
         .lock()
         .map_err(|error| error.to_string())?
         .language
-        .clone())
-}
-
-#[tauri::command]
-fn get_application_theme(state: State<'_, AppState>) -> Result<String, String> {
-    Ok(state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .theme
         .clone())
 }
 
@@ -13820,18 +13704,18 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             "bridge.health",
             "extension heartbeat authenticated",
         );
-        let (language, theme) = {
+        let language = {
             let settings = state
                 .settings
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            (settings.language.clone(), settings.theme.clone())
+            settings.language.clone()
         };
         bridge_response(
             &mut stream,
             "200 OK",
             origin,
-            &serde_json::json!({ "ok": true, "language": language, "theme": theme }).to_string(),
+            &serde_json::json!({ "ok": true, "language": language }).to_string(),
         );
     } else if first.starts_with("GET /v1/activate ") {
         diagnostic_log(
@@ -15260,15 +15144,7 @@ fn main() {
                     }
                 })
                 .build(app)?;
-            {
-                let theme = app
-                    .state::<AppState>()
-                    .settings
-                    .lock()
-                    .map(|settings| settings.theme.clone())
-                    .unwrap_or_else(|_| default_theme());
-                apply_window_icon(app.handle(), &theme);
-            }
+            apply_window_icon(app.handle());
             if std::env::args().any(|argument| argument == "--hidden") {
                 if let Some(window) = app.get_webview_window("main") {
                     window.hide()?;
@@ -15296,7 +15172,6 @@ fn main() {
             is_local_link_target,
             get_about_media,
             get_about_background,
-            open_link_window,
             authenticate_local_link_account,
             authenticate_remote_link_account,
             list_link_shares,
@@ -15362,8 +15237,7 @@ fn main() {
             record_ui_diagnostic,
             set_application_language,
             control_main_window,
-            set_application_theme,
-            get_application_theme,
+            open_link_window,
             get_application_language,
             get_log_editor,
             set_log_editor,
@@ -16114,9 +15988,9 @@ mod tests {
     }
 
     #[test]
-    fn theme_icon_is_an_a_tinted_with_the_theme_accent() {
+    fn window_icon_is_a_blue_a() {
         let size = 64_u32;
-        let pixels = render_a_icon(size, theme_accent("samurai"));
+        let pixels = render_a_icon(size, WINDOW_ICON_ACCENT);
         assert_eq!(pixels.len(), (size * size * 4) as usize);
         let at = |x: u32, y: u32| {
             let index = ((y * size + x) * 4) as usize;
@@ -16131,16 +16005,9 @@ mod tests {
         assert_eq!(at(32, 28)[3], 0, "the A's counter is transparent");
         let stroke = at(32, 12);
         assert_eq!(stroke[3], 255, "the apex is opaque");
-        // samurai accent #ff596d: red dominates the tinted glyph.
-        assert!(stroke[0] > stroke[1] && stroke[0] > stroke[2]);
-        assert_ne!(render_a_icon(size, theme_accent("jade")), pixels);
-        assert_eq!(theme_accent("unknown-theme"), 0x25d9ef);
-    }
-
-    #[test]
-    fn every_theme_has_an_accent() {
-        assert_eq!(THEME_ACCENTS.len(), 28);
-        assert_eq!(theme_accent("void"), 0x25d9ef);
+        // accent #25d9ef: blue dominates the glyph.
+        assert!(stroke[2] > stroke[0]);
+        assert_ne!(render_a_icon(size, 0xff596d), pixels);
     }
 
     #[test]

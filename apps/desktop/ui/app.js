@@ -17,10 +17,9 @@ const catalogs = {
     torrents: "Torrents",
     tools: "Tools",
     settings: "Settings",
-    themes: "Themes", language: "Language",
-    themesDescription: "Personalize colors, transparency, corners and interface size.",
+    language: "Language",
     languageDescription: "Choose the language used throughout Apocalipse and in the tray menu.",
-    chooseTheme: "Choose theme", themeOptions: "Theme options", windowTransparency: "Window transparency", windowTransparencyHint: "Make the application window transparent", transparencyLevel: "Transparency level", roundedCorners: "Rounded corners", roundedCornersHint: "Use rounded corners on windows, panels and controls", cornerRadius: "Corner radius", interfaceSize: "Interface size", interfaceSizeHint: "Adjust text and element sizes", compact: "Compact", normal: "Normal", large: "Large", chooseLanguage: "Choose language", languageHint: "The entire application and tray menu use the selected language.",
+    compact: "Compact", normal: "Normal", large: "Large", chooseLanguage: "Choose language", languageHint: "The entire application and tray menu use the selected language.",
     logs: "Logs", logsDescription: "End-to-end diagnostics for extension, shortcuts, interface, bridge and downloads.", exportLog: "Export log", searchLogs: "Search events…", allLevels: "All levels",
     downloadsDescription: "Manage direct downloads, progress, speed and completed files.",
     mediaDescription: "Videos, audio, recordings and exports detected by Apocalipse.",
@@ -136,8 +135,6 @@ const catalogs = {
     linkReceiveHint: "Paste an Apocalipse Link received from another computer.",
     linkReceive: "Receive",
     preferences: "PREFERENCES",
-    appearanceTheme: "Interface theme",
-    themeHint: "Colors and text contrast are adjusted together for readability.",
     associations: "File and link associations",
     associationsHint: "Choose individually what the system should open with Apocalipse.",
     startWithSystem: "Start with the system",
@@ -261,10 +258,9 @@ const catalogs = {
     torrents: "Torrents",
     tools: "Ferramentas",
     settings: "Configurações",
-    themes: "Temas", language: "Idioma",
-    themesDescription: "Personalize cores, transparência, cantos e tamanho da interface.",
+    language: "Idioma",
     languageDescription: "Escolha o idioma usado em todo o Apocalipse e no menu da bandeja.",
-    chooseTheme: "Escolher tema", themeOptions: "Opções do tema", windowTransparency: "Transparência da janela", windowTransparencyHint: "Deixa a janela do aplicativo transparente", transparencyLevel: "Nível de transparência", roundedCorners: "Cantos arredondados", roundedCornersHint: "Usar cantos arredondados nas janelas, painéis e controles", cornerRadius: "Raio dos cantos", interfaceSize: "Tamanho da interface", interfaceSizeHint: "Ajusta o tamanho dos textos e elementos", compact: "Compacto", normal: "Normal", large: "Grande", chooseLanguage: "Escolher idioma", languageHint: "Todo o aplicativo e o menu da bandeja usam o idioma selecionado.",
+    compact: "Compacto", normal: "Normal", large: "Grande", chooseLanguage: "Escolher idioma", languageHint: "Todo o aplicativo e o menu da bandeja usam o idioma selecionado.",
     logs: "Logs", logsDescription: "Diagnóstico de ponta a ponta da extensão, atalhos, interface, ponte e downloads.", exportLog: "Exportar log", searchLogs: "Pesquisar eventos…", allLevels: "Todos os níveis",
     downloadsDescription: "Gerencie downloads diretos, progresso, velocidade e arquivos concluídos.",
     mediaDescription: "Vídeos, áudios, gravações e exportações detectados pelo Apocalipse.",
@@ -380,8 +376,6 @@ const catalogs = {
     linkReceiveHint: "Cole um Apocalipse Link recebido de outro computador.",
     linkReceive: "Receber",
     preferences: "PREFERÊNCIAS",
-    appearanceTheme: "Tema da interface",
-    themeHint: "As cores e o contraste do texto são ajustados juntos para manter a leitura.",
     associations: "Associações de arquivos e links",
     associationsHint: "Escolha individualmente o que o sistema deve abrir com o Apocalipse.",
     startWithSystem: "Iniciar com o sistema",
@@ -505,10 +499,9 @@ const catalogs = {
     torrents: "种子",
     tools: "工具",
     settings: "设置",
-    themes: "主题", language: "语言",
-    themesDescription: "自定义颜色、透明度、圆角和界面大小。",
+    language: "语言",
     languageDescription: "选择整个 Apocalipse 和托盘菜单使用的语言。",
-    chooseTheme: "选择主题", themeOptions: "主题选项", windowTransparency: "窗口透明度", windowTransparencyHint: "使应用程序窗口透明", transparencyLevel: "透明度级别", roundedCorners: "圆角", roundedCornersHint: "为窗口、面板和控件使用圆角", cornerRadius: "圆角半径", interfaceSize: "界面大小", interfaceSizeHint: "调整文本和元素大小", compact: "紧凑", normal: "正常", large: "大", chooseLanguage: "选择语言", languageHint: "整个应用程序和托盘菜单都使用所选语言。",
+    compact: "紧凑", normal: "正常", large: "大", chooseLanguage: "选择语言", languageHint: "整个应用程序和托盘菜单都使用所选语言。",
     logs: "日志", logsDescription: "扩展、快捷键、界面、桥接和下载的端到端诊断。", exportLog: "导出日志", searchLogs: "搜索事件…", allLevels: "所有级别",
     downloadsDescription: "管理直接下载、进度、速度和已完成文件。",
     mediaDescription: "管理 Apocalipse 检测到的视频、音频、录制和导出。",
@@ -624,8 +617,6 @@ const catalogs = {
     linkReceiveHint: "粘贴从另一台计算机收到的 Apocalipse Link。",
     linkReceive: "接收",
     preferences: "偏好设置",
-    appearanceTheme: "界面主题",
-    themeHint: "颜色与文字对比度会同步调整，以保持清晰易读。",
     associations: "文件和链接关联",
     associationsHint: "单独选择由系统使用 Apocalipse 打开的类型。",
     startWithSystem: "随系统启动",
@@ -741,12 +732,12 @@ Object.assign(catalogs["zh-CN"], {"linkQuic": "使用 QUIC 接收共享文件（
 Object.assign(catalogs.en, {originalAudio: "Original audio"});
 Object.assign(catalogs["pt-BR"], {originalAudio: "Áudio original"});
 Object.assign(catalogs["zh-CN"], {originalAudio: "原始音频"});
-Object.assign(catalogs["en"], {"themeGallery": "Theme gallery", "themeSearch": "Search themes…", "themeLivePreview": "Live preview", "themeCustomize": "Customize", "themeBrightness": "Background brightness", "themeAero": "Aero effect", "themeAnimations": "Smooth animations", "themeApply": "Apply theme", "themeReset": "Restore default", "themeApplied": "Theme applied.", "themeSaveFailed": "Could not save theme", "themeNoResults": "No matching themes.", "themeExampleFile": "Example file.iso", "themeExample": "Preview example", "themesDescription": "Choose the scenery of your Apocalipse.", "windowTransparency": "Glass / transparency", "windowTransparencyHint": "Control how clearly panels and controls stand out over the scenery.", "windowMinimize": "Minimize", "windowMaximize": "Maximize / restore", "windowClose": "Close", "taskDestination": "Destination", "taskEngine": "Engine", "taskEta": "Remaining", "taskConnectionsLabel": "Connections"});
-Object.assign(catalogs["pt-BR"], {"themeGallery": "Galeria de temas", "themeSearch": "Buscar tema…", "themeLivePreview": "Prévia em tempo real", "themeCustomize": "Personalizar", "themeBrightness": "Brilho do fundo", "themeAero": "Efeito Aero", "themeAnimations": "Animações suaves", "themeApply": "Aplicar tema", "themeReset": "Restaurar padrão", "themeApplied": "Tema aplicado.", "themeSaveFailed": "Não foi possível salvar o tema", "themeNoResults": "Nenhum tema encontrado.", "themeExampleFile": "Arquivo de exemplo.iso", "themeExample": "Exemplo de prévia", "themesDescription": "Escolha o cenário do seu Apocalipse.", "windowTransparency": "Vidro / transparência", "windowTransparencyHint": "Controle o destaque dos painéis e controles sobre o cenário.", "windowMinimize": "Minimizar", "windowMaximize": "Maximizar / restaurar", "windowClose": "Fechar", "taskDestination": "Destino", "taskEngine": "Motor", "taskEta": "Restante", "taskConnectionsLabel": "Conexões"});
-Object.assign(catalogs["zh-CN"], {"themeGallery": "主题库", "themeSearch": "搜索主题…", "themeLivePreview": "实时预览", "themeCustomize": "个性化", "themeBrightness": "背景亮度", "themeAero": "毛玻璃效果", "themeAnimations": "平滑动画", "themeApply": "应用主题", "themeReset": "恢复默认", "themeApplied": "已应用主题。", "themeSaveFailed": "无法保存主题", "themeNoResults": "未找到主题。", "themeExampleFile": "示例文件.iso", "themeExample": "预览示例", "themesDescription": "为您的 Apocalipse 选择风景。", "windowTransparency": "玻璃 / 透明度", "windowTransparencyHint": "调整风景上面板和控件的可见程度。", "windowMinimize": "最小化", "windowMaximize": "最大化 / 还原", "windowClose": "关闭", "taskDestination": "位置", "taskEngine": "引擎", "taskEta": "剩余时间", "taskConnectionsLabel": "连接"});
-Object.assign(catalogs.en, {donate: "Donate", settingsGeneral: "General", settingsNetwork: "Network and proxy", settingsExtension: "Browser extension", settingsLink: "Apocalipse Link", openLinkWindow: "Open in a separate window"});
-Object.assign(catalogs["pt-BR"], {donate: "Doação", settingsGeneral: "Geral", settingsNetwork: "Rede e proxy", settingsExtension: "Extensão do navegador", settingsLink: "Apocalipse Link", openLinkWindow: "Abrir em janela separada"});
-Object.assign(catalogs["zh-CN"], {donate: "捐赠", settingsGeneral: "常规", settingsNetwork: "网络与代理", settingsExtension: "浏览器扩展", settingsLink: "Apocalipse Link", openLinkWindow: "在单独窗口中打开"});
+Object.assign(catalogs["en"], {"windowMinimize": "Minimize", "windowMaximize": "Maximize / restore", "windowClose": "Close", "taskDestination": "Destination", "taskEngine": "Engine", "taskEta": "Remaining", "taskConnectionsLabel": "Connections"});
+Object.assign(catalogs["pt-BR"], {"windowMinimize": "Minimizar", "windowMaximize": "Maximizar / restaurar", "windowClose": "Fechar", "taskDestination": "Destino", "taskEngine": "Motor", "taskEta": "Restante", "taskConnectionsLabel": "Conexões"});
+Object.assign(catalogs["zh-CN"], {"windowMinimize": "最小化", "windowMaximize": "最大化 / 还原", "windowClose": "关闭", "taskDestination": "位置", "taskEngine": "引擎", "taskEta": "剩余时间", "taskConnectionsLabel": "连接"});
+Object.assign(catalogs.en, {darkMode: "Dark mode", darkModeHint: "Near-black surfaces with light text. Progress colours stay the same.", openLinkWindow: "Open Apocalipse Link window", donate: "Donate", settingsGeneral: "General", settingsNetwork: "Network and proxy", settingsExtension: "Browser extension", settingsLink: "Apocalipse Link", openLinkWindow: "Open in a separate window"});
+Object.assign(catalogs["pt-BR"], {darkMode: "Modo escuro", darkModeHint: "Superfícies quase pretas com texto claro. As cores do progresso continuam iguais.", openLinkWindow: "Abrir janela do Apocalipse Link", donate: "Doação", settingsGeneral: "Geral", settingsNetwork: "Rede e proxy", settingsExtension: "Extensão do navegador", settingsLink: "Apocalipse Link", openLinkWindow: "Abrir em janela separada"});
+Object.assign(catalogs["zh-CN"], {darkMode: "深色模式", darkModeHint: "近黑色背景与浅色文字，进度条颜色不变。", openLinkWindow: "打开 Apocalipse Link 窗口", donate: "捐赠", settingsGeneral: "常规", settingsNetwork: "网络与代理", settingsExtension: "浏览器扩展", settingsLink: "Apocalipse Link", openLinkWindow: "在单独窗口中打开"});
 let locale = localStorage.getItem("apocalipse.language") || "en";
 let pendingDiagnosticTrace = null;
 let pendingReferer = null;
@@ -783,7 +774,7 @@ let selectionPointerActive = false;
 let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
-const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", logs: "logsDescription", themes: "themesDescription", language: "languageDescription", about: "aboutDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
+const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", logs: "logsDescription", language: "languageDescription", about: "aboutDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
 let lastUiInteractionTrace = null;
 const freshUiTrace = () => {
   const now = performance.now();
@@ -1831,6 +1822,17 @@ function renderLinkShares(shares) {
 }
 document.querySelector("#link-share-file").onclick = async () => { try { renderLinkShares(await invoke("add_link_file_share")); await refreshVisibleLinkPanels({ resetToRoot: true }); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
 document.querySelector("#link-share-folder").onclick = async () => { try { renderLinkShares(await invoke("add_link_share")); await refreshVisibleLinkPanels({ resetToRoot: true }); } catch (error) { if (`${error}` !== "cancelled") window.alert(String(error)); } };
+const darkModeToggle = document.querySelector("#dark-mode");
+const applyColorMode = (dark) => {
+  document.documentElement.dataset.mode = dark ? "dark" : "light";
+  try { localStorage.setItem("apocalipse.mode", dark ? "dark" : "light"); } catch {}
+};
+darkModeToggle.checked = document.documentElement.dataset.mode === "dark";
+darkModeToggle.onchange = () => applyColorMode(darkModeToggle.checked);
+document.querySelector("#open-link-window").onclick = () => {
+  invoke("open_link_window").catch((error) => window.alert(String(error)));
+  invoke("record_ui_diagnostic", { level: "INFO", event: "link_window_requested", detail: "source=settings" }).catch(() => {});
+};
 document.querySelector("#link-connect").onclick = async () => {
   const id = document.querySelector("#link-remote-id").value.trim();
   const username = document.querySelector("#link-remote-username").value.trim();
@@ -2145,7 +2147,7 @@ const selectLanguage = (language) => {
 document.querySelectorAll("[data-language-choice]").forEach((button) => {
   button.onclick = () => selectLanguage(button.dataset.languageChoice);
 });
-// settings.json is authoritative for the language, like the theme: a missing or
+// settings.json is authoritative for the language: a missing or
 // stale webview cache (localStorage is lost on some restarts) must not show a
 // different language than the one the browser extension receives from the app.
 // A backend still at the default "en" while the cache holds another language

@@ -28,19 +28,23 @@
   · <a href="https://github.com/linuxhell/apocalipse-download-manager/issues">Issues</a>
 </p>
 
-## Demo / Demonstração / 演示
-
+## Screenshots / Capturas de tela / 截图
 
 <p align="center">
-  <a href="https://github.com/linuxhell/apocalipse-download-manager/blob/main/assets/demo/adm-demo.mp4">
-    <img alt="Apocalipse Download Manager demo (click for the full-quality video)" src="assets/demo/adm-demo-preview.gif" width="800">
-  </a>
+  <img alt="Downloads: one dense row per download, blue progress bar, red when failed, green when completed" src="assets/screenshots/downloads.png" width="800">
+</p>
+<p align="center">
+  <img alt="Settings with tabs (Tools tab)" src="assets/screenshots/settings-tools.png" width="395">
+  <img alt="Optional dark mode" src="assets/screenshots/downloads-dark.png" width="395">
+</p>
+<p align="center">
+  <img alt="About page with the city and deer scene, music player and creator photo" src="assets/screenshots/about.png" width="800">
 </p>
 
-<p align="center"><sub>Click the preview to watch the full-quality video.</sub></p>
+<p align="center"><sub>Real interface rendered with sample downloads. / Interface real com downloads de exemplo. / 真实界面，使用示例下载。</sub></p>
 
 > [!IMPORTANT]
-> **Current release: ADM 0.5.0 + browser extension 0.3.204.** New compact IDM-sized window (980×620): white background, black text, no themes; Downloads, Torrents, Recordings, Donate and About in the sidebar, everything else in tabs inside Settings; blue progress bars (red on failure, green when done). Previously: steadier extension connection (bridge no longer serialized), consistent language between app and extension, fixed extension ID on Chrome/Edge. Earlier fixes: HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). The Firefox XPI in the release is Mozilla-signed.
+> **Current release: ADM 0.5.0 + browser extension 0.3.204.** New compact IDM-sized window (980×620): white background, black text, no themes; Downloads, Torrents, Recordings, Donate and About in the sidebar, everything else in tabs inside Settings; blue progress bars (red on failure, green when done). Previously: steadier extension connection (bridge no longer serialized), consistent language between app and extension, fixed extension ID on Chrome/Edge. Earlier fixes: HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). The Firefox XPI in the release is Mozilla-signed (extension 0.3.204).
 
 ## Download the current release
 
@@ -81,7 +85,7 @@
 - Progressive recordings with later MP4/AAC export
 - Apocalipse Link for authenticated, TLS-encrypted file transfers between computers
 - Per-site credentials stored in the operating system secure credential vault
-- 28 visual themes with Cinema Premium scenic backgrounds, adjustable transparency and readable contrast
+- Compact IDM-sized window (980×620): white surface, black text, optional dark mode styles; no themes
 - English, Brazilian Portuguese and Simplified Chinese in the desktop app and browser extension
 - Portable Windows, Linux and macOS x64 builds, with no mandatory installer
 
@@ -90,7 +94,7 @@ Sites protected by DRM or access controls are intentionally not bypassed. Downlo
 ## Release 0.4.91 highlights
 
 - **Download button:** a Referer that makes a CDN answer 403 (e.g. `video.twimg.com`) is dropped after a 1-byte probe; sites that need it still get it.
-- **Icon:** the Apocalipse "A" replaces the alien, and the window/taskbar icon takes the current theme colour.
+- **Icon:** the Apocalipse "A" replaces the alien, and the window/taskbar icon is always the blue "A".
 
 ## Release 0.4.90 highlights
 
@@ -110,7 +114,7 @@ This release ships the Mozilla-signed Firefox XPI 0.3.203, so Firefox gets the s
 
 The interface (introduced in 0.4.83) keeps Downloads, Torrents and Recordings in the same narrow, scrollable task column. Pause/resume, the red remove control and the yellow folder control stay visible on each task. On Windows and macOS, the folder action reveals the task file directly when it exists instead of opening an unrelated folder view.
 
-Cinema Premium adds 28 HD themes with palette-aware contrast and configurable transparency. The About page keeps the selected palette without the scenic wallpaper, while Logs use balanced diagnostic/event panes.
+The interface is a single compact white window with black text; the About page keeps the city/deer scene, music player and creator photo, and Logs use balanced diagnostic/event panes.
 
 Browser extension 0.3.202 follows the selected palette. The current release includes Chrome and Edge ZIP packages plus the Mozilla-signed Firefox XPI.
 

@@ -10,7 +10,7 @@
 - Chrome, Edge and signed Firefox browser extensions
 - Facebook, Instagram and TikTok media workflows
 - Torrent/magnet downloads with file selection, peer data and player preview
-- Native tray, themes, clipboard detection and protocol/file associations
+- Native tray, clipboard detection and protocol/file associations
 - Per-tool updates for yt-dlp, FFmpeg, ffprobe, aria2, N_m3u8DL-RE and QuickJS
 - Apocalipse Link authenticated local/remote file browsing and transfers,
   TLS-encrypted with trust-on-first-use certificate pinning
