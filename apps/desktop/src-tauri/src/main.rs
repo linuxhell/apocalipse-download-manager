@@ -5020,7 +5020,9 @@ async fn inspect_media_formats(
         // Manual URLs do not carry an extension identity. Reuse the browser
         // session so inspection and the actual download see the same YouTube
         // authentication/challenge state.
-        command.args(["--cookies-from-browser", "chrome"]);
+        if let Some(browser) = browser_cookie_source() {
+            command.args(["--cookies-from-browser", browser]);
+        }
     }
     if let Some(value) = user_agent.as_deref().filter(|value| !value.is_empty()) {
         command.arg("--user-agent").arg(value);
@@ -5067,10 +5069,21 @@ async fn inspect_media_formats(
         use std::os::windows::process::CommandExt;
         command.as_std_mut().creation_flags(0x08000000);
     }
-    let output = command
+    let mut output = command
         .output()
         .await
         .map_err(|error| format!("yt_dlp_unavailable: {error}"))?;
+    if !output.status.success()
+        && browser_cookie_failure(&String::from_utf8_lossy(&output.stderr))
+    {
+        // The browser cookie store was unreadable (profile missing, database
+        // locked). Inspect again without browser cookies instead of failing.
+        let mut retry = command_without_browser_cookies(&command);
+        output = retry
+            .output()
+            .await
+            .map_err(|error| format!("yt_dlp_unavailable: {error}"))?;
+    }
     if let Some(path) = cookie_jar {
         let _ = fs::remove_file(path);
     }
@@ -7260,7 +7273,9 @@ async fn run_external_download(
                 || task.source.contains("youtube.com/")
                 || task.source.contains("youtu.be/")
             {
-                command.args(["--cookies-from-browser", "chrome"]);
+                if let Some(browser) = browser_cookie_source() {
+                    command.args(["--cookies-from-browser", browser]);
+                }
             }
             command.args([
                 "--ignore-config",
@@ -7476,6 +7491,7 @@ async fn run_external_download(
     // yt-dlp can impersonate one when curl_cffi is available; retry once with it
     // after a 403 instead of forcing impersonation (slower) on every request.
     let mut impersonation_retry_available = kind == DownloadKind::MediaPage;
+    let mut cookie_retry_available = kind == DownloadKind::MediaPage;
     let mut result = loop {
         let mut tls_fingerprint_blocked = false;
         let attempt = match command.spawn() {
@@ -7563,6 +7579,22 @@ async fn run_external_download(
             }
             Err(error) => Err(format!("external_engine_unavailable: {error}")),
         };
+        if cookie_retry_available
+            && attempt
+                .as_ref()
+                .err()
+                .is_some_and(|detail| browser_cookie_failure(detail))
+        {
+            cookie_retry_available = false;
+            diagnostic_log(
+                &app.state::<AppState>(),
+                "INFO",
+                "external.browser_cookies_dropped",
+                &format!("task={id} engine=yt-dlp"),
+            );
+            command = command_without_browser_cookies(&command);
+            continue;
+        }
         if attempt.is_err() && tls_fingerprint_blocked && impersonation_retry_available {
             impersonation_retry_available = false;
             let yt_dlp = tools.1.clone();
@@ -7666,13 +7698,96 @@ fn yt_dlp_impersonation_target(yt_dlp: &Path) -> Option<&'static str> {
 /// Rebuilds a process command (tokio's `Command` is not `Clone`) with extra
 /// trailing arguments, preserving program, arguments, environment, working
 /// directory and the stdio/process-group setup used for external engines.
+/// The installed browser whose profile yt-dlp should borrow cookies from. The
+/// choice used to be hard-wired to Chrome, which made every YouTube download
+/// fail ("could not find chrome cookies database") on PCs that only have Edge,
+/// Brave or Firefox. `None` means no known profile exists: yt-dlp then runs
+/// without browser cookies.
+fn browser_cookie_source() -> Option<&'static str> {
+    browser_cookie_source_in(&|path: &Path| path.is_dir())
+}
+
+fn browser_cookie_source_in(exists: &dyn Fn(&Path) -> bool) -> Option<&'static str> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    let roaming = std::env::var_os("APPDATA").map(PathBuf::from);
+    let mut candidates: Vec<(&'static str, PathBuf)> = Vec::new();
+    if cfg!(windows) {
+        if let Some(local) = &local {
+            candidates.push(("chrome", local.join("Google/Chrome/User Data")));
+            candidates.push(("edge", local.join("Microsoft/Edge/User Data")));
+            candidates.push(("brave", local.join("BraveSoftware/Brave-Browser/User Data")));
+            candidates.push(("chromium", local.join("Chromium/User Data")));
+        }
+        if let Some(roaming) = &roaming {
+            candidates.push(("firefox", roaming.join("Mozilla/Firefox/Profiles")));
+        }
+    } else if cfg!(target_os = "macos") {
+        if let Some(home) = &home {
+            let support = home.join("Library/Application Support");
+            candidates.push(("chrome", support.join("Google/Chrome")));
+            candidates.push(("edge", support.join("Microsoft Edge")));
+            candidates.push(("brave", support.join("BraveSoftware/Brave-Browser")));
+            candidates.push(("chromium", support.join("Chromium")));
+            candidates.push(("firefox", support.join("Firefox/Profiles")));
+        }
+    } else if let Some(home) = &home {
+        candidates.push(("chrome", home.join(".config/google-chrome")));
+        candidates.push(("edge", home.join(".config/microsoft-edge")));
+        candidates.push(("brave", home.join(".config/BraveSoftware/Brave-Browser")));
+        candidates.push(("chromium", home.join(".config/chromium")));
+        candidates.push(("firefox", home.join(".mozilla/firefox")));
+    }
+    candidates
+        .into_iter()
+        .find(|(_, path)| exists(path))
+        .map(|(name, _)| name)
+}
+
+/// True when yt-dlp failed only because it could not read the browser's cookie
+/// store (missing profile, locked or encrypted database).
+fn browser_cookie_failure(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    lower.contains("cookies database")
+        || lower.contains("cookie database")
+        || lower.contains("could not copy") && lower.contains("cookie")
+        || lower.contains("failed to decrypt") && lower.contains("cookie")
+        || lower.contains("cookies-from-browser")
+}
+
+fn command_without_browser_cookies(command: &tokio::process::Command) -> tokio::process::Command {
+    rebuild_command(command, true, &[])
+}
+
 fn command_with_extra_args(
     command: &tokio::process::Command,
     extra: &[&str],
 ) -> tokio::process::Command {
+    rebuild_command(command, false, extra)
+}
+
+fn rebuild_command(
+    command: &tokio::process::Command,
+    drop_browser_cookies: bool,
+    extra: &[&str],
+) -> tokio::process::Command {
     let original = command.as_std();
     let mut rebuilt = tokio::process::Command::new(original.get_program());
-    rebuilt.args(original.get_args()).args(extra);
+    let mut skip_next = false;
+    for argument in original.get_args() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if drop_browser_cookies && argument == "--cookies-from-browser" {
+            skip_next = true;
+            continue;
+        }
+        rebuilt.arg(argument);
+    }
+    rebuilt.args(extra);
     for (key, value) in original.get_envs() {
         match value {
             Some(value) => rebuilt.env(key, value),
@@ -16021,6 +16136,45 @@ mod tests {
     fn yt_dlp_updates_come_from_the_nightly_builds_on_every_platform() {
         assert_eq!(YT_DLP_RELEASE_REPO, "yt-dlp/yt-dlp-nightly-builds");
         assert_eq!(YT_DLP_UPDATE_CHANNEL, "nightly");
+    }
+
+    #[test]
+    fn browser_cookie_source_uses_whichever_browser_is_installed() {
+        let only = |wanted: &'static str| {
+            move |path: &Path| {
+                let text = path.to_string_lossy().to_ascii_lowercase();
+                text.contains(wanted)
+            }
+        };
+        // Edge only: the old hard-coded "chrome" would have failed here.
+        assert_eq!(
+            browser_cookie_source_in(&only("edge")),
+            Some("edge"),
+            "an Edge-only PC must not be told to read Chrome cookies"
+        );
+        assert_eq!(browser_cookie_source_in(&|_| false), None);
+    }
+
+    #[test]
+    fn unreadable_browser_cookie_stores_are_recognised() {
+        assert!(browser_cookie_failure(
+            "ERROR: could not find chrome cookies database in \"C:\\x\""
+        ));
+        assert!(browser_cookie_failure("Could not copy Chrome cookie database"));
+        assert!(!browser_cookie_failure("HTTP Error 403: Forbidden"));
+    }
+
+    #[test]
+    fn dropping_browser_cookies_removes_the_flag_and_its_value() {
+        let mut original = tokio::process::Command::new("yt-dlp");
+        original.args(["--no-playlist", "--cookies-from-browser", "chrome", "-f", "best"]);
+        let rebuilt = command_without_browser_cookies(&original);
+        let args: Vec<_> = rebuilt
+            .as_std()
+            .get_args()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, ["--no-playlist", "-f", "best"]);
     }
 
     #[test]

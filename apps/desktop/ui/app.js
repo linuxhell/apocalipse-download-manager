@@ -974,13 +974,38 @@ async function resolveCachedThumbnail(url) {
   return pending;
 }
 
-function loadPreviewThumbnail(image, url) {
-  image.dataset.thumbnailSource = url || "";
+// yt-dlp's "thumbnail" for YouTube is often the maxres image, which does not
+// exist for every video (404 -> broken image). hqdefault always exists.
+function youtubeThumbnailFallback(source) {
+  let parsed;
+  try { parsed = new URL(String(source || "")); } catch { return null; }
+  const host = parsed.hostname.replace(/^www\.|^m\./, "");
+  let id = null;
+  if (host === "youtu.be") id = parsed.pathname.split("/")[1];
+  else if (host === "youtube.com" || host === "music.youtube.com") {
+    id = parsed.searchParams.get("v") || parsed.pathname.match(/^\/(?:shorts|embed|live)\/([^/?#]+)/)?.[1];
+  }
+  return id && /^[\w-]{6,20}$/.test(id) ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
+}
+
+async function resolveThumbnailChain(...urls) {
+  for (const url of urls) {
+    if (!url) continue;
+    const resolved = await resolveCachedThumbnail(url);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+function loadPreviewThumbnail(image, url, fallbackUrl = null) {
+  image.dataset.thumbnailSource = url || fallbackUrl || "";
   image.hidden = true;
   image.removeAttribute("src");
-  if (!url) return;
-  resolveCachedThumbnail(url).then((resolved) => {
-    if (!resolved || image.dataset.thumbnailSource !== url) return;
+  if (!url && !fallbackUrl) return;
+  const sourceKey = image.dataset.thumbnailSource;
+  resolveThumbnailChain(url, fallbackUrl).then((resolved) => {
+    if (!resolved || image.dataset.thumbnailSource !== sourceKey) return;
+    url = sourceKey;
     image.src = resolved;
     image.hidden = false;
     image.onerror = () => {
@@ -1091,9 +1116,9 @@ function renderDownloads(force = false) {
       className: "download-icon",
       textContent: "⇩",
     });
-    if (task.thumbnail) {
-      const requestedThumbnail = task.thumbnail;
-      resolveCachedThumbnail(requestedThumbnail).then((resolved) => {
+    const requestedThumbnail = task.thumbnail || youtubeThumbnailFallback(task.source);
+    if (requestedThumbnail) {
+      resolveThumbnailChain(task.thumbnail, youtubeThumbnailFallback(task.source)).then((resolved) => {
         if (!resolved || !row.isConnected) return;
         const thumbnail = document.createElement("img");
         thumbnail.className = "download-thumbnail";
@@ -2485,15 +2510,14 @@ async function showMediaInspection(url, generation = analysisGeneration) {
     });
     if (!analysisIsCurrent(generation)) return false;
     pendingTitle = media.title || pendingTitle;
-    pendingThumbnail = media.thumbnail || pendingThumbnail;
+    const ytFallback = youtubeThumbnailFallback(url);
+    pendingThumbnail = media.thumbnail || pendingThumbnail || ytFallback;
     pendingDuration = Number.isFinite(media.duration) ? media.duration : pendingDuration;
     pendingIsLive = media.isLive === true;
     document.querySelector("#media-title").textContent = media.title;
     document.querySelector("#media-duration").textContent = media.duration ? `${t("duration")}: ${secondsLabel(media.duration)}` : "";
     const thumbnail = document.querySelector("#media-thumbnail");
-    thumbnail.hidden = !media.thumbnail;
-    if (media.thumbnail) thumbnail.src = media.thumbnail;
-    else thumbnail.removeAttribute("src");
+    loadPreviewThumbnail(thumbnail, media.thumbnail, ytFallback);
     for (const format of media.formats) option(select, format.selection, format.label);
     document.querySelector("#file-name").value = media.suggestedFileName;
     refreshAutoExtractOption();
