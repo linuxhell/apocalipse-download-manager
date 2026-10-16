@@ -9812,6 +9812,10 @@ async fn github_latest_release(
 /// Generate keys and sign manifests with
 /// `cargo run -p apocalipse-core --example tools_manifest`.
 const TRUSTED_TOOL_UPDATE_KEYS: &[&str] = &[];
+/// yt-dlp is updated from the nightly builds, which carry site fixes days before
+/// the stable releases. `--update-to nightly` pulls from the same repository.
+const YT_DLP_RELEASE_REPO: &str = "yt-dlp/yt-dlp-nightly-builds";
+const YT_DLP_UPDATE_CHANNEL: &str = "nightly";
 const TOOL_UPDATE_MANIFEST_URL: &str =
     "https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/tools-manifest.json";
 
@@ -9976,7 +9980,7 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
 
     let result = match id.as_str() {
         "yt-dlp" => {
-            let release = github_latest_release(&client, "yt-dlp/yt-dlp").await?;
+            let release = github_latest_release(&client, YT_DLP_RELEASE_REPO).await?;
             let expected = match (platform, architecture) {
                 ("windows", "x86_64") => "yt-dlp.exe",
                 ("windows", "aarch64") => "yt-dlp_arm64.exe",
@@ -10323,7 +10327,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         return Err("tool_target_must_be_a_file".to_owned());
     }
 
-    // `yt-dlp -U` verifies against yt-dlp's own checksums, not ours. With signed
+    // `yt-dlp --update-to nightly` verifies against yt-dlp's own checksums, not ours. With signed
     // manifests enabled, update through the verified download path instead.
     if id == "yt-dlp" && !TRUSTED_TOOL_UPDATE_KEYS.is_empty() {
         return download_tool(state.clone(), id).await;
@@ -10332,7 +10336,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         let before = version_line(&executable, &["--version"])
             .ok_or_else(|| "yt_dlp_not_found".to_owned())?;
         let mut command = Command::new(&executable);
-        command.arg("-U");
+        command.args(["--update-to", YT_DLP_UPDATE_CHANNEL]);
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
@@ -16011,6 +16015,12 @@ mod tests {
         // accent #25d9ef: blue dominates the glyph.
         assert!(stroke[2] > stroke[0]);
         assert_ne!(render_a_icon(size, 0xff596d), pixels);
+    }
+
+    #[test]
+    fn yt_dlp_updates_come_from_the_nightly_builds_on_every_platform() {
+        assert_eq!(YT_DLP_RELEASE_REPO, "yt-dlp/yt-dlp-nightly-builds");
+        assert_eq!(YT_DLP_UPDATE_CHANNEL, "nightly");
     }
 
     #[test]

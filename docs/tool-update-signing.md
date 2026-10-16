@@ -16,7 +16,7 @@ release assets are accepted.
   (e.g. `yt-dlp/windows-x86_64`), the asset `length` and its `sha256`. The hash
   is of the exact downloaded asset (the archive for zipped tools).
 - Verification failure aborts the install (`tool_update_verification_failed:*`).
-- With signing on, `yt-dlp -U` is not used: yt-dlp updates through the same
+- With signing on, `yt-dlp --update-to nightly` is not used: yt-dlp updates through the same
   verified download path.
 
 While `TRUSTED_TOOL_UPDATE_KEYS` is empty nothing changes: the previous checks
