@@ -40,7 +40,7 @@
 <p align="center"><sub>Click the preview to watch the full-quality video.</sub></p>
 
 > [!IMPORTANT]
-> **Current release: ADM 0.4.91 + browser extension 0.3.203.** Steadier extension connection (bridge no longer serialized), consistent language between app and extension, fixed extension ID on Chrome/Edge. Earlier fixes: HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). Cinema Premium keeps its **28 HD themes** and compact queues. The Firefox XPI in the release is Mozilla-signed.
+> **Current release: ADM 0.5.0 + browser extension 0.3.203.** New compact IDM-sized window (980×620): white background, black text, no themes; Downloads, Torrents, Recordings, Donate and About in the sidebar, everything else in tabs inside Settings; blue progress bars (red on failure, green when done). Previously: steadier extension connection (bridge no longer serialized), consistent language between app and extension, fixed extension ID on Chrome/Edge. Earlier fixes: HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). The Firefox XPI in the release is Mozilla-signed.
 
 ## Download the current release
 
