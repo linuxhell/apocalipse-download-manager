@@ -735,9 +735,9 @@ Object.assign(catalogs["zh-CN"], {originalAudio: "原始音频"});
 Object.assign(catalogs["en"], {"windowMinimize": "Minimize", "windowMaximize": "Maximize / restore", "windowClose": "Close", "taskDestination": "Destination", "taskEngine": "Engine", "taskEta": "Remaining", "taskConnectionsLabel": "Connections"});
 Object.assign(catalogs["pt-BR"], {"windowMinimize": "Minimizar", "windowMaximize": "Maximizar / restaurar", "windowClose": "Fechar", "taskDestination": "Destino", "taskEngine": "Motor", "taskEta": "Restante", "taskConnectionsLabel": "Conexões"});
 Object.assign(catalogs["zh-CN"], {"windowMinimize": "最小化", "windowMaximize": "最大化 / 还原", "windowClose": "关闭", "taskDestination": "位置", "taskEngine": "引擎", "taskEta": "剩余时间", "taskConnectionsLabel": "连接"});
-Object.assign(catalogs.en, {darkMode: "Dark mode", darkModeHint: "Near-black surfaces with light text. Progress colours stay the same.", openLinkWindow: "Open Apocalipse Link window", donate: "Donate", settingsGeneral: "General", settingsNetwork: "Network and proxy", settingsExtension: "Browser extension", settingsLink: "Apocalipse Link", openLinkWindow: "Open in a separate window"});
-Object.assign(catalogs["pt-BR"], {darkMode: "Modo escuro", darkModeHint: "Superfícies quase pretas com texto claro. As cores do progresso continuam iguais.", openLinkWindow: "Abrir janela do Apocalipse Link", donate: "Doação", settingsGeneral: "Geral", settingsNetwork: "Rede e proxy", settingsExtension: "Extensão do navegador", settingsLink: "Apocalipse Link", openLinkWindow: "Abrir em janela separada"});
-Object.assign(catalogs["zh-CN"], {darkMode: "深色模式", darkModeHint: "近黑色背景与浅色文字，进度条颜色不变。", openLinkWindow: "打开 Apocalipse Link 窗口", donate: "捐赠", settingsGeneral: "常规", settingsNetwork: "网络与代理", settingsExtension: "浏览器扩展", settingsLink: "Apocalipse Link", openLinkWindow: "在单独窗口中打开"});
+Object.assign(catalogs.en, {darkMode: "Dark mode", darkModeHint: "Near-black surfaces with light text. Progress colours stay the same.", donate: "Donate", settingsGeneral: "General", settingsNetwork: "Network and proxy", settingsExtension: "Browser extension", settingsLink: "Apocalipse Link"});
+Object.assign(catalogs["pt-BR"], {darkMode: "Modo escuro", darkModeHint: "Superfícies quase pretas com texto claro. As cores do progresso continuam iguais.", donate: "Doação", settingsGeneral: "Geral", settingsNetwork: "Rede e proxy", settingsExtension: "Extensão do navegador", settingsLink: "Apocalipse Link"});
+Object.assign(catalogs["zh-CN"], {darkMode: "深色模式", darkModeHint: "近黑色背景与浅色文字，进度条颜色不变。", donate: "捐赠", settingsGeneral: "常规", settingsNetwork: "网络与代理", settingsExtension: "浏览器扩展", settingsLink: "Apocalipse Link"});
 let locale = localStorage.getItem("apocalipse.language") || "en";
 let pendingDiagnosticTrace = null;
 let pendingReferer = null;
@@ -1647,7 +1647,7 @@ darkModeToggle.checked = document.documentElement.dataset.mode === "dark";
 darkModeToggle.onchange = () => applyColorMode(darkModeToggle.checked);
 document.querySelector("#open-link-window").onclick = () => {
   invoke("open_link_window").catch((error) => window.alert(String(error)));
-  invoke("record_ui_diagnostic", { level: "INFO", event: "link_window_requested", detail: "source=settings" }).catch(() => {});
+  invoke("record_ui_diagnostic", { level: "INFO", event: "link_window_requested", detail: "source=navigation" }).catch(() => {});
 };
 function updateLogEditorControls() {
   const configured = Boolean(document.querySelector("#log-editor").value.trim());
