@@ -1305,13 +1305,12 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "APOCALIPSE_SYNC_DESKTOP_APPEARANCE") {
     bridgeRequest("/v1/health")
       .then(async (result) => {
-        const stored = await chrome.storage.local.get({ language: "en", desktopTheme: "void" });
+        const stored = await chrome.storage.local.get({ language: "en" });
         const language = result?.language === "pt-BR" ? "pt_BR" : result?.language === "zh-CN" ? "zh_CN" : result?.language === "en" ? "en" : stored.language;
-        const theme = typeof result?.theme === "string" ? result.theme : stored.desktopTheme;
-        if (stored.language !== language || stored.desktopTheme !== theme) {
-          await chrome.storage.local.set({ language, desktopTheme: theme });
+        if (stored.language !== language) {
+          await chrome.storage.local.set({ language });
         }
-        reply({ language, theme });
+        reply({ language });
       })
       .catch((error) => reply({ error: String(error) }));
     return true;

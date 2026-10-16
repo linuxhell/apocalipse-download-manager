@@ -380,13 +380,13 @@ test('media overlay follows clipping by an internal scroll container', () => {
   assert.ok(controls.every(node => !node.hidden));
 });
 
-test('new overlays receive an already selected theme before any theme change', () => {
+test('overlays are always white with black text, whatever theme an older version stored', () => {
   const p = page({ recordable: true, theme: 'samurai' });
   const controls = p.appended.filter(node => String(node.className).includes('apocalipse-media-download'));
   assert.equal(controls.length, 2);
   for (const control of controls) {
-    assert.equal(control.style['--apocalipse-accent'], '#ff596d');
-    assert.equal(control.style['--apocalipse-foreground'], '#000000');
+    assert.equal(control.style['--apocalipse-accent'], '#ffffff');
+    assert.equal(control.style['--apocalipse-foreground'], '#111111');
   }
 });
 

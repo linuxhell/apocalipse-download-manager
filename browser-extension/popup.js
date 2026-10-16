@@ -1,12 +1,7 @@
 globalThis.ADM_DIAG?.register("popup.js");
-let media = [], selected = "video", locale = "en", activePageUrl = "", interfaceTheme = "void";
+let media = [], selected = "video", locale = "en", activePageUrl = "";
 let activeMediaTab = null, mediaRefreshRunning = false, mediaFingerprint = "";
-const popupThemes = new Set(["void","nebula","ember","jade","plasma","glacier","amber","abyss","rust","venom","wine","linen","sky","blossom","sage","sand","lilac","mist","citrus","coral","frost","cyberpunk","bladerunner","sexy","samurai","future","fantasy","pandora"]);
 const normalizeDesktopLanguage = (language) => language === "pt-BR" ? "pt_BR" : language === "zh-CN" ? "zh_CN" : ["en","pt_BR","zh_CN"].includes(language) ? language : "en";
-const applyPopupTheme = (theme) => {
-  interfaceTheme = popupThemes.has(theme) ? theme : "void";
-  document.documentElement.dataset.theme = interfaceTheme;
-};
 const selectedUrls = new Set();
 const SOCIAL_TRACK_PAIR_WINDOW_MS = 8_000;
 const isSocialPage = (url) => {
@@ -551,15 +546,13 @@ chrome.storage.local.get({ language: "en" }, ({ language }) => {
 });
 // Keep all three media tabs synchronized while a feed changes under the popup.
 setInterval(() => { if (activeMediaTab) void refreshMediaInventory(activeMediaTab); }, 1500);
-chrome.storage.local.get({ desktopTheme: "void" }, ({ desktopTheme }) => applyPopupTheme(desktopTheme));
 chrome.storage.local.get({ pairingToken: "" }, async ({ pairingToken }) => {
   document.querySelector("#pairing-token").value = pairingToken;
   if (!pairingToken) { setBridgeStatus(false); return; }
   try {
     const appearance = await directBridgeHealth(pairingToken);
     if (appearance.language) locale = normalizeDesktopLanguage(appearance.language);
-    if (appearance.theme) applyPopupTheme(appearance.theme);
-    await chrome.storage.local.set({ language: locale, desktopTheme: interfaceTheme });
+    await chrome.storage.local.set({ language: locale });
     document.querySelector("#language").value = locale;
     translate();
     render();
@@ -591,11 +584,9 @@ setInterval(async () => {
   try {
     const appearance = await directBridgeHealth(pairingToken);
     const nextLocale = appearance.language ? normalizeDesktopLanguage(appearance.language) : locale;
-    const nextTheme = popupThemes.has(appearance.theme) ? appearance.theme : interfaceTheme;
-    if (nextLocale !== locale || nextTheme !== interfaceTheme) {
+    if (nextLocale !== locale) {
       locale = nextLocale;
-      applyPopupTheme(nextTheme);
-      await chrome.storage.local.set({ language: locale, desktopTheme: interfaceTheme });
+      await chrome.storage.local.set({ language: locale });
       document.querySelector("#language").value = locale;
       translate();
       render();
@@ -615,8 +606,7 @@ document.querySelector("#connect").onclick = async () => {
   try {
     const appearance = await directBridgeHealth(token);
     if (appearance.language) locale = normalizeDesktopLanguage(appearance.language);
-    if (appearance.theme) applyPopupTheme(appearance.theme);
-    await chrome.storage.local.set({ language: locale, desktopTheme: interfaceTheme });
+    await chrome.storage.local.set({ language: locale });
     document.querySelector("#language").value = locale;
     translate();
     render();
