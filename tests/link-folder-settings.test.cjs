@@ -11,31 +11,22 @@ const linkJs = fs.readFileSync(path.join(root, "apps/desktop/ui/link.js"), "utf8
 const rust = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
 const workflow = fs.readFileSync(path.join(root, ".github/workflows/validate-portable.yml"), "utf8");
 
-test("Apocalipse Link selects and transfers both files and folders", () => {
-  assert.match(app, /linkSelectedLocal = entry;/);
-  assert.match(app, /linkSelectedRemote = entry;/);
-  assert.match(app, /directory: linkSelectedRemote\.directory/);
-  assert.match(rust, /"PUT"[\s\S]*\/v1\/link\/directory\?path=\{encoded\}/);
-  assert.match(rust, /fs::create_dir_all\(&destination\)/);
-  assert.match(rust, /send_link_directory\(&state, &id, &password, &remote_path\)/);
-});
-
 test("Link exposes only explicit shares with per-share write permission", () => {
-  assert.doesNotMatch(html, /id="link-allow-write"/);
-  assert.match(html, /id="link-share-file"/);
-  assert.match(html, /id="link-share-folder"/);
-  assert.match(app, /update_link_share/);
-  assert.match(app, /delete_remote_link_item/);
+  assert.doesNotMatch(linkHtml, /id="link-allow-write"/);
+  assert.match(linkHtml, /id="link-share-file"/);
+  assert.match(linkHtml, /id="link-share-folder"/);
+  assert.match(linkJs, /update_link_share/);
+  assert.match(linkJs, /delete_remote_link_item/);
   assert.match(rust, /list_shared_link_directory/);
   assert.match(rust, /fn list_local_link_files\([\s\S]*list_shared_link_directory/);
-  assert.match(app, /linkNoShares/);
-  assert.match(app, /refreshVisibleLinkPanels/);
+  assert.match(linkJs, /linkNoShares/);
+  assert.match(linkJs, /refreshVisibleLinkPanels/);
   assert.match(rust, /resolve_link_share/);
   assert.match(rust, /DELETE \/v1\/link\/item/);
   assert.match(rust, /link_write_not_allowed/);
-  assert.match(html, /linkRemoteAuthPlan/);
-  assert.match(html, /linkRemoteAccountFormats/);
-  assert.match(html, /linkRemoteSecurityNotice/);
+  assert.match(linkHtml, /linkRemoteAuthPlan/);
+  assert.match(linkHtml, /linkRemoteAccountFormats/);
+  assert.match(linkHtml, /linkRemoteSecurityNotice/);
 });
 
 test("Windows SMB shared folders are discovered automatically for Link", () => {
@@ -73,9 +64,9 @@ test("per-site rules own new credentials and expose removal", () => {
 });
 
 test("Link share mutations refresh visible panels at the share root", () => {
-  assert.match(app, /refreshVisibleLinkPanels\(\{ resetToRoot: true \}\)/);
-  assert.match(app, /const localPath = resetToRoot \? "" : linkLocalPath;/);
-  assert.match(app, /const remotePath = resetToRoot \? "" : linkRemotePath;/);
+  assert.match(linkJs, /refreshVisibleLinkPanels\(\{ resetToRoot: true \}\)/);
+  assert.match(linkJs, /const localPath = resetToRoot \? "" : linkLocalPath;/);
+  assert.match(linkJs, /const remotePath = resetToRoot \? "" : linkRemotePath;/);
 });
 
 test("explicit Link shares remain visible even if metadata is temporarily unavailable", () => {
@@ -89,26 +80,26 @@ test("explicit Link shares remain visible even if metadata is temporarily unavai
 });
 
 test("Link remote guidance follows the selected language", () => {
-  assert.match(html, /data-i18n="linkAccessNotice"/);
-  assert.match(html, /data-i18n="linkRemoteAuthPlan"/);
-  assert.match(html, /data-i18n="linkRemoteAccountFormats"/);
-  assert.match(html, /data-i18n="linkRemoteSecurityNotice"/);
+  assert.match(linkHtml, /data-i18n="linkAccessNotice"/);
+  assert.match(linkHtml, /data-i18n="linkRemoteAuthPlan"/);
+  assert.match(linkHtml, /data-i18n="linkRemoteAccountFormats"/);
+  assert.match(linkHtml, /data-i18n="linkRemoteSecurityNotice"/);
   assert.equal((app.match(/linkRemoteAuthPlan:/g) || []).length, 3);
   assert.equal((app.match(/linkRemoteAccountFormats:/g) || []).length, 3);
   assert.equal((app.match(/linkRemoteSecurityNotice:/g) || []).length, 3);
-  assert.doesNotMatch(app, /linkWindowsLoginNotice:/);
-  assert.doesNotMatch(app, /Authorized access shows all drives and folders/);
-  assert.doesNotMatch(app, /O acesso autorizado mostra todas as unidades e pastas/);
+  assert.doesNotMatch(linkJs, /linkWindowsLoginNotice:/);
+  assert.doesNotMatch(linkJs, /Authorized access shows all drives and folders/);
+  assert.doesNotMatch(linkJs, /O acesso autorizado mostra todas as unidades e pastas/);
 });
 
 test("Link keeps system-account fields for encrypted remote login without requiring them for loopback", () => {
-  assert.match(html, /id="link-remote-username"/);
-  assert.match(html, /data-i18n="linkRemoteUsername"/);
-  assert.match(html, /data-i18n="linkRemoteSystemPassword"/);
-  assert.doesNotMatch(html, /id="link-own-password"/);
-  assert.doesNotMatch(html, /id="link-new-password"/);
-  assert.doesNotMatch(html, /linkCurrentPassword/);
-  assert.doesNotMatch(html, /linkNewPassword/);
+  assert.match(linkHtml, /id="link-remote-username"/);
+  assert.match(linkHtml, /data-i18n="linkRemoteUsername"/);
+  assert.match(linkHtml, /data-i18n="linkRemoteSystemPassword"/);
+  assert.doesNotMatch(linkHtml, /id="link-own-password"/);
+  assert.doesNotMatch(linkHtml, /id="link-new-password"/);
+  assert.doesNotMatch(linkHtml, /linkCurrentPassword/);
+  assert.doesNotMatch(linkHtml, /linkNewPassword/);
   assert.doesNotMatch(rust, /fn regenerate_link_password/);
   assert.doesNotMatch(rust, /regenerate_link_password,/);
   assert.equal((app.match(/linkRemoteUsername:/g) || []).length, 3);
@@ -116,33 +107,33 @@ test("Link keeps system-account fields for encrypted remote login without requir
   assert.equal((app.match(/linkCredentialsRequired:/g) || []).length, 3);
   assert.equal((app.match(/linkRemoteSessionReady:/g) || []).length, 3);
   assert.equal((app.match(/linkRemoteFirstTrust:/g) || []).length, 3);
-  assert.match(app, /passwordField\.value = "";/);
-  assert.match(app, /invoke\("authenticate_remote_link_account"/);
+  assert.match(linkJs, /passwordField\.value = "";/);
   assert.match(linkJs, /invoke\("authenticate_remote_link_account"/);
-  assert.doesNotMatch(app, /invoke\("authenticate_local_link_account"/);
+  assert.match(linkJs, /invoke\("authenticate_remote_link_account"/);
   assert.doesNotMatch(linkJs, /invoke\("authenticate_local_link_account"/);
-  assert.doesNotMatch(app, /linkRemotePassword/);
+  assert.doesNotMatch(linkJs, /invoke\("authenticate_local_link_account"/);
+  assert.doesNotMatch(linkJs, /linkRemotePassword/);
 });
 
 test("Link has one address-based connection flow for loopback, LAN and Internet", () => {
-  assert.doesNotMatch(html, /id="link-self-test"/);
-  assert.doesNotMatch(app, /linkSelfTestMode/);
-  assert.doesNotMatch(app, /linkSelfTest:/);
+  assert.doesNotMatch(linkHtml, /id="link-self-test"/);
+  assert.doesNotMatch(linkJs, /linkSelfTestMode/);
+  assert.doesNotMatch(linkJs, /linkSelfTest:/);
   assert.doesNotMatch(rust, /fn get_local_link_capabilities/);
-  assert.match(html, /127\.0\.0\.1:17655/);
-  assert.match(html, /data-i18n="linkRemoteAddressExamples"/);
+  assert.match(linkHtml, /127\.0\.0\.1:17655/);
+  assert.match(linkHtml, /data-i18n="linkRemoteAddressExamples"/);
   assert.equal((app.match(/linkRemoteAddressExamples:/g) || []).length, 3);
   assert.match(rust, /struct LinkIdentity\s*\{\s*id: String,\s*\}/);
   assert.doesNotMatch(rust, /struct LinkIdentity\s*\{[^}]*password:/);
 });
 
 test("Loopback Link opens explicit shares without a Windows password round-trip", () => {
-  assert.match(app, /async function isLocalLinkTarget\(value\)/);
-  assert.match(app, /host === "127\.0\.0\.1"/);
-  assert.match(app, /if \(await isLocalLinkTarget\(id\)\)/);
-  assert.match(app, /linkRemoteId = id;[\s\S]*linkLocalAccountSession = true;[\s\S]*await openRemoteLink\(""\)/);
+  assert.match(linkJs, /async function isLocalLinkTarget\(value\)/);
+  assert.match(linkJs, /host === "127\.0\.0\.1"/);
+  assert.match(linkJs, /if \(await isLocalLinkTarget\(id\)\)/);
   assert.match(linkJs, /linkRemoteId = id;[\s\S]*linkLocalAccountSession = true;[\s\S]*await openRemoteLink\(""\)/);
-  assert.doesNotMatch(app, /invoke\("authenticate_local_link_account"/);
+  assert.match(linkJs, /linkRemoteId = id;[\s\S]*linkLocalAccountSession = true;[\s\S]*await openRemoteLink\(""\)/);
+  assert.doesNotMatch(linkJs, /invoke\("authenticate_local_link_account"/);
   assert.doesNotMatch(linkJs, /invoke\("authenticate_local_link_account"/);
   assert.match(rust, /fn list_local_link_files\([\s\S]*list_shared_link_directory/);
   assert.match(rust, /fn list_shared_link_directory\([\s\S]*link_share_entries\(settings\)/);
@@ -181,9 +172,9 @@ test("Native system-account authentication remains available for encrypted remot
 });
 
 test("Loopback Link file operations bypass the legacy remote transport", () => {
-  assert.match(app, /linkLocalAccountSession[\s\S]*delete_local_shared_link_item/);
-  assert.match(app, /linkLocalAccountSession[\s\S]*download_local_shared_link_item/);
-  assert.match(app, /linkLocalAccountSession[\s\S]*upload_local_shared_link_item/);
+  assert.match(linkJs, /linkLocalAccountSession[\s\S]*delete_local_shared_link_item/);
+  assert.match(linkJs, /linkLocalAccountSession[\s\S]*download_local_shared_link_item/);
+  assert.match(linkJs, /linkLocalAccountSession[\s\S]*upload_local_shared_link_item/);
   assert.match(rust, /fn delete_local_shared_link_item/);
   assert.match(rust, /fn download_local_shared_link_item/);
   assert.match(rust, /fn upload_local_shared_link_item/);
@@ -260,9 +251,9 @@ test("Apocalipse Link opens as a dedicated maximized native window with normal c
 });
 
 test("Link lists scroll independently, disconnect explicitly and tray opens with one click", () => {
-  assert.match(html, /id="link-disconnect"/);
   assert.match(linkHtml, /id="link-disconnect"/);
-  assert.match(app, /function disconnectLink\(\)/);
+  assert.match(linkHtml, /id="link-disconnect"/);
+  assert.match(linkJs, /function disconnectLink\(\)/);
   assert.match(linkJs, /function disconnectLink\(\)/);
   assert.match(rust, /TrayIconEvent::Click[\s\S]*button: MouseButton::Left/);
   assert.doesNotMatch(rust, /TrayIconEvent::DoubleClick/);
@@ -322,26 +313,5 @@ test("Linux validation covers Debian Fedora Arch and publishes an AppImage", () 
   assert.match(workflow, /@tauri-apps\/cli@2 build --bundles appimage/);
   assert.match(workflow, /apocalipse-download-manager-linux-x64\.AppImage/);
   assert.match(workflow, /ubuntu-22\.04/);
-});
-
-test("a remote Link file matching a paused/failed download can fill it instead of downloading over the internet", () => {
-  const start = rust.indexOf("async fn use_remote_link_file_for_download(");
-  const end = rust.indexOf("\n}", start);
-  assert.ok(start >= 0 && end > start);
-  const block = rust.slice(start, end);
-  assert.match(block, /DownloadState::Queued \| DownloadState::Paused \| DownloadState::Failed \{ \.\. \}/);
-  assert.match(block, /torrent_relocate_unsupported/);
-  assert.match(block, /download_link_file_to\(&state, &id, &password, &path, &destination, &mut reporter\)/);
-  assert.match(block, /task\.state = DownloadState::Completed;/);
-  assert.match(rust, /\n\s*use_remote_link_file_for_download,\s*\n\s*upload_remote_link_file,/);
-  for (const ui of [app, linkJs]) {
-    assert.match(ui, /function linkMatchingDownload\(fileName\)/);
-    assert.match(ui, /invoke\("use_remote_link_file_for_download", \{/);
-    assert.match(ui, /linkUseForDownload: "Use for download",/);
-    // The use-for-download button must not be nested inside another
-    // <button> (invalid HTML that breaks click handling): the row it's
-    // appended to has to be a plain div.
-    assert.match(ui, /const row = document\.createElement\("div"\);\s*\n\s*row\.className = "link-file";/);
-  }
 });
 

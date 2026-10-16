@@ -135,7 +135,7 @@ footer .bridge-connected i { background: var(--green); }
 footer .bridge-waiting i { background: var(--orange); }
 
 /* Generic form controls */
-input[type="text"], input[type="url"], input[type="number"], input[type="password"], input[type="search"], input[type="time"], select, textarea {
+input:not([type]), input[type="text"], input[type="url"], input[type="number"], input[type="password"], input[type="search"], input[type="time"], select, textarea {
   width: 100%; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); padding: 6px 9px; outline: none; }
 input:focus, select:focus, textarea:focus { border-color: var(--strong); }
 input[readonly] { background: var(--surface-2); }
@@ -186,7 +186,6 @@ button:disabled { opacity: .45; cursor: default; }
 .tool-settings #tool-list label > div { display: flex; gap: 6px; margin-top: 4px; }
 .tool-found { color: var(--green); }
 .unavailable { color: var(--red); }
-.link-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 8px; }
 .link-identity, .link-connect, .link-files { border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
 .link-files header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .link-file, .destination-row { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-bottom: 1px solid var(--hover); }
@@ -260,3 +259,28 @@ dialog form { padding: 16px 20px; display: flex; flex-direction: column; max-hei
 :root[data-mode="dark"] .download-row:hover { background: #1a1a1a; }
 :root[data-mode="dark"] .download-info > small { color: #cfcfcf; }
 :root[data-mode="dark"] .about-creator-photo { border-color: #444; }
+
+/* Apocalipse Link: dedicated window (link.html) */
+body.link-window { display: block; height: 100vh; overflow: hidden; }
+.link-window-main { height: 100%; display: flex; flex-direction: column; padding: 14px 20px 16px; min-height: 0; }
+.link-window-header p:first-child { margin: 0; font-size: 11px; letter-spacing: 1px; color: var(--faint); }
+.link-window-header h1 { margin: 2px 0 2px; font-size: 21px; }
+.link-window-header p { margin: 0; color: var(--muted); }
+.link-window .link-panel { flex: 1; min-height: 0; display: grid; grid-template-columns: 320px minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px; margin-top: 12px; }
+.link-window .link-identity { grid-column: 1; grid-row: 1; }
+.link-window .link-connect { grid-column: 1; grid-row: 2 / 4; overflow-y: auto; }
+.link-window .link-files { display: flex; flex-direction: column; min-height: 0; }
+.link-window .link-files:nth-of-type(3) { grid-column: 2; grid-row: 1 / 3; }
+.link-window .link-files:nth-of-type(4) { grid-column: 3; grid-row: 1 / 3; }
+.link-window .link-files > div { flex: 1; min-height: 0; overflow-y: auto; }
+.link-window .link-transfer-panel { grid-column: 2 / 4; grid-row: 3; }
+.link-window .link-identity small, .link-window .link-connect small { display: block; margin: 4px 0; line-height: 1.35; }
+.link-window #link-share-list { max-height: 90px; overflow-y: auto; }
+.link-files header > span { display: flex; gap: 6px; }
+.link-file { cursor: default; }
+.link-file span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-transfer-panel { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.link-transfer-panel header { display: flex; justify-content: space-between; margin-bottom: 6px; }
+.link-transfer-track { height: 6px; background: var(--track); border-radius: 3px; overflow: hidden; }
+.link-transfer-track span { display: block; height: 100%; width: 0; background: var(--blue); }
+.link-transfer-actions { display: flex; gap: 8px; margin-top: 8px; }
