@@ -8405,9 +8405,11 @@ fn render_a_icon(size: u32, accent: u32) -> Vec<u8> {
 }
 
 /// Tints the main window (and with it the taskbar entry) with the current theme.
-fn apply_window_icon(app: &tauri::AppHandle, theme: &str) {
+fn apply_window_icon(app: &tauri::AppHandle, _theme: &str) {
+    // Themes were removed in 0.5.0: the window icon is always the blue "A",
+    // whatever theme an older version left in the settings file.
     if let Some(window) = app.get_webview_window("main") {
-        let icon = Image::new_owned(render_a_icon(128, theme_accent(theme)), 128, 128);
+        let icon = Image::new_owned(render_a_icon(128, theme_accent("void")), 128, 128);
         let _ = window.set_icon(icon);
     }
 }
