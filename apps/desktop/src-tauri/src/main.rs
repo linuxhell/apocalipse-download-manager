@@ -5073,8 +5073,7 @@ async fn inspect_media_formats(
         .output()
         .await
         .map_err(|error| format!("yt_dlp_unavailable: {error}"))?;
-    if !output.status.success()
-        && browser_cookie_failure(&String::from_utf8_lossy(&output.stderr))
+    if !output.status.success() && browser_cookie_failure(&String::from_utf8_lossy(&output.stderr))
     {
         // The browser cookie store was unreadable (profile missing, database
         // locked). Inspect again without browser cookies instead of failing.
@@ -16160,14 +16159,22 @@ mod tests {
         assert!(browser_cookie_failure(
             "ERROR: could not find chrome cookies database in \"C:\\x\""
         ));
-        assert!(browser_cookie_failure("Could not copy Chrome cookie database"));
+        assert!(browser_cookie_failure(
+            "Could not copy Chrome cookie database"
+        ));
         assert!(!browser_cookie_failure("HTTP Error 403: Forbidden"));
     }
 
     #[test]
     fn dropping_browser_cookies_removes_the_flag_and_its_value() {
         let mut original = tokio::process::Command::new("yt-dlp");
-        original.args(["--no-playlist", "--cookies-from-browser", "chrome", "-f", "best"]);
+        original.args([
+            "--no-playlist",
+            "--cookies-from-browser",
+            "chrome",
+            "-f",
+            "best",
+        ]);
         let rebuilt = command_without_browser_cookies(&original);
         let args: Vec<_> = rebuilt
             .as_std()
