@@ -7751,8 +7751,9 @@ fn browser_cookie_failure(output: &str) -> bool {
     let lower = output.to_ascii_lowercase();
     lower.contains("cookies database")
         || lower.contains("cookie database")
-        || lower.contains("could not copy") && lower.contains("cookie")
-        || lower.contains("failed to decrypt") && lower.contains("cookie")
+        || lower.contains("dpapi")
+        || lower.contains("failed to decrypt")
+        || (lower.contains("could not copy") && lower.contains("cookie"))
         || lower.contains("cookies-from-browser")
 }
 
@@ -16161,6 +16162,10 @@ mod tests {
         ));
         assert!(browser_cookie_failure(
             "Could not copy Chrome cookie database"
+        ));
+        // Chromium 127+ app-bound encryption: yt-dlp cannot decrypt the store.
+        assert!(browser_cookie_failure(
+            "ERROR: Failed to decrypt with DPAPI. See https://github.com/yt-dlp/yt-dlp/issues/10927 for more info"
         ));
         assert!(!browser_cookie_failure("HTTP Error 403: Forbidden"));
     }
