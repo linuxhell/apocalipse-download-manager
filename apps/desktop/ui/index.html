@@ -43,6 +43,12 @@
 <button data-i18n="moqStart" id="moq-start" type="button"></button>
 <button data-i18n="moqStop" disabled="" id="moq-stop" type="button"></button>
 <p id="moq-status" role="status"></p>
+
+<section class="task-connections">
+<label for="task-connections"><span><b data-i18n="taskConnections">Threads for this download</b><small data-i18n="taskConnectionsHint">Only changes this task. Use 1 on sites that reject segmented downloads.</small></span><output id="task-connections-value">Automatic</output></label>
+<input id="task-connections" max="32" min="1" type="range" value="16"/>
+<div class="range-scale"><span>1</span><span>8</span><span>16</span><span>32</span></div>
+</section>
 </details>
 
 
@@ -292,13 +298,16 @@
 <div aria-label="Download options" class="add-dialog-scroll" id="add-dialog-scroll" role="region" tabindex="0">
 <div class="add-dialog-grid">
 <section class="add-dialog-analysis">
-<label data-i18n="sourceUrl">Source URL</label><input autofocus="" id="url" placeholder="https://…" required="" type="text"/>
+<div class="step"><span class="step-num">1</span><b data-i18n="stepLink">Link</b></div>
+<label class="sr-only" data-i18n="sourceUrl" for="url">Source URL</label><input autofocus="" id="url" placeholder="https://…" required="" type="text"/>
 <div class="analysis" hidden="" id="analysis"></div>
 <label class="setting-toggle compact-toggle" hidden="" id="auto-extract-option">
 <input id="auto-extract" type="checkbox"/>
 <span><b data-i18n="autoExtract">Extract automatically after download</b><small data-i18n="autoExtractHint">Shown only for archive files. Loose root files are kept inside a folder named after the archive.</small></span>
 </label>
 <section class="media-inspection" hidden="" id="media-inspection">
+<div class="step"><span class="step-num">2</span><b data-i18n="stepFound">Media found</b></div>
+<div class="media-card">
 <img alt="" hidden="" id="media-thumbnail"/>
 <div>
 <strong id="media-title"></strong>
@@ -312,6 +321,7 @@
 </div>
 </div>
 </div>
+</div>
 </section>
 <section class="destination-history" hidden="" id="torrent-inspection">
 <div><b id="torrent-title"></b><small id="torrent-total"></small></div>
@@ -319,13 +329,16 @@
 </section>
 </section>
 <section class="add-dialog-destination">
-<label data-i18n="fileName" for="file-name">File name</label>
-<input id="file-name" required="" type="text"/>
-<label data-i18n="saveTo" for="destination">Save to</label>
+<div class="step"><span class="step-num">3</span><b data-i18n="stepSave">Save</b></div>
+<div class="save-grid">
+<div><label data-i18n="fileName" for="file-name">File name</label>
+<input id="file-name" required="" type="text"/></div>
+<div><label data-i18n="saveTo" for="destination">Save to</label>
 <div class="path-picker">
 <input id="destination" required="" type="text"/><button data-i18n="browse" data-pick-for="destination" type="button">
             Browse…
           </button>
+</div></div>
 </div>
 <section class="destination-history">
 <div>
@@ -342,12 +355,13 @@
 <select id="priority"><option data-i18n="priorityHigh" value="10">High</option><option data-i18n="priorityNormal" selected="" value="0">Normal</option><option data-i18n="priorityLow" value="-10">Low</option></select>
 <label data-i18n="downloadBandwidthLimit" for="download-bandwidth-limit">This download limit</label>
 <div class="bandwidth-input"><input id="download-bandwidth-limit" max="10240" min="0" step="0.1" type="number" value="0"/><span data-i18n="megabytesPerSecond">MB/s</span><small data-i18n="unlimited">Unlimited</small></div>
-</details>
 <section class="task-connections">
 <label for="task-connections"><span><b data-i18n="taskConnections">Threads for this download</b><small data-i18n="taskConnectionsHint">Only changes this task. Use 1 on sites that reject segmented downloads.</small></span><output id="task-connections-value">Automatic</output></label>
 <input id="task-connections" max="32" min="1" type="range" value="16"/>
 <div class="range-scale"><span>1</span><span>8</span><span>16</span><span>32</span></div>
 </section>
+</details>
+
 </section>
 </div>
 </div>

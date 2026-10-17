@@ -210,7 +210,7 @@ const catalogs = {
     bridgeConnected: "Extension connected",
     bridgeWaiting: "Waiting for extension",
     bridgeDisconnected: "Extension disconnected",
-    recentLocations: "Download locations",
+    recentLocations: "Recent folders",
     clearLocations: "Clear download locations",
     defaultLocation: "Default",
     unavailableLocation: "Unavailable",
@@ -451,7 +451,7 @@ const catalogs = {
     bridgeConnected: "Extensão conectada",
     bridgeWaiting: "Aguardando extensão",
     bridgeDisconnected: "Extensão desconectada",
-    recentLocations: "Locais de download",
+    recentLocations: "Pastas recentes",
     clearLocations: "Limpar caminhos de download",
     defaultLocation: "Padrão",
     unavailableLocation: "Indisponível",
@@ -692,7 +692,7 @@ const catalogs = {
     bridgeConnected: "扩展已连接",
     bridgeWaiting: "正在等待扩展",
     bridgeDisconnected: "扩展已断开连接",
-    recentLocations: "下载位置",
+    recentLocations: "最近的文件夹",
     clearLocations: "清除下载路径",
     defaultLocation: "默认",
     unavailableLocation: "不可用",
@@ -774,9 +774,9 @@ let selectionPointerActive = false;
 let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
-Object.assign(catalogs.en, {"conflictInUse": "Some files are in use by another program: {files}. Close the program that is using them, or choose Rename.", "conflictProtected": "This location contains the running Apocalipse. Replacing or deleting it would break the app, so only Rename is offered.", "conflictFileEyebrow": "Existing file", "conflictFileTitle": "This file already exists", "conflictFileCopy": "A file with this name is already in {folder}. What do you want to do?", "conflictOnDisk": "In the folder", "conflictNew": "New download", "conflictExtractEyebrow": "Extraction", "conflictExtractTitle": "Files already exist at the destination", "conflictExtractCopy": "Extracting {archive} into {folder}: {count} files already exist.", "conflictMore": "+ {n} more files", "conflictRename": "Rename", "conflictReplace": "Replace", "conflictSkip": "Skip", "conflictRenameFileHint": "Keep both. The new file is saved as “{name}”", "conflictRenameExtractHint": "Extract into a new folder and keep the existing one", "conflictReplaceFileHint": "Delete the existing file and download the new one in its place", "conflictReplaceExtractHint": "Extract into the existing folder, overwriting only the files in conflict", "conflictSkipHint": "Do not download this file", "conflictDelete": "Delete the old folder and extract", "conflictDeleteHint": "Erase the current contents of the destination before extracting", "conflictRemember": "Use this choice for the next conflicts too", "conflictContinue": "Continue", "conflictConfirmDelete": "Confirm deletion", "conflictOriginalUntouched": "The original archive is not changed"});
-Object.assign(catalogs["pt-BR"], {"conflictInUse": "Alguns arquivos estão em uso por outro programa: {files}. Feche o programa que os está usando ou escolha Renomear.", "conflictProtected": "Este local contém o Apocalipse em execução. Substituir ou excluir quebraria o aplicativo, então só Renomear está disponível.", "conflictFileEyebrow": "Arquivo existente", "conflictFileTitle": "Este arquivo já existe", "conflictFileCopy": "Já há um arquivo com este nome em {folder}. O que fazer?", "conflictOnDisk": "Na pasta", "conflictNew": "Novo download", "conflictExtractEyebrow": "Extração", "conflictExtractTitle": "Já existem arquivos no destino", "conflictExtractCopy": "Ao extrair {archive} em {folder}, {count} arquivos já existem.", "conflictMore": "+ {n} outros arquivos", "conflictRename": "Renomear", "conflictReplace": "Substituir", "conflictSkip": "Pular", "conflictRenameFileHint": "Manter os dois. O novo será salvo como “{name}”", "conflictRenameExtractHint": "Extrair para uma pasta nova e manter a existente", "conflictReplaceFileHint": "Excluir o arquivo existente e baixar o novo no lugar", "conflictReplaceExtractHint": "Extrair na pasta existente, sobrescrevendo só os arquivos em conflito", "conflictSkipHint": "Não baixar este arquivo", "conflictDelete": "Excluir a pasta antiga e extrair", "conflictDeleteHint": "Apagar o conteúdo atual do destino antes de extrair", "conflictRemember": "Usar esta escolha nos próximos conflitos", "conflictContinue": "Continuar", "conflictConfirmDelete": "Confirmar exclusão", "conflictOriginalUntouched": "O arquivo compactado original não é alterado"});
-Object.assign(catalogs["zh-CN"], {"conflictInUse": "部分文件正被其他程序占用：{files}。请关闭占用它们的程序，或选择重命名。", "conflictProtected": "此位置包含正在运行的 Apocalipse。替换或删除会破坏应用，因此只能选择重命名。", "conflictFileEyebrow": "文件已存在", "conflictFileTitle": "此文件已存在", "conflictFileCopy": "{folder} 中已有同名文件。要怎么处理？", "conflictOnDisk": "文件夹中", "conflictNew": "新下载", "conflictExtractEyebrow": "解压", "conflictExtractTitle": "目标位置已有文件", "conflictExtractCopy": "将 {archive} 解压到 {folder} 时，有 {count} 个文件已存在。", "conflictMore": "另有 {n} 个文件", "conflictRename": "重命名", "conflictReplace": "替换", "conflictSkip": "跳过", "conflictRenameFileHint": "两个都保留。新文件将保存为“{name}”", "conflictRenameExtractHint": "解压到新文件夹并保留现有文件夹", "conflictReplaceFileHint": "删除现有文件，并用新下载的文件替代", "conflictReplaceExtractHint": "解压到现有文件夹，仅覆盖冲突的文件", "conflictSkipHint": "不下载此文件", "conflictDelete": "删除旧文件夹并解压", "conflictDeleteHint": "解压前清空目标位置的现有内容", "conflictRemember": "后续冲突也使用此选择", "conflictContinue": "继续", "conflictConfirmDelete": "确认删除", "conflictOriginalUntouched": "原压缩文件不会被修改"});
+Object.assign(catalogs.en, {"stepLink": "Link", "stepFound": "Media found", "stepSave": "Save", "conflictInUse": "Some files are in use by another program: {files}. Close the program that is using them, or choose Rename.", "conflictProtected": "This location contains the running Apocalipse. Replacing or deleting it would break the app, so only Rename is offered.", "conflictFileEyebrow": "Existing file", "conflictFileTitle": "This file already exists", "conflictFileCopy": "A file with this name is already in {folder}. What do you want to do?", "conflictOnDisk": "In the folder", "conflictNew": "New download", "conflictExtractEyebrow": "Extraction", "conflictExtractTitle": "Files already exist at the destination", "conflictExtractCopy": "Extracting {archive} into {folder}: {count} files already exist.", "conflictMore": "+ {n} more files", "conflictRename": "Rename", "conflictReplace": "Replace", "conflictSkip": "Skip", "conflictRenameFileHint": "Keep both. The new file is saved as “{name}”", "conflictRenameExtractHint": "Extract into a new folder and keep the existing one", "conflictReplaceFileHint": "Delete the existing file and download the new one in its place", "conflictReplaceExtractHint": "Extract into the existing folder, overwriting only the files in conflict", "conflictSkipHint": "Do not download this file", "conflictDelete": "Delete the old folder and extract", "conflictDeleteHint": "Erase the current contents of the destination before extracting", "conflictRemember": "Use this choice for the next conflicts too", "conflictContinue": "Continue", "conflictConfirmDelete": "Confirm deletion", "conflictOriginalUntouched": "The original archive is not changed"});
+Object.assign(catalogs["pt-BR"], {"stepLink": "Link", "stepFound": "Mídia encontrada", "stepSave": "Salvar", "conflictInUse": "Alguns arquivos estão em uso por outro programa: {files}. Feche o programa que os está usando ou escolha Renomear.", "conflictProtected": "Este local contém o Apocalipse em execução. Substituir ou excluir quebraria o aplicativo, então só Renomear está disponível.", "conflictFileEyebrow": "Arquivo existente", "conflictFileTitle": "Este arquivo já existe", "conflictFileCopy": "Já há um arquivo com este nome em {folder}. O que fazer?", "conflictOnDisk": "Na pasta", "conflictNew": "Novo download", "conflictExtractEyebrow": "Extração", "conflictExtractTitle": "Já existem arquivos no destino", "conflictExtractCopy": "Ao extrair {archive} em {folder}, {count} arquivos já existem.", "conflictMore": "+ {n} outros arquivos", "conflictRename": "Renomear", "conflictReplace": "Substituir", "conflictSkip": "Pular", "conflictRenameFileHint": "Manter os dois. O novo será salvo como “{name}”", "conflictRenameExtractHint": "Extrair para uma pasta nova e manter a existente", "conflictReplaceFileHint": "Excluir o arquivo existente e baixar o novo no lugar", "conflictReplaceExtractHint": "Extrair na pasta existente, sobrescrevendo só os arquivos em conflito", "conflictSkipHint": "Não baixar este arquivo", "conflictDelete": "Excluir a pasta antiga e extrair", "conflictDeleteHint": "Apagar o conteúdo atual do destino antes de extrair", "conflictRemember": "Usar esta escolha nos próximos conflitos", "conflictContinue": "Continuar", "conflictConfirmDelete": "Confirmar exclusão", "conflictOriginalUntouched": "O arquivo compactado original não é alterado"});
+Object.assign(catalogs["zh-CN"], {"stepLink": "链接", "stepFound": "找到的媒体", "stepSave": "保存", "conflictInUse": "部分文件正被其他程序占用：{files}。请关闭占用它们的程序，或选择重命名。", "conflictProtected": "此位置包含正在运行的 Apocalipse。替换或删除会破坏应用，因此只能选择重命名。", "conflictFileEyebrow": "文件已存在", "conflictFileTitle": "此文件已存在", "conflictFileCopy": "{folder} 中已有同名文件。要怎么处理？", "conflictOnDisk": "文件夹中", "conflictNew": "新下载", "conflictExtractEyebrow": "解压", "conflictExtractTitle": "目标位置已有文件", "conflictExtractCopy": "将 {archive} 解压到 {folder} 时，有 {count} 个文件已存在。", "conflictMore": "另有 {n} 个文件", "conflictRename": "重命名", "conflictReplace": "替换", "conflictSkip": "跳过", "conflictRenameFileHint": "两个都保留。新文件将保存为“{name}”", "conflictRenameExtractHint": "解压到新文件夹并保留现有文件夹", "conflictReplaceFileHint": "删除现有文件，并用新下载的文件替代", "conflictReplaceExtractHint": "解压到现有文件夹，仅覆盖冲突的文件", "conflictSkipHint": "不下载此文件", "conflictDelete": "删除旧文件夹并解压", "conflictDeleteHint": "解压前清空目标位置的现有内容", "conflictRemember": "后续冲突也使用此选择", "conflictContinue": "继续", "conflictConfirmDelete": "确认删除", "conflictOriginalUntouched": "原压缩文件不会被修改"});
 const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", logs: "logsDescription", language: "languageDescription", about: "aboutDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
 let lastUiInteractionTrace = null;
 const freshUiTrace = () => {
@@ -1717,20 +1717,32 @@ async function refreshDestinationHistory() {
     const destinations = await invoke("list_download_directories");
     const root = document.querySelector("#destination-list");
     root.replaceChildren();
-    for (const item of destinations) {
+    // Only the six most recent folders are shown (the default folder first),
+    // as cards: folder name on top, full path underneath.
+    const current = document.querySelector("#destination").value;
+    for (const item of destinations.slice(0, 6)) {
       const row = document.createElement("div");
-      row.className = "destination-row";
+      row.className = "destination-card";
       row.classList.toggle("unavailable", !item.available);
+      row.classList.toggle("selected", item.path === current);
+      row.title = item.path;
       const select = document.createElement("button");
       select.type = "button";
       select.className = "destination-select";
-      const path = document.createElement("span");
-      path.textContent = item.path;
-      const badge = document.createElement("small");
+      const folderName = item.path.split(/[\\/]/).filter(Boolean).pop() || item.path;
+      const title = document.createElement("b");
+      title.textContent = folderName;
+      const badge = document.createElement("span");
+      badge.className = "destination-badge";
       badge.textContent = item.isDefault ? t("defaultLocation") : (!item.available ? t("unavailableLocation") : "");
-      select.append(path, badge);
+      badge.hidden = !badge.textContent;
+      title.append(badge);
+      const path = document.createElement("small");
+      path.textContent = item.path;
+      select.append(title, path);
       select.onclick = () => {
         document.querySelector("#destination").value = item.path;
+        root.querySelectorAll(".destination-card").forEach((card) => card.classList.toggle("selected", card === row));
       };
       row.append(select);
       if (!item.isDefault) {
@@ -1738,6 +1750,7 @@ async function refreshDestinationHistory() {
         remove.type = "button";
         remove.className = "destination-remove";
         remove.textContent = "×";
+        remove.setAttribute("aria-label", t("clearLocations"));
         remove.onclick = async () => {
           await invoke("remove_download_directory", { path: item.path });
           await refreshDestinationHistory();

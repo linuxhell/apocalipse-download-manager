@@ -354,3 +354,55 @@ dialog .close:focus-visible { outline: 2px solid var(--line-strong); outline-off
 .conflict-footer .dialog-actions { margin-top: 0; }
 .conflict-footer .dialog-actions button { white-space: nowrap; }
 .conflict-protected { margin: 10px 0 0; padding: 9px 12px; border: 1px solid var(--yellow); border-radius: 10px; font-size: 12px; color: var(--text); background: color-mix(in srgb, var(--yellow) 12%, var(--surface)); }
+
+/* Add download — concept A: three steps in one column. */
+#add-dialog form { width: 660px; }
+.add-dialog-grid { grid-template-columns: 1fr; gap: 18px 0; }
+.add-dialog-analysis, .add-dialog-destination { display: flex; flex-direction: column; gap: 10px; }
+.add-dialog-grid .step { display: flex; align-items: center; gap: 10px; }
+.step-num { width: 24px; height: 24px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--strong); color: var(--on-strong); font-size: 12px; font-weight: 700; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.add-dialog-grid label { margin: 0 0 6px; font-weight: 600; }
+.add-dialog-grid input[type="text"], .add-dialog-grid select { height: 38px; border-radius: 9px; padding: 0 12px; }
+.analysis { margin: 0; }
+.media-inspection { display: flex; flex-direction: column; gap: 10px; margin: 0; }
+.media-card { display: flex; gap: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+.media-card > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.media-card img { width: 150px; height: 84px; flex: none; object-fit: cover; border-radius: 10px; }
+.media-card img[hidden] { display: none; }
+#media-title { font-size: 14px; }
+#media-duration { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.save-grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 12px; }
+.save-grid > div { min-width: 0; }
+.path-picker { display: flex; gap: 8px; }
+.add-dialog-destination .destination-history { margin: 4px 0 0; }
+.add-dialog-destination .destination-history > div:first-child b { font-size: 12px; }
+#destination-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+.destination-card { position: relative; min-width: 0; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); }
+.destination-card:hover { background: var(--surface-2); }
+.destination-card.selected { border-color: var(--strong); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--strong); }
+.destination-card.unavailable { opacity: .55; }
+.destination-card .destination-select { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 0; padding: 9px 26px 9px 12px; border: 0 !important; border-radius: 10px; background: transparent !important; text-align: left; font-weight: 400 !important; }
+.destination-card .destination-select b { display: flex; align-items: center; gap: 6px; max-width: 100%; font-size: 13px; font-weight: 600 !important; }
+.destination-card .destination-select small { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); }
+.destination-badge { margin-left: auto; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 10px; font-weight: 500; color: var(--muted); }
+.destination-card .destination-remove { position: absolute; right: 4px; top: 4px; width: 22px; height: 22px; min-height: 0 !important; padding: 0 !important; border: 0 !important; background: transparent !important; color: var(--faint); font-size: 14px; line-height: 1; }
+.destination-card .destination-remove:hover { color: var(--red); }
+.add-dialog-destination .destination-history > div:first-child button { padding: 5px 12px; min-height: 0; font-size: 12px; }
+
+.add-dialog-scroll { max-height: calc(100vh - 215px); }
+.add-dialog-grid { gap: 14px 0; }
+.add-dialog-analysis, .add-dialog-destination { gap: 8px; }
+.media-card { padding: 10px; gap: 14px; }
+.media-card img { width: 128px; height: 72px; }
+.advanced-download .task-connections { margin-top: 12px; }
+.media-card img { width: 104px; height: 58px; }
+.media-card { padding: 8px 10px; gap: 12px; }
+.media-card > div { gap: 2px; }
+#media-duration { margin-bottom: 2px; }
+#add-dialog form { padding: 14px 20px; }
+#add-dialog .dialog-head { margin-bottom: 4px; }
+.add-dialog-scroll { max-height: calc(100vh - 190px); }
+.add-dialog-destination .destination-history > div:first-child button { border: 0 !important; background: transparent !important; text-decoration: underline; font-weight: 500 !important; min-height: 0; padding: 0; color: var(--muted); }
+.destination-card .destination-select { padding: 7px 24px 7px 11px; }
+#destination-list { gap: 8px; margin-top: 8px; }
