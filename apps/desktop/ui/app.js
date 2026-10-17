@@ -774,6 +774,9 @@ let selectionPointerActive = false;
 let historyQuery = "";
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
+Object.assign(catalogs.en, {"conflictFileEyebrow": "Existing file", "conflictFileTitle": "This file already exists", "conflictFileCopy": "A file with this name is already in {folder}. What do you want to do?", "conflictOnDisk": "In the folder", "conflictNew": "New download", "conflictExtractEyebrow": "Extraction", "conflictExtractTitle": "Files already exist at the destination", "conflictExtractCopy": "Extracting {archive} into {folder}: {count} files already exist.", "conflictMore": "+ {n} more files", "conflictRename": "Rename", "conflictReplace": "Replace", "conflictSkip": "Skip", "conflictRenameFileHint": "Keep both. The new file is saved as “{name}”", "conflictRenameExtractHint": "Extract into a new folder and keep the existing one", "conflictReplaceFileHint": "Delete the existing file and download the new one in its place", "conflictReplaceExtractHint": "Extract into the existing folder, overwriting only the files in conflict", "conflictSkipHint": "Do not download this file", "conflictDelete": "Delete the old folder and extract", "conflictDeleteHint": "Erase the current contents of the destination before extracting", "conflictRemember": "Use this choice for the next conflicts too", "conflictContinue": "Continue", "conflictConfirmDelete": "Confirm deletion", "conflictOriginalUntouched": "The original archive is not changed"});
+Object.assign(catalogs["pt-BR"], {"conflictFileEyebrow": "Arquivo existente", "conflictFileTitle": "Este arquivo já existe", "conflictFileCopy": "Já há um arquivo com este nome em {folder}. O que fazer?", "conflictOnDisk": "Na pasta", "conflictNew": "Novo download", "conflictExtractEyebrow": "Extração", "conflictExtractTitle": "Já existem arquivos no destino", "conflictExtractCopy": "Ao extrair {archive} em {folder}, {count} arquivos já existem.", "conflictMore": "+ {n} outros arquivos", "conflictRename": "Renomear", "conflictReplace": "Substituir", "conflictSkip": "Pular", "conflictRenameFileHint": "Manter os dois. O novo será salvo como “{name}”", "conflictRenameExtractHint": "Extrair para uma pasta nova e manter a existente", "conflictReplaceFileHint": "Excluir o arquivo existente e baixar o novo no lugar", "conflictReplaceExtractHint": "Extrair na pasta existente, sobrescrevendo só os arquivos em conflito", "conflictSkipHint": "Não baixar este arquivo", "conflictDelete": "Excluir a pasta antiga e extrair", "conflictDeleteHint": "Apagar o conteúdo atual do destino antes de extrair", "conflictRemember": "Usar esta escolha nos próximos conflitos", "conflictContinue": "Continuar", "conflictConfirmDelete": "Confirmar exclusão", "conflictOriginalUntouched": "O arquivo compactado original não é alterado"});
+Object.assign(catalogs["zh-CN"], {"conflictFileEyebrow": "文件已存在", "conflictFileTitle": "此文件已存在", "conflictFileCopy": "{folder} 中已有同名文件。要怎么处理？", "conflictOnDisk": "文件夹中", "conflictNew": "新下载", "conflictExtractEyebrow": "解压", "conflictExtractTitle": "目标位置已有文件", "conflictExtractCopy": "将 {archive} 解压到 {folder} 时，有 {count} 个文件已存在。", "conflictMore": "另有 {n} 个文件", "conflictRename": "重命名", "conflictReplace": "替换", "conflictSkip": "跳过", "conflictRenameFileHint": "两个都保留。新文件将保存为“{name}”", "conflictRenameExtractHint": "解压到新文件夹并保留现有文件夹", "conflictReplaceFileHint": "删除现有文件，并用新下载的文件替代", "conflictReplaceExtractHint": "解压到现有文件夹，仅覆盖冲突的文件", "conflictSkipHint": "不下载此文件", "conflictDelete": "删除旧文件夹并解压", "conflictDeleteHint": "解压前清空目标位置的现有内容", "conflictRemember": "后续冲突也使用此选择", "conflictContinue": "继续", "conflictConfirmDelete": "确认删除", "conflictOriginalUntouched": "原压缩文件不会被修改"});
 const descriptions = { downloads: "downloadsDescription", recordings: "recordingsDescription", torrents: "torrentsDescription", link: "linkDescription", logs: "logsDescription", language: "languageDescription", about: "aboutDescription", settings: "settingsDescription", tools: "toolsPageDescription" };
 let lastUiInteractionTrace = null;
 const freshUiTrace = () => {
@@ -2675,6 +2678,97 @@ document.querySelector("#analyze").onclick = async () => {
     if (current()) analyzeButton.disabled = false;
   }
 };
+
+// ---- File / extraction conflicts ------------------------------------------
+const conflictRememberedMode = { download: null, extract: null };
+const conflictDialog = document.querySelector("#conflict-dialog");
+const formatConflictText = (key, values = {}) => Object.entries(values)
+  .reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
+// Resolves with "rename" | "replace" | "delete" | "skip", or null when cancelled.
+function showConflictDialog({ kind, folder, fileName, existing, incomingSize, suggestedName, archive, count, names }) {
+  if (conflictRememberedMode[kind]) return Promise.resolve(conflictRememberedMode[kind]);
+  return new Promise((resolve) => {
+    const extract = kind === "extract";
+    const $ = (selector) => conflictDialog.querySelector(selector);
+    $("#conflict-eyebrow").textContent = t(extract ? "conflictExtractEyebrow" : "conflictFileEyebrow").toUpperCase();
+    $("#conflict-title").textContent = t(extract ? "conflictExtractTitle" : "conflictFileTitle");
+    $("#conflict-copy").textContent = extract
+      ? formatConflictText("conflictExtractCopy", { archive, folder, count })
+      : formatConflictText("conflictFileCopy", { folder });
+    $("#conflict-compare").hidden = extract;
+    $("#conflict-files").hidden = !extract;
+    if (extract) {
+      const list = $("#conflict-files");
+      list.replaceChildren(...names.map((name) => Object.assign(document.createElement("div"), { textContent: name })));
+      if (count > names.length) {
+        list.append(Object.assign(document.createElement("div"), { className: "more", textContent: formatConflictText("conflictMore", { n: count - names.length }) }));
+      }
+    } else {
+      $("#conflict-old-name").textContent = fileName;
+      $("#conflict-old-meta").textContent = `${formatBytes(existing.size)} · ${existing.modifiedMs ? new Date(existing.modifiedMs).toLocaleString() : ""}`;
+      $("#conflict-new-name").textContent = fileName;
+      $("#conflict-new-meta").textContent = incomingSize > 0 ? formatBytes(incomingSize) : t("conflictNew");
+    }
+    $("#conflict-rename-hint").textContent = extract
+      ? t("conflictRenameExtractHint")
+      : formatConflictText("conflictRenameFileHint", { name: suggestedName });
+    $("#conflict-replace-hint").textContent = t(extract ? "conflictReplaceExtractHint" : "conflictReplaceFileHint");
+    $('[data-conflict-mode="delete"]').hidden = !extract;
+    $('[data-conflict-mode="skip"]').hidden = extract;
+    $("#conflict-remember").checked = false;
+    const continueButton = $("#conflict-continue");
+    let selected = "rename";
+    const refresh = () => {
+      conflictDialog.querySelectorAll("[data-conflict-mode]").forEach((button) => {
+        button.classList.toggle("selected", button.dataset.conflictMode === selected);
+      });
+      continueButton.textContent = selected === "delete" ? t("conflictConfirmDelete") : t("conflictContinue");
+    };
+    const finish = (value) => {
+      conflictDialog.onclose = null;
+      conflictDialog.close();
+      // Never remember "delete": erasing a folder always needs an explicit confirmation.
+      if (value && value !== "delete" && $("#conflict-remember").checked) conflictRememberedMode[kind] = value;
+      resolve(value);
+    };
+    conflictDialog.querySelectorAll("[data-conflict-mode]").forEach((button) => {
+      button.onclick = () => { selected = button.dataset.conflictMode; refresh(); };
+    });
+    continueButton.onclick = () => finish(selected);
+    conflictDialog.querySelectorAll("[data-conflict-cancel]").forEach((button) => { button.onclick = () => finish(null); });
+    conflictDialog.onclose = () => resolve(null);
+    refresh();
+    conflictDialog.showModal();
+  });
+}
+// Returns the file name to use, or null when the user cancelled/skipped.
+async function resolveFileConflict(directory, fileName, incomingSize) {
+  if (!directory || !fileName) return fileName;
+  let existing;
+  try { existing = await invoke("check_file_conflict", { directory, fileName }); } catch { return fileName; }
+  if (!existing.exists) return fileName;
+  const mode = await showConflictDialog({ kind: "download", folder: directory, fileName, existing, incomingSize: incomingSize || 0, suggestedName: existing.suggestedName });
+  if (!mode || mode === "skip") return null;
+  if (mode === "rename") return existing.suggestedName;
+  await invoke("remove_existing_file", { directory, fileName });
+  return fileName;
+}
+window.__TAURI__?.event?.listen?.("archive-conflict", async (event) => {
+  const conflict = event.payload;
+  const mode = await showConflictDialog({
+    kind: "extract",
+    folder: conflict.destination,
+    archive: conflict.archive.split(/[\\/]/).pop(),
+    count: conflict.count,
+    names: conflict.names,
+  });
+  try {
+    await invoke("resolve_archive_conflict", { id: conflict.taskId, mode: mode || "skip" });
+  } catch (error) {
+    reportUiError("main", "resolve-archive-conflict", error);
+  }
+}).catch(error => reportUiError("main", "archive-conflict-listener", error));
+
 document.querySelector("#enqueue").onclick = async () => {
   const url = document.querySelector("#url");
   const button = document.querySelector("#enqueue");
@@ -2690,18 +2784,23 @@ document.querySelector("#enqueue").onclick = async () => {
       ? torrentInputs.reduce((total, input) => total + (Number(input.dataset.torrentSize) || 0), 0)
       : null;
     const autoExtract = document.querySelector("#auto-extract-option").hidden ? false : document.querySelector("#auto-extract").checked;
+    let chosenFileName = document.querySelector("#file-name").value;
+    if (!torrentSelection) {
+      chosenFileName = await resolveFileConflict(document.querySelector("#destination").value, chosenFileName, pendingExpectedSize);
+      if (chosenFileName === null) return;
+    }
     const acceptedTask = pendingBrowserAssistedPath
       ? await invoke("import_browser_assisted_download", {
           localPath: pendingBrowserAssistedPath,
           url: url.value,
           destinationDirectory: document.querySelector("#destination").value,
-          fileName: document.querySelector("#file-name").value,
+          fileName: chosenFileName,
           autoExtract,
         })
       : await invoke("enqueue_download", {
         url: url.value,
         destinationDirectory: document.querySelector("#destination").value,
-        fileName: document.querySelector("#file-name").value,
+        fileName: chosenFileName,
         formatSelection: document.querySelector("#media-inspection").hidden || document.querySelector("#media-format-control").hidden ? null : document.querySelector("#media-format").value,
         torrentSelection,
         mirrors: document.querySelector("#mirrors").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),

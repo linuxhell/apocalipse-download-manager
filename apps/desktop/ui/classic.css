@@ -324,3 +324,32 @@ dialog .close:focus-visible { outline: 2px solid var(--line-strong); outline-off
 .task-icon-action { color: var(--muted); }
 .task-icon-action:hover:not(:disabled) { color: var(--text); }
 .task-remove-action:hover:not(:disabled) { color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
+
+/* Conflict dialog (existing file / existing extraction target). */
+#conflict-dialog form { width: 520px; max-width: 94vw; }
+.conflict-head { position: relative; display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.conflict-head > div { flex: 1; }
+.conflict-head small { display: block; font-size: 10.5px; letter-spacing: 1.2px; color: var(--faint); }
+.conflict-head h2 { margin: 2px 0 0; font-size: 18px; }
+.conflict-badge { width: 30px; height: 30px; flex: none; border-radius: 50%; display: grid; place-items: center; font-weight: 800; background: #fff3d6; color: #a86b00; }
+:root[data-mode="dark"] .conflict-badge { background: #3a2c0c; color: #f2b632; }
+.conflict-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0 4px; }
+.conflict-compare > div { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); min-width: 0; }
+.conflict-compare small { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.conflict-compare b { display: block; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conflict-files { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin: 10px 0 4px; }
+.conflict-files div { padding: 7px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conflict-files div:last-child { border-bottom: 0; }
+.conflict-files .more { color: var(--muted); }
+.conflict-options { display: flex; flex-direction: column; gap: 9px; margin-top: 12px; }
+.conflict-options button { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%; padding: 13px 16px; min-height: 0; text-align: left; border: 1px solid var(--line-strong) !important; border-radius: 10px; background: var(--surface); font-weight: 400 !important; }
+.conflict-options button b { font-size: 14px; font-weight: 700 !important; }
+.conflict-options button small { font-size: 12px; color: var(--muted); font-weight: 400 !important; }
+.conflict-options button:hover { background: var(--surface-2); }
+.conflict-options button.selected { border-color: var(--strong) !important; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--strong); }
+.conflict-options button.danger { border-left: 4px solid var(--red) !important; }
+.conflict-options button.danger b { color: var(--red); }
+.conflict-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.conflict-remember { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; color: var(--muted); }
+.conflict-footer .dialog-actions { margin-top: 0; }
+.conflict-footer .dialog-actions button { white-space: nowrap; }

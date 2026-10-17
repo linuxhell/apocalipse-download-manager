@@ -3612,7 +3612,95 @@ fn unique_extraction_directory(parent: &Path, name: &std::ffi::OsStr) -> Result<
     Err("archive_destination_names_exhausted".to_owned())
 }
 
-fn extract_archive_safely(settings: &UserSettings, archive: &Path) -> Result<PathBuf, String> {
+/// What to do when extraction would land on files that already exist.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExtractPolicy {
+    /// Extract into a new `name (N)` folder (the historical behaviour).
+    Rename,
+    /// Extract into the existing folder, overwriting only the files in conflict.
+    Replace,
+    /// Delete the existing folder first, then extract.
+    DeleteFirst,
+}
+
+impl ExtractPolicy {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "rename" => Some(Self::Rename),
+            "replace" => Some(Self::Replace),
+            "delete" => Some(Self::DeleteFirst),
+            _ => None,
+        }
+    }
+}
+
+/// Where an archive's members will land, relative to the archive's parent
+/// folder: the destination folder name and every member path under it. An
+/// archive with a single top-level folder is extracted as that folder;
+/// otherwise a folder named after the archive is created.
+fn extraction_layout(members: &[String], archive_stem: &str) -> (String, Vec<String>) {
+    let normalized: Vec<String> = members
+        .iter()
+        .map(|member| member.replace('\\', "/").trim_matches('/').to_owned())
+        .filter(|member| !member.is_empty())
+        .collect();
+    let mut tops = normalized
+        .iter()
+        .filter_map(|member| member.split('/').next())
+        .collect::<Vec<_>>();
+    tops.sort_unstable();
+    tops.dedup();
+    if let [top] = tops.as_slice() {
+        let prefix = format!("{top}/");
+        if normalized.iter().any(|member| member.starts_with(&prefix)) {
+            return ((*top).to_owned(), normalized);
+        }
+    }
+    (
+        archive_stem.to_owned(),
+        normalized
+            .into_iter()
+            .map(|member| format!("{archive_stem}/{member}"))
+            .collect(),
+    )
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ArchiveConflict {
+    task_id: String,
+    archive: String,
+    destination: String,
+    count: usize,
+    names: Vec<String>,
+}
+
+/// Lists the archive's files that already exist at their extraction target.
+fn archive_conflicts(
+    settings: &UserSettings,
+    archive: &Path,
+) -> Result<(PathBuf, Vec<String>), String> {
+    let executable = settings
+        .extractor_path
+        .clone()
+        .ok_or_else(|| "archive_extractor_not_configured".to_owned())?;
+    let kind =
+        extractor_kind(&executable).ok_or_else(|| "unsupported_archive_extractor".to_owned())?;
+    let members = list_archive_members(&executable, kind, archive)?;
+    let parent = archive.parent().unwrap_or_else(|| Path::new("."));
+    let (name, files) = extraction_layout(&members, &archive_name_without_extensions(archive));
+    let conflicts = files
+        .into_iter()
+        .filter(|relative| parent.join(relative).is_file())
+        .collect::<Vec<_>>();
+    Ok((parent.join(name), conflicts))
+}
+
+fn extract_archive_safely(
+    settings: &UserSettings,
+    archive: &Path,
+    policy: ExtractPolicy,
+) -> Result<PathBuf, String> {
     if !archive.is_file()
         || !archive
             .file_name()
@@ -3677,10 +3765,26 @@ fn extract_archive_safely(settings: &UserSettings, archive: &Path) -> Result<Pat
     } else {
         std::ffi::OsString::from(archive_name_without_extensions(archive))
     };
-    // Never merge into an existing folder: move_tree replaces same-named
-    // files, so extracting `project.zip` (root `src/`) next to the user's own
-    // `src/` used to overwrite their files without asking.
-    let destination = match unique_extraction_directory(parent, &destination_name) {
+    // The user decides what happens to an existing folder (see
+    // `ExtractPolicy`); move_tree overwrites same-named files, so `Replace`
+    // only ever touches the files that are really in conflict.
+    let destination = match policy {
+        ExtractPolicy::Rename => unique_extraction_directory(parent, &destination_name),
+        ExtractPolicy::Replace => Ok(parent.join(&destination_name)),
+        ExtractPolicy::DeleteFirst => {
+            let target = parent.join(&destination_name);
+            // Only ever delete a real folder that sits directly next to the
+            // archive and is not the archive itself.
+            if target.is_dir() && target.parent() == Some(parent) && target != archive {
+                fs::remove_dir_all(&target)
+                    .map(|_| target.clone())
+                    .map_err(|error| error.to_string())
+            } else {
+                Ok(target)
+            }
+        }
+    };
+    let destination = match destination {
         Ok(destination) => destination,
         Err(error) => {
             let _ = fs::remove_dir_all(&staging);
@@ -3703,6 +3807,111 @@ fn extract_archive_safely(settings: &UserSettings, archive: &Path) -> Result<Pat
     Ok(destination)
 }
 
+#[tauri::command]
+async fn resolve_archive_conflict(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    mode: String,
+) -> Result<Option<String>, String> {
+    if mode == "skip" {
+        diagnostic_log(
+            &state,
+            "INFO",
+            "archive.extract_skipped",
+            &format!("task={id}"),
+        );
+        return Ok(None);
+    }
+    let policy =
+        ExtractPolicy::parse(&mode).ok_or_else(|| "unsupported_conflict_mode".to_owned())?;
+    let archive = state
+        .queue
+        .lock()
+        .map_err(|error| error.to_string())?
+        .iter()
+        .find(|task| task.id.to_string() == id)
+        .map(|task| task.destination.clone())
+        .ok_or_else(|| "download_not_found".to_owned())?;
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        extract_archive_safely(&settings, &archive, policy)
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let app_state = app.state::<AppState>();
+    match result {
+        Ok(path) => {
+            diagnostic_log(
+                &app_state,
+                "INFO",
+                "archive.auto_extract_completed",
+                &format!("task={id} mode={mode} output={}", path.display()),
+            );
+            Ok(Some(path.display().to_string()))
+        }
+        Err(error) => {
+            diagnostic_log(
+                &app_state,
+                "ERROR",
+                "archive.auto_extract_failed",
+                &format!("task={id} mode={mode} error={error}"),
+            );
+            Err(error)
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileConflict {
+    exists: bool,
+    size: u64,
+    modified_ms: u64,
+    suggested_name: String,
+}
+
+/// Reports whether `file_name` already exists in `directory`, with the name
+/// "Rename" would use.
+#[tauri::command]
+fn check_file_conflict(directory: String, file_name: String) -> Result<FileConflict, String> {
+    let directory = PathBuf::from(directory);
+    let file_name = validate_file_name(&file_name)?;
+    let path = directory.join(&file_name);
+    let metadata = fs::metadata(&path)
+        .ok()
+        .filter(|metadata| metadata.is_file());
+    let suggested = unique_destination(&directory, &file_name)?;
+    Ok(FileConflict {
+        exists: metadata.is_some(),
+        size: metadata.as_ref().map_or(0, |metadata| metadata.len()),
+        modified_ms: metadata
+            .as_ref()
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map_or(0, |duration| duration.as_millis() as u64),
+        suggested_name: suggested
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or(file_name),
+    })
+}
+
+/// "Replace": removes the existing file so the new download takes its name.
+#[tauri::command]
+fn remove_existing_file(directory: String, file_name: String) -> Result<(), String> {
+    let file_name = validate_file_name(&file_name)?;
+    let path = PathBuf::from(directory).join(file_name);
+    if path.is_file() {
+        fs::remove_file(&path).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn maybe_auto_extract_completed(app: &tauri::AppHandle, id: DownloadId) {
     let state = app.state::<AppState>();
     let task = state
@@ -3722,7 +3931,32 @@ fn maybe_auto_extract_completed(app: &tauri::AppHandle, id: DownloadId) {
     let destination = task.destination.clone();
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let result = extract_archive_safely(&settings, &destination);
+        // Files already at the extraction target: ask the user instead of
+        // silently renaming or overwriting (the UI answers through
+        // `resolve_archive_conflict`).
+        if let Ok((target, conflicts)) = archive_conflicts(&settings, &destination) {
+            if !conflicts.is_empty() {
+                let state = app.state::<AppState>();
+                diagnostic_log(
+                    &state,
+                    "INFO",
+                    "archive.extract_conflict",
+                    &format!("task={id} conflicts={}", conflicts.len()),
+                );
+                let _ = app.emit(
+                    "archive-conflict",
+                    ArchiveConflict {
+                        task_id: id.to_string(),
+                        archive: destination.display().to_string(),
+                        destination: target.display().to_string(),
+                        count: conflicts.len(),
+                        names: conflicts.into_iter().take(5).collect(),
+                    },
+                );
+                return;
+            }
+        }
+        let result = extract_archive_safely(&settings, &destination, ExtractPolicy::Rename);
         let state = app.state::<AppState>();
         match &result {
             Ok(path) => diagnostic_log(
@@ -15385,6 +15619,9 @@ fn main() {
             control_main_window,
             open_link_window,
             main_window_ready,
+            resolve_archive_conflict,
+            check_file_conflict,
+            remove_existing_file,
             get_dark_mode,
             set_dark_mode,
             get_application_language,
@@ -16244,6 +16481,58 @@ mod tests {
         )
         .unwrap();
         assert_eq!(text, log);
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn extraction_layout_uses_the_single_root_folder_or_the_archive_name() {
+        let rooted = vec![
+            "project".to_owned(),
+            "project/src".to_owned(),
+            "project\\src\\main.rs".to_owned(),
+        ];
+        let (name, files) = extraction_layout(&rooted, "project-1.0");
+        assert_eq!(name, "project");
+        assert!(files.contains(&"project/src/main.rs".to_owned()));
+        let loose = vec!["a.txt".to_owned(), "docs/b.txt".to_owned()];
+        let (name, files) = extraction_layout(&loose, "bundle");
+        assert_eq!(name, "bundle");
+        assert_eq!(files, ["bundle/a.txt", "bundle/docs/b.txt"]);
+        // A lone file is not a root folder.
+        let (name, files) = extraction_layout(&["only.txt".to_owned()], "only");
+        assert_eq!(name, "only");
+        assert_eq!(files, ["only/only.txt"]);
+    }
+
+    #[test]
+    fn extract_policy_names_match_the_ui_modes() {
+        assert_eq!(ExtractPolicy::parse("rename"), Some(ExtractPolicy::Rename));
+        assert_eq!(
+            ExtractPolicy::parse("replace"),
+            Some(ExtractPolicy::Replace)
+        );
+        assert_eq!(
+            ExtractPolicy::parse("delete"),
+            Some(ExtractPolicy::DeleteFirst)
+        );
+        assert_eq!(ExtractPolicy::parse("skip"), None);
+    }
+
+    #[test]
+    fn file_conflict_reports_existing_files_and_a_free_name() {
+        let directory = std::env::temp_dir().join(format!("adm-conflict-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("a.zip"), b"1234").unwrap();
+        let conflict =
+            check_file_conflict(directory.display().to_string(), "a.zip".to_owned()).unwrap();
+        assert!(conflict.exists);
+        assert_eq!(conflict.size, 4);
+        assert_eq!(conflict.suggested_name, "a (1).zip");
+        let none =
+            check_file_conflict(directory.display().to_string(), "b.zip".to_owned()).unwrap();
+        assert!(!none.exists);
+        remove_existing_file(directory.display().to_string(), "a.zip".to_owned()).unwrap();
+        assert!(!directory.join("a.zip").exists());
         let _ = fs::remove_dir_all(&directory);
     }
 
