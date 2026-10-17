@@ -1217,7 +1217,7 @@ function renderDownloads(force = false) {
         pause_download: '<path d="M8 5v14M16 5v14"/>',
         resume_download: '<path d="m8 5 11 7-11 7z"/>',
         stop_recording: '<path d="M6 6h12v12H6z"/>',
-        reveal_download: '<path fill="#ffc84a" stroke="#b98112" d="M3 6h7l2 3h9v10H3z"/><path fill="#ffdc75" stroke="#b98112" d="M3 11h19l-3 8H2z"/>',
+        reveal_download: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
       };
       if (icons[command]) {
         button.classList.add("task-icon-action");
@@ -1344,7 +1344,7 @@ function renderDownloads(force = false) {
     removeButton.className = "task-action task-icon-action task-remove-action";
     removeButton.title = t("removeSelected");
     removeButton.setAttribute("aria-label", t("removeSelected"));
-    removeButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="#e94558" stroke-width="2" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg>';
+    removeButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
     removeButton.onclick = () => {
       selectedIds.clear();
       selectedIds.add(task.id);

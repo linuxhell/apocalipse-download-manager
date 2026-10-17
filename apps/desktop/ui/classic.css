@@ -319,3 +319,8 @@ button.primary, button#add { padding: 9px 20px; font-size: 13px; border-radius: 
 #clear-dialog .remove-options button.danger { border-left: 4px solid var(--red) !important; }
 #clear-dialog .remove-options button.danger:hover { border-color: var(--red) !important; }
 dialog .close:focus-visible { outline: 2px solid var(--line-strong); outline-offset: 2px; border-radius: 6px; }
+
+/* Row action icons are monochrome; only "remove" turns red on hover. */
+.task-icon-action { color: var(--muted); }
+.task-icon-action:hover:not(:disabled) { color: var(--text); }
+.task-remove-action:hover:not(:disabled) { color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
