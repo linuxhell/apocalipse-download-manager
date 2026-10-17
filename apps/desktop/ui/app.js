@@ -1666,10 +1666,16 @@ document.querySelector("#clear-logs").onclick = async () => { await invoke("clea
 const darkModeToggle = document.querySelector("#dark-mode");
 const applyColorMode = (dark) => {
   document.documentElement.dataset.mode = dark ? "dark" : "light";
+  darkModeToggle.checked = Boolean(dark);
   try { localStorage.setItem("apocalipse.mode", dark ? "dark" : "light"); } catch {}
 };
 darkModeToggle.checked = document.documentElement.dataset.mode === "dark";
-darkModeToggle.onchange = () => applyColorMode(darkModeToggle.checked);
+darkModeToggle.onchange = () => {
+  applyColorMode(darkModeToggle.checked);
+  invoke("set_dark_mode", { enabled: darkModeToggle.checked }).catch((error) => reportUiError("main", "dark-mode-save", error, "WARN"));
+};
+// settings.json is the source of truth; localStorage only avoids a flash.
+invoke("get_dark_mode").then((saved) => applyColorMode(Boolean(saved))).catch((error) => reportUiError("main", "dark-mode-load", error, "WARN"));
 document.querySelector("#open-link-window").onclick = () => {
   invoke("open_link_window").catch((error) => window.alert(String(error)));
   invoke("record_ui_diagnostic", { level: "INFO", event: "link_window_requested", detail: "source=navigation" }).catch(() => {});

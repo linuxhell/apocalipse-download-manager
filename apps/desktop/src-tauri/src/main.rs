@@ -451,6 +451,8 @@ struct UserSettings {
     link_quic_local_ips: Vec<IpAddr>,
     #[serde(default = "default_language")]
     language: String,
+    #[serde(default)]
+    dark_mode: bool,
     #[serde(default = "default_true")]
     save_torrent_metadata: bool,
 }
@@ -531,6 +533,7 @@ impl Default for UserSettings {
             link_quic_enabled: false,
             link_quic_local_ips: Vec::new(),
             language: default_language(),
+            dark_mode: false,
             save_torrent_metadata: true,
         }
     }
@@ -8359,6 +8362,33 @@ fn record_ui_diagnostic(
     Ok(())
 }
 
+/// The colour mode lives in settings.json: the webview's localStorage is not
+/// reliable across restarts (portable installs, cleared WebView data), which is
+/// why a dark-mode choice kept in localStorage alone was forgotten.
+#[tauri::command]
+fn get_dark_mode(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .dark_mode)
+}
+
+#[tauri::command]
+fn set_dark_mode(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    settings.dark_mode = enabled;
+    save_settings(&state, &settings)?;
+    drop(settings);
+    diagnostic_log(
+        &state,
+        "INFO",
+        "application.dark_mode_changed",
+        &format!("enabled={enabled}"),
+    );
+    Ok(())
+}
+
 #[tauri::command]
 fn set_application_language(state: State<'_, AppState>, language: String) -> Result<(), String> {
     if !matches!(language.as_str(), "en" | "pt-BR" | "zh-CN") {
@@ -15393,6 +15423,8 @@ fn main() {
             control_main_window,
             open_link_window,
             main_window_ready,
+            get_dark_mode,
+            set_dark_mode,
             get_application_language,
             get_log_editor,
             set_log_editor,

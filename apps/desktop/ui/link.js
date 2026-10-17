@@ -779,6 +779,7 @@ window.__TAURI__?.event?.listen?.("link-transfer-progress", (event) => {
 
 syncPresentation();
 window.addEventListener("storage", syncPresentation);
+invoke("get_dark_mode").then((dark) => { document.documentElement.dataset.mode = dark ? "dark" : "light"; }).catch(() => {});
 invoke("record_ui_diagnostic", { level: "INFO", event: "link_window_opened", detail: "dedicated=true maximized=true" }).catch(() => {});
 loadLinkIdentity().catch((error) => {
   document.querySelector("#link-status").textContent = String(error);
