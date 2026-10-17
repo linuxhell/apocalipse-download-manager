@@ -289,3 +289,27 @@ body.link-window { display: block; height: 100vh; overflow: hidden; }
 
 /* Black outline around the frameless main window (and the dark/light modes alike). */
 body:not(.link-window)::after { content: ""; position: fixed; inset: 0; border: 1px solid #000; pointer-events: none; z-index: 2147483647; }
+
+/* Roomier, softer buttons everywhere. */
+button:not(.primary):not(#add):not(.task-action):not(nav button):not(.window-controls button):not(.tabs button):not([data-settings-tab]):not(.list-action-button):not(.close):not(summary) { padding: 8px 16px; font-size: 13px; border-radius: 8px; min-height: 34px; }
+button.primary, button#add { padding: 9px 20px; font-size: 13px; border-radius: 8px; min-height: 36px; }
+.dialog-actions button { min-height: 38px; padding: 9px 22px; }
+
+/* Remove-from-list dialog: two large option cards instead of tiny inline buttons. */
+#clear-dialog form { width: 480px; max-width: 94vw; }
+#clear-dialog .remove-options { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 4px; }
+#clear-dialog .remove-options button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%; padding: 14px 18px; min-height: 0; text-align: left; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); font-weight: 400; }
+#clear-dialog .remove-options button b { font-size: 14px; font-weight: 700; color: var(--text); }
+#clear-dialog .remove-options button small { font-size: 12px; color: var(--muted); line-height: 1.35; }
+#clear-dialog .remove-options button:hover { background: var(--surface-2); border-color: var(--strong); }
+#clear-dialog .remove-options button.danger { border-left: 4px solid var(--red); }
+#clear-dialog .remove-options button.danger b { color: var(--red); }
+#clear-dialog .remove-options button.danger:hover { border-color: var(--red); background: color-mix(in srgb, var(--red) 8%, var(--surface)); }
+#clear-dialog .dialog-actions { margin-top: 16px; }
+#clear-dialog .remove-options button { border: 1px solid var(--line-strong) !important; font-weight: 400 !important; }
+#clear-dialog .remove-options button b { font-weight: 700 !important; }
+#clear-dialog .remove-options button small { font-weight: 400 !important; }
+#clear-dialog .remove-options button:hover { border-color: var(--strong) !important; }
+#clear-dialog .remove-options button.danger { border-left: 4px solid var(--red) !important; }
+#clear-dialog .remove-options button.danger:hover { border-color: var(--red) !important; }
+dialog .close:focus-visible { outline: 2px solid var(--line-strong); outline-offset: 2px; border-radius: 6px; }
