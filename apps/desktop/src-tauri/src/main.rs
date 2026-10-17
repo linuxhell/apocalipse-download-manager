@@ -3612,6 +3612,14 @@ fn unique_extraction_directory(parent: &Path, name: &std::ffi::OsStr) -> Result<
     Err("archive_destination_names_exhausted".to_owned())
 }
 
+/// True when `path` is (or contains) the running Apocalipse executable.
+/// Replacing or deleting it would break the app, so those options are refused.
+fn contains_running_app(path: &Path) -> bool {
+    std::env::current_exe()
+        .ok()
+        .is_some_and(|exe| exe == path || exe.starts_with(path))
+}
+
 /// What to do when extraction would land on files that already exist.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExtractPolicy {
@@ -3673,6 +3681,7 @@ struct ArchiveConflict {
     destination: String,
     count: usize,
     names: Vec<String>,
+    protected_app: bool,
 }
 
 /// Lists the archive's files that already exist at their extraction target.
@@ -3768,6 +3777,10 @@ fn extract_archive_safely(
     // The user decides what happens to an existing folder (see
     // `ExtractPolicy`); move_tree overwrites same-named files, so `Replace`
     // only ever touches the files that are really in conflict.
+    if policy != ExtractPolicy::Rename && contains_running_app(&parent.join(&destination_name)) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err("archive_destination_is_running_app".to_owned());
+    }
     let destination = match policy {
         ExtractPolicy::Rename => unique_extraction_directory(parent, &destination_name),
         ExtractPolicy::Replace => Ok(parent.join(&destination_name)),
@@ -3873,6 +3886,7 @@ struct FileConflict {
     size: u64,
     modified_ms: u64,
     suggested_name: String,
+    protected_app: bool,
 }
 
 /// Reports whether `file_name` already exists in `directory`, with the name
@@ -3898,6 +3912,7 @@ fn check_file_conflict(directory: String, file_name: String) -> Result<FileConfl
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or(file_name),
+        protected_app: contains_running_app(&path),
     })
 }
 
@@ -3906,6 +3921,9 @@ fn check_file_conflict(directory: String, file_name: String) -> Result<FileConfl
 fn remove_existing_file(directory: String, file_name: String) -> Result<(), String> {
     let file_name = validate_file_name(&file_name)?;
     let path = PathBuf::from(directory).join(file_name);
+    if contains_running_app(&path) {
+        return Err("file_is_running_app".to_owned());
+    }
     if path.is_file() {
         fs::remove_file(&path).map_err(|error| error.to_string())?;
     }
@@ -3951,6 +3969,7 @@ fn maybe_auto_extract_completed(app: &tauri::AppHandle, id: DownloadId) {
                         destination: target.display().to_string(),
                         count: conflicts.len(),
                         names: conflicts.into_iter().take(5).collect(),
+                        protected_app: contains_running_app(&target),
                     },
                 );
                 return;
@@ -16502,6 +16521,23 @@ mod tests {
         let (name, files) = extraction_layout(&["only.txt".to_owned()], "only");
         assert_eq!(name, "only");
         assert_eq!(files, ["only/only.txt"]);
+    }
+
+    #[test]
+    fn the_running_app_is_protected_from_replace_and_delete() {
+        let exe = std::env::current_exe().unwrap();
+        assert!(contains_running_app(&exe));
+        assert!(contains_running_app(exe.parent().unwrap()));
+        assert!(!contains_running_app(
+            &std::env::temp_dir().join("adm-not-the-app")
+        ));
+        let error = remove_existing_file(
+            exe.parent().unwrap().display().to_string(),
+            exe.file_name().unwrap().to_string_lossy().into_owned(),
+        )
+        .unwrap_err();
+        assert_eq!(error, "file_is_running_app");
+        assert!(exe.exists());
     }
 
     #[test]

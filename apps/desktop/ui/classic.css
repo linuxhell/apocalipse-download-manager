@@ -353,3 +353,4 @@ dialog .close:focus-visible { outline: 2px solid var(--line-strong); outline-off
 .conflict-remember { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; color: var(--muted); }
 .conflict-footer .dialog-actions { margin-top: 0; }
 .conflict-footer .dialog-actions button { white-space: nowrap; }
+.conflict-protected { margin: 10px 0 0; padding: 9px 12px; border: 1px solid var(--yellow); border-radius: 10px; font-size: 12px; color: var(--text); background: color-mix(in srgb, var(--yellow) 12%, var(--surface)); }
