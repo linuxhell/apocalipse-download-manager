@@ -3612,6 +3612,32 @@ fn unique_extraction_directory(parent: &Path, name: &std::ffi::OsStr) -> Result<
     Err("archive_destination_names_exhausted".to_owned())
 }
 
+/// Every regular file below `dir` (empty when `dir` does not exist).
+fn files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        let Ok(read) = fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in read.flatten() {
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(kind) if kind.is_dir() => pending.push(path),
+                Ok(kind) if kind.is_file() => files.push(path),
+                _ => {}
+            }
+        }
+    }
+    files
+}
+
+/// True when the file cannot be opened for writing right now (in use by
+/// another program, running executable, or no permission).
+fn file_is_locked(path: &Path) -> bool {
+    fs::OpenOptions::new().write(true).open(path).is_err()
+}
+
 /// True when `path` is (or contains) the running Apocalipse executable.
 /// Replacing or deleting it would break the app, so those options are refused.
 fn contains_running_app(path: &Path) -> bool {
@@ -3781,6 +3807,42 @@ fn extract_archive_safely(
         let _ = fs::remove_dir_all(&staging);
         return Err("archive_destination_is_running_app".to_owned());
     }
+    if policy != ExtractPolicy::Rename {
+        // Check first, change nothing afterwards: a file another program holds
+        // open (a running .exe, a locked document) would otherwise stop the
+        // extraction halfway through, leaving old and new files mixed.
+        let target = parent.join(&destination_name);
+        let source_root = if entries.len() == 1 && entries[0].is_dir() {
+            entries[0].clone()
+        } else {
+            staging.clone()
+        };
+        let candidates = match policy {
+            ExtractPolicy::DeleteFirst => files_under(&target),
+            _ => files_under(&source_root)
+                .into_iter()
+                .filter_map(|file| {
+                    file.strip_prefix(&source_root)
+                        .ok()
+                        .map(|rel| target.join(rel))
+                })
+                .filter(|existing| existing.is_file())
+                .collect(),
+        };
+        let in_use = candidates
+            .iter()
+            .filter(|file| file_is_locked(file))
+            .filter_map(|file| {
+                file.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+            .take(5)
+            .collect::<Vec<_>>();
+        if !in_use.is_empty() {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(format!("archive_files_in_use:{}", in_use.join(", ")));
+        }
+    }
     let destination = match policy {
         ExtractPolicy::Rename => unique_extraction_directory(parent, &destination_name),
         ExtractPolicy::Replace => Ok(parent.join(&destination_name)),
@@ -3804,19 +3866,23 @@ fn extract_archive_safely(
             return Err(error);
         }
     };
-    if entries.len() == 1 && entries[0].is_dir() {
-        move_tree(&entries[0], &destination)?;
-    } else {
-        fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
-        for entry in entries {
-            let entry_name = entry
-                .file_name()
-                .ok_or_else(|| "archive_entry_name_missing".to_owned())?;
-            let target = destination.join(entry_name);
-            move_tree(&entry, &target)?;
+    let moved = (|| -> Result<(), String> {
+        if entries.len() == 1 && entries[0].is_dir() {
+            move_tree(&entries[0], &destination)
+        } else {
+            fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
+            for entry in &entries {
+                let entry_name = entry
+                    .file_name()
+                    .ok_or_else(|| "archive_entry_name_missing".to_owned())?;
+                move_tree(entry, &destination.join(entry_name))?;
+            }
+            Ok(())
         }
-    }
+    })();
+    // Always clear the staging folder, also when moving failed.
     let _ = fs::remove_dir_all(&staging);
+    moved?;
     Ok(destination)
 }
 
@@ -3925,6 +3991,14 @@ fn remove_existing_file(directory: String, file_name: String) -> Result<(), Stri
         return Err("file_is_running_app".to_owned());
     }
     if path.is_file() {
+        if file_is_locked(&path) {
+            return Err(format!(
+                "file_in_use:{}",
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            ));
+        }
         fs::remove_file(&path).map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -16538,6 +16612,21 @@ mod tests {
         .unwrap_err();
         assert_eq!(error, "file_is_running_app");
         assert!(exe.exists());
+    }
+
+    #[test]
+    fn locked_and_missing_files_are_detected_without_touching_them() {
+        let directory = std::env::temp_dir().join(format!("adm-lock-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(directory.join("sub")).unwrap();
+        fs::write(directory.join("a.txt"), b"a").unwrap();
+        fs::write(directory.join("sub/b.txt"), b"b").unwrap();
+        let mut files = files_under(&directory);
+        files.sort();
+        assert_eq!(files.len(), 2);
+        assert!(!file_is_locked(&directory.join("a.txt")));
+        assert!(file_is_locked(&directory.join("missing.txt")));
+        assert_eq!(fs::read(directory.join("a.txt")).unwrap(), b"a");
+        let _ = fs::remove_dir_all(&directory);
     }
 
     #[test]
