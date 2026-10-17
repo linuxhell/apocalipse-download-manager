@@ -7947,62 +7947,24 @@ fn clear_general_log(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Writes the diagnostic bundle as a real ZIP using Deflate at the maximum
+/// level (9). It used to write every entry uncompressed ("stored"), which made
+/// log-heavy bundles several times larger than necessary.
 fn write_diagnostic_zip(path: &Path, entries: Vec<(String, Vec<u8>)>) -> Result<(), String> {
-    let mut output = Vec::new();
-    let mut central = Vec::new();
+    let file = fs::File::create(path).map_err(|error| error.to_string())?;
+    let mut writer = zip::ZipWriter::new(std::io::BufWriter::new(file));
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .compression_level(Some(9))
+        .large_file(false);
     for (name, data) in &entries {
-        let name = name.as_bytes();
-        let offset = u32::try_from(output.len()).map_err(|_| "diagnostic_too_large")?;
-        let size = u32::try_from(data.len()).map_err(|_| "diagnostic_too_large")?;
-        let crc = crc32fast::hash(data);
-        output.extend_from_slice(&0x04034b50_u32.to_le_bytes());
-        output.extend_from_slice(&20_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&crc.to_le_bytes());
-        output.extend_from_slice(&size.to_le_bytes());
-        output.extend_from_slice(&size.to_le_bytes());
-        output.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(name);
-        output.extend_from_slice(data);
-        central.push((name.to_vec(), crc, size, offset));
+        writer
+            .start_file(name.as_str(), options)
+            .map_err(|error| error.to_string())?;
+        std::io::Write::write_all(&mut writer, data).map_err(|error| error.to_string())?;
     }
-    let central_offset = u32::try_from(output.len()).map_err(|_| "diagnostic_too_large")?;
-    for (name, crc, size, offset) in &central {
-        output.extend_from_slice(&0x02014b50_u32.to_le_bytes());
-        output.extend_from_slice(&20_u16.to_le_bytes());
-        output.extend_from_slice(&20_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&crc.to_le_bytes());
-        output.extend_from_slice(&size.to_le_bytes());
-        output.extend_from_slice(&size.to_le_bytes());
-        output.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&0_u32.to_le_bytes());
-        output.extend_from_slice(&offset.to_le_bytes());
-        output.extend_from_slice(name);
-    }
-    let central_size =
-        u32::try_from(output.len()).map_err(|_| "diagnostic_too_large")? - central_offset;
-    let count = u16::try_from(central.len()).map_err(|_| "diagnostic_too_large")?;
-    output.extend_from_slice(&0x06054b50_u32.to_le_bytes());
-    output.extend_from_slice(&0_u16.to_le_bytes());
-    output.extend_from_slice(&0_u16.to_le_bytes());
-    output.extend_from_slice(&count.to_le_bytes());
-    output.extend_from_slice(&count.to_le_bytes());
-    output.extend_from_slice(&central_size.to_le_bytes());
-    output.extend_from_slice(&central_offset.to_le_bytes());
-    output.extend_from_slice(&0_u16.to_le_bytes());
-    fs::write(path, output).map_err(|error| error.to_string())
+    let mut inner = writer.finish().map_err(|error| error.to_string())?;
+    std::io::Write::flush(&mut inner).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -16252,6 +16214,37 @@ mod tests {
             .map(|value| value.to_string_lossy().into_owned())
             .collect();
         assert_eq!(args, ["--no-playlist", "-f", "best"]);
+    }
+
+    #[test]
+    fn diagnostic_zip_is_deflated_and_round_trips() {
+        let directory = std::env::temp_dir().join(format!("adm-zip-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("bundle.zip");
+        let log = "2026-10-16T21:20:15 INFO engine=yt-dlp task=abc detail=ok\n".repeat(2000);
+        let entries = vec![
+            ("logs/events.jsonl".to_owned(), log.clone().into_bytes()),
+            ("README.txt".to_owned(), b"hello".to_vec()),
+        ];
+        write_diagnostic_zip(&path, entries).unwrap();
+        let mut archive = zip::ZipArchive::new(fs::File::open(&path).unwrap()).unwrap();
+        assert_eq!(archive.len(), 2);
+        {
+            let entry = archive.by_name("logs/events.jsonl").unwrap();
+            assert_eq!(entry.compression(), zip::CompressionMethod::Deflated);
+            assert!(
+                entry.compressed_size() * 10 < entry.size(),
+                "log must compress well"
+            );
+        }
+        let mut text = String::new();
+        std::io::Read::read_to_string(
+            &mut archive.by_name("logs/events.jsonl").unwrap(),
+            &mut text,
+        )
+        .unwrap();
+        assert_eq!(text, log);
+        let _ = fs::remove_dir_all(&directory);
     }
 
     #[test]
