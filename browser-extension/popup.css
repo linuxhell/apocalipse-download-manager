@@ -85,3 +85,6 @@ article img,.audio-icon,.preview img,#requested-media img{background:#e8e8e8}
 .audio-icon{background:#e8e8e8;color:#111}
 #requested-media{background:var(--p-surface-2);border-color:var(--p-line)}
 #bridge-dot{box-shadow:none} #bridge-dot.connected{box-shadow:none}
+
+/* Black outline around the popup. */
+body::after { content: ""; position: fixed; inset: 0; border: 1px solid #000; pointer-events: none; z-index: 2147483647; }

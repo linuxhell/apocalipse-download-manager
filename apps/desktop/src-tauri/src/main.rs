@@ -12725,6 +12725,30 @@ fn bridge_response<S: Write>(stream: &mut S, status: &str, origin: Option<&str>,
     let _ = stream.write_all(response.as_bytes());
 }
 
+static START_HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn reveal_main_window_after_start(app: &tauri::AppHandle) {
+    if START_HIDDEN.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(window) = handle.get_webview_window("main") {
+            if !window.is_visible().unwrap_or(true) {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
+    });
+}
+
+/// Called by the UI once the page has painted: shows the (initially invisible)
+/// main window unless the app was started hidden in the tray.
+#[tauri::command]
+fn main_window_ready(app: tauri::AppHandle) {
+    reveal_main_window_after_start(&app);
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     let main_app = app.clone();
     let _ = app.run_on_main_thread(move || {
@@ -15267,10 +15291,18 @@ fn main() {
                 })
                 .build(app)?;
             apply_window_icon(app.handle());
-            if std::env::args().any(|argument| argument == "--hidden") {
-                if let Some(window) = app.get_webview_window("main") {
-                    window.hide()?;
-                }
+            // The main window is created invisible (tauri.conf.json) so neither a
+            // hidden autostart nor a normal launch flashes a blank white window
+            // while the page loads. A normal launch shows it once the UI calls
+            // `main_window_ready`; the timer below is only a safety net.
+            let start_hidden = std::env::args().any(|argument| argument == "--hidden");
+            START_HIDDEN.store(start_hidden, std::sync::atomic::Ordering::SeqCst);
+            if !start_hidden {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(5));
+                    reveal_main_window_after_start(&handle);
+                });
             }
             Ok(())
         })
@@ -15360,6 +15392,7 @@ fn main() {
             set_application_language,
             control_main_window,
             open_link_window,
+            main_window_ready,
             get_application_language,
             get_log_editor,
             set_log_editor,

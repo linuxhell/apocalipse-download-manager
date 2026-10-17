@@ -286,3 +286,6 @@ body.link-window { display: block; height: 100vh; overflow: hidden; }
 .link-transfer-track { height: 6px; background: var(--track); border-radius: 3px; overflow: hidden; }
 .link-transfer-track span { display: block; height: 100%; width: 0; background: var(--blue); }
 .link-transfer-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+/* Black outline around the frameless main window (and the dark/light modes alike). */
+body:not(.link-window)::after { content: ""; position: fixed; inset: 0; border: 1px solid #000; pointer-events: none; z-index: 2147483647; }
