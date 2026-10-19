@@ -239,7 +239,6 @@ dialog form { padding: 16px 20px; display: flex; flex-direction: column; max-hei
 .dialog-copy { color: var(--muted); margin: 0 0 8px; }
 .add-dialog-viewport { position: relative; flex: 1; min-height: 0; display: flex; }
 .add-dialog-scroll { flex: 1; min-height: 0; max-height: 62vh; overflow-y: auto; padding-right: 10px; }
-.add-dialog-scrollbar { display: none; }
 .add-dialog-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
 .add-dialog-analysis, .add-dialog-destination { min-width: 0; }
 .analysis { margin: 8px 0; padding: 8px 10px; background: var(--surface-2); border-radius: 6px; }

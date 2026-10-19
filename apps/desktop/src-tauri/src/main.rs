@@ -10077,31 +10077,6 @@ fn aria2_asset_suffix() -> Result<&'static str, String> {
     }
 }
 
-fn active_torrent_video(directory: &Path) -> Option<PathBuf> {
-    let mut best: Option<(u64, PathBuf)> = None;
-    for entry in fs::read_dir(directory).ok()?.flatten() {
-        let path = entry.path();
-        let candidate = if path.is_dir() {
-            find_video_file(&path, 0)
-        } else if is_previewable_video_path(&path) {
-            Some(path)
-        } else {
-            None
-        };
-        let Some(candidate) = candidate else {
-            continue;
-        };
-        let Ok(metadata) = candidate.metadata() else {
-            continue;
-        };
-        let size = metadata.len();
-        if best.as_ref().is_none_or(|(current, _)| size > *current) {
-            best = Some((size, candidate));
-        }
-    }
-    best.filter(|(size, _)| *size > 0).map(|(_, path)| path)
-}
-
 fn previewable_task_media(root: &Path) -> Option<PathBuf> {
     let media = if root.is_file() && is_previewable_video_path(root) {
         Some(root.to_path_buf())
