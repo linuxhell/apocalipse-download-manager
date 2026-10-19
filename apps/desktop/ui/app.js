@@ -170,6 +170,7 @@ const catalogs = {
     connections: "Connections per download",
     automatic: "Automatic",
     taskConnections: "Threads for this download",
+    bandwidthPrompt: "Speed limit in MB/s (0 = unlimited)", verifying: "Verifying",
     taskConnectionsHint: "Only changes this task. Use 1 on sites that reject segmented downloads.",
     downloadBandwidthLimit: "This download limit", megabytesPerSecond: "MB/s", unlimited: "Unlimited", smartAutomation: "Smart automation", bandwidthAction: "Speed limit", bandwidthPanel: "Bandwidth", adaptiveEfficiency: "Adaptive efficiency", adaptiveEfficiencyHint: "Optimizes queue order and connection use for the current workload.", scheduler: "Download schedule", schedulerHint: "Automatically pauses outside the permitted local time window.", scheduleStart: "Start", scheduleEnd: "End", bandwidthPanelHint: "Set limits without changing the window size.", currentBandwidth: "Current usage", globalBandwidthLimit: "Global download limit",
     defaults: "Default",
@@ -380,6 +381,7 @@ const catalogs = {
     connections: "Conexões por download",
     automatic: "Automático",
     taskConnections: "Threads para este download",
+    bandwidthPrompt: "Limite de velocidade em MB/s (0 = ilimitado)", verifying: "Verificando",
     taskConnectionsHint: "Altera somente esta tarefa. Use 1 em sites que não aceitam downloads segmentados.",
     downloadBandwidthLimit: "Limite deste download", megabytesPerSecond: "MB/s", unlimited: "Ilimitado", smartAutomation: "Automação inteligente", bandwidthAction: "Limitar velocidade", bandwidthPanel: "Banda", adaptiveEfficiency: "Eficiência adaptativa", adaptiveEfficiencyHint: "Otimiza a ordem da fila e o uso de conexões para a carga atual.", scheduler: "Agendamento de downloads", schedulerHint: "Pausa automaticamente fora do horário local permitido.", scheduleStart: "Início", scheduleEnd: "Fim", bandwidthPanelHint: "Defina limites sem alterar o tamanho da janela.", currentBandwidth: "Uso atual", globalBandwidthLimit: "Limite global de download",
     defaults: "Padrão",
@@ -590,6 +592,7 @@ const catalogs = {
     connections: "每个下载的连接数",
     automatic: "自动",
     taskConnections: "此下载的线程数",
+    bandwidthPrompt: "限速（MB/秒，0 = 不限速）", verifying: "校验中",
     taskConnectionsHint: "仅更改此任务。对于不允许分段下载的网站，请使用 1。",
     downloadBandwidthLimit: "此下载的限制", megabytesPerSecond: "MB/秒", unlimited: "不限速", smartAutomation: "智能自动化", bandwidthAction: "限速", bandwidthPanel: "带宽", adaptiveEfficiency: "自适应效率", adaptiveEfficiencyHint: "根据当前负载优化队列顺序和连接使用。", scheduler: "下载计划", schedulerHint: "在允许的本地时间之外自动暂停。", scheduleStart: "开始", scheduleEnd: "结束", bandwidthPanelHint: "无需改变窗口大小即可设置限制。", currentBandwidth: "当前使用量", globalBandwidthLimit: "全局下载限制",
     defaults: "默认",
@@ -1242,11 +1245,15 @@ function renderDownloads(force = false) {
         if (value === null) return;
         const megabytes = Number(value.replace(",", "."));
         if (!Number.isFinite(megabytes) || megabytes < 0 || megabytes > 10240) return;
-        await invoke("set_download_bandwidth_limit", {
-          id: task.id,
-          bandwidthLimit: Math.round(megabytes * 1024 * 1024),
-        });
-        await refreshDownloads();
+        try {
+          await invoke("set_download_bandwidth_limit", {
+            id: task.id,
+            bandwidthLimit: Math.round(megabytes * 1024 * 1024),
+          });
+          await refreshDownloads();
+        } catch (error) {
+          window.alert(String(error));
+        }
       };
       actions.append(bandwidth);
     }
@@ -1395,6 +1402,7 @@ const bandwidthDialog = document.querySelector("#bandwidth-dialog");
 let exportTaskId = null;
 document.querySelector("#history-search").oninput = (event) => {
   historyQuery = event.target.value.trim().toLocaleLowerCase();
+  selectedIds.clear();
   renderDownloads();
 };
 document.querySelector("#import-list").onclick = async (event) => {
@@ -1495,6 +1503,8 @@ async function showSettingsTab(tab) {
 }
 function showPage(page) {
   const openedAt = performance.now();
+  // A selection made on another page must not survive into bulk actions here.
+  if (page !== activePage) selectedIds.clear();
   activePage = page;
   document.body.dataset.page = page;
   const list = ["downloads", "recordings", "torrents"].includes(page);
@@ -1770,6 +1780,7 @@ document.querySelectorAll("#add").forEach(
   (button) =>
     (button.onclick = () => {
       resetAnalysisForNewRequest();
+      pendingBrowserAssistedPath = null;
       pendingDiagnosticTrace = null;
       pendingReferer = null;
       pendingDuration = null;
