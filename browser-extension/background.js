@@ -289,7 +289,10 @@ async function bridgeRequest(path, options = {}, suppliedToken = null) {
     throw new Error("not_paired");
   }
   try {
+    // A hung desktop must not stall every browser download and heartbeat.
+    const timeoutMs = path === "/v1/preview-media" ? 120000 : path.startsWith("/v1/blob") ? 60000 : 20000;
     const response = await fetch(`${BRIDGE}${path}`, {
+      ...(typeof AbortSignal !== "undefined" && AbortSignal.timeout ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
       ...options,
       headers: {
         "Authorization": `Bearer ${pairingToken}`,
@@ -1430,10 +1433,24 @@ const chatgptLibraryUrl = (value) => {
   } catch { return null; }
 };
 
+// Hosts a web page must never be able to make the extension fetch with the
+// user's cookies: loopback, link-local, private ranges and bare intranet names.
+const privateNetworkHost = (hostname) => {
+  const host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return true;
+  if (!host.includes(".") && !host.includes(":")) return true;
+  if (host.includes(":")) return host === "::1" || host === "::" || /^(fc|fd|fe[89ab])/.test(host) || host.startsWith("::ffff:");
+  const parts = host.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
+  const [a, b] = parts;
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+};
+
 const genericHttpDownload = (value) => {
   try {
     const url = new URL(value);
-    return /^(https?):$/i.test(url.protocol) ? { url: url.href, kind: "forced" } : null;
+    if (!/^(https?):$/i.test(url.protocol) || privateNetworkHost(url.hostname)) return null;
+    return { url: url.href, kind: "forced" };
   } catch { return null; }
 };
 
@@ -1719,13 +1736,23 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     reply({ ok: false, bypass: true });
     return;
   }
+  // The page world can forge this message, so the tab URL is authoritative and
+  // a request that carries a body may only target the page's own origin.
+  const tabUrl = sender.tab?.url || null;
+  const method = String(message.method || "GET").toUpperCase();
+  if (method !== "GET" && method !== "POST") { reply({ ok: false, error: "unsupported_method" }); return; }
+  if (method === "POST" || message.body) {
+    let sameOrigin = false;
+    try { sameOrigin = Boolean(tabUrl) && new URL(message.url).origin === new URL(tabUrl).origin; } catch {}
+    if (!sameOrigin) { reply({ ok: false, error: "cross_origin_body_rejected" }); return; }
+  }
   const request = {
     url: message.url,
-    pageUrl: message.pageUrl || sender.tab?.url || null,
+    pageUrl: tabUrl || message.pageUrl || null,
     fileName: message.fileName || "",
     source: message.source || "main-world",
     force: Boolean(message.force) || forceIsActive(shortcutTabId),
-    method: message.method || "GET",
+    method,
     body: message.body || null,
     contentType: message.contentType || null,
   };

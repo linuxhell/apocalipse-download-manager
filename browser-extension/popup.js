@@ -359,7 +359,7 @@ const render = () => {
     try { parsed = new URL(item.url); } catch { parsed = null; }
     const pathName = parsed?.pathname?.split("/").filter(Boolean).pop() || "";
     const extension = (pathName.match(/\.([a-z0-9]{2,8})$/i)?.[1] || item.ext || (/\.m3u8(?:$|[?#])/i.test(item.url) ? "m3u8" : item.kind)).toUpperCase();
-    row.querySelector("b").textContent = item.title || decodeURIComponent(pathName) || item.url;
+    row.querySelector("b").textContent = item.title || (() => { try { return decodeURIComponent(pathName); } catch { return pathName; } })() || item.url;
     metadata.textContent = [extension, formatBytes(item.size), formatDuration(item.duration), item.ambiguousSocialTrack ? t("incompleteTrack") : (item.recommended ? t("recommended") : ""), parsed?.hostname].filter(Boolean).join(" · ");
     const previewButton = row.querySelector(".external-preview");
     previewButton.textContent = t("externalPreview");
