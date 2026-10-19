@@ -2,7 +2,8 @@
 
 The sidebar entry directly below Apocalipse Link opens a separate, reusable
 Tauri window. Its UI follows the saved ADM language (en, pt-BR, zh-CN), including
-changes while open, and the selected colour mode. The layout takes inspiration
+changes while open, and the selected colour mode. Opening it does not show or
+resize the main window. The layout takes inspiration
 from aMule's network/search/preferences organization and dense server tables.
 It does not reuse aMule C++ code, launch aMule, or require an aMule daemon.
 
@@ -61,7 +62,7 @@ or nodes remain reachable. Updating a list is distinct from connecting to peers.
 
 ## Validation
 
-- 328 Node regression/behaviour tests pass, including live language changes,
+- 329 Node regression/behaviour tests pass, including live language changes,
   metadata URL rejection, native command routing, and text-only rendering of
   untrusted server/result names.
 - A Chromium render at 1280x820 was visually inspected in Portuguese; light/dark

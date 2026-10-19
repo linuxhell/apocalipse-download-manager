@@ -87,3 +87,14 @@ test('Kad bootstrap is identified as a probe rather than a connected routing ses
   f.ids.get('ed2k-bootstrap').onclick();await new Promise(resolve=>setImmediate(resolve));
   assert.ok(f.calls.some(c=>c.command==='ed2k_bootstrap'));
 });
+
+test('opening an independent ED2K window does not show or resize the main window',()=>{
+  const code=fs.readFileSync(path.join(root,'apps/desktop/ui/color-mode.js'),'utf8');
+  for(const bodyClass of ['link-window','ed2k-window','']){
+    const calls=[];let loaded;
+    const window={addEventListener:(_,fn)=>{loaded=fn;},__TAURI__:{core:{invoke:async name=>{calls.push(name);}}}};
+    const document={documentElement:{dataset:{}},body:{classList:{contains:name=>name===bodyClass}}};
+    vm.runInNewContext(code,{window,document,localStorage:{getItem:()=>null},requestAnimationFrame:fn=>fn()});
+    loaded();assert.deepEqual(calls,bodyClass?[]:['main_window_ready']);
+  }
+});
