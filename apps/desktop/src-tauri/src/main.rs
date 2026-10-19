@@ -1568,6 +1568,17 @@ fn link_share_entries(settings: &UserSettings) -> Vec<LinkFileEntry> {
         .collect()
 }
 
+/// One path component coming from a Link peer. It must stay inside the folder
+/// it is joined to: no separators, no `.`/`..`, no NUL, and on Windows no `:`
+/// (a drive prefix such as `C:` makes `PathBuf::push` discard the base path).
+fn valid_link_component(part: &str) -> bool {
+    !part.is_empty()
+        && part != "."
+        && part != ".."
+        && !part.contains(['/', '\\', '\0'])
+        && !(cfg!(windows) && part.contains(':'))
+}
+
 fn resolve_link_share(
     settings: &UserSettings,
     virtual_path: &str,
@@ -1586,7 +1597,7 @@ fn resolve_link_share(
         if part.is_empty() || part == "." {
             continue;
         }
-        if part == ".." || part.contains(['/', '\\']) {
+        if !valid_link_component(part) {
             return Err("invalid_remote_path".to_owned());
         }
         path.push(part);
@@ -2517,6 +2528,11 @@ async fn download_remote_link_file(
                 for entry in
                     list_remote_link_directory_sync(&state, &id, &password, remote_directory)?
                 {
+                    // The peer chooses `entry.name`: never let it climb out of
+                    // (or replace) the folder the user picked.
+                    if !valid_link_component(&entry.name) {
+                        return Err("invalid_remote_path".to_owned());
+                    }
                     let local_path = local_directory.join(&entry.name);
                     if entry.directory {
                         pending.push((entry.path, local_path));
@@ -2726,6 +2742,13 @@ enum BValue {
 }
 
 fn parse_bencode(data: &[u8], position: &mut usize) -> Result<BValue, String> {
+    parse_bencode_at(data, position, 0)
+}
+
+fn parse_bencode_at(data: &[u8], position: &mut usize, depth: usize) -> Result<BValue, String> {
+    if depth > 64 {
+        return Err("invalid_torrent".to_owned());
+    }
     let byte = *data
         .get(*position)
         .ok_or_else(|| "invalid_torrent".to_owned())?;
@@ -2748,7 +2771,7 @@ fn parse_bencode(data: &[u8], position: &mut usize) -> Result<BValue, String> {
             *position += 1;
             let mut values = Vec::new();
             while data.get(*position) != Some(&b'e') {
-                values.push(parse_bencode(data, position)?);
+                values.push(parse_bencode_at(data, position, depth + 1)?);
             }
             *position += 1;
             Ok(BValue::List(values))
@@ -2757,10 +2780,10 @@ fn parse_bencode(data: &[u8], position: &mut usize) -> Result<BValue, String> {
             *position += 1;
             let mut values = HashMap::new();
             while data.get(*position) != Some(&b'e') {
-                let BValue::Bytes(key) = parse_bencode(data, position)? else {
+                let BValue::Bytes(key) = parse_bencode_at(data, position, depth + 1)? else {
                     return Err("invalid_torrent".to_owned());
                 };
-                values.insert(key, parse_bencode(data, position)?);
+                values.insert(key, parse_bencode_at(data, position, depth + 1)?);
             }
             *position += 1;
             Ok(BValue::Dict(values))
@@ -4422,7 +4445,20 @@ fn write_social_cookie_jar(path: &Path, url: &str, header: &str) -> Result<(), S
         }
         jar.push_str(&format!(".{domain}\tTRUE\t/\tTRUE\t0\t{name}\t{value}\n"));
     }
-    fs::write(path, jar).map_err(|error| error.to_string())
+    // Session cookies: owner-only, like the credential file.
+    write_private_file(path, jar.as_bytes()).map_err(|error| error.to_string())
+}
+
+fn write_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)?.write_all(bytes)
 }
 
 /// Quotes a value the way yt-dlp's config-file parser (POSIX shlex) expects,
@@ -4769,7 +4805,11 @@ fn handle_link_connection<S: Read + Write>(
         let resolved = path
             .ok_or_else(|| "invalid_path".to_owned())
             .and_then(|value| {
-                let is_root = value.trim_matches('/').split('/').count() <= 2;
+                let is_root = value
+                    .split('/')
+                    .filter(|part| !part.is_empty() && *part != ".")
+                    .count()
+                    <= 2;
                 let (path, allow_write) = resolve_link_share(&settings, &value)?;
                 if !allow_write || is_root {
                     return Err("link_write_not_allowed".to_owned());
@@ -4855,6 +4895,12 @@ fn handle_link_connection<S: Read + Write>(
                 bridge_response(&mut stream, "403 Forbidden", None, "");
                 return;
             }
+        }
+        if !has_content_length(&headers) {
+            // Without a length the body would be read as empty and the
+            // existing file silently replaced by a zero-byte one.
+            bridge_response(&mut stream, "411 Length Required", None, "");
+            return;
         }
         let length = bridge_content_length(&headers);
         let body_start = header_end + 4;
@@ -5064,7 +5110,10 @@ fn handle_link_connection<S: Read + Write>(
         Ok(value) => value,
         Err(_) => return,
     };
-    if request.password != settings.link_password {
+    if !constant_time_eq(
+        request.password.as_bytes(),
+        settings.link_password.as_bytes(),
+    ) {
         bridge_response(
             &mut stream,
             "401 Unauthorized",
@@ -5399,26 +5448,34 @@ async fn inspect_media_formats(
         use std::os::windows::process::CommandExt;
         command.as_std_mut().creation_flags(0x08000000);
     }
-    let mut output = command
-        .output()
-        .await
-        .map_err(|error| format!("yt_dlp_unavailable: {error}"))?;
-    if !output.status.success() && browser_cookie_failure(&String::from_utf8_lossy(&output.stderr))
-    {
-        // The browser cookie store was unreadable (profile missing, database
-        // locked). Inspect again without browser cookies instead of failing.
-        let mut retry = command_without_browser_cookies(&command);
-        output = retry
+    let output = async {
+        let mut output = command
             .output()
             .await
             .map_err(|error| format!("yt_dlp_unavailable: {error}"))?;
+        if !output.status.success()
+            && browser_cookie_failure(&String::from_utf8_lossy(&output.stderr))
+        {
+            // The browser cookie store was unreadable (profile missing, database
+            // locked). Inspect again without browser cookies instead of failing.
+            let mut retry = command_without_browser_cookies(&command);
+            output = retry
+                .output()
+                .await
+                .map_err(|error| format!("yt_dlp_unavailable: {error}"))?;
+        }
+        Ok::<_, String>(output)
     }
+    .await;
+    // Remove the cookie jar and the plaintext credential file even when
+    // yt-dlp could not be spawned.
     if let Some(path) = cookie_jar {
         let _ = fs::remove_file(path);
     }
     if let Some(path) = credential_config {
         let _ = fs::remove_file(path);
     }
+    let output = output?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
     }
@@ -7325,6 +7382,15 @@ fn aria2_status_outage_exceeded(failing_for: Duration) -> bool {
     failing_for >= ARIA2_STATUS_OUTAGE_LIMIT
 }
 
+/// Frees the worker slot of a task that ended before its normal cleanup and
+/// lets the next queued task start; otherwise the slot leaks until restart.
+fn release_worker_slot(app: &tauri::AppHandle, id: uuid::Uuid) {
+    if let Ok(mut workers) = app.state::<AppState>().workers.lock() {
+        workers.remove(&id);
+    }
+    start_next_queued(app);
+}
+
 async fn run_external_download(
     app: tauri::AppHandle,
     id: DownloadId,
@@ -7352,6 +7418,7 @@ async fn run_external_download(
                         message: "signed_stream_url_expired".to_owned(),
                     };
                 });
+                release_worker_slot(&app, id);
                 return;
             }
         }
@@ -7393,6 +7460,7 @@ async fn run_external_download(
                     message: error.to_string(),
                 }
             });
+            release_worker_slot(&app, id);
             return;
         }
     }
@@ -7802,7 +7870,10 @@ async fn run_external_download(
                 command
             }
         }
-        _ => return,
+        _ => {
+            release_worker_slot(&app, id);
+            return;
+        }
     };
     #[cfg(target_os = "windows")]
     {
@@ -12332,6 +12403,7 @@ fn get_transfer_limits(state: State<'_, AppState>) -> Result<TransferLimits, Str
 
 #[tauri::command]
 async fn set_transfer_limits(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     max_active_downloads: usize,
     connections_per_download: usize,
@@ -12360,6 +12432,9 @@ async fn set_transfer_limits(
             .set_global_download_limit(result.global_bandwidth_limit)
             .await?;
     }
+    // A higher limit frees slots: start queued tasks now instead of waiting
+    // for a running one to finish.
+    start_next_queued(&app);
     Ok(result)
 }
 
@@ -12988,6 +13063,14 @@ fn bridge_authorized(headers: &str, expected: &str) -> bool {
     })
 }
 
+fn has_content_length(headers: &str) -> bool {
+    headers.lines().any(|line| {
+        line.split_once(':').is_some_and(|(name, value)| {
+            name.eq_ignore_ascii_case("content-length") && value.trim().parse::<usize>().is_ok()
+        })
+    })
+}
+
 fn bridge_content_length(headers: &str) -> usize {
     headers
         .lines()
@@ -13004,9 +13087,21 @@ fn read_bridge_request(stream: &mut TcpStream) -> Option<Vec<u8>> {
     // Authenticated media requests may include a bounded thumbnail. Keep a
     // defensive ceiling while allowing the extension's portable preview image.
     const MAX_REQUEST_SIZE: usize = 786_432;
+    // The per-read timeout alone let a client trickle one byte every few
+    // seconds and hold a connection slot forever (before any authentication),
+    // so the whole request must arrive within one overall deadline.
+    const REQUEST_DEADLINE: Duration = Duration::from_secs(10);
+    const READ_SLICE: Duration = Duration::from_secs(3);
+    let deadline = Instant::now() + REQUEST_DEADLINE;
     let mut request = Vec::with_capacity(8_192);
     let mut chunk = [0_u8; 8_192];
     loop {
+        let remaining = deadline.checked_duration_since(Instant::now())?;
+        stream
+            .set_read_timeout(Some(
+                remaining.min(READ_SLICE).max(Duration::from_millis(50)),
+            ))
+            .ok()?;
         let count = stream.read(&mut chunk).ok()?;
         if count == 0 {
             break;
@@ -13018,7 +13113,7 @@ fn read_bridge_request(stream: &mut TcpStream) -> Option<Vec<u8>> {
         if let Some(header_end) = request.windows(4).position(|value| value == b"\r\n\r\n") {
             let body_start = header_end + 4;
             let headers = String::from_utf8_lossy(&request[..header_end]);
-            if request.len() >= body_start + bridge_content_length(&headers) {
+            if request.len() >= body_start.saturating_add(bridge_content_length(&headers)) {
                 break;
             }
         }
@@ -13841,11 +13936,15 @@ fn decode_hex(value: &str) -> Result<Vec<u8>, String> {
     if value.len() > 131_072 || !value.len().is_multiple_of(2) {
         return Err("invalid_blob_chunk".to_owned());
     }
-    (0..value.len())
-        .step_by(2)
-        .map(|index| {
-            u8::from_str_radix(&value[index..index + 2], 16)
-                .map_err(|_| "invalid_blob_chunk".to_owned())
+    // Work on bytes: slicing the &str by byte offsets panics when a multi-byte
+    // character straddles an offset (e.g. "aéb"), which killed the bridge thread.
+    let digit = |byte: u8| (byte as char).to_digit(16).map(|value| value as u8);
+    value
+        .as_bytes()
+        .chunks(2)
+        .map(|pair| match (digit(pair[0]), digit(pair[1])) {
+            (Some(high), Some(low)) => Ok((high << 4) | low),
+            _ => Err("invalid_blob_chunk".to_owned()),
         })
         .collect()
 }
@@ -16632,6 +16731,31 @@ mod tests {
         assert!(!bridge_authorized("GET / HTTP/1.1\r\n", "secret-token"));
         assert!(constant_time_eq(b"abc", b"abc"));
         assert!(!constant_time_eq(b"abc", b"abd"));
+    }
+
+    #[test]
+    fn blob_chunk_hex_decoding_never_panics_on_multibyte_text() {
+        assert_eq!(decode_hex("00ff10").unwrap(), vec![0x00, 0xff, 0x10]);
+        assert_eq!(decode_hex("").unwrap(), Vec::<u8>::new());
+        assert!(decode_hex("aéb").is_err());
+        assert!(decode_hex("é9").is_err());
+        assert!(decode_hex("zz").is_err());
+        assert!(decode_hex("abc").is_err());
+    }
+
+    #[test]
+    fn link_peers_cannot_escape_the_chosen_folder() {
+        assert!(valid_link_component("movie.mkv"));
+        assert!(valid_link_component("a b (1).txt"));
+        assert!(!valid_link_component(".."));
+        assert!(!valid_link_component("../x"));
+        assert!(!valid_link_component("/etc/passwd"));
+        assert!(!valid_link_component("a\\b"));
+        assert!(!valid_link_component(""));
+        assert!(!valid_link_component("a\0b"));
+        if cfg!(windows) {
+            assert!(!valid_link_component("C:"));
+        }
     }
 
     #[test]
