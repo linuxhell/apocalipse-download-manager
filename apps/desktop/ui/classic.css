@@ -207,8 +207,8 @@ button:disabled { opacity: .45; cursor: default; }
 .log-toolbar select { width: 140px; }
 .log-event-list { max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; }
 .log-event { padding: 7px 10px; border-bottom: 1px solid var(--hover); font-size: 12px; }
-.log-event.level-ERROR { border-left: 3px solid var(--red); }
-.log-event.level-WARN { border-left: 3px solid var(--orange); }
+.log-event.level-error { border-left: 3px solid var(--red); }
+.log-event.level-warn { border-left: 3px solid var(--orange); }
 .log-event p { margin: 3px 0 0; color: var(--muted); word-break: break-all; }
 #log-empty { color: var(--faint); }
 pre#diagnostic-log { max-height: 340px; overflow: auto; background: var(--surface-2); padding: 10px; border-radius: 6px; font-size: 12px; white-space: pre-wrap; }

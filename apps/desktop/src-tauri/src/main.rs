@@ -12986,11 +12986,29 @@ fn bridge_origin(headers: &str) -> Option<&str> {
     })
 }
 
+/// Compares two secrets without stopping at the first differing byte, so the
+/// time taken does not reveal how much of a guessed token was right.
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0_u8, |difference, (a, b)| difference | (a ^ b))
+        == 0
+}
+
 fn bridge_authorized(headers: &str, expected: &str) -> bool {
+    if expected.is_empty() {
+        return false;
+    }
     headers.lines().any(|line| {
         line.split_once(':').is_some_and(|(name, value)| {
             name.eq_ignore_ascii_case("authorization")
-                && value.trim() == format!("Bearer {expected}")
+                && value
+                    .trim()
+                    .strip_prefix("Bearer ")
+                    .is_some_and(|token| constant_time_eq(token.as_bytes(), expected.as_bytes()))
         })
     })
 }
@@ -16627,6 +16645,18 @@ mod tests {
         assert!(file_is_locked(&directory.join("missing.txt")));
         assert_eq!(fs::read(directory.join("a.txt")).unwrap(), b"a");
         let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn bridge_tokens_are_compared_exactly_and_never_when_empty() {
+        let headers = "GET /v1/health HTTP/1.1\r\nAuthorization: Bearer secret-token\r\n";
+        assert!(bridge_authorized(headers, "secret-token"));
+        assert!(!bridge_authorized(headers, "secret-toke"));
+        assert!(!bridge_authorized(headers, "secret-token-extra"));
+        assert!(!bridge_authorized("Authorization: Bearer \r\n", ""));
+        assert!(!bridge_authorized("GET / HTTP/1.1\r\n", "secret-token"));
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
     }
 
     #[test]
