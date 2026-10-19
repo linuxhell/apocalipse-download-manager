@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Apocalipse ED2K/Kad</title>
+  <link rel="stylesheet" href="classic.css"><link rel="stylesheet" href="ed2k.css">
+  <script src="color-mode.js"></script>
+</head>
+<body class="ed2k-window">
+  <header class="ed2k-header"><div><span class="ed2k-eyebrow">APOCALIPSE · NIBIRU XTREME</span><h1>Apocalipse ED2K/Kad</h1></div><span class="ed2k-preview" data-i18n="preview"></span></header>
+  <section class="ed2k-toolbar" aria-labelledby="tab-networks">
+    <button id="ed2k-connect" class="primary" data-i18n="connect"></button><button id="ed2k-disconnect" data-i18n="disconnect" disabled></button>
+    <span class="ed2k-toolbar-divider"></span><button id="ed2k-bootstrap" data-i18n="bootstrap"></button>
+    <div class="ed2k-indicators"><span id="ed2k-status"></span><span id="kad-status"></span></div>
+  </section>
+  <nav class="ed2k-tabs" role="tablist">
+    <button role="tab" aria-selected="true" aria-controls="panel-networks" id="tab-networks" data-tab="networks" data-i18n="networks"></button>
+    <button role="tab" aria-selected="false" aria-controls="panel-search" id="tab-search" data-tab="search" data-i18n="search"></button>
+    <button role="tab" aria-selected="false" aria-controls="panel-preferences" id="tab-preferences" data-tab="preferences" data-i18n="preferences"></button>
+    <button role="tab" aria-selected="false" aria-controls="panel-log" id="tab-log" data-tab="log" data-i18n="log"></button>
+  </nav>
+  <main class="ed2k-content">
+    <section id="panel-networks" role="tabpanel" aria-labelledby="tab-networks">
+      <div class="ed2k-section-heading"><div><h2 data-i18n="servers"></h2><p data-i18n="serversHint"></p></div><span id="server-count" class="ed2k-count"></span></div>
+      <div class="ed2k-table-wrap"><table><thead><tr><th data-i18n="serverName"></th><th data-i18n="address"></th><th data-i18n="port"></th><th data-i18n="description"></th><th></th></tr></thead><tbody id="ed2k-servers"></tbody></table></div>
+      <div class="ed2k-network-bottom"><article><h2>Kad</h2><p id="kad-summary"></p><p data-i18n="kadHint"></p></article><article><h2 data-i18n="scopeTitle"></h2><p data-i18n="scopeHint"></p></article></div>
+    </section>
+    <section id="panel-search" role="tabpanel" aria-labelledby="tab-search" hidden>
+      <div class="ed2k-section-heading"><div><h2 data-i18n="search"></h2><p data-i18n="searchHint"></p></div></div>
+      <form id="ed2k-search-form" class="ed2k-search-form"><label><span data-i18n="query"></span><input id="ed2k-query" maxlength="1024" required></label><button id="ed2k-search-submit" class="primary" type="submit" data-i18n="search" disabled></button></form>
+      <div class="ed2k-table-wrap"><table><thead><tr><th data-i18n="file"></th><th data-i18n="size"></th><th data-i18n="sources"></th><th>ED2K</th><th></th></tr></thead><tbody id="ed2k-results"></tbody></table></div>
+      <p id="search-summary"></p>
+    </section>
+    <section id="panel-preferences" role="tabpanel" aria-labelledby="tab-preferences" hidden>
+      <div class="ed2k-section-heading"><div><h2 data-i18n="preferences"></h2><p data-i18n="preferencesHint"></p></div></div>
+      <article class="ed2k-setting"><h3>server.met</h3><label><span data-i18n="listUrl"></span><input id="ed2k-server-url" type="url" value="https://upd.emule-security.org/server.met"></label><div><button id="ed2k-update-servers" data-i18n="updateServers"></button><button id="ed2k-import-servers" data-i18n="importServers"></button></div></article>
+      <article class="ed2k-setting"><h3>nodes.dat</h3><label><span data-i18n="listUrl"></span><input id="ed2k-node-url" type="url" value="https://upd.emule-security.org/nodes.dat"></label><div><button id="ed2k-update-nodes" data-i18n="updateNodes"></button><button id="ed2k-import-nodes" data-i18n="importNodes"></button></div></article>
+      <p data-i18n="listSafety"></p>
+    </section>
+    <section id="panel-log" role="tabpanel" aria-labelledby="tab-log" hidden><div class="ed2k-section-heading"><h2 data-i18n="log"></h2><button id="ed2k-clear-log" data-i18n="clear"></button></div><pre id="ed2k-log" role="log"></pre></section>
+  </main>
+  <footer class="ed2k-footer"><span id="ed2k-feedback" role="status"></span><span data-i18n="engine"></span></footer>
+  <script src="ed2k.js"></script>
+</body>
+</html>

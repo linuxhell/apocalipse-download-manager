@@ -5,6 +5,7 @@ mod audio_conversion;
 
 mod aria2;
 mod diagnostics;
+mod ed2k_ui;
 mod prepared_preview;
 mod runtime_health;
 mod thumbnail_cache;
@@ -8750,7 +8751,11 @@ fn set_dark_mode(state: State<'_, AppState>, enabled: bool) -> Result<(), String
 }
 
 #[tauri::command]
-fn set_application_language(state: State<'_, AppState>, language: String) -> Result<(), String> {
+fn set_application_language(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    language: String,
+) -> Result<(), String> {
     if !matches!(language.as_str(), "en" | "pt-BR" | "zh-CN") {
         return Err("unsupported_language".to_owned());
     }
@@ -8773,6 +8778,8 @@ fn set_application_language(state: State<'_, AppState>, language: String) -> Res
         "application.language_changed",
         &format!("language={language}"),
     );
+    app.emit("apocalipse-language-changed", &language)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -15605,6 +15612,11 @@ fn main() {
             ));
             let initial_queue = load_queue(&queue_path);
             let initial_aria2_tasks = restored_aria2_task_map(&initial_queue);
+            let ed2k_root = app_data.join("ed2k-kad");
+            app.manage(
+                ed2k_ui::Ed2kState::new(ed2k_root.clone())
+                    .unwrap_or_else(|error| ed2k_ui::Ed2kState::unavailable(ed2k_root, error)),
+            );
             app.manage(AppState {
                 queue: Mutex::new(initial_queue),
                 queue_path,
@@ -15803,6 +15815,15 @@ fn main() {
             set_application_language,
             control_main_window,
             open_link_window,
+            ed2k_ui::open_ed2k_window,
+            ed2k_ui::ed2k_overview,
+            ed2k_ui::ed2k_update_list,
+            ed2k_ui::ed2k_import_list,
+            ed2k_ui::ed2k_connect,
+            ed2k_ui::ed2k_disconnect,
+            ed2k_ui::ed2k_search,
+            ed2k_ui::ed2k_bootstrap,
+            ed2k_ui::ed2k_copy_link,
             main_window_ready,
             resolve_archive_conflict,
             check_file_conflict,
