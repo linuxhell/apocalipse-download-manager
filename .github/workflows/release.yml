@@ -246,6 +246,8 @@ jobs:
   release:
     name: Publish clean release
     needs: build
+    # Never publish from a feature branch started by workflow_dispatch.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -258,8 +260,7 @@ jobs:
 
       - name: Validate extension handoffs before publication
         run: |
-          node --check browser-extension/background.js
-          node --check browser-extension/popup.js
+          for file in browser-extension/*.js; do node --check "$file"; done
           node --test tests/*.test.cjs
 
       - uses: actions/download-artifact@v4
@@ -296,6 +297,21 @@ jobs:
           PY
           )
           if [[ -f "$signed" ]]; then
+            # A damaged or mislabeled signed package must stop the release.
+            unzip -tq "$signed"
+            python3 - "$signed" "$version" <<'PY'
+          import json
+          import sys
+          import zipfile
+
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              shipped = json.loads(archive.read("manifest.json"))["version"]
+              if "META-INF/mozilla.rsa" not in archive.namelist():
+                  raise SystemExit("Firefox XPI is not Mozilla-signed")
+          expected = json.load(open("browser-extension/manifest.json", encoding="utf-8"))["version"]
+          if shipped != expected:
+              raise SystemExit(f"Signed XPI is {shipped}, extension manifest is {expected}")
+          PY
             cp "$signed" "$GITHUB_WORKSPACE/dist/apocalipse-firefox-${version}.xpi"
           elif [[ -n "$fallback_version" ]]; then
             # An unsigned XPI cannot be installed in release Firefox. Until a signed
@@ -354,6 +370,12 @@ jobs:
             exit 1
           fi
 
+          # Fail before tagging anything when the notes are missing.
+          if [[ ! -f "packaging/release-notes-v${version}.md" ]]; then
+            echo "::error::packaging/release-notes-v${version}.md is missing"
+            exit 1
+          fi
+
           # Keep an existing version tag fixed. Reusing it is allowed only when
           # every change since the tagged product commit is release packaging.
           if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
@@ -361,7 +383,7 @@ jobs:
             tagged_commit=$(git rev-parse 'FETCH_HEAD^{commit}')
             if [[ "$tagged_commit" != "$GITHUB_SHA" ]]; then
               changed_paths=$(git diff --name-only "$tagged_commit..$GITHUB_SHA")
-              invalid_paths=$(printf '%s\n' "$changed_paths" | grep -Ev '^(\.github/workflows/release\.yml|packaging/firefox/apocalipse-firefox-0\.3\.167\.xpi|packaging/release-trigger-0\.4\.71\.txt)$' || true)
+              invalid_paths=$(printf '%s\n' "$changed_paths" | grep -Ev '^(\.github/workflows/[^/]+\.yml|packaging/firefox/[^/]+|packaging/release-[^/]+)$' || true)
               if [[ -n "$invalid_paths" ]]; then
                 echo "::error::$tag belongs to another product commit. Only release packaging changes may reuse the existing tag."
                 printf '%s\n' "$invalid_paths"
