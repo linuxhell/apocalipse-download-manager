@@ -486,7 +486,7 @@ fn default_bridge_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 fn default_aria2_release_repo() -> String {
-    "linuxhell/aria2-ultra".to_owned()
+    "FerroDownload/aria2-static-builds".to_owned()
 }
 fn default_link_password() -> String {
     uuid::Uuid::new_v4().simple().to_string()
@@ -5732,11 +5732,16 @@ fn save_queue_in_background(state: &AppState, queue: &[DownloadTask]) {
     }
 }
 
-fn load_settings(path: &Path) -> Result<UserSettings, String> {
-    let mut settings: UserSettings = read_json_state_file(path).unwrap_or_default();
-    if settings.aria2_release_repo == "FerroDownload/aria2-static-builds" {
+fn migrate_aria2_release_repo(settings: &mut UserSettings) {
+    // The former default repository was deleted. Keep explicit custom sources.
+    if settings.aria2_release_repo == "linuxhell/aria2-ultra" {
         settings.aria2_release_repo = default_aria2_release_repo();
     }
+}
+
+fn load_settings(path: &Path) -> Result<UserSettings, String> {
+    let mut settings: UserSettings = read_json_state_file(path).unwrap_or_default();
+    migrate_aria2_release_repo(&mut settings);
     for share in &mut settings.link_shares {
         if let Ok(metadata) = fs::metadata(&share.path) {
             share.directory = metadata.is_dir();
@@ -15889,6 +15894,27 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn aria2_release_source_migrates_deleted_default_and_preserves_custom_sources() {
+        assert_eq!(
+            super::default_aria2_release_repo(),
+            "FerroDownload/aria2-static-builds"
+        );
+        for (saved, expected) in [
+            ("linuxhell/aria2-ultra", "FerroDownload/aria2-static-builds"),
+            (
+                "FerroDownload/aria2-static-builds",
+                "FerroDownload/aria2-static-builds",
+            ),
+            ("custom-owner/custom-builds", "custom-owner/custom-builds"),
+        ] {
+            let mut settings = super::UserSettings::default();
+            settings.aria2_release_repo = saved.to_owned();
+            super::migrate_aria2_release_repo(&mut settings);
+            assert_eq!(settings.aria2_release_repo, expected);
+        }
+    }
+
     #[test]
     fn task_preview_accepts_only_own_audio_or_video_payload() {
         let directory = tempfile::tempdir().unwrap();
