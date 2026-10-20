@@ -8,7 +8,7 @@ const js = readFileSync(join(__dirname, '../apps/desktop/ui/app.js'), 'utf8');
 const rust = readFileSync(join(__dirname, '../apps/desktop/src-tauri/src/main.rs'), 'utf8');
 
 test('Tools offers localized Download beside Browse for every configurable item', () => {
-  for (const id of ['ffmpeg', 'yt-dlp', 'qjs', 'n-m3u8dl-re', 'aria2', 'extractor', 'player']) {
+  for (const id of ['ffmpeg', 'yt-dlp', 'qjs', 'n-m3u8dl-re', 'xtreme', 'extractor', 'player']) {
     assert.match(html, new RegExp(`data-tool-download="${id}"`));
     assert.match(html, new RegExp(`data-tool-pick="${id}"`));
   }

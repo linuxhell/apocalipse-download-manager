@@ -89,12 +89,12 @@ test('ED2K server and result names are plain text and search uses the native com
   assert.equal(f.ids.get('ed2k-results').children[0].children[0].textContent,'<script>untrusted</script>.txt');
   assert.equal(f.calls.find(c=>c.command==='ed2k_search').args.query,'example');
 });
-test('Kad bootstrap is identified as a probe rather than a connected routing session',async()=>{
+test('Kad routing is explicit about unsupported keyword search and publishing',async()=>{
   const f=await windowFixture();
-  assert.match(f.context.testCatalogs.en.kadHint,/does not yet keep a Kad session/);
-  assert.match(f.context.testCatalogs['pt-BR'].scopeHint,/Kad persistente ainda está em desenvolvimento/);
+  assert.match(f.context.testCatalogs.en.kadHint,/Keyword search, publishing, obfuscation/);
+  assert.match(f.context.testCatalogs['pt-BR'].scopeHint,/busca por palavras e publicação Kad ainda estão pendentes/);
   f.ids.get('ed2k-bootstrap').onclick();await new Promise(resolve=>setImmediate(resolve));
-  assert.ok(f.calls.some(c=>c.command==='ed2k_bootstrap'));
+  assert.ok(f.calls.some(c=>c.command==='ed2k_start_kad'));
 });
 
 test('opening an independent ED2K window does not show or resize the main window',()=>{

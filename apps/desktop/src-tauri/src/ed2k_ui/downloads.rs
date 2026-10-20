@@ -133,7 +133,7 @@ impl Downloads {
                 };
                 if cancel.load(Ordering::Acquire){return Err("cancelled".into());}
                 let state=app.state::<Ed2kState>();
-                let connection=state.server.read().await.as_ref().cloned().ok_or("ed2k_not_connected")?;
+                let connection=state.server.read().await.as_ref().cloned().filter(|c|c.is_connected());
                 queue.update(&id,|task|task.status="connecting".into())?;
                 let hash=task.file.hash_hex();
                 let mut sources=None;
@@ -141,19 +141,31 @@ impl Downloads {
                 for attempt in 0..3 {
                     if cancel.load(Ordering::Acquire){return Err("cancelled".into());}
                     let found = tokio::select! {
-                        result=connection.sources(&hash)=>result,
+                        result=async { match connection.as_ref() { Some(connection)=>connection.sources(&hash).await.map_err(|e|e.to_string()), None=>Ok(Vec::new()) } }=>result,
                         _=async{while !cancel.load(Ordering::Acquire){tokio::time::sleep(std::time::Duration::from_millis(50)).await;}}=>return Err("cancelled".into()),
                     };
                     match found {
-                        Ok(found)=>{sources=Some(found);break;},
+                        Ok(found) if !found.is_empty()=>{sources=Some(found);break;},
+                        Ok(_)=>{sources=Some(Vec::new());break;},
                         Err(reason)=>error=reason.to_string(),
                     }
                     if attempt<2 {tokio::time::sleep(std::time::Duration::from_secs(1)).await;}
                 }
-                let sources=sources.ok_or(error)?;
+                let mut sources=sources.unwrap_or_default();
+                let kad=state.kad_session.lock().await.clone();
+                if sources.is_empty() {
+                    if let Some(kad)=kad {
+                        sources=tokio::select! {
+                            result=kad.sources(task.file.hash,task.file.size)=>result?,
+                            _=async{while !cancel.load(Ordering::Acquire){tokio::time::sleep(std::time::Duration::from_millis(50)).await;}}=>return Err("cancelled".into()),
+                        };
+                    }
+                }
+                if sources.is_empty(){return Err(error);}
+
                 tokio::fs::create_dir_all(&task.directory).await.map_err(|e|e.to_string())?;
-                let callbacks=if connection.is_low_id(){None}else{state.incoming.lock().await.as_ref().map(|listener|ed2k::CallbackClient::new(connection.clone(),listener.callbacks()))};
-                let options=ed2k::TransferOptions{identity:state.user_hash,client_id:connection.client_id,callbacks};
+                let callbacks=match connection.as_ref().filter(|c|!c.is_low_id()) { Some(connection)=>state.incoming.lock().await.as_ref().map(|listener|ed2k::CallbackClient::new(connection.clone(),listener.callbacks())), None=>None };
+                let options=ed2k::TransferOptions{identity:state.user_hash,client_id:connection.as_ref().map(|c|c.client_id).unwrap_or(0),callbacks};
                 ed2k::download_with_options(&task.file,&task.directory,&sources,options,cancel.clone(),|progress|{
                     let _=queue.update(&id,|task|{
                         task.status=match progress.stage{TransferStage::Connecting=>"connecting",TransferStage::Queued=>"waiting_peer",TransferStage::Checking=>"checking",TransferStage::Downloading=>"downloading",TransferStage::Completed=>"completed"}.into();
@@ -241,6 +253,12 @@ pub async fn ed2k_add_download(
         .await
         .as_ref()
         .is_some_and(|s| s.is_connected())
+        || state
+            .kad_session
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|s| s.status().running)
     {
         state.downloads.start(app, id.clone())?;
     }

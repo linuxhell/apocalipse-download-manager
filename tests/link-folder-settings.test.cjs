@@ -143,7 +143,9 @@ test("LAN and Internet Link use TLS with TOFU pinning and system-account authent
   assert.match(rust, /TcpListener::bind\(\("0\.0\.0\.0", LINK_PORT\)\)/);
   assert.match(rust, /ServerConnection::new/);
   assert.match(rust, /ClientConnection::new/);
-  assert.doesNotMatch(rust, /fn read_link_http_response[\s\S]*?read_to_end/);
+  const responseStart = rust.indexOf("fn read_link_http_response");
+  const responseBody = rust.slice(responseStart, rust.indexOf("\nfn ", responseStart + 10));
+  assert.doesNotMatch(responseBody, /read_to_end/);
   assert.match(rust, /fn read_link_http_response[\s\S]*?bridge_content_length/);
   assert.match(rust, /link_trusted_certificates/);
   assert.match(rust, /link_tls_certificate_changed/);

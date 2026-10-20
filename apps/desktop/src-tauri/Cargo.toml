@@ -9,7 +9,7 @@ repository.workspace = true
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-nibiru-xtreme = { git = "https://github.com/linuxhell/nibiru-xtreme", rev = "b36859f9c70e602e1b34374dc56b1309f6891a49", default-features = false }
+nibiru-xtreme = { git = "https://github.com/linuxhell/nibiru-xtreme", rev = "0a9fcdde7363aed6881c08f57e157564a0bebd04", default-features = false }
 apocalipse-core = { path = "../../../crates/apocalipse-core" }
 apocalipse-transport-lab = { path = "../../../experiments/transport-lab", features = ["moqt"] }
 anyhow.workspace = true
@@ -28,6 +28,7 @@ sha2.workspace = true
 base64.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 crc32fast = "1"
+flate2 = "1"
 rcgen = "0.13"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
@@ -37,3 +38,9 @@ zip = { version = "2.4", default-features = false, features = ["deflate"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "ico"] }
 
 tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }

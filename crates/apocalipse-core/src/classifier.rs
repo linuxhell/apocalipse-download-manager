@@ -23,7 +23,7 @@ pub fn classify_url(input: &str) -> Option<DownloadKind> {
     if !input.contains("://") && local_path.ends_with(".torrent") {
         return Some(DownloadKind::Torrent);
     }
-    if !input.contains("://") && local_path.ends_with(".m3u8") {
+    if !input.contains("://") && (local_path.ends_with(".m3u8") || local_path.ends_with(".mpd")) {
         return Some(DownloadKind::Hls);
     }
     if !input.contains("://")
@@ -41,7 +41,9 @@ pub fn classify_url(input: &str) -> Option<DownloadKind> {
     let path = url.path().to_ascii_lowercase();
     if path.ends_with(".torrent") {
         Some(DownloadKind::Torrent)
-    } else if path.ends_with(".m3u8") || url.fragment() == Some("adm.m3u8") {
+    } else if (path.ends_with(".m3u8") || path.ends_with(".mpd"))
+        || url.fragment() == Some("adm.m3u8")
+    {
         // The fragment marks manifests the browser extension identified by
         // Content-Type on URLs that carry no ".m3u8" extension.
         Some(DownloadKind::Hls)

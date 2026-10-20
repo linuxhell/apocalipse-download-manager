@@ -107,11 +107,14 @@
 <label data-tool="yt-dlp"><span>yt-dlp <small></small></span><div><input id="tool-yt-dlp" type="text"/><button data-i18n="browse" data-tool-pick="yt-dlp" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="yt-dlp" type="button">Download</button><button data-i18n="update" data-tool-update="yt-dlp" type="button">Update</button></div></label>
 <label data-tool="qjs"><span>QuickJS (qjs) <small></small></span><div><input id="tool-qjs" type="text"/><button data-i18n="browse" data-tool-pick="qjs" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="qjs" type="button">Download</button><button data-i18n="update" data-tool-update="qjs" type="button">Update</button></div></label>
 <label data-tool="n-m3u8dl-re"><span>N_m3u8DL-RE <small></small></span><div><input id="tool-n-m3u8dl-re" type="text"/><button data-i18n="browse" data-tool-pick="n-m3u8dl-re" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="n-m3u8dl-re" type="button">Download</button><button data-i18n="update" data-tool-update="n-m3u8dl-re" type="button">Update</button></div></label>
-<label data-tool="aria2"><span><span data-i18n="aria2Backend">aria2 (HTTP/HTTPS, FTP, torrent and magnet)</span> <small></small></span><div><input id="tool-aria2" type="text"/><button data-i18n="browse" data-tool-pick="aria2" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="aria2" type="button">Download</button><button data-i18n="update" data-tool-update="aria2" type="button">Update</button></div></label>
+<label data-tool="xtreme"><span><span data-i18n="xtremeBackend">Nibiru Xtreme (HTTP/HTTPS, FTP, torrent and magnet)</span> <small></small></span><div><input id="tool-xtreme" type="text"/><button data-i18n="browse" data-tool-pick="xtreme" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="xtreme" type="button">Download</button><button data-i18n="update" data-tool-update="xtreme" type="button">Update</button></div></label>
+<label data-tool="colapse"><span><span >Nibiru Colapse</span> <small></small></span><div><input id="tool-colapse" type="text"/><button data-i18n="browse" data-tool-pick="colapse" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="colapse" type="button">Download</button><button data-i18n="update" data-tool-update="colapse" type="button">Update</button></div></label>
+<label data-tool="power"><span><span >Nibiru Power</span> <small></small></span><div><input id="tool-power" type="text"/><button data-i18n="browse" data-tool-pick="power" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="power" type="button">Download</button><button data-i18n="update" data-tool-update="power" type="button">Update</button></div></label>
+<label data-tool="m3u8"><span><span >Nibiru M3U8</span> <small></small></span><div><input id="tool-m3u8" type="text"/><button data-i18n="browse" data-tool-pick="m3u8" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="m3u8" type="button">Download</button><button data-i18n="update" data-tool-update="m3u8" type="button">Update</button></div></label>
 <label data-tool="extractor"><span><span data-i18n="archiveExtractor">Archive extractor</span> <small></small></span><div><input id="tool-extractor" type="text"/><button data-i18n="browse" data-tool-pick="extractor" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="extractor" type="button">Download</button></div></label>
 <label data-tool="player"><span><span data-i18n="mediaPlayer">mpv / media player</span> <small></small></span><div><input id="tool-player" type="text"/><button data-i18n="browse" data-tool-pick="player" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="player" type="button">Download</button></div></label>
 </div>
-</section><div class="pane-actions"><button class="primary" data-i18n="save" id="save-tools" type="button">Save</button></div></div><div class="pane" data-pane="network" hidden><section class="pairing-settings">
+<button id="nibiru-media-open" type="button">Nibiru media</button></section><div class="pane-actions"><button class="primary" data-i18n="save" id="save-tools" type="button">Save</button></div></div><div class="pane" data-pane="network" hidden><section class="pairing-settings">
 <label class="setting-toggle compact-toggle">
 <input id="proxy-enabled" type="checkbox"/>
 <span><b data-i18n="proxy">Proxy</b><small data-i18n="proxyHint">Route downloads through an HTTP, HTTPS or SOCKS proxy</small></span>
@@ -159,23 +162,23 @@
 </select>
 <label data-i18n="dnsServers" for="dns-servers">DNS servers</label>
 <input id="dns-servers" maxlength="400" placeholder="1.1.1.1, 1.0.0.1" type="text"/>
-<small data-i18n="dnsScopeHint">Applied to the native HTTP engine. aria2 uses the system resolver; SOCKS5H continues resolving through the proxy.</small>
+<small data-i18n="dnsScopeHint">Applied to the native HTTP engine. xtreme uses the system resolver; SOCKS5H continues resolving through the proxy.</small>
 </section><section class="pairing-settings">
-<b data-i18n="aria2RpcTitle">aria2 RPC</b>
+<b data-i18n="xtremeRpcTitle">xtreme RPC</b>
 <label class="setting-toggle compact-toggle">
-<input checked="" id="aria2-rpc-enabled" type="checkbox"/>
-<span><b data-i18n="aria2RpcEnabled">Use aria2 RPC</b><small data-i18n="aria2RpcEnabledHint">Control accelerated HTTP/HTTPS, FTP, torrent and magnet transfers through the local aria2 engine.</small></span>
+<input checked="" id="xtreme-rpc-enabled" type="checkbox"/>
+<span><b data-i18n="xtremeRpcEnabled">Use xtreme RPC</b><small data-i18n="xtremeRpcEnabledHint">Control accelerated HTTP/HTTPS, FTP, torrent and magnet transfers through the local xtreme engine.</small></span>
 </label>
 <label class="setting-toggle compact-toggle">
-<input checked="" id="aria2-rpc-auto-start" type="checkbox"/>
-<span><b data-i18n="aria2RpcAutoStart">Start aria2 automatically when needed</b><small data-i18n="aria2RpcAutoStartHint">Keeps one local aria2 backend for the current Apocalipse session.</small></span>
+<input checked="" id="xtreme-rpc-auto-start" type="checkbox"/>
+<span><b data-i18n="xtremeRpcAutoStart">Start xtreme automatically when needed</b><small data-i18n="xtremeRpcAutoStartHint">Keeps one local xtreme backend for the current Apocalipse session.</small></span>
 </label>
-<label data-i18n="aria2RpcPort" for="aria2-rpc-port">RPC port</label>
-<input data-i18n-placeholder="aria2RpcPortHint" id="aria2-rpc-port" max="65535" min="1024" placeholder="Automatic" step="1" type="number"/>
-<div class="bandwidth-current"><span data-i18n="aria2RpcStatus">RPC status</span><strong id="aria2-rpc-status">Disconnected</strong></div>
+<label data-i18n="xtremeRpcPort" for="xtreme-rpc-port">RPC port</label>
+<input data-i18n-placeholder="xtremeRpcPortHint" id="xtreme-rpc-port" max="65535" min="1024" placeholder="Automatic" step="1" type="number"/>
+<div class="bandwidth-current"><span data-i18n="xtremeRpcStatus">RPC status</span><strong id="xtreme-rpc-status">Disconnected</strong></div>
 <div class="diagnostic-actions">
-<button data-i18n="aria2RpcTest" id="aria2-rpc-test" type="button">Test RPC connection</button>
-<button data-i18n="aria2RpcRegenerateToken" id="aria2-rpc-regenerate-token" type="button">Regenerate RPC token</button>
+<button data-i18n="xtremeRpcTest" id="xtreme-rpc-test" type="button">Test RPC connection</button>
+<button data-i18n="xtremeRpcRegenerateToken" id="xtreme-rpc-regenerate-token" type="button">Regenerate RPC token</button>
 </div>
 </section></div><div class="pane" data-pane="extension" hidden><section class="pairing-settings">
 <b data-i18n="extensionPairing">Browser extension pairing</b>
@@ -468,11 +471,24 @@
 <div class="dialog-actions"><button data-export-close="" data-i18n="cancel" type="button">Cancel</button><button class="primary" data-i18n="export" id="export-recording" type="button">Export</button></div>
 </form>
 </dialog>
+<dialog id="nibiru-media-dialog"><form method="dialog">
+<div class="dialog-head"><h2>Nibiru Colapse</h2><button id="nibiru-media-close" type="button">×</button></div>
+<p id="nibiru-media-hint"></p>
+<label id="nibiru-operation-label" for="nibiru-operation"></label>
+<select id="nibiru-operation"><option value="inspect">Inspect</option><option value="mp4-faststart">MP4 faststart</option><option value="wav-gain">WAV gain</option><option value="wav-normalize">WAV normalize</option><option value="wav-cut">WAV cut</option><option value="y4m-cut">Y4M cut</option></select>
+<label id="nibiru-input-label" for="nibiru-input"></label><div class="path-picker"><input id="nibiru-input" type="text" required><button id="nibiru-input-browse" type="button">…</button></div>
+<label id="nibiru-output-label" for="nibiru-output"></label><input id="nibiru-output" type="text">
+<label id="nibiru-start-label" for="nibiru-start">Start / dB</label><input id="nibiru-start" type="number" value="0" step="any">
+<label id="nibiru-frames-label" for="nibiru-frames">Frames</label><input id="nibiru-frames" type="number" min="1" value="1">
+<pre id="nibiru-media-result" style="max-height:35vh;overflow:auto;white-space:pre-wrap" role="status"></pre>
+<div class="dialog-actions"><button id="nibiru-capabilities" type="button">Capabilities</button><button class="primary" id="nibiru-media-run" type="button">Run</button></div>
+</form></dialog>
 <script src="button-feedback.js"></script>
 <script src="task-list-state.js"></script>
 <script src="audio-format-policy.js"></script>
 
 <script src="app.js"></script>
+<script src="nibiru-media.js"></script>
 <script src="diagnostics-panel.js"></script>
 </body>
 </html>

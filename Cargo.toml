@@ -24,7 +24,8 @@ sha2 = "0.10"
 base64 = "0.22"
 ed25519-dalek = { version = "2.1", default-features = false, features = ["std"] }
 thiserror = "2.0"
-tokio = { version = "1.44", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+# 1.54 fixes Windows Child drop ordering when an async process wait is cancelled.
+tokio = { version = "1.54.0", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 url = "2.5"
 percent-encoding = "2.3"
 uuid = { version = "1.16", features = ["serde", "v4"] }

@@ -1,5 +1,6 @@
 //! Native Nibiru ED2K integration. No aMule executable or daemon is used.
 pub mod downloads;
+pub mod kad;
 pub mod shares;
 use nibiru_xtreme::ed2k::{
     self,
@@ -32,6 +33,7 @@ pub struct Ed2kState {
     incoming: AsyncMutex<Option<ed2k::IncomingListener>>,
     generation: AtomicU64,
     kad: RwLock<Option<BootstrapResult>>,
+    kad_session: AsyncMutex<Option<std::sync::Arc<kad::KadSession>>>,
     user_hash: [u8; 16],
 }
 impl Ed2kState {
@@ -49,6 +51,7 @@ impl Ed2kState {
             incoming: AsyncMutex::new(None),
             generation: AtomicU64::new(0),
             kad: RwLock::new(None),
+            kad_session: AsyncMutex::new(None),
             user_hash: [0; 16],
         }
     }
@@ -139,6 +142,7 @@ impl Ed2kState {
             incoming: AsyncMutex::new(None),
             generation: AtomicU64::new(0),
             kad: RwLock::new(None),
+            kad_session: AsyncMutex::new(None),
             user_hash,
         })
     }
@@ -204,12 +208,13 @@ pub async fn ed2k_overview(state: State<'_, Ed2kState>) -> Result<serde_json::Va
     let server = state.server.read().await;
     let active = server.as_ref().filter(|c| c.is_connected());
     let kad = state.kad.read().await;
+    let kad_status = state.kad_session.lock().await.as_ref().map(|s| s.status());
     let library = state.library.lock().map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
         "servers":library.servers,"node_count":library.nodes.len(),"downloads":state.downloads.list()?,"incoming":incoming,
         "server":active.map(|c|&c.server),"client_id":active.map(|c|c.client_id),"low_id":active.is_some_and(|c|c.is_low_id()),
-        "kad_bootstrap":*kad,"server_list_url":ed2k::SERVER_LIST_URL,"node_list_url":ed2k::NODE_LIST_URL,
-        "capabilities":{"server_login":true,"server_search":true,"server_sources":true,"kad_bootstrap":true,"kad_routing":false,"peer_download":true,"peer_download_scope":"verified_parts_direct_and_server_callback","server_callback":true,"sharing":true,"upload":true,"upload_queue":true,"publishing":true,"messages":false}
+        "kad_bootstrap":*kad,"kad_session":kad_status,"server_list_url":ed2k::SERVER_LIST_URL,"node_list_url":ed2k::NODE_LIST_URL,
+        "capabilities":{"server_login":true,"server_search":true,"server_sources":true,"kad_bootstrap":true,"kad_routing":true,"kad_keyword_search":false,"kad_publishing":false,"kad_direct_sources":true,"peer_download":true,"peer_download_scope":"verified_parts_direct_and_server_callback","server_callback":true,"sharing":true,"upload":true,"upload_queue":true,"publishing":true,"messages":false}
     }))
 }
 fn install(state: &Ed2kState, kind: &str, bytes: &[u8]) -> Result<usize, String> {
@@ -467,4 +472,37 @@ mod tests {
         let state = Ed2kState::unavailable(PathBuf::new(), "invalid_ed2k_identity".into());
         assert_eq!(state.ready().unwrap_err(), "invalid_ed2k_identity");
     }
+}
+
+#[tauri::command]
+pub async fn ed2k_start_kad(state: State<'_, Ed2kState>) -> Result<kad::Status, String> {
+    state.ready()?;
+    let mut session = state.kad_session.lock().await;
+    if let Some(session) = session.as_ref().filter(|s| s.status().running) {
+        return Ok(session.status());
+    }
+    let seeds = state
+        .library
+        .lock()
+        .map_err(|e| e.to_string())?
+        .nodes
+        .clone();
+    let started = kad::KadSession::start(
+        state.user_hash,
+        state.incoming_port().await?,
+        state.root.join("kad-routing.json"),
+        seeds,
+        false,
+    )
+    .await?;
+    let status = started.status();
+    *session = Some(started);
+    Ok(status)
+}
+#[tauri::command]
+pub async fn ed2k_stop_kad(state: State<'_, Ed2kState>) -> Result<(), String> {
+    if let Some(session) = state.kad_session.lock().await.take() {
+        session.stop();
+    }
+    Ok(())
 }

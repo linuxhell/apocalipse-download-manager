@@ -28,10 +28,16 @@ replacement; performance/memory claims require measurements of the final build.
   4662, falls back to an available port on collision). Login advertises that
   actual port. The server's assigned ID remains authoritative: a listener does
   not prove firewall/NAT reachability. The UI shows the port and handshake count.
-- Kad currently implements a UDP bootstrap probe that validates a responding
-  node and returns contacts. It **does not** keep a routing table/session active,
-  perform Kad lookup/publishing or download through Kad. The UI labels this as
-  bootstrap rather than a connected Kad session.
+- Kad now runs a persistent UDP session with a bounded 512-contact routing table,
+  plain Kad2 HELLO, XOR-ordered iterative lookups, cancellation, periodic refresh
+  and verified-contact persistence. Plain (`E4`) and zlib-packed (`E5`) UDP
+  replies are supported. A matching HELLO introduces a candidate;
+  only a separate random endpoint challenge can verify it. Stored contacts need
+  that handshake again after restart. Direct high-ID sources discovered through
+  Kad feed the download queue even without an ED2K server. This is not a full
+  Kademlia routing zone: keyword search, publishing, obfuscation, firewall testing
+  and buddy/UDP callbacks are not implemented. The UDP socket alone proves no
+  public reachability. A diagnostic one-shot bootstrap command remains available.
 - Direct high-ID peer downloads have a persistent transfer queue, pause/resume,
   root-checked ED2K hashsets, verified parts, 32/64-bit offsets and compressed
   block support. Unfinished tasks reopen paused. Resume rehashes saved data.
@@ -53,7 +59,7 @@ replacement; performance/memory claims require measurements of the final build.
 - **Publishing.** After connecting, the shared list is offered to the server and
   offered again every 15 minutes. ED2K has no withdraw packet: files that were
   unshared leave the server index when the connection is renewed.
-- Credits, AICH, obfuscation, messaging, Kad lookup/publishing and full aMule feature
+- Credits, AICH, obfuscation, messaging, Kad keyword search/publishing and full aMule feature
   parity remain required work.
 
 An ED2K initialization error disables this feature rather than stopping the
@@ -63,7 +69,7 @@ part of this draft.
 
 ## Reference and seed provenance
 
-Latest stable observed 2026-10-19:
+Latest stable verified again on 2026-10-20:
 [aMule 3.1.0](https://github.com/amule-org/amule/releases/tag/3.1.0),
 commit `909d304d993ee07df6c6f6acf501a6d791d53666`.
 The active repository is [amule-org/amule](https://github.com/amule-org/amule).
@@ -92,8 +98,10 @@ or nodes remain reachable. Updating a list is distinct from connecting to peers.
   check are fixtures, not evidence of public ED2K connectivity.
 - Nibiru's local TCP/UDP fixtures exercise ED2K login/search and Kad bootstrap
   wire packets. FTP/FTPS/SFTP/HTTP3 transfers are verified separately in Nibiru.
-- The desktop crate compiles and its ED2K unit tests pass on Linux with the CI's GTK/WebKit
-  packages installed. CI Windows/Linux/macOS builds remain the acceptance gate.
+- This audit cross-compiled the complete desktop executable for Windows GNU x64.
+  A Linux harness executes the actual production Kad, native RPC and CLI adapter
+  modules without requiring GTK. This is not a Windows runtime test. Native
+  Windows/Linux/macOS CI and public-network interoperability remain acceptance gates.
 - Nibiru's real-socket tests cover Nibiru downloading from a Nibiru listener, queueing and
   promotion, cancellation, invalid ranges, a file changed on disk, the bandwidth limit and
   `OP_OFFERFILES` batches. Interoperability with eMule/aMule has not been tested yet.
@@ -144,3 +152,89 @@ callback fixture exercises OP_CALLBACKREQUEST, an unrelated incoming peer ID,
 and a completed MD4-verified download from the matching Low-ID source. Pending
 callback registrations are removed on cancellation/drop. This does not implement
 Low-ID to Low-ID NAT traversal.
+
+## Audit checkpoint, 2026-10-20
+
+See [AUDITORIA-NIBIRU-ED2K-2026-10-20.md](AUDITORIA-NIBIRU-ED2K-2026-10-20.md)
+for fixed integration defects, tested revisions and the remaining aMule gap.
+The additions have real UDP fixtures for routing/source lookup, wrong-target
+rejection, persisted contacts, and pending-query cleanup after cancellation.
+The client remains experimental; this checkpoint is not a claim of full parity.
+
+## Plain Kad2 HELLO and endpoint verification
+
+Starting the persistent Kad session also starts or reuses the native incoming
+TCP listener. `HELLO_REQ` (`0x11`) and `HELLO_RES` (`0x19`) report that listener's
+actual bound TCP port, including its fallback port when 4662 is occupied. The
+payload is the 16-byte node ID, little-endian TCP port, protocol version, tag
+count and tags. The advertised Kad version is **5**. Advertising version 6 or
+higher causes aMule to select obfuscated HELLO replies; version 8 also introduces
+keyed HELLO acknowledgements, neither of which this socket implements.
+
+HELLO parsing allows at most 512 payload bytes and 16 tags, checks truncation and
+trailing bytes, rejects zero IDs/ports and duplicate control tags, and accepts
+both named and compact integer tags. `TAG_KADMISCOPTIONS` (`F2`) bit 0 means UDP
+firewalled: such a HELLO cannot admit or renew a verified routing contact. Bit 1
+is TCP firewalled and does not exclude an otherwise reachable UDP router. A HELLO
+response requiring the version-8 keyed ACK is unsupported. `TAG_SOURCEUPORT`
+(`FC`) is an integer UDP port; it must match the datagram's observed source port.
+This implementation does not follow a differing advertised NAT port, because a
+HELLO has not yet proven authority to change the pending query's endpoint.
+
+An outgoing handshake first requires a valid HELLO response from the exact IP
+and UDP port, with the expected peer node ID. It then sends `KADEMLIA2_REQ`
+(`0x21`), type 2, with a fresh random UUID-v4 target and the intended peer's node
+ID. Only a strictly parsed `KADEMLIA2_RES` (`0x29`) from that endpoint echoing the
+random target establishes verification. Ordinary routing and source replies use
+predictable targets and never establish or extend this proof. The challenge
+proves receipt at an endpoint; it is not cryptographic ownership of a node ID or
+a test of this client's public reachability.
+
+A peer performing its own legacy challenge must not wait for mutual verification:
+requests addressed to our node ID from an unknown or expired peer get the echoed
+target and an **empty contact list**. Only a currently verified endpoint can
+receive routing contacts. Incoming HELLO packets enqueue candidates in the bounded
+table; they do not create a task per packet. The existing worker refreshes at most
+four contacts per 30-second pass. Queries retain a 32-slot global limit, one
+pending query per endpoint, a three-second timeout and cleanup on cancellation.
+Responses to incoming requests share a 20-per-second budget. Verification expires
+after 20 minutes and is never loaded as trusted state from disk.
+
+Kad's `E5` zlib framing is separate from obfuscation. The opcode remains outside
+the compressed payload. Both encoded and decoded payloads are limited to 32 KiB;
+the decoder uses a fixed output capacity, requires the end of a complete zlib
+stream and rejects trailing bytes or concatenated streams. Untracked replies are
+discarded before inflation, and incoming requests consume their rate budget before
+inflation. The UDP receive buffer can hold a complete IPv4 datagram so an oversized
+packet can be rejected without triggering Windows' short-buffer receive failure.
+Recoverable receive errors, including a reset/refusal from an offline UDP peer,
+use a 100 ms retry delay that can be cancelled immediately by shutdown. Structural
+socket errors still stop the session.
+
+Source discovery collects multiple `0x3b` datagrams from each queried peer. Every
+packet must match the endpoint, peer node ID and file target; a callback-only
+first batch does not prevent using a later batch of direct sources. Collection
+stops after six valid datagrams, 300 raw source rows, 192 KiB of decoded payload,
+or a fixed three-second window from the request, whichever comes first. These
+budgets apply before unusable sources are filtered, and the channel itself has
+six slots. Direct endpoints are deduplicated before returning them to downloads.
+At most three peers are queried sequentially, so collecting their replies may
+take up to nine seconds in addition to routing lookup. Background refresh yields
+to foreground lookup/source collection instead of causing a busy contact to look
+like an empty source result. Cancellation and timeout release the registration.
+
+Local UDP fixtures cover the HELLO wire with a live TCP binding, malformed and
+oversized tags, wrong IDs/endpoints/nonces, UDP-firewalled and keyed-ACK replies,
+the empty unknown-peer challenge, expiry, persistence/restart, and cancellation
+during HELLO, challenge and source collection. They also cover zlib corruption,
+truncation, expansion limits and trailing data; large UDP packets; cancellable
+receive backoff; first-batch callback sources followed by direct sources; source
+packet/row limits; refresh contention; and MD4 byte order using a nonuniform hash.
+Ordinary lookup success does not renew verification. These are independent packet fixtures, not
+tests against a running aMule or the public Kad network. Protocol references are
+aMule 3.1.0's `KademliaUDPListener.cpp` (`SendMyDetails`, `AddContact2`,
+`Process2HelloRequest`, `Process2HelloResponse`, `ProcessKademlia2Request` and
+`SendLegacyChallenge`), plus `include/tags/FileTags.h` and the Kad protocol
+constant headers. Compression and source batching were checked against
+`Packet.cpp`, `ClientUDPSocket.cpp` and `kademlia/kademlia/Indexed.cpp`.
+The implementation uses no aMule C++ source.
