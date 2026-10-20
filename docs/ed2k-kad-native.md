@@ -30,9 +30,12 @@ replacement; performance/memory claims require measurements of the final build.
   node and returns contacts. It **does not** keep a routing table/session active,
   perform Kad lookup/publishing or download through Kad. The UI labels this as
   bootstrap rather than a connected Kad session.
-- Peer downloads/uploads, queues, shared files, credits, AICH, obfuscation,
-  messaging and full aMule feature parity remain required work. Search results
-  are not presented as downloadable tasks in this alpha.
+- Direct high-ID peer downloads have a persistent transfer queue, pause/resume,
+  root-checked ED2K hashsets, verified parts, 32/64-bit offsets and compressed
+  block support. Unfinished tasks reopen paused. Resume rehashes saved data.
+  The ADM download directory is used; existing destinations are preserved.
+- Low-ID callbacks, uploads/upload queues, shared files, credits, AICH,
+  obfuscation, messaging and full aMule feature parity remain required work.
 
 An ED2K initialization error disables this feature rather than stopping the
 main ADM from opening. Existing HTTP, media, torrent and Link engines are not
@@ -62,7 +65,7 @@ or nodes remain reachable. Updating a list is distinct from connecting to peers.
 
 ## Validation
 
-- 331 Node regression/behaviour tests pass, including live language changes,
+- 332 Node regression/behaviour tests pass, including live language changes,
   metadata URL rejection, native command routing, and text-only rendering of
   untrusted server/result names.
 - A Chromium render at 1280x820 was visually inspected in Portuguese; light/dark
@@ -86,6 +89,28 @@ Search results can be filtered locally and sorted by source count, size or name.
 Each result can query the connected server using native OP_GETSOURCES. Responses
 are correlated by file hash, checked for exact bounded lengths and deduplicated.
 Low IDs are explicitly marked as requiring callbacks and never displayed as IPs.
-This discovers sources; it does not yet transfer peer data. Native TCP fixture
+Source discovery also feeds the native direct-peer transfer queue. Native TCP fixture
 coverage includes unrelated responses, malformed lengths, invalid hashes,
 duplicate sources and request throttling. UI behaviour and live themes are tested.
+
+
+## Verified peer transfers
+
+Search results can be added directly to Transfers, or users can paste a standard
+ED2K file link. Two tasks may run concurrently; each native transfer uses one
+peer and bounded block requests, trying at most 16 direct sources per attempt.
+Low-ID sources remain visible but are not dialed as IP addresses. An incomplete
+attempt keeps verified parts and can be resumed to refresh server sources.
+
+Persisted task records are bounded and atomically saved. Partial files use a
+hash/size filename and an OS file lock. Resume never trusts task progress alone:
+it reads and hashes saved parts. A peer hashset must first match the requested
+root hash. Files are synced and published without replacing an existing target.
+Removing a record preserves completed and partial files. Queued work can be
+paused, including during source lookup and peer network stalls.
+
+Native local TCP fixtures cover multipart resume, compressed blocks split over
+packets, raw fragments arriving out of order, corruption, hashset validation,
+large offsets above 4 GiB, cancellation, and a finalization race with an existing
+user file. UI tests cover add/resume/pause/remove command routing. Public-network
+interoperability and uploads/Kad feature completeness remain separate gates.

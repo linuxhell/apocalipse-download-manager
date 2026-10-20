@@ -1,4 +1,5 @@
 //! Native Nibiru ED2K integration. No aMule executable or daemon is used.
+pub mod downloads;
 use nibiru_xtreme::ed2k::{
     self,
     metadata::{Node, Server},
@@ -22,6 +23,7 @@ struct Library {
 }
 pub struct Ed2kState {
     root: PathBuf,
+    downloads: downloads::Downloads,
     startup_error: Option<String>,
     library: Mutex<Library>,
     server: RwLock<Option<ServerConnection>>,
@@ -32,6 +34,7 @@ pub struct Ed2kState {
 impl Ed2kState {
     pub fn unavailable(root: PathBuf, error: String) -> Self {
         Self {
+            downloads: downloads::Downloads::empty(root.join("downloads.json")),
             root,
             startup_error: Some(error),
             library: Mutex::new(Library {
@@ -79,6 +82,7 @@ impl Ed2kState {
             Err(e) => return Err(e.to_string()),
         };
         Ok(Self {
+            downloads: downloads::Downloads::load(root.join("downloads.json"))?,
             root,
             startup_error: None,
             library: Mutex::new(library),
@@ -146,10 +150,10 @@ pub async fn ed2k_overview(state: State<'_, Ed2kState>) -> Result<serde_json::Va
     let kad = state.kad.read().await;
     let library = state.library.lock().map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
-        "servers":library.servers,"node_count":library.nodes.len(),
+        "servers":library.servers,"node_count":library.nodes.len(),"downloads":state.downloads.list()?,
         "server":active.map(|c|&c.server),"client_id":active.map(|c|c.client_id),"low_id":active.is_some_and(|c|c.is_low_id()),
         "kad_bootstrap":*kad,"server_list_url":ed2k::SERVER_LIST_URL,"node_list_url":ed2k::NODE_LIST_URL,
-        "capabilities":{"server_login":true,"server_search":true,"server_sources":true,"kad_bootstrap":true,"kad_routing":false,"peer_download":false,"sharing":false,"messages":false}
+        "capabilities":{"server_login":true,"server_search":true,"server_sources":true,"kad_bootstrap":true,"kad_routing":false,"peer_download":true,"peer_download_scope":"high_id_verified_parts","sharing":false,"messages":false}
     }))
 }
 fn install(state: &Ed2kState, kind: &str, bytes: &[u8]) -> Result<usize, String> {

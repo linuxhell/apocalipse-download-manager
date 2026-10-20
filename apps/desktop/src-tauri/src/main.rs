@@ -15843,6 +15843,8 @@ fn main() {
             ed2k_ui::ed2k_disconnect,
             ed2k_ui::ed2k_search,
             ed2k_ui::ed2k_find_sources,
+            ed2k_ui::downloads::ed2k_add_download,
+            ed2k_ui::downloads::ed2k_download_action,
             ed2k_ui::ed2k_bootstrap,
             ed2k_ui::ed2k_copy_link,
             main_window_ready,

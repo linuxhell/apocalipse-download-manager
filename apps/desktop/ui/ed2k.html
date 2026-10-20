@@ -16,6 +16,7 @@
   <nav class="ed2k-tabs" role="tablist">
     <button role="tab" aria-selected="true" aria-controls="panel-networks" id="tab-networks" data-tab="networks" data-i18n="networks"></button>
     <button role="tab" aria-selected="false" aria-controls="panel-search" id="tab-search" data-tab="search" data-i18n="search"></button>
+    <button role="tab" aria-selected="false" aria-controls="panel-transfers" id="tab-transfers" data-tab="transfers" data-i18n="transfers"></button>
     <button role="tab" aria-selected="false" aria-controls="panel-preferences" id="tab-preferences" data-tab="preferences" data-i18n="preferences"></button>
     <button role="tab" aria-selected="false" aria-controls="panel-log" id="tab-log" data-tab="log" data-i18n="log"></button>
   </nav>
@@ -32,6 +33,12 @@
       <div class="ed2k-table-wrap"><table><thead><tr><th data-i18n="file"></th><th data-i18n="size"></th><th data-i18n="sources"></th><th>ED2K</th><th></th></tr></thead><tbody id="ed2k-results"></tbody></table></div>
       <p id="search-summary"></p>
       <section id="ed2k-source-panel" hidden><h2 id="ed2k-source-title"></h2><p data-i18n="sourceHint"></p><div class="ed2k-table-wrap"><table><thead><tr><th data-i18n="address"></th><th data-i18n="port"></th><th data-i18n="connectionType"></th></tr></thead><tbody id="ed2k-source-results"></tbody></table></div><p id="ed2k-source-summary"></p></section>
+    </section>
+    <section id="panel-transfers" role="tabpanel" aria-labelledby="tab-transfers" hidden>
+      <div class="ed2k-section-heading"><div><h2 data-i18n="transfers"></h2><p data-i18n="transfersHint"></p></div></div>
+      <form id="ed2k-add-form" class="ed2k-search-form"><label><span data-i18n="fileLink"></span><input id="ed2k-file-link" maxlength="4096" required spellcheck="false"></label><button id="ed2k-add-submit" class="primary" type="submit" data-i18n="addDownload"></button></form>
+      <div class="ed2k-table-wrap"><table><thead><tr><th data-i18n="file"></th><th data-i18n="size"></th><th data-i18n="verifiedProgress"></th><th data-i18n="status"></th><th>Peer</th><th></th></tr></thead><tbody id="ed2k-downloads"></tbody></table></div>
+      <p data-i18n="retainedFilesHint"></p>
     </section>
     <section id="panel-preferences" role="tabpanel" aria-labelledby="tab-preferences" hidden>
       <div class="ed2k-section-heading"><div><h2 data-i18n="preferences"></h2><p data-i18n="preferencesHint"></p></div></div>
