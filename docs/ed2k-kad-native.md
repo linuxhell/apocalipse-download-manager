@@ -36,8 +36,25 @@ replacement; performance/memory claims require measurements of the final build.
   root-checked ED2K hashsets, verified parts, 32/64-bit offsets and compressed
   block support. Unfinished tasks reopen paused. Resume rehashes saved data.
   The ADM download directory is used; existing destinations are preserved.
-- Uploads/upload queues, shared files, credits, AICH,
-  obfuscation, messaging and full aMule feature parity remain required work.
+- **Sharing and uploads.** The *Shared* tab lists exactly what the user chose: single
+  files or folders (optionally with subfolders), added through native pickers.
+  Nothing is shared automatically. Choices are stored in `shared.json`; computed
+  hashes are cached in `shared-cache.json` and reused only while path, size and
+  modification time match and the hashes are internally consistent, so reopening
+  does not rehash large libraries. Hashing runs in the background with progress,
+  per-file problems are listed, and files already shared keep being served during a
+  rescan. Each file has an upload priority (very low to release) and per-file
+  request/upload statistics. Links can be copied and the containing folder opened;
+  the folder is looked up by hash in the registry, never from a path sent by the UI.
+- **Upload queue.** The *Uploads* tab configures simultaneous slots (1-64) and a total
+  KiB/s limit, and shows active clients, the waiting queue (ordered by file priority,
+  then waiting time) and the total uploaded. Clients that disconnect keep their place
+  for 30 minutes.
+- **Publishing.** After connecting, the shared list is offered to the server and
+  offered again every 15 minutes. ED2K has no withdraw packet: files that were
+  unshared leave the server index when the connection is renewed.
+- Credits, AICH, obfuscation, messaging, Kad lookup/publishing and full aMule feature
+  parity remain required work.
 
 An ED2K initialization error disables this feature rather than stopping the
 main ADM from opening. Existing HTTP, media, torrent and Link engines are not
@@ -67,7 +84,7 @@ or nodes remain reachable. Updating a list is distinct from connecting to peers.
 
 ## Validation
 
-- 332 Node regression/behaviour tests pass, including live language changes,
+- 337 Node regression/behaviour tests pass, including live language changes,
   metadata URL rejection, native command routing, and text-only rendering of
   untrusted server/result names.
 - A Chromium render at 1280x820 was visually inspected in Portuguese; light/dark
@@ -75,9 +92,11 @@ or nodes remain reachable. Updating a list is distinct from connecting to peers.
   check are fixtures, not evidence of public ED2K connectivity.
 - Nibiru's local TCP/UDP fixtures exercise ED2K login/search and Kad bootstrap
   wire packets. FTP/FTPS/SFTP/HTTP3 transfers are verified separately in Nibiru.
-- Local desktop compilation requires GTK/WebKit/pkg-config, unavailable in the
-  current container. CI Windows/Linux/macOS builds remain the acceptance gate
-  for the Tauri integration and its backend unit tests.
+- The desktop crate compiles and its ED2K unit tests pass on Linux with the CI's GTK/WebKit
+  packages installed. CI Windows/Linux/macOS builds remain the acceptance gate.
+- Nibiru's real-socket tests cover Nibiru downloading from a Nibiru listener, queueing and
+  promotion, cancellation, invalid ranges, a file changed on disk, the bandwidth limit and
+  `OP_OFFERFILES` batches. Interoperability with eMule/aMule has not been tested yet.
 
 ## Window and source lookup update
 

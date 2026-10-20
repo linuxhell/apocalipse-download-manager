@@ -16,3 +16,9 @@ html[data-mode=dark] body.ed2k-window{--ed2k-bg:#000}
 .ed2k-window button:disabled{opacity:.5;cursor:default}
 
 .ed2k-result-tools{display:flex;gap:16px;align-items:end;margin:0 0 14px}.ed2k-result-tools label:first-child{flex:1}.ed2k-result-tools input,.ed2k-result-tools select{padding:8px 10px;border:1px solid var(--line-strong);border-radius:5px}.ed2k-window td button+button{margin-left:8px}#ed2k-source-panel{margin-top:24px}#ed2k-source-title{overflow-wrap:anywhere}
+.ed2k-share-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 14px}.ed2k-window .ed2k-check{flex-direction:row;align-items:center;gap:6px}.ed2k-window .ed2k-check input{width:auto}
+.ed2k-scan{display:flex;gap:12px;align-items:center;margin:0 0 12px;color:var(--muted)}.ed2k-scan progress{flex:0 0 260px;height:10px}#ed2k-scan-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ed2k-warning{color:var(--red)!important}.ed2k-content h3{font-size:14px;margin:22px 0 10px;font-weight:650}
+.ed2k-window select{border:1px solid var(--line-strong);border-radius:5px;padding:5px 8px}.ed2k-window td select{max-width:120px}
+#panel-uploads .ed2k-search-form label{max-width:260px}
+

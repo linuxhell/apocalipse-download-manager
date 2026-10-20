@@ -17,6 +17,8 @@
     <button role="tab" aria-selected="true" aria-controls="panel-networks" id="tab-networks" data-tab="networks" data-i18n="networks"></button>
     <button role="tab" aria-selected="false" aria-controls="panel-search" id="tab-search" data-tab="search" data-i18n="search"></button>
     <button role="tab" aria-selected="false" aria-controls="panel-transfers" id="tab-transfers" data-tab="transfers" data-i18n="transfers"></button>
+    <button role="tab" aria-selected="false" aria-controls="panel-shared" id="tab-shared" data-tab="shared" data-i18n="shared"></button>
+    <button role="tab" aria-selected="false" aria-controls="panel-uploads" id="tab-uploads" data-tab="uploads" data-i18n="uploads"></button>
     <button role="tab" aria-selected="false" aria-controls="panel-preferences" id="tab-preferences" data-tab="preferences" data-i18n="preferences"></button>
     <button role="tab" aria-selected="false" aria-controls="panel-log" id="tab-log" data-tab="log" data-i18n="log"></button>
   </nav>
@@ -39,6 +41,27 @@
       <form id="ed2k-add-form" class="ed2k-search-form"><label><span data-i18n="fileLink"></span><input id="ed2k-file-link" maxlength="4096" required spellcheck="false"></label><button id="ed2k-add-submit" class="primary" type="submit" data-i18n="addDownload"></button></form>
       <div class="ed2k-table-wrap"><table><thead><tr><th data-i18n="file"></th><th data-i18n="size"></th><th data-i18n="verifiedProgress"></th><th data-i18n="status"></th><th>Peer</th><th></th></tr></thead><tbody id="ed2k-downloads"></tbody></table></div>
       <p data-i18n="retainedFilesHint"></p>
+    </section>
+    <section id="panel-shared" role="tabpanel" aria-labelledby="tab-shared" hidden>
+      <div class="ed2k-section-heading"><div><h2 data-i18n="shared"></h2><p data-i18n="sharedHint"></p></div><span id="shared-count" class="ed2k-count"></span></div>
+      <div class="ed2k-share-tools"><button id="ed2k-share-file" class="primary" data-i18n="shareFile"></button><button id="ed2k-share-folder" class="primary" data-i18n="shareFolder"></button><label class="ed2k-check"><input id="ed2k-share-recursive" type="checkbox" checked><span data-i18n="includeSubfolders"></span></label><button id="ed2k-share-rescan" data-i18n="rescan"></button></div>
+      <div id="ed2k-scan" class="ed2k-scan" hidden><progress id="ed2k-scan-bar" max="1" value="0"></progress><span id="ed2k-scan-text"></span></div>
+      <p id="ed2k-scan-errors" class="ed2k-warning" hidden></p>
+      <h3 data-i18n="sharedItems"></h3>
+      <div class="ed2k-table-wrap"><table><thead><tr><th data-i18n="sharedPath"></th><th data-i18n="kind"></th><th data-i18n="sharedFiles"></th><th data-i18n="status"></th><th></th></tr></thead><tbody id="ed2k-share-entries"></tbody></table></div>
+      <h3 data-i18n="sharedFilesTitle"></h3>
+      <div class="ed2k-table-wrap"><table><thead><tr><th data-i18n="file"></th><th data-i18n="size"></th><th>ED2K</th><th data-i18n="priority"></th><th data-i18n="requests"></th><th data-i18n="uploaded"></th><th></th></tr></thead><tbody id="ed2k-shared-files"></tbody></table></div>
+      <p id="ed2k-publish-status"></p><p data-i18n="removeHint"></p>
+    </section>
+    <section id="panel-uploads" role="tabpanel" aria-labelledby="tab-uploads" hidden>
+      <div class="ed2k-section-heading"><div><h2 data-i18n="uploads"></h2><p data-i18n="uploadsHint"></p></div><span id="upload-total" class="ed2k-count"></span></div>
+      <form id="ed2k-upload-form" class="ed2k-search-form"><label><span data-i18n="uploadSlots"></span><input id="ed2k-upload-slots" type="number" min="1" max="64" step="1" required></label><label><span data-i18n="uploadLimit"></span><input id="ed2k-upload-kib" type="number" min="0" max="1000000" step="1" required></label><button id="ed2k-upload-save" class="primary" type="submit" data-i18n="saveSettings"></button></form>
+      <h3 data-i18n="activeUploads"></h3>
+      <div class="ed2k-table-wrap"><table><thead><tr><th data-i18n="client"></th><th data-i18n="address"></th><th data-i18n="file"></th><th data-i18n="uploaded"></th><th data-i18n="elapsed"></th></tr></thead><tbody id="ed2k-upload-active"></tbody></table></div>
+      <p id="ed2k-upload-active-summary"></p>
+      <h3 data-i18n="waitingQueue"></h3>
+      <div class="ed2k-table-wrap"><table><thead><tr><th data-i18n="rank"></th><th data-i18n="client"></th><th data-i18n="address"></th><th data-i18n="file"></th><th data-i18n="waited"></th></tr></thead><tbody id="ed2k-upload-waiting"></tbody></table></div>
+      <p id="ed2k-upload-waiting-summary"></p>
     </section>
     <section id="panel-preferences" role="tabpanel" aria-labelledby="tab-preferences" hidden>
       <div class="ed2k-section-heading"><div><h2 data-i18n="preferences"></h2><p data-i18n="preferencesHint"></p></div></div>
