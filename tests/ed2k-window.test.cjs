@@ -22,6 +22,7 @@ async function windowFixture({language='pt-BR',serverName='Fixture',connected=fa
   const all=[...html.matchAll(/<([a-z][\w-]*)\b([^>]*)>/gi)].map(m=>new Element(m[1],m[2]));
   const ids=new Map(all.filter(e=>e.id).map(e=>[e.id,e]));
   const document={hidden:false,documentElement:{lang:'en',dataset:{}},createElement:tag=>new Element(tag),querySelector:selector=>ids.get(selector.slice(1)),querySelectorAll:selector=>{
+    if(selector==='#ed2k-results button')return ids.get('ed2k-results').children.flatMap(r=>r.children.flatMap(td=>td.children));
     if(selector==='[data-i18n]')return all.filter(e=>e.dataset.i18n);
     if(selector==='[data-tab]')return all.filter(e=>e.dataset.tab);
     if(selector==='[role=tabpanel]')return all.filter(e=>e.attributes.role==='tabpanel');
@@ -29,7 +30,7 @@ async function windowFixture({language='pt-BR',serverName='Fixture',connected=fa
     throw Error('Unexpected selector '+selector);
   }};
   const overview={servers:[{host:'192.0.2.1',port:4661,name:serverName,description:'Test fixture'}],node_count:20,server:connected?{name:serverName}:null,kad_bootstrap:null};
-  const calls=[]; let languageListener; const listeners={};
+  const calls=[]; let languageListener, modeListener; const listeners={};
   const window={addEventListener:(name,fn)=>{listeners[name]=fn;},__TAURI__:{core:{invoke:async(command,args)=>{
     calls.push({command,args});
     switch(command){
@@ -39,15 +40,16 @@ async function windowFixture({language='pt-BR',serverName='Fixture',connected=fa
       case 'ed2k_connect':overview.server=overview.servers[0];return null;
       case 'ed2k_disconnect':overview.server=null;return null;
       case 'ed2k_search':return [{name:'<script>untrusted</script>.txt',size:1024,sources:3,hash:'a'.repeat(32),link:'ed2k://|file|test|1024|'+'a'.repeat(32)+'|/'}];
+      case 'ed2k_find_sources':return [{client_id:123,host:null,port:4662,requires_callback:true},{client_id:0x04030201,host:'1.2.3.4',port:4662,requires_callback:false}];
       case 'ed2k_import_list':return null;
       default:return null;
     }
-  }},event:{listen:async(_,fn)=>{languageListener=fn;return()=>{};}}}};
+  }},event:{listen:async(name,fn)=>{if(name==='apocalipse-language-changed')languageListener=fn;else if(name==='apocalipse-mode-changed')modeListener=fn;return()=>{};}}}};
   const cache=new Map([['apocalipse.language','en']]);
   const context={window,document,localStorage:{getItem:k=>cache.get(k),setItem:(k,v)=>cache.set(k,v)},setInterval:()=>1,clearInterval(){},URL,Intl,Date};
   vm.runInNewContext(script.replace('const catalogs =','const catalogs = globalThis.testCatalogs ='),context);
   await new Promise(resolve=>setImmediate(resolve));
-  return {ids,all,calls,overview,document,context,language:value=>languageListener({payload:value}),listeners};
+  return {ids,all,calls,overview,document,context,language:value=>languageListener({payload:value}),listeners,mode:value=>modeListener({payload:value})};
 }
 
 test('independent ED2K window uses the saved ADM language and updates while open',async()=>{
@@ -97,4 +99,26 @@ test('opening an independent ED2K window does not show or resize the main window
     vm.runInNewContext(code,{window,document,localStorage:{getItem:()=>null},requestAnimationFrame:fn=>fn()});
     loaded();assert.deepEqual(calls,bodyClass?[]:['main_window_ready']);
   }
+});
+
+test('ED2K window follows live theme changes and filters source results without remote requests',async()=>{
+  const f=await windowFixture({connected:true});
+  f.mode(true);assert.equal(f.document.documentElement.dataset.mode,'dark');
+  f.mode(false);assert.equal(f.document.documentElement.dataset.mode,'light');
+  f.ids.get('ed2k-query').value='example';
+  f.ids.get('ed2k-search-form').onsubmit({preventDefault(){}});
+  await new Promise(resolve=>setImmediate(resolve));
+  const row=f.ids.get('ed2k-results').children[0];
+  await row.children[4].children[1].onclick();
+  assert.equal(f.calls.find(c=>c.command==='ed2k_find_sources').args.hash,'a'.repeat(32));
+  assert.equal(f.ids.get('ed2k-source-panel').hidden,false);
+  const sources=f.ids.get('ed2k-source-results').children;
+  assert.equal(sources[0].children[0].textContent,'ID 123');
+  assert.equal(sources[0].children[2].textContent,'Exige callback do servidor');
+  assert.equal(sources[1].children[0].textContent,'1.2.3.4');
+  f.ids.get('ed2k-result-filter').value='not found';f.ids.get('ed2k-result-filter').oninput();
+  assert.equal(f.ids.get('ed2k-results').children.length,0);
+  f.ids.get('ed2k-result-filter').value='UNTRUSTED';f.ids.get('ed2k-result-filter').oninput();
+  assert.equal(f.ids.get('ed2k-results').children.length,1);
+  assert.equal(f.calls.filter(c=>c.command==='ed2k_search').length,1);
 });

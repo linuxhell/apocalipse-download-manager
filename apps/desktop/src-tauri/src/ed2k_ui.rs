@@ -109,9 +109,16 @@ fn save_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 #[tauri::command]
 pub async fn open_ed2k_window(app: tauri::AppHandle) -> Result<(), String> {
+    let theme = if super::get_dark_mode(app.state())? {
+        tauri::Theme::Dark
+    } else {
+        tauri::Theme::Light
+    };
     if let Some(window) = app.get_webview_window("apocalipse-ed2k-kad") {
+        window.set_theme(Some(theme)).map_err(|e| e.to_string())?;
         window.show().map_err(|e| e.to_string())?;
         let _ = window.unminimize();
+        window.maximize().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
         return Ok(());
     }
@@ -121,9 +128,11 @@ pub async fn open_ed2k_window(app: tauri::AppHandle) -> Result<(), String> {
         WebviewUrl::App("ed2k.html".into()),
     )
     .title("Apocalipse ED2K/Kad")
+    .theme(Some(theme))
     .inner_size(1280.0, 820.0)
     .min_inner_size(960.0, 640.0)
     .resizable(true)
+    .maximized(true)
     .decorations(true)
     .build()
     .map_err(|e| e.to_string())?;
@@ -140,7 +149,7 @@ pub async fn ed2k_overview(state: State<'_, Ed2kState>) -> Result<serde_json::Va
         "servers":library.servers,"node_count":library.nodes.len(),
         "server":active.map(|c|&c.server),"client_id":active.map(|c|c.client_id),"low_id":active.is_some_and(|c|c.is_low_id()),
         "kad_bootstrap":*kad,"server_list_url":ed2k::SERVER_LIST_URL,"node_list_url":ed2k::NODE_LIST_URL,
-        "capabilities":{"server_login":true,"server_search":true,"kad_bootstrap":true,"kad_routing":false,"peer_download":false,"sharing":false,"messages":false}
+        "capabilities":{"server_login":true,"server_search":true,"server_sources":true,"kad_bootstrap":true,"kad_routing":false,"peer_download":false,"sharing":false,"messages":false}
     }))
 }
 fn install(state: &Ed2kState, kind: &str, bytes: &[u8]) -> Result<usize, String> {
@@ -282,6 +291,21 @@ pub async fn ed2k_search(
         .cloned()
         .ok_or("ed2k_not_connected")?;
     connection.search(&query).await.map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub async fn ed2k_find_sources(
+    state: State<'_, Ed2kState>,
+    hash: String,
+) -> Result<Vec<ed2k::FileSource>, String> {
+    state.ready()?;
+    let connection = state
+        .server
+        .read()
+        .await
+        .as_ref()
+        .cloned()
+        .ok_or("ed2k_not_connected")?;
+    connection.sources(&hash).await.map_err(|e| e.to_string())
 }
 #[tauri::command]
 pub async fn ed2k_bootstrap(state: State<'_, Ed2kState>) -> Result<BootstrapResult, String> {

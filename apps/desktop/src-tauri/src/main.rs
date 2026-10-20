@@ -8741,11 +8741,26 @@ fn get_dark_mode(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn set_dark_mode(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+fn set_dark_mode(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.dark_mode = enabled;
     save_settings(&state, &settings)?;
     drop(settings);
+    if let Some(window) = app.get_webview_window("apocalipse-ed2k-kad") {
+        window
+            .set_theme(Some(if enabled {
+                tauri::Theme::Dark
+            } else {
+                tauri::Theme::Light
+            }))
+            .map_err(|e| e.to_string())?;
+    }
+    app.emit("apocalipse-mode-changed", enabled)
+        .map_err(|e| e.to_string())?;
     diagnostic_log(
         &state,
         "INFO",
@@ -15827,6 +15842,7 @@ fn main() {
             ed2k_ui::ed2k_connect,
             ed2k_ui::ed2k_disconnect,
             ed2k_ui::ed2k_search,
+            ed2k_ui::ed2k_find_sources,
             ed2k_ui::ed2k_bootstrap,
             ed2k_ui::ed2k_copy_link,
             main_window_ready,

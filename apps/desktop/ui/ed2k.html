@@ -7,7 +7,7 @@
   <script src="color-mode.js"></script>
 </head>
 <body class="ed2k-window">
-  <header class="ed2k-header"><div><span class="ed2k-eyebrow">APOCALIPSE · NIBIRU XTREME</span><h1>Apocalipse ED2K/Kad</h1></div><span class="ed2k-preview" data-i18n="preview"></span></header>
+  <header class="ed2k-header"><div><h1>Apocalipse ED2K/Kad</h1></div><span class="ed2k-preview" data-i18n="preview"></span></header>
   <section class="ed2k-toolbar" aria-labelledby="tab-networks">
     <button id="ed2k-connect" class="primary" data-i18n="connect"></button><button id="ed2k-disconnect" data-i18n="disconnect" disabled></button>
     <span class="ed2k-toolbar-divider"></span><button id="ed2k-bootstrap" data-i18n="bootstrap"></button>
@@ -28,8 +28,10 @@
     <section id="panel-search" role="tabpanel" aria-labelledby="tab-search" hidden>
       <div class="ed2k-section-heading"><div><h2 data-i18n="search"></h2><p data-i18n="searchHint"></p></div></div>
       <form id="ed2k-search-form" class="ed2k-search-form"><label><span data-i18n="query"></span><input id="ed2k-query" maxlength="1024" required></label><button id="ed2k-search-submit" class="primary" type="submit" data-i18n="search" disabled></button></form>
+      <div class="ed2k-result-tools"><label><span data-i18n="filterResults"></span><input id="ed2k-result-filter" type="search"></label><label><span data-i18n="sortResults"></span><select id="ed2k-result-sort"><option value="sources" data-i18n="sortSources"></option><option value="size" data-i18n="sortSize"></option><option value="name" data-i18n="sortName"></option></select></label></div>
       <div class="ed2k-table-wrap"><table><thead><tr><th data-i18n="file"></th><th data-i18n="size"></th><th data-i18n="sources"></th><th>ED2K</th><th></th></tr></thead><tbody id="ed2k-results"></tbody></table></div>
       <p id="search-summary"></p>
+      <section id="ed2k-source-panel" hidden><h2 id="ed2k-source-title"></h2><p data-i18n="sourceHint"></p><div class="ed2k-table-wrap"><table><thead><tr><th data-i18n="address"></th><th data-i18n="port"></th><th data-i18n="connectionType"></th></tr></thead><tbody id="ed2k-source-results"></tbody></table></div><p id="ed2k-source-summary"></p></section>
     </section>
     <section id="panel-preferences" role="tabpanel" aria-labelledby="tab-preferences" hidden>
       <div class="ed2k-section-heading"><div><h2 data-i18n="preferences"></h2><p data-i18n="preferencesHint"></p></div></div>

@@ -62,7 +62,7 @@ or nodes remain reachable. Updating a list is distinct from connecting to peers.
 
 ## Validation
 
-- 329 Node regression/behaviour tests pass, including live language changes,
+- 331 Node regression/behaviour tests pass, including live language changes,
   metadata URL rejection, native command routing, and text-only rendering of
   untrusted server/result names.
 - A Chromium render at 1280x820 was visually inspected in Portuguese; light/dark
@@ -73,3 +73,19 @@ or nodes remain reachable. Updating a list is distinct from connecting to peers.
 - Local desktop compilation requires GTK/WebKit/pkg-config, unavailable in the
   current container. CI Windows/Linux/macOS builds remain the acceptance gate
   for the Tauri integration and its backend unit tests.
+
+## Window and source lookup update
+
+The independent window opens maximized, including when reused, and uses the
+saved ADM theme for both its content and native title bar. Theme events update
+open content immediately. The extra header eyebrow was removed at user request.
+Main surfaces are white in light mode and black in dark mode, using the shared
+monochrome ADM palette for borders, tables and controls.
+
+Search results can be filtered locally and sorted by source count, size or name.
+Each result can query the connected server using native OP_GETSOURCES. Responses
+are correlated by file hash, checked for exact bounded lengths and deduplicated.
+Low IDs are explicitly marked as requiring callbacks and never displayed as IPs.
+This discovers sources; it does not yet transfer peer data. Native TCP fixture
+coverage includes unrelated responses, malformed lengths, invalid hashes,
+duplicate sources and request throttling. UI behaviour and live themes are tested.
