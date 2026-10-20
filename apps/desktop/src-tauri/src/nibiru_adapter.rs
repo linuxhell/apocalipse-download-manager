@@ -118,6 +118,22 @@ pub enum MediaOperation {
         input: PathBuf,
         output: PathBuf,
     },
+    FlacEncode {
+        input: PathBuf,
+        output: PathBuf,
+    },
+    FlacDecode {
+        input: PathBuf,
+        output: PathBuf,
+    },
+    QoaEncode {
+        input: PathBuf,
+        output: PathBuf,
+    },
+    QoaDecode {
+        input: PathBuf,
+        output: PathBuf,
+    },
     WavCut {
         input: PathBuf,
         output: PathBuf,
@@ -173,6 +189,10 @@ impl MediaOperation {
                 vec!["inspect".into(), text(input)?]
             }
             Self::Mp4Faststart { input, output } => pair("mp4-faststart", input, output)?,
+            Self::FlacEncode { input, output } => pair("flac-encode", input, output)?,
+            Self::FlacDecode { input, output } => pair("flac-decode", input, output)?,
+            Self::QoaEncode { input, output } => pair("qoa-encode", input, output)?,
+            Self::QoaDecode { input, output } => pair("qoa-decode", input, output)?,
             Self::WavCut {
                 input,
                 output,
@@ -515,7 +535,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires NIBIRU_COLAPSE_BIN pointing to the compiled native engine"]
-    async fn real_colapse_executes_all_seven_typed_adm_operations() {
+    async fn real_colapse_executes_all_eleven_typed_adm_operations() {
         let executable =
             PathBuf::from(std::env::var_os("NIBIRU_COLAPSE_BIN").expect("NIBIRU_COLAPSE_BIN"));
         let directory = tempfile::tempdir().unwrap();
@@ -526,6 +546,112 @@ mod tests {
             colapse_request(&executable, json!({"operation":"inspect","input":input})).await;
         assert_eq!(inspected["result"]["format"], "wav");
         assert_eq!(inspected["result"]["frames"], 3);
+
+        let compressed = directory.path().join("encoded.flac");
+        let encoded = colapse_request(
+            &executable,
+            json!({"operation":"flac-encode","input":input,"output":compressed}),
+        )
+        .await;
+        assert_eq!(encoded["result"]["frames"], 3);
+        assert_eq!(encoded["result"]["md5_present"], true);
+        assert_eq!(encoded["result"]["md5_verified"], false);
+        // Independent MD5 vector for little-endian PCM16 [-1000, 0, 1000].
+        assert_eq!(encoded["result"]["md5"], "26286da2c3568dafde63da7bfab38501");
+        let compressed_bytes = std::fs::read(&compressed).unwrap();
+        assert_eq!(&compressed_bytes[..4], b"fLaC");
+        let inspected = colapse_request(
+            &executable,
+            json!({"operation":"inspect","input":compressed}),
+        )
+        .await;
+        assert_eq!(inspected["result"]["format"], "flac");
+        assert_eq!(inspected["result"]["frames"], 3);
+        assert_eq!(inspected["result"]["bits_per_sample"], 16);
+        assert_eq!(inspected["result"]["audio_integrity_verified"], false);
+        assert_eq!(inspected["result"]["md5"], encoded["result"]["md5"]);
+        let decoded = directory.path().join("decoded.wav");
+        let result = colapse_request(
+            &executable,
+            json!({"operation":"flac-decode","input":compressed,"output":decoded}),
+        )
+        .await;
+        assert_eq!(result["result"]["frames"], 3);
+        assert_eq!(result["result"]["md5_present"], true);
+        assert_eq!(result["result"]["md5_verified"], true);
+        assert_eq!(result["result"]["md5"], encoded["result"]["md5"]);
+        assert_eq!(std::fs::read(&decoded).unwrap(), original);
+        for occupied in [
+            MediaOperation::FlacEncode {
+                input: input.clone(),
+                output: compressed.clone(),
+            },
+            MediaOperation::FlacDecode {
+                input: compressed.clone(),
+                output: decoded.clone(),
+            },
+        ] {
+            assert_eq!(
+                process_media(&executable, &occupied).await.unwrap_err(),
+                "media_output_already_exists"
+            );
+        }
+        assert_eq!(std::fs::read(&compressed).unwrap(), compressed_bytes);
+        assert_eq!(std::fs::read(&decoded).unwrap(), original);
+
+        let qoa = directory.path().join("encoded.qoa");
+        let encoded_qoa = colapse_request(
+            &executable,
+            json!({"operation":"qoa-encode","input":input,"output":qoa}),
+        )
+        .await;
+        assert_eq!(encoded_qoa["result"]["frames"], 3);
+        assert_eq!(encoded_qoa["result"]["lossy"], true);
+        assert_eq!(encoded_qoa["result"]["checksum_available"], false);
+        let qoa_bytes = std::fs::read(&qoa).unwrap();
+        assert_eq!(&qoa_bytes[..4], b"qoaf");
+        let inspected_qoa =
+            colapse_request(&executable, json!({"operation":"inspect","input":qoa})).await;
+        assert_eq!(inspected_qoa["result"]["format"], "qoa");
+        assert_eq!(inspected_qoa["result"]["frames"], 3);
+        assert_eq!(inspected_qoa["result"]["audio_integrity_verified"], false);
+
+        // Independent QOA vector: zero LMS state and scale/residual symbols 0.
+        // The spec rounds 0.75 to +1; unchanged zero weights predict zero.
+        let reference_qoa = directory.path().join("reference.qoa");
+        let mut reference = b"qoaf".to_vec();
+        reference.extend(3_u32.to_be_bytes());
+        reference.extend([1, 0, 0xbb, 0x80, 0, 3, 0, 32]);
+        reference.extend([0; 24]);
+        std::fs::write(&reference_qoa, &reference).unwrap();
+        let qoa_wav = directory.path().join("qoa-decoded.wav");
+        let decoded_qoa = colapse_request(
+            &executable,
+            json!({"operation":"qoa-decode","input":reference_qoa,"output":qoa_wav}),
+        )
+        .await;
+        assert_eq!(decoded_qoa["result"]["frames"], 3);
+        assert_eq!(decoded_qoa["result"]["lossy"], true);
+        assert_eq!(decoded_qoa["result"]["checksum_available"], false);
+        assert_eq!(std::fs::read(&qoa_wav).unwrap(), wav(&[1, 1, 1]));
+        for occupied in [
+            MediaOperation::QoaEncode {
+                input: input.clone(),
+                output: qoa.clone(),
+            },
+            MediaOperation::QoaDecode {
+                input: reference_qoa.clone(),
+                output: qoa_wav.clone(),
+            },
+        ] {
+            assert_eq!(
+                process_media(&executable, &occupied).await.unwrap_err(),
+                "media_output_already_exists"
+            );
+        }
+        assert_eq!(std::fs::read(&qoa).unwrap(), qoa_bytes);
+        assert_eq!(std::fs::read(&reference_qoa).unwrap(), reference);
+        assert_eq!(std::fs::read(&qoa_wav).unwrap(), wav(&[1, 1, 1]));
 
         let cut = directory.path().join("cut.wav");
         let result = colapse_request(

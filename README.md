@@ -1,153 +1,150 @@
+<p align="center"><img src="assets/branding/apocalipse-a-blue.svg" width="180" alt="Apocalipse Download Manager"></p>
 
+# Apocalipse Download Manager
 
+[Português do Brasil](README.md) · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
+Gerenciador de downloads portátil com interface Rust/Tauri, extensão de navegador, captura de mídia, torrents, transferências entre computadores e integração nativa com os motores Nibiru.
 
-<p align="center">
-  <img src="assets/branding/apocalipse-a-blue.svg" width="220" alt="Apocalipse Download Manager modern blue A logo">
-</p>
+**Estado desta árvore: ADM `0.6.1`, extensão `0.3.206`, integração Nibiru/ED2K em desenvolvimento em 20/10/2026.** O número da aplicação não significa que todas as alterações desta branch já estejam publicadas. Este README descreve o código atual; versões publicadas têm suas próprias notas no [changelog](CHANGELOG.md) e em [Releases](https://github.com/linuxhell/apocalipse-download-manager/releases).
 
-<h1 align="center">Apocalipse Download Manager</h1>
+## Recursos atuais
 
-<p align="center">
-  <strong>Fast, portable, open-source downloads, media capture and torrents.</strong><br>
-  <strong>Downloads rápidos, portáteis e livres, captura de mídia e torrents.</strong><br>
-  <strong>快速、便携、开源的下载、媒体捕获与种子管理工具。</strong>
-</p>
-
-<p align="center">
-  <a href="https://github.com/linuxhell/apocalipse-download-manager/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/linuxhell/apocalipse-download-manager?style=flat-square"></a>
-  <a href="LICENSE"><img alt="GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-0aa8c2?style=flat-square"></a>
-  <img alt="Windows Linux macOS" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-182533?style=flat-square">
-  <img alt="Extension 0.3.203" src="https://img.shields.io/badge/browser%20extension-0.3.203-2363ef?style=flat-square">
-</p>
-
-<p align="center">
-  <a href="https://github.com/linuxhell/apocalipse-download-manager/releases/latest"><strong>Download / Baixar / 下载</strong></a>
-  · <a href="#quick-start--início-rápido--快速开始">Quick start</a>
-  · <a href="CHANGELOG.md">Changelog</a>
-  · <a href="https://github.com/linuxhell/apocalipse-download-manager/issues">Issues</a>
-</p>
-
-## Screenshots / Capturas de tela / 截图
-
-<p align="center">
-  <img alt="Downloads: one dense row per download, blue progress bar, red when failed, green when completed" src="assets/screenshots/downloads.png" width="800">
-</p>
-<p align="center">
-  <img alt="Settings with tabs (Tools tab)" src="assets/screenshots/settings-tools.png" width="395">
-  <img alt="Optional dark mode" src="assets/screenshots/downloads-dark.png" width="395">
-</p>
-<p align="center">
-  <img alt="About page with the city and deer scene, music player and creator photo" src="assets/screenshots/about.png" width="800">
-</p>
-
-<p align="center"><sub>Real interface rendered with sample downloads. / Interface real com downloads de exemplo. / 真实界面，使用示例下载。</sub></p>
-
-> [!IMPORTANT]
-> **Current release: ADM 0.6.1 + browser extension 0.3.206.** Security and stability release after a full code audit (safer Link transfers, fixed queue slots, hardened extension). Previously in 0.6.0: new compact IDM-sized window (980×620): white background, black text, no themes; Downloads, Torrents, Recordings, Donate and About in the sidebar, everything else in tabs inside Settings; blue progress bars (red on failure, green when done). Previously: steadier extension connection (bridge no longer serialized), consistent language between app and extension, fixed extension ID on Chrome/Edge. Earlier fixes: HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). The Firefox XPI in the release is Mozilla-signed (extension 0.3.206).
-
-## Download the current release
-
-| Platform | Package |
+| Área | Implementado nesta árvore |
 | --- | --- |
-| Windows x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-windows-x64-portable.zip) |
-| Linux x64 | [AppImage](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64.AppImage) · [Portable tar.gz](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64-portable.tar.gz) |
-| macOS x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-macos-x64-portable.zip) |
-| Chrome | [Extension 0.3.203](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.203.zip) |
-| Edge | [Extension 0.3.203](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.203.zip) |
-| Firefox | [Mozilla-signed XPI 0.3.203](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.203.xpi) |
+| HTTP/HTTPS | Retomada com identidade do arquivo, segmentação, espelhos verificados, SHA-256, fila e concorrência adaptativa |
+| Torrents/magnets | Nibiru Xtreme, seleção de arquivos, informações de peers/sessão e prévia de mídia |
+| Navegador | Captura de vídeo, áudio e imagens; envio ao ADM; idiomas `pt-BR`, `en` e `zh-CN` |
+| Extração de páginas | Nibiru Power para fontes suportadas e rotas yt-dlp para os demais fluxos existentes |
+| HLS/DASH | Integração por capacidades com Nibiru M3U8; rotas legadas conforme o fluxo |
+| Mídia local | Operações tipadas Colapse: inspeção, WAV, FLAC, QOA, Y4M e MP4 faststart |
+| Gravações | Gravação progressiva e exportação pelos motores de mídia configurados |
+| Apocalipse Link | Transferências autenticadas com TLS; QUIC é uma opção separada, desativada por padrão |
+| ED2K/Kad | Janela independente, busca em servidor, fontes, partes verificadas, compartilhamento explícito e sessão Kad limitada |
+| Interface | Janela principal de 980×620, modo claro/escuro, bandeja e troca de idioma durante a execução |
 
-## Quick start / Início rápido / 快速开始
+<p align="center"><img src="assets/screenshots/downloads.png" width="800" alt="Interface de downloads com dados de exemplo"></p>
 
-### English
+As capturas ilustram a interface; não comprovam conectividade pública nem execução do checkpoint mais recente em cada sistema.
 
-1. Download the portable package for your platform and extract it. On Linux AppImage, mark the file executable before launching.
-2. Install the matching browser extension if you want automatic media detection and browser-to-ADM handoff.
-3. Open **Tools** in ADM and update the engines you use, especially aria2, yt-dlp and FFmpeg.
+## Começar
 
-### Português do Brasil
+1. Obtenha um pacote em [Releases](https://github.com/linuxhell/apocalipse-download-manager/releases) ou compile esta branch. Extraia o pacote inteiro para uma pasta gravável.
+2. Execute o ADM. No Windows, mantenha as DLLs distribuídas junto do executável; a interface precisa do WebView2. No Linux, o desktop usa GTK/WebKit.
+3. Em **Configurações → Ferramentas**, confira caminhos e capacidades. Os binários Nibiru usam subpastas em `data/tools/`; caminhos próprios também são aceitos.
+4. Instale a extensão correspondente para Chrome, Edge ou Firefox. O manifesto desta árvore é `0.3.206`; gerar um XPI localmente não lhe dá assinatura Mozilla automaticamente.
+5. Escolha `Português do Brasil`, `English` ou `简体中文`. A extensão e a janela ED2K acompanham o idioma configurado.
 
-1. Baixe o pacote portátil da sua plataforma e extraia. No Linux AppImage, marque o arquivo como executável antes de abrir.
-2. Instale a extensão do seu navegador se quiser detecção automática de mídia e envio direto para o ADM.
-3. Abra **Ferramentas** no ADM e atualize os motores que você usa, principalmente aria2, yt-dlp e FFmpeg.
+`data/`, ao lado do executável, guarda configurações, fila, logs e ferramentas. Senhas e tokens usam o cofre de credenciais do sistema; copiar a pasta portátil não garante a migração desses segredos. Use somente conteúdo que você tenha autorização para baixar.
 
-### 简体中文
+## Motores e integração
 
-1. 下载适合您平台的便携包并解压。Linux AppImage 首次运行前请先赋予可执行权限。
-2. 如需自动检测网页媒体并发送到 ADM，请安装对应的浏览器扩展。
-3. 在 ADM 中打开**工具**，更新您使用的引擎，尤其是 aria2、yt-dlp 和 FFmpeg。
+| Motor | Função no ADM | Contrato atual |
+| --- | --- | --- |
+| [Nibiru Xtreme](https://github.com/linuxhell/nibiru-xtreme) | Transferências/torrents e biblioteca ED2K embutida | RPC nativo `nibiru.*`, identidade e capacidades verificadas |
+| [Nibiru Power](https://github.com/linuxhell/nibiru-power) | Descoberta de mídia em páginas suportadas | `extract URL --json --timeout 30`; supervisor ADM com prazo de 40 s |
+| [Nibiru M3U8](https://github.com/linuxhell/nibiru-m3u8) | Playlists e segmentos suportados | CLI nativa, capacidades e eventos JSONL |
+| [Nibiru Colapse](https://github.com/linuxhell/nibiru-colapse) | Arquivos de mídia locais | Operações tipadas; JSON com `schema_version=1`, `engine`, `operation`, `result` |
 
-## What Apocalipse does
+Os quatro executáveis respondem a `capabilities --json`. O ADM recusa identidade/schema incompatível. Power não recebe comandos de yt-dlp e Colapse não recebe comandos de FFmpeg. FFmpeg, FFprobe, yt-dlp e QuickJS ainda atendem rotas não cobertas pelos motores nativos; confira os binários incluídos no seu pacote.
 
-- Resumable HTTP/HTTPS downloads, mirrors, SHA-256 verification and an adaptive queue
-- Torrent and magnet workflows with file selection, peer/session information and player preview
-- Browser media discovery for video, audio and images; yt-dlp, HLS and FFmpeg workflows
-- Progressive recordings with later MP4/AAC export
-- Apocalipse Link for authenticated, TLS-encrypted file transfers between computers
-- Per-site credentials stored in the operating system secure credential vault
-- Compact IDM-sized window (980×620): white surface, black text, optional dark mode styles; no themes
-- English, Brazilian Portuguese and Simplified Chinese in the desktop app and browser extension
-- Portable Windows, Linux and macOS x64 builds, with no mandatory installer
+As chaves antigas `aria2_rpc_*` são aceitas para migração; a integração atual inicia Xtreme e usa RPC `nibiru.*`. Revisões dos executáveis estão em [scripts/nibiru-engines.json](scripts/nibiru-engines.json). A biblioteca ED2K tem seu próprio pin no [Cargo.toml do desktop](apps/desktop/src-tauri/Cargo.toml) e `Cargo.lock`; commits posteriores contendo apenas documentação não mudam o código já fixado.
 
-Sites protected by DRM or access controls are intentionally not bypassed. Download only content you are authorized to save.
+## Parâmetros atuais
 
-## Release 0.4.91 highlights
+### Aplicação e CLI
 
-- **Download button:** a Referer that makes a CDN answer 403 (e.g. `video.twimg.com`) is dropped after a 1-byte probe; sites that need it still get it.
-- **Icon:** the Apocalipse "A" replaces the alien, and the window/taskbar icon is always the blue "A".
+| Comando | Efeito |
+| --- | --- |
+| `apocalipse-desktop` | Abre a aplicação |
+| `apocalipse-desktop --hidden` | Inicia com a janela principal oculta |
+| `apocalipse-desktop --open URL` | Abre uma fonte reconhecida; usado também pelas associações do sistema |
+| `apocalipse-desktop --verify-media-routing REPORT.json` | Diagnóstico da CI; grava o relatório e encerra antes de abrir a interface |
+| `apocalipse-cli URL DESTINO` | Download pelo core Rust, solicita 8 conexões e preserva destinos existentes |
+| `apocalipse-cli benchmark URL DESTINO [CONEXOES] [ESPELHO ...]` | Padrão 8 conexões, limite 1–32, adaptação ativa e resumo JSON |
 
-## Release 0.4.90 highlights
+São nomes dos alvos Cargo; o pacote pode renomear o desktop. No Windows, acrescente `.exe`. A CLI é uma ferramenta separada do core e não controla todas as funções da interface. Não expõe flags para cabeçalhos, checksum ou sobrescrita.
 
-This release ships the Mozilla-signed Firefox XPI 0.3.203, so Firefox gets the same connection and overlay fixes as Chrome and Edge.
+### Configurações da interface
 
-## Release 0.4.89 highlights
+| Campo em `settings.json` | Padrão e interpretação |
+| --- | --- |
+| `max_active_downloads` | `3`; ajustável de 1 a 20 tarefas |
+| `connections_per_download` | `16`; limite solicitado de 1 a 32; streams multiplexados não equivalem necessariamente a conexões TCP |
+| `adaptive_efficiency` | `true`; adapta a concorrência conforme motor/transferência |
+| `global_bandwidth_limit` | `0` sem limite; bytes/s, máximo de 10 GiB/s |
+| `download_directory` | Inicialmente `null`; diretório escolhido na interface |
+| `xtreme_path`, `power_path`, `m3u8_path`, `colapse_path` | Opcionais; padrão `data/tools/NOME/NOME[.exe]` |
+| `xtreme_rpc_enabled`, `xtreme_rpc_auto_start` | `true`; porta automática quando `xtreme_rpc_port` é `null` |
+| `ffmpeg_path`, `yt_dlp_path`, `qjs_path`, `n_m3u8dl_re_path` | Caminhos opcionais para as rotas correspondentes |
+| `proxy_enabled`, `proxy_url`, `dns_enabled`, `dns_servers` | Proxy/DNS configuráveis; habilitação inicia em `false` |
+| `language`, `dark_mode` | Idiomas `en`, `pt-BR`, `zh-CN`; padrões `en` e `false` |
+| `link_quic_enabled` | `false`; opção experimental independente do Link TLS |
 
-- **Extension connection:** the local bridge serves each connection on its own thread, the extension stops flooding it with per-scan diagnostics, and the UI restores its language from `settings.json`.
-- **Fixed extension ID** on Chrome/Edge (`lfgkfogkggkgacahaidkbhggdolpojjf`), so reinstalling from another folder keeps the same ID. The pairing token is still per install.
+Prefira a interface para mudar configurações. O bridge escuta em `127.0.0.1:17654`; a porta-base do Link é `17655`. Esses números não são flags CLI. Segredos não devem aparecer nos exemplos de configuração.
 
-### Earlier in 0.4.88
+### Mídia local
 
-- **Capture:** HLS playlists served without `.m3u8` in the URL are detected by Content-Type; on pages with several equal-length videos the download uses the playlist of the video on screen; the Download button is back on YouTube Shorts.
-- **Recordings:** repeated recordings (`title.recording (1).webm`) now export to the chosen format, and export errors are shown.
-- **Media downloads:** after a 403 caused by TLS fingerprinting, yt-dlp is retried once impersonating a browser (`--impersonate chrome`) when the installed build supports it.
-- **Tool updates:** signed-manifest verification (signature, anti-rollback, expiry, SHA-256) is wired into the tool installer and stays dormant until a trusted key is added. See [docs/tool-update-signing.md](docs/tool-update-signing.md).
+O adaptador Nibiru aceita os pedidos tipados abaixo; a concatenação está disponível pelo contrato, sem seletor múltiplo no painel atual. Caminhos devem ser absolutos; entradas precisam existir e saídas precisam ser novas.
 
-The interface (introduced in 0.4.83) keeps Downloads, Torrents and Recordings in the same narrow, scrollable task column. Pause/resume, the red remove control and the yellow folder control stay visible on each task. On Windows and macOS, the folder action reveals the task file directly when it exists instead of opening an unrelated folder view.
+| Operação | Campos do pedido |
+| --- | --- |
+| `inspect` | `input` |
+| `wav-cut`, `y4m-cut` | `input`, `output`, `start`, `frames` |
+| `wav-gain` | `input`, `output`, `db` |
+| `wav-normalize` | `input`, `output`, `peak_db` |
+| `wav-concat` | `inputs`, `output` |
+| `flac-encode`, `flac-decode`, `qoa-encode`, `qoa-decode` | `input`, `output` |
+| `mp4-faststart` | `input`, `output` |
 
-The interface is a single compact white window with black text; the About page keeps the city/deer scene, music player and creator photo, and Logs use balanced diagnostic/event panes.
+`start`/`frames` contam sample frames em WAV e frames de vídeo em Y4M. Ganho usa dB; normalização é de pico em dBFS, sem LUFS. FLAC é sem perdas nos perfis inteiros suportados. QOA usa PCM16 com perdas e não contém checksum; não equivale a uma cópia exata do áudio original. Inspeção MP4 não decodifica os codecs identificados. Consulte capacidades e limites no README do Colapse.
 
-Browser extension 0.3.202 follows the selected palette. The current release includes Chrome and Edge ZIP packages plus the Mozilla-signed Firefox XPI.
+No contrato ADM, cortes exigem `frames >= 1` e soma `start + frames` sem overflow; ganho fica entre −120 e +120 dB, e normalização ainda exige alvo ≤ 0 dBFS no Colapse. Concatenação aceita 1–256 entradas. O supervisor de mídia tem prazo de seis horas. Esses limites do adaptador são adicionais aos limites do core Colapse.
 
-## Performance and engineering
+## ED2K/Kad: estado real
 
-Benchmark details and limitations live in [docs/PERFORMANCE.md](docs/PERFORMANCE.md), keeping the homepage focused on downloading and using the application.
+Há login/busca em servidor, fontes, downloads diretos com verificação MD4/partes, retomada, compartilhamento escolhido pelo usuário, fila de uploads e publicação da lista no servidor. Kad usa HELLO, desafio de endpoint, consultas iterativas e fontes diretas. O [documento ED2K/Kad](docs/ed2k-kad-native.md) detalha limites de pacotes, contatos, filas e cancelamento.
 
-For architecture, development status and security details, see [ROADMAP.md](ROADMAP.md), [SECURITY.md](SECURITY.md) and the [changelog](CHANGELOG.md).
+Dois downloads ED2K podem trabalhar em paralelo; cada transferência usa um peer por vez e tenta até 16 fontes diretas por tentativa. Uploads permitem 1–64 slots e limite total em KiB/s. O listener TCP prefere 4662, usando outra porta se ocupada. O ID atribuído pelo servidor é a referência: uma porta local aberta não comprova acesso através de NAT/firewall.
 
-## Português do Brasil
+Kad tem até 512 contatos, 32 consultas pendentes, três segundos por consulta e provas de endpoint com validade de 20 minutos. Fontes diretas podem alimentar a fila sem servidor ED2K. Busca/publicação por palavras-chave Kad, créditos, AICH, ofuscação e paridade completa com aMule continuam pendentes. Testes locais entre componentes próprios não comprovam interoperabilidade pública com eMule/aMule.
 
-O Apocalipse é um gerenciador de downloads livre e portátil para Windows, Linux e macOS. Ele reúne downloads HTTP retomáveis, torrents/magnet, detecção de mídia no navegador, yt-dlp, HLS, FFmpeg, gravações progressivas e Apocalipse Link em uma única interface.
+## Compilar, testar e empacotar
 
-A versão **0.4.88** corrige a captura de playlists HLS sem `.m3u8` na URL, o download de vídeo errado em páginas com vários vídeos, o botão Baixar nos YouTube Shorts e a exportação de gravações repetidas. Também tenta de novo o yt-dlp imitando um navegador quando o site bloqueia com 403 e liga a verificação de atualizações de ferramentas assinadas (ativa quando uma chave for cadastrada). O Cinema Premium mantém os **28 temas em HD** e as filas compactas. A extensão atual é a **0.3.202**, com XPI do Firefox assinado pela Mozilla.
+Use Rust estável e execute na raiz para carregar `.cargo/config.toml`, que habilita a API HTTP/3 de reqwest. A CI JavaScript usa Node 22; scripts de build usam Python 3.11 ou posterior.
 
-Os detalhes de desempenho foram movidos para [docs/PERFORMANCE.md](docs/PERFORMANCE.md) para a página inicial ficar mais clara.
+```sh
+cargo test --locked -p apocalipse-core
+cargo build --locked --release -p apocalipse-cli
+cargo build --locked --release -p apocalipse-desktop
+node --test tests/*.test.cjs
+python3 scripts/build_nibiru_engines.py --output dist/nibiru-tools --require-all
+```
 
-## 简体中文
+Em Debian/Ubuntu, o desktop usa `build-essential`, `pkg-config`, `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`, `libpam0g-dev`, `libssl-dev`. A [matriz de CI](.github/workflows/validate-portable.yml) cobre os comandos Fedora/Arch e jobs Windows/macOS. Compilar só core/CLI não exige GTK/WebKit.
 
-Apocalipse 是适用于 Windows、Linux 和 macOS 的自由开源便携下载管理器。它把可恢复 HTTP 下载、种子/磁力链接、浏览器媒体检测、yt-dlp、HLS、FFmpeg、渐进式录制和 Apocalipse Link 集成在同一界面中。
+| Opção de `build_nibiru_engines.py` | Comportamento |
+| --- | --- |
+| `--output PASTA` | Obrigatória; saída dos motores e de `build.json` |
+| `--require-all` | Falha se qualquer revisão necessária estiver ausente |
+| `--source-root PASTA` | Usa clones Git locais `PASTA/nibiru-*`, sempre na revisão fixada; aceita commits ainda não publicados |
 
-**0.4.88** 版本修复了 URL 中不含 `.m3u8` 的 HLS 播放列表捕获、多视频页面下载错误视频、YouTube Shorts 下载按钮缺失以及重复录制无法导出的问题。遇到 403（TLS 指纹拦截）时，yt-dlp 会模拟浏览器重试一次，并接入了已签名工具更新的校验（添加受信任密钥后启用）。Cinema Premium 保留 **28 个高清主题**与紧凑队列。当前浏览器扩展版本为 **0.3.202**，Firefox XPI 已由 Mozilla 签名。
+O script compila para o sistema onde é executado, verifica versão/capacidades, copia avisos de licença e registra SHA-256. Não é um cross-compiler. Pins ainda não publicados exigem clones locais ou publicação prévia dos commits.
 
-性能测试的详细数据与限制已移至 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)，使项目首页更简洁。
+### Validação e limites
 
-## Support the project
+O checkpoint de auditoria executou 337 testes JavaScript, 52 do core e testes dos módulos nativos em harness Linux, incluindo os quatro executáveis reais. O desktop completo foi compilado para Windows GNU x64. Depois da inclusão de FLAC/QOA, os 33 testes comuns do harness passaram novamente, assim como o teste que executa as 11 operações tipadas com o Colapse real. Quatro testes novos do painel, em Node/VM, conferem a mudança de idioma e 24 pedidos nas três línguas. São escopos distintos, sem soma de repetições.
 
-If Apocalipse helps you, [donate via PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL) to support continued development.
+O Colapse desta etapa passou em 115 testes Rust e 53 testes Python, além das verificações independentes de codecs e do benchmark documentado em seu repositório. Logs, comandos, hashes e limites de cada execução acompanham o checkpoint correspondente. Os testes de interface em VM não comprovam o funcionamento do WebView no Windows.
 
-Se o Apocalipse for útil para você, [faça uma doação pelo PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL) e ajude a manter o desenvolvimento.
+Compilar Windows não equivale a executar sua interface. Execução nativa Windows, conectividade pública ED2K/Kad, empacotamento AppImage e auditoria semântica integral ainda exigem evidência específica. A [auditoria delimitada](docs/AUDITORIA-NIBIRU-ED2K-2026-10-20.md) registra a cobertura real. O instalador suporta manifestos assinados, mas a lista de chaves confiáveis está vazia; essa assinatura ainda não é exigida. Veja [atualizações de ferramentas](docs/tool-update-signing.md).
 
-如果 Apocalipse 对您有帮助，请[通过 PayPal 捐赠](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL)，支持项目继续开发。
+## Evolução e contribuição
 
-## License
+Tecnologias novas são avaliadas pelo ganho mensurável em velocidade, integridade, qualidade, compatibilidade ou manutenção. HTTP/3, codecs nativos e paralelismo devem manter resultados reproduzíveis, fallbacks aplicáveis e documentação sincronizada. Experimentos não são apresentados como melhorias comprovadas. Consulte [desempenho](docs/PERFORMANCE.md), [roadmap](ROADMAP.md), [segurança](SECURITY.md) e [issues](https://github.com/linuxhell/apocalipse-download-manager/issues); documentos históricos identificam o snapshot a que se referem.
 
-GPL-3.0-or-later.
+Você pode [apoiar o desenvolvimento pelo PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL).
+
+## Licença
+
+ADM usa [GPL-3.0-or-later](LICENSE). Motores e ferramentas mantêm suas próprias licenças e avisos; a licença do ADM não substitui esses termos.

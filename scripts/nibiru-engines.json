@@ -4,25 +4,25 @@
     {
       "name": "nibiru-xtreme",
       "repository": "https://github.com/linuxhell/nibiru-xtreme.git",
-      "revision": "0a9fcdde7363aed6881c08f57e157564a0bebd04",
+      "revision": "dd92f6ee0b45e41b23c537504000d6e52fde9e18",
       "required": true
     },
     {
       "name": "nibiru-power",
       "repository": "https://github.com/linuxhell/nibiru-power.git",
-      "revision": "55e10437298111cddc1e92fca699db8afbb65806",
+      "revision": "6d5f207e581dfa563c8402e1a48eac484bb35169",
       "required": true
     },
     {
       "name": "nibiru-m3u8",
       "repository": "https://github.com/linuxhell/nibiru-m3u8.git",
-      "revision": "803cab28a64fdfbb2ae667ab987ce1951f8b0717",
+      "revision": "2f1ae000e4dc89fb8fb69d2ce4ad442b219de297",
       "required": true
     },
     {
       "name": "nibiru-colapse",
       "repository": "https://github.com/linuxhell/nibiru-colapse.git",
-      "revision": "712c83af47695b44ae9afe430327e236da52d3f1",
+      "revision": "ff935647c3bd13f5d681bf30670eb970d27cbda9",
       "required": true
     }
   ]
