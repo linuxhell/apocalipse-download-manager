@@ -3475,7 +3475,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 [[package]]
 name = "nibiru-xtreme"
 version = "0.2.0-alpha.1"
-source = "git+https://github.com/linuxhell/nibiru-xtreme?rev=a77e131e958546b23cce15084504fdfe0ec03e00#a77e131e958546b23cce15084504fdfe0ec03e00"
+source = "git+https://github.com/linuxhell/nibiru-xtreme?rev=5077fbdb44a692027207a2150fb9a417afc5e303#5077fbdb44a692027207a2150fb9a417afc5e303"
 dependencies = [
  "anyhow",
  "clap",

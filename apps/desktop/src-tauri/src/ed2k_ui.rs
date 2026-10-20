@@ -14,7 +14,7 @@ use std::{
     },
 };
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex as AsyncMutex, RwLock};
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Library {
@@ -27,6 +27,7 @@ pub struct Ed2kState {
     startup_error: Option<String>,
     library: Mutex<Library>,
     server: RwLock<Option<ServerConnection>>,
+    incoming: AsyncMutex<Option<ed2k::IncomingListener>>,
     generation: AtomicU64,
     kad: RwLock<Option<BootstrapResult>>,
     user_hash: [u8; 16],
@@ -42,10 +43,29 @@ impl Ed2kState {
                 nodes: Vec::new(),
             }),
             server: RwLock::new(None),
+            incoming: AsyncMutex::new(None),
             generation: AtomicU64::new(0),
             kad: RwLock::new(None),
             user_hash: [0; 16],
         }
+    }
+    async fn incoming_port(&self) -> Result<u16, String> {
+        let mut incoming = self.incoming.lock().await;
+        if incoming
+            .as_ref()
+            .is_none_or(|listener| !listener.status().running)
+        {
+            *incoming = Some(
+                ed2k::IncomingListener::bind(self.user_hash, 4662)
+                    .await
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+        Ok(incoming
+            .as_ref()
+            .ok_or("ed2k_incoming_unavailable")?
+            .status()
+            .tcp_port)
     }
     fn ready(&self) -> Result<(), String> {
         match &self.startup_error {
@@ -87,6 +107,7 @@ impl Ed2kState {
             startup_error: None,
             library: Mutex::new(library),
             server: RwLock::new(None),
+            incoming: AsyncMutex::new(None),
             generation: AtomicU64::new(0),
             kad: RwLock::new(None),
             user_hash,
@@ -145,15 +166,21 @@ pub async fn open_ed2k_window(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn ed2k_overview(state: State<'_, Ed2kState>) -> Result<serde_json::Value, String> {
     state.ready()?;
+    let incoming = state
+        .incoming
+        .lock()
+        .await
+        .as_ref()
+        .map(|listener| listener.status());
     let server = state.server.read().await;
     let active = server.as_ref().filter(|c| c.is_connected());
     let kad = state.kad.read().await;
     let library = state.library.lock().map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
-        "servers":library.servers,"node_count":library.nodes.len(),"downloads":state.downloads.list()?,
+        "servers":library.servers,"node_count":library.nodes.len(),"downloads":state.downloads.list()?,"incoming":incoming,
         "server":active.map(|c|&c.server),"client_id":active.map(|c|c.client_id),"low_id":active.is_some_and(|c|c.is_low_id()),
         "kad_bootstrap":*kad,"server_list_url":ed2k::SERVER_LIST_URL,"node_list_url":ed2k::NODE_LIST_URL,
-        "capabilities":{"server_login":true,"server_search":true,"server_sources":true,"kad_bootstrap":true,"kad_routing":false,"peer_download":true,"peer_download_scope":"high_id_verified_parts","sharing":false,"messages":false}
+        "capabilities":{"server_login":true,"server_search":true,"server_sources":true,"kad_bootstrap":true,"kad_routing":false,"peer_download":true,"peer_download_scope":"verified_parts_direct_and_server_callback","server_callback":true,"sharing":false,"messages":false}
     }))
 }
 fn install(state: &Ed2kState, kind: &str, bytes: &[u8]) -> Result<usize, String> {
@@ -257,12 +284,22 @@ pub async fn ed2k_connect(
         if state.generation.load(Ordering::Acquire) != revision {
             return Err("connection_cancelled".into());
         }
-        match ServerConnection::connect(server, state.user_hash, "Apocalipse Nibiru", 0).await {
+        match ServerConnection::connect(
+            server,
+            state.user_hash,
+            "Apocalipse Nibiru",
+            state.incoming_port().await?,
+        )
+        .await
+        {
             Ok(connection) => {
                 let mut active = state.server.write().await;
                 if state.generation.load(Ordering::Acquire) != revision {
                     connection.disconnect();
                     return Err("connection_cancelled".into());
+                }
+                if let Some(listener) = state.incoming.lock().await.as_ref() {
+                    listener.set_client_id(connection.client_id);
                 }
                 *active = Some(connection);
                 return Ok(());
@@ -278,6 +315,9 @@ pub async fn ed2k_disconnect(state: State<'_, Ed2kState>) -> Result<(), String> 
     state.generation.fetch_add(1, Ordering::AcqRel);
     if let Some(connection) = state.server.write().await.take() {
         connection.disconnect();
+    }
+    if let Some(listener) = state.incoming.lock().await.as_ref() {
+        listener.set_client_id(0);
     }
     Ok(())
 }

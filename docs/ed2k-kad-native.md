@@ -24,8 +24,10 @@ replacement; performance/memory claims require measurements of the final build.
   Automatic selection tries at most four initial servers. Disconnect invalidates
   in-flight attempts. Native server search displays file size, sources, hash and
   an ED2K link that can be copied.
-- No incoming peer listener exists yet. Server login currently uses port zero
-  and may receive Low ID or be rejected. The UI explicitly displays Low ID.
+- Connecting starts a bounded incoming TCP hello/probe listener (prefers port
+  4662, falls back to an available port on collision). Login advertises that
+  actual port. The server's assigned ID remains authoritative: a listener does
+  not prove firewall/NAT reachability. The UI shows the port and handshake count.
 - Kad currently implements a UDP bootstrap probe that validates a responding
   node and returns contacts. It **does not** keep a routing table/session active,
   perform Kad lookup/publishing or download through Kad. The UI labels this as
@@ -34,7 +36,7 @@ replacement; performance/memory claims require measurements of the final build.
   root-checked ED2K hashsets, verified parts, 32/64-bit offsets and compressed
   block support. Unfinished tasks reopen paused. Resume rehashes saved data.
   The ADM download directory is used; existing destinations are preserved.
-- Low-ID callbacks, uploads/upload queues, shared files, credits, AICH,
+- Uploads/upload queues, shared files, credits, AICH,
   obfuscation, messaging and full aMule feature parity remain required work.
 
 An ED2K initialization error disables this feature rather than stopping the
@@ -99,7 +101,10 @@ duplicate sources and request throttling. UI behaviour and live themes are teste
 Search results can be added directly to Transfers, or users can paste a standard
 ED2K file link. Two tasks may run concurrently; each native transfer uses one
 peer and bounded block requests, trying at most 16 direct sources per attempt.
-Low-ID sources remain visible but are not dialed as IP addresses. An incomplete
+Low-ID sources are never dialed as IP addresses. If the requester has a High-ID
+server session and an incoming listener, it registers a bounded callback and
+asks the server to arrange the peer connection. The incoming client ID must
+match the requested source before it enters the verified transfer path. An incomplete
 attempt keeps verified parts and can be resumed to refresh server sources.
 
 Persisted task records are bounded and atomically saved. Partial files use a
@@ -114,3 +119,9 @@ packets, raw fragments arriving out of order, corruption, hashset validation,
 large offsets above 4 GiB, cancellation, and a finalization race with an existing
 user file. UI tests cover add/resume/pause/remove command routing. Public-network
 interoperability and uploads/Kad feature completeness remain separate gates.
+
+An incoming TCP fixture covers hello identity and no-file responses. A server
+callback fixture exercises OP_CALLBACKREQUEST, an unrelated incoming peer ID,
+and a completed MD4-verified download from the matching Low-ID source. Pending
+callback registrations are removed on cancellation/drop. This does not implement
+Low-ID to Low-ID NAT traversal.
