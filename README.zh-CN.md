@@ -17,7 +17,7 @@
 | 浏览器 | 捕获视频、音频和图片并发送至 ADM；支持 `pt-BR`、`en`、`zh-CN` |
 | 网页提取 | Nibiru Power 处理已支持的来源，其余现有流程使用 yt-dlp 路径 |
 | HLS/DASH | 根据能力集成 Nibiru M3U8；适用流程保留原有路径 |
-| 本地媒体 | Colapse 类型化操作：检查、WAV、FLAC、QOA、Y4M、MP4 faststart |
+| 本地媒体 | Colapse 类型化操作：检查、WAV、FLAC、QOA、实验性 QOIR 与 PPM/PAM、Y4M、MP4 faststart |
 | 录制 | 渐进式录制，并通过配置的媒体引擎导出 |
 | Apocalipse Link | 通过 TLS 进行经过身份验证的传输；QUIC 是独立选项，默认关闭 |
 | ED2K/Kad | 独立窗口、服务器搜索、来源查询、分块校验、主动共享和有界 Kad 会话 |
@@ -85,7 +85,7 @@
 
 ### 本地媒体
 
-Nibiru 适配器接受以下类型化请求；拼接通过契约提供，当前面板尚无多输入选择器。路径必须为绝对路径；输入必须存在，输出必须是新文件。
+Nibiru 适配器接受 13 个类型化操作，其中 12 个显示在面板中。拼接通过契约提供，当前界面尚无多输入选择器。路径必须为绝对路径；输入必须存在，输出必须是新文件。未知字段以及属于其他操作的字段会被拒绝。
 
 | 操作 | 请求字段 |
 | --- | --- |
@@ -95,11 +95,15 @@ Nibiru 适配器接受以下类型化请求；拼接通过契约提供，当前�
 | `wav-normalize` | `input`、`output`、`peak_db` |
 | `wav-concat` | `inputs`、`output` |
 | `flac-encode`、`flac-decode`、`qoa-encode`、`qoa-decode` | `input`、`output` |
+| `qoir-encode` | `input`、`output`；可选 `input_color`：`bt709` 或 `srgb` |
+| `qoir-decode` | `input`、`output` |
 | `mp4-faststart` | `input`、`output` |
 
 WAV 的 `start`/`frames` 按采样帧计数，Y4M 按视频帧计数。增益单位为 dB；归一化目标是峰值 dBFS，不测量 LUFS。FLAC 对支持的整数配置提供无损转换。QOA 使用有损 PCM16 且不包含校验和，不能精确保留原始音频。MP4 检查不解码所识别的编解码器。请参阅 Colapse 能力声明及 README 限制。
 
-ADM 契约要求裁剪 `frames >= 1`，且 `start + frames` 不溢出；增益范围为 −120 到 +120 dB，Colapse 另要求归一化目标 ≤ 0 dBFS。拼接接受 1–256 个输入。媒体监督器的期限为六小时。这些适配器边界叠加在 Colapse core 限制之上。
+QOIR 是与 QOI 不同的实验性图像格式。编码接受单幅 P6 PPM 或 P7 PAM 图像，支持每通道 8 位的 RGB/RGBA，并生成无损 QOIR；解码导出 PAM，也接受该格式的有损级别。上限为 67,108,864 像素。输入颜色默认为 BT.709，除非提供已识别的颜色注释或显式 `input_color`；选择 sRGB 不会转换像素。PAM 导出会拒绝预乘 alpha 和无法表示的元数据，包括 ICC 配置文件。QOIR 没有强制校验和。面板标明格式处于实验阶段，且仅在编码时显示颜色选项。
+
+ADM 契约要求裁剪 `frames >= 1`，且 `start + frames` 不溢出；增益范围为 −120 到 +120 dB，通过 ADM 归一化时接受 −120 到 0 dBFS，这是适配器边界与 Colapse 上限共同作用的范围。拼接接受 1–256 个输入。媒体监督器的期限为六小时。这些适配器边界叠加在 Colapse core 限制之上。
 
 ## ED2K/Kad：实际状态
 
@@ -133,9 +137,9 @@ Debian/Ubuntu 桌面构建使用 `build-essential`、`pkg-config`、`libwebkit2g
 
 ### 验证与限制
 
-审计检查点执行了 337 个 JavaScript 测试、52 个 core 测试及 Linux harness 原生模块测试，包含四个真实引擎程序。完整桌面已交叉编译为 Windows GNU x64。加入 FLAC/QOA 后，33 个常规 harness 测试再次通过，使用真实 Colapse 程序执行全部 11 个类型化操作的测试也通过了。新增四个 Node/VM 面板测试，检查实时语言切换及三种语言下的 24 个请求。各项测试的范围不同，重复执行不会累加为总数。
+当前检查点通过了直接用 Node 执行并按 TAP 统计的 44 个文件、341 个 JavaScript 测试，以及全部 33 个常规原生 harness 测试。另一个测试使用真实 Colapse 程序执行了全部 13 个类型化操作。JavaScript 套件中的四个 Node/VM 面板测试检查实时语言切换及三种语言下的 36 个模拟请求，包括颜色选项。三个 workflow 均通过 YAML、Bash 块语法及集成测试过滤器检查。此前的审计检查点还执行了 52 个 core 测试和四个真实引擎，并将桌面程序交叉编译为 Windows GNU x64。各项测试按范围分别报告，不累加重复运行；语法检查不等于执行远程任务。
 
-本阶段 Colapse 通过了 115 个 Rust 测试、53 个 Python 测试，以及独立编解码检查和其仓库中记录的基准测试。相应 checkpoint 包含每次执行的日志、命令、哈希和限制。VM 界面测试不能证明 Windows WebView 的实际运行行为。
+包含 QOIR 和并行 FLAC 解码器的 Colapse 第 4 轮检查点通过了 172 个 Rust 测试（本次调用忽略四个依赖外部参考/语料的测试）、53 个 Python 测试、格式检查、Clippy，以及 13 个操作/21 个编解码方向的冒烟检查。ADM 的真实适配器测试使用了同一个冻结的 Linux 程序。[基于 FFmpeg 源码阅读的后续修复](https://github.com/linuxhell/nibiru-colapse/blob/main/docs/SOURCE_GUIDED_DEVELOPMENT_2026-10-20.md)、独立音频/像素比较及性能矩阵在引擎仓库中保留各自的记录。日志、命令、哈希和限制将每次执行绑定到对应程序；数量不累加重复运行，也不代表完整编解码器覆盖。VM 界面测试不能证明 Windows WebView 的实际运行行为。
 
 Windows 编译成功不代表界面已运行。原生 Windows 执行、ED2K/Kad 公网连通性、AppImage 打包及完整语义审计仍需专门证据。[限定范围审计](docs/AUDITORIA-NIBIRU-ED2K-2026-10-20.md) 记录实际覆盖范围。安装器支持签名清单，但可信密钥列表为空，尚未强制要求该签名。详见[工具更新](docs/tool-update-signing.md)。
 

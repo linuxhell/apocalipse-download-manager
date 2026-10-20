@@ -17,7 +17,7 @@ A portable download manager with a Rust/Tauri interface, browser extension, medi
 | Browser | Video, audio and image capture; ADM handoff; `pt-BR`, `en` and `zh-CN` |
 | Page extraction | Nibiru Power for supported sources and yt-dlp routes for other existing workflows |
 | HLS/DASH | Capability-based Nibiru M3U8 integration; existing routes where applicable |
-| Local media | Typed Colapse operations: inspection, WAV, FLAC, QOA, Y4M and MP4 faststart |
+| Local media | Typed Colapse operations: inspection, WAV, FLAC, QOA, experimental QOIR with PPM/PAM, Y4M and MP4 faststart |
 | Recordings | Progressive recording and export through configured media engines |
 | Apocalipse Link | Authenticated TLS transfers; QUIC is a separate option, disabled by default |
 | ED2K/Kad | Independent window, server search, sources, verified parts, explicit sharing and bounded Kad session |
@@ -85,7 +85,7 @@ Prefer the interface when changing settings. The bridge listens on `127.0.0.1:17
 
 ### Local media
 
-The Nibiru adapter accepts the typed requests below; concatenation is exposed through the contract without a multiple-input picker in the current panel. Paths must be absolute; inputs must exist and outputs must be new.
+The Nibiru adapter accepts 13 typed operations, 12 of which appear in the panel. Concatenation is exposed through the contract without a multiple-input picker in the current interface. Paths must be absolute; inputs must exist and outputs must be new. Unknown fields and fields belonging to a different operation are rejected.
 
 | Operation | Request fields |
 | --- | --- |
@@ -95,11 +95,15 @@ The Nibiru adapter accepts the typed requests below; concatenation is exposed th
 | `wav-normalize` | `input`, `output`, `peak_db` |
 | `wav-concat` | `inputs`, `output` |
 | `flac-encode`, `flac-decode`, `qoa-encode`, `qoa-decode` | `input`, `output` |
+| `qoir-encode` | `input`, `output`; optional `input_color`: `bt709` or `srgb` |
+| `qoir-decode` | `input`, `output` |
 | `mp4-faststart` | `input`, `output` |
 
 `start`/`frames` count sample frames in WAV and video frames in Y4M. Gain uses dB; normalization targets peak dBFS without LUFS. FLAC is lossless for supported integer profiles. QOA uses lossy PCM16 and has no checksum; it does not preserve the original audio exactly. MP4 inspection does not decode identified codecs. See Colapse's capabilities and README limits.
 
-The ADM contract requires `frames >= 1` and a nonoverflowing `start + frames` for cuts; gain ranges from −120 to +120 dB, and Colapse additionally requires a normalization target ≤ 0 dBFS. Concatenation accepts 1–256 inputs. The media supervisor has a six-hour deadline. These adapter bounds are additional to Colapse core limits.
+QOIR is an experimental image format, distinct from QOI. Encoding accepts one P6 PPM or P7 PAM image, with 8-bit RGB/RGBA, and produces lossless QOIR; decoding exports PAM and also accepts the format's lossy levels. The limit is 67,108,864 pixels. Input color defaults to BT.709 unless a recognized color comment or explicit `input_color` applies; selecting sRGB does not transform the pixels. PAM export rejects premultiplied alpha and metadata it cannot represent, including ICC profiles. QOIR has no mandatory checksum. The panel labels the format experimental and shows the color choice only for encoding.
+
+The ADM contract requires `frames >= 1` and a nonoverflowing `start + frames` for cuts; gain ranges from −120 to +120 dB, and normalization through ADM accepts −120 to 0 dBFS, combining the adapter's bound with Colapse's ceiling. Concatenation accepts 1–256 inputs. The media supervisor has a six-hour deadline. These adapter bounds are additional to Colapse core limits.
 
 ## ED2K/Kad: actual state
 
@@ -133,9 +137,9 @@ The script builds for its execution system, checks versions/capabilities, copies
 
 ### Validation and limits
 
-The audit checkpoint ran 337 JavaScript tests, 52 core tests and native-module tests in a Linux harness, including all four real executables. The complete desktop was cross-compiled for Windows GNU x64. After FLAC/QOA was added, all 33 normal harness tests passed again, as did the test executing all 11 typed operations with the real Colapse binary. Four new Node/VM panel tests check live language changes and 24 requests across all three languages. These are distinct scopes, with repeated tests not added to a total.
+The current checkpoint passed 341 JavaScript tests across 44 files, executed directly with Node and TAP counts, and all 33 normal native-harness tests. A separate test executed all 13 typed operations with the real Colapse binary. Within the JavaScript suite, four Node/VM panel tests check live language changes and 36 mocked requests across all three languages, including color choices. All three workflows passed YAML validation, Bash-block syntax checks and verification of the integration filter. The earlier audit checkpoint also ran 52 core tests and all four real engines, and cross-compiled the desktop for Windows GNU x64. These are distinct scopes, with repeated tests not added to a total; syntax validation does not execute remote jobs.
 
-This Colapse revision passed 115 Rust tests and 53 Python tests, plus independent codec checks and the benchmark documented in its repository. Logs, commands, hashes and the limits of each run accompany the corresponding checkpoint. VM interface tests do not establish Windows WebView runtime behavior.
+The Colapse round 4 checkpoint, with QOIR and parallel FLAC decoding, passed 172 Rust tests (four external/corpus-dependent tests ignored in that invocation), 53 Python tests, formatting, Clippy and smoke checks for 13 operations/21 codec directions. The same frozen Linux executable was used in the real ADM adapter test. [Later fixes guided by FFmpeg source review](https://github.com/linuxhell/nibiru-colapse/blob/main/docs/SOURCE_GUIDED_DEVELOPMENT_2026-10-20.md), independent audio/pixel comparisons and the performance matrix retain their own records in the engine repository. Logs, commands, hashes and limits bind each execution to the tested executable; counts do not add repeated runs or establish complete codec coverage. VM interface tests do not establish Windows WebView runtime behavior.
 
 Compiling Windows does not mean its interface ran. Native Windows execution, public ED2K/Kad connectivity, AppImage packaging and a complete semantic audit still require specific evidence. The [scoped audit](docs/AUDITORIA-NIBIRU-ED2K-2026-10-20.md) records actual coverage. The installer supports signed manifests, but the trusted-key list is empty, so that signature is not yet enforced. See [tool updates](docs/tool-update-signing.md).
 

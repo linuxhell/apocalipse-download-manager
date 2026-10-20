@@ -74,9 +74,9 @@ function mediaFixture() {
 }
 
 const translations = {
-  en: { open: 'Nibiru media', start: 'Start frame', gain: 'Gain (dB)', peak: 'Target peak (dBFS)', normalize: 'WAV peak normalization' },
-  'pt-BR': { open: 'Mídia Nibiru', start: 'Frame inicial', gain: 'Ganho (dB)', peak: 'Pico alvo (dBFS)', normalize: 'Normalizar pico WAV' },
-  'zh-CN': { open: 'Nibiru 媒体', start: '起始帧', gain: '增益 (dB)', peak: '目标峰值 (dBFS)', normalize: 'WAV 峰值归一化' },
+  en: { open: 'Nibiru media', start: 'Start frame', gain: 'Gain (dB)', peak: 'Target peak (dBFS)', normalize: 'WAV peak normalization', color: 'Input color interpretation' },
+  'pt-BR': { open: 'Mídia Nibiru', start: 'Frame inicial', gain: 'Ganho (dB)', peak: 'Pico alvo (dBFS)', normalize: 'Normalizar pico WAV', color: 'Interpretação de cor da entrada' },
+  'zh-CN': { open: 'Nibiru 媒体', start: '起始帧', gain: '增益 (dB)', peak: '目标峰值 (dBFS)', normalize: 'WAV 峰值归一化', color: '输入颜色解释' },
 };
 
 test('media language changes before opening and while open preserve the selected operation and input', () => {
@@ -86,6 +86,7 @@ test('media language changes before opening and while open preserve the selected
   f.get('nibiru-output').value = '/media/output.wav';
   f.get('nibiru-start').value = '-1.5';
   f.get('nibiru-frames').value = '25';
+  f.get('nibiru-input-color').value = 'srgb';
   for (const locale of ['pt-BR', 'zh-CN', 'en']) {
     f.language(locale);
     assert.equal(f.get('nibiru-media-open').textContent, translations[locale].open);
@@ -96,6 +97,8 @@ test('media language changes before opening and while open preserve the selected
     assert.equal(f.get('nibiru-output').value, '/media/output.wav');
     assert.equal(f.get('nibiru-start').value, '-1.5');
     assert.equal(f.get('nibiru-frames').value, '25');
+    assert.equal(f.get('nibiru-input-color').value, 'srgb');
+    assert.equal(f.get('nibiru-input-color-label').textContent, translations[locale].color);
     assert.equal(f.get('nibiru-media-dialog').open, locale !== 'pt-BR');
     if (locale === 'pt-BR') f.get('nibiru-media-open').onclick();
   }
@@ -112,16 +115,20 @@ for (const [locale, text] of Object.entries(translations)) {
       { operation: 'wav-gain', value: '2.5', frames: '19', label: text.gain, parameters: { db: 2.5 } },
       { operation: 'wav-normalize', value: '-1.5', frames: '19', label: text.peak, parameters: { peak_db: -1.5 } },
       ...['flac-encode', 'flac-decode', 'qoa-encode', 'qoa-decode'].map(operation => ({ operation, value: '-1.5', frames: '0', parameters: {} })),
+      ...['', 'bt709', 'srgb'].map(color => ({ operation: 'qoir-encode', value: '-1.5', frames: '0', color, parameters: color ? { input_color: color } : {} })),
+      { operation: 'qoir-decode', value: '-1.5', frames: '0', color: 'srgb', parameters: {} },
     ];
     for (const row of cases) {
       f.choose(row.operation);
-      const pcmExtension = row.operation === 'y4m-cut' ? 'y4m' : 'wav';
+      const pcmExtension = row.operation.startsWith('qoir-') ? 'pam' : row.operation === 'y4m-cut' ? 'y4m' : 'wav';
       const input = `/media/input.${row.operation.endsWith('-decode') ? row.operation.split('-')[0] : pcmExtension}`;
       const output = `/media/output.${row.operation.endsWith('-encode') ? row.operation.split('-')[0] : pcmExtension}`;
       f.get('nibiru-input').value = input;
       f.get('nibiru-output').value = output;
       f.get('nibiru-start').value = row.value;
       f.get('nibiru-frames').value = row.frames;
+      f.get('nibiru-input-color').value = row.color ?? 'srgb';
+      for (const id of ['nibiru-input-color-label', 'nibiru-input-color']) assert.equal(f.get(id).hidden, row.operation !== 'qoir-encode', row.operation);
       if (row.label) assert.equal(f.get('nibiru-start-label').textContent, row.label, row.operation);
       for (const id of ['nibiru-start-label', 'nibiru-start']) assert.equal(f.get(id).hidden, !row.label, row.operation);
       for (const id of ['nibiru-frames-label', 'nibiru-frames']) assert.equal(f.get(id).hidden, !('frames' in row.parameters), row.operation);

@@ -112,7 +112,7 @@ jobs:
           cargo test --locked -p apocalipse-desktop real_native_runtime_serves_adm_rpc_and_downloads_http -- --ignored
           cargo test --locked -p apocalipse-desktop real_engine_download_progress_and_publication -- --ignored
           cargo test --locked -p apocalipse-desktop nibiru::adapter::tests::real_power_extract_uses_the_adm_runner_and_media_conversion -- --ignored --exact
-          cargo test --locked -p apocalipse-desktop nibiru::adapter::tests::real_colapse_executes_all_eleven_typed_adm_operations -- --ignored --exact
+          cargo test --locked -p apocalipse-desktop nibiru::adapter::tests::real_colapse_executes_all_thirteen_typed_adm_operations -- --ignored --exact
 
       - name: Stage Windows portable
         if: runner.os == 'Windows'

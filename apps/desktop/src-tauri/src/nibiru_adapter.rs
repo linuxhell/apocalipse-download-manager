@@ -109,7 +109,14 @@ fn power_inspection(
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(tag = "operation", rename_all = "kebab-case")]
+#[serde(rename_all = "lowercase")]
+pub enum QoirInputColor {
+    Bt709,
+    Srgb,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum MediaOperation {
     Inspect {
         input: PathBuf,
@@ -131,6 +138,16 @@ pub enum MediaOperation {
         output: PathBuf,
     },
     QoaDecode {
+        input: PathBuf,
+        output: PathBuf,
+    },
+    QoirEncode {
+        input: PathBuf,
+        output: PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_color: Option<QoirInputColor>,
+    },
+    QoirDecode {
         input: PathBuf,
         output: PathBuf,
     },
@@ -193,6 +210,25 @@ impl MediaOperation {
             Self::FlacDecode { input, output } => pair("flac-decode", input, output)?,
             Self::QoaEncode { input, output } => pair("qoa-encode", input, output)?,
             Self::QoaDecode { input, output } => pair("qoa-decode", input, output)?,
+            Self::QoirEncode {
+                input,
+                output,
+                input_color,
+            } => {
+                let mut args = pair("qoir-encode", input, output)?;
+                if let Some(color) = input_color {
+                    args.extend([
+                        "--input-color".into(),
+                        match color {
+                            QoirInputColor::Bt709 => "bt709",
+                            QoirInputColor::Srgb => "srgb",
+                        }
+                        .into(),
+                    ]);
+                }
+                args
+            }
+            Self::QoirDecode { input, output } => pair("qoir-decode", input, output)?,
             Self::WavCut {
                 input,
                 output,
@@ -370,6 +406,37 @@ mod tests {
             db: 0.0,
         };
         assert_eq!(relative.args().unwrap_err(), "media_path_must_be_absolute");
+        for color in ["bt709", "srgb"] {
+            let operation: MediaOperation = serde_json::from_value(json!({
+                "operation": "qoir-encode", "input": input, "output": output,
+                "input_color": color
+            }))
+            .unwrap();
+            let args = operation.args().unwrap();
+            assert!(args.windows(2).any(|pair| pair == ["--input-color", color]));
+        }
+        for color in ["other", "--events", "srgb --events"] {
+            assert!(serde_json::from_value::<MediaOperation>(json!({
+                "operation": "qoir-encode", "input": input, "output": output,
+                "input_color": color
+            }))
+            .is_err());
+        }
+        for request in [
+            json!({"operation":"qoir-decode","input":input,"output":output,"input_color":"srgb"}),
+            json!({"operation":"flac-encode","input":input,"output":output,"db":0.0}),
+        ] {
+            assert!(serde_json::from_value::<MediaOperation>(request).is_err());
+        }
+        let implicit: MediaOperation = serde_json::from_value(json!({
+            "operation": "qoir-encode", "input": input, "output": output
+        }))
+        .unwrap();
+        assert!(!implicit
+            .args()
+            .unwrap()
+            .iter()
+            .any(|arg| arg == "--input-color"));
         std::fs::write(&output, b"keep this file").unwrap();
         let occupied = MediaOperation::WavGain {
             input,
@@ -535,7 +602,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires NIBIRU_COLAPSE_BIN pointing to the compiled native engine"]
-    async fn real_colapse_executes_all_eleven_typed_adm_operations() {
+    async fn real_colapse_executes_all_thirteen_typed_adm_operations() {
         let executable =
             PathBuf::from(std::env::var_os("NIBIRU_COLAPSE_BIN").expect("NIBIRU_COLAPSE_BIN"));
         let directory = tempfile::tempdir().unwrap();
@@ -652,6 +719,80 @@ mod tests {
         assert_eq!(std::fs::read(&qoa).unwrap(), qoa_bytes);
         assert_eq!(std::fs::read(&reference_qoa).unwrap(), reference);
         assert_eq!(std::fs::read(&qoa_wav).unwrap(), wav(&[1, 1, 1]));
+
+        let image = directory.path().join("entrada cor 中文.pam");
+        let pixels = [255, 0, 127, 0, 3, 5, 7, 255];
+        let mut pam = b"P7\n# COLORSPACE SRGB\nWIDTH 2\nHEIGHT 1\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n".to_vec();
+        pam.extend(pixels);
+        std::fs::write(&image, &pam).unwrap();
+        let qoir = directory.path().join("imagem nativa.qoir");
+        let encoded_qoir = colapse_request(
+            &executable,
+            json!({"operation":"qoir-encode","input":image,"output":qoir,"input_color":"srgb"}),
+        )
+        .await;
+        assert_eq!(encoded_qoir["result"]["width"], 2);
+        assert_eq!(encoded_qoir["result"]["height"], 1);
+        assert_eq!(encoded_qoir["result"]["channels"], 4);
+        assert_eq!(encoded_qoir["result"]["alpha_mode"], "straight");
+        assert_eq!(encoded_qoir["result"]["color_space"], "srgb");
+        assert_eq!(encoded_qoir["result"]["lossy"], false);
+        assert_eq!(encoded_qoir["result"]["experimental"], true);
+        let qoir_bytes = std::fs::read(&qoir).unwrap();
+        assert_eq!(&qoir_bytes[..4], b"QOIR");
+        let inspected_qoir =
+            colapse_request(&executable, json!({"operation":"inspect","input":qoir})).await;
+        assert_eq!(inspected_qoir["result"]["format"], "qoir");
+        assert_eq!(inspected_qoir["result"]["color_space"], "srgb");
+        assert_eq!(inspected_qoir["result"]["pixel_data_decoded"], false);
+        assert_eq!(inspected_qoir["result"]["checksum_available"], false);
+
+        // Independent literal QOIR tile: BGRA, straight alpha, implicit sRGB.
+        // It covers fully transparent RGB values as well as an opaque pixel.
+        let mut reference = Vec::new();
+        for (kind, payload) in [
+            (b"QOIR", [2, 0, 0, 2, 1, 0, 0, 0].as_slice()),
+            (
+                b"QPIX",
+                [8, 0, 0, 0, 127, 0, 255, 0, 7, 5, 3, 255].as_slice(),
+            ),
+            (b"QEND", [].as_slice()),
+        ] {
+            reference.extend(kind);
+            reference.extend((payload.len() as u64).to_le_bytes());
+            reference.extend(payload);
+        }
+        let reference_qoir = directory.path().join("reference.qoir");
+        std::fs::write(&reference_qoir, &reference).unwrap();
+        let decoded_pam = directory.path().join("decoded.pam");
+        let decoded_qoir = colapse_request(
+            &executable,
+            json!({"operation":"qoir-decode","input":reference_qoir,"output":decoded_pam}),
+        )
+        .await;
+        assert_eq!(decoded_qoir["result"]["channels"], 4);
+        assert_eq!(decoded_qoir["result"]["alpha_mode"], "straight");
+        assert_eq!(std::fs::read(&decoded_pam).unwrap(), pam);
+        for occupied in [
+            MediaOperation::QoirEncode {
+                input: image.clone(),
+                output: qoir.clone(),
+                input_color: Some(QoirInputColor::Srgb),
+            },
+            MediaOperation::QoirDecode {
+                input: reference_qoir.clone(),
+                output: decoded_pam.clone(),
+            },
+        ] {
+            assert_eq!(
+                process_media(&executable, &occupied).await.unwrap_err(),
+                "media_output_already_exists"
+            );
+        }
+        assert_eq!(std::fs::read(&image).unwrap(), pam);
+        assert_eq!(std::fs::read(&qoir).unwrap(), qoir_bytes);
+        assert_eq!(std::fs::read(&reference_qoir).unwrap(), reference);
+        assert_eq!(std::fs::read(&decoded_pam).unwrap(), pam);
 
         let cut = directory.path().join("cut.wav");
         let result = colapse_request(

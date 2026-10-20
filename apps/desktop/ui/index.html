@@ -475,9 +475,11 @@
 <div class="dialog-head"><h2>Nibiru Colapse</h2><button id="nibiru-media-close" type="button">×</button></div>
 <p id="nibiru-media-hint"></p>
 <label id="nibiru-operation-label" for="nibiru-operation"></label>
-<select id="nibiru-operation"><option value="inspect">Inspect</option><option value="mp4-faststart">MP4 faststart</option><option value="flac-encode">WAV → FLAC</option><option value="flac-decode">FLAC → WAV</option><option value="qoa-encode">WAV → QOA</option><option value="qoa-decode">QOA → WAV</option><option value="wav-gain">WAV gain</option><option value="wav-normalize">WAV normalize</option><option value="wav-cut">WAV cut</option><option value="y4m-cut">Y4M cut</option></select>
+<select id="nibiru-operation"><option value="inspect">Inspect</option><option value="mp4-faststart">MP4 faststart</option><option value="flac-encode">WAV → FLAC</option><option value="flac-decode">FLAC → WAV</option><option value="qoa-encode">WAV → QOA</option><option value="qoa-decode">QOA → WAV</option><option value="qoir-encode">PPM/PAM → QOIR</option><option value="qoir-decode">QOIR → PAM</option><option value="wav-gain">WAV gain</option><option value="wav-normalize">WAV normalize</option><option value="wav-cut">WAV cut</option><option value="y4m-cut">Y4M cut</option></select>
 <label id="nibiru-input-label" for="nibiru-input"></label><div class="path-picker"><input id="nibiru-input" type="text" required><button id="nibiru-input-browse" type="button">…</button></div>
 <label id="nibiru-output-label" for="nibiru-output"></label><input id="nibiru-output" type="text">
+<label id="nibiru-input-color-label" for="nibiru-input-color" hidden></label>
+<select id="nibiru-input-color" hidden><option id="nibiru-input-color-auto" value=""></option><option id="nibiru-input-color-bt709" value="bt709"></option><option id="nibiru-input-color-srgb" value="srgb"></option></select>
 <label id="nibiru-start-label" for="nibiru-start">Start / dB</label><input id="nibiru-start" type="number" value="0" step="any">
 <label id="nibiru-frames-label" for="nibiru-frames">Frames</label><input id="nibiru-frames" type="number" min="1" value="1">
 <pre id="nibiru-media-result" style="max-height:35vh;overflow:auto;white-space:pre-wrap" role="status"></pre>

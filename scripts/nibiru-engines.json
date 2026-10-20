@@ -22,7 +22,7 @@
     {
       "name": "nibiru-colapse",
       "repository": "https://github.com/linuxhell/nibiru-colapse.git",
-      "revision": "ff935647c3bd13f5d681bf30670eb970d27cbda9",
+      "revision": "6f92c7e432d086b59936028a09a8b582d13af693",
       "required": true
     }
   ]
