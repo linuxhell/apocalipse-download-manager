@@ -4420,6 +4420,7 @@ struct BlobUpload {
     speed_sample_at: Instant,
     speed_sample_bytes: u64,
     smoothed_speed: u64,
+    last_activity: Instant,
 }
 
 #[derive(Deserialize)]
@@ -14323,6 +14324,18 @@ fn queue_from_bridge(
     Ok(None)
 }
 
+/// A file the browser finished writing moments ago. Slow disks and long
+/// finalisation fit comfortably in the window; a file untouched for hours is not
+/// a fresh download.
+fn finished_recently(metadata: &std::fs::Metadata) -> bool {
+    const WINDOW: Duration = Duration::from_secs(15 * 60);
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+        .is_none_or(|age| age <= WINDOW)
+}
+
 fn register_browser_download(
     app: &tauri::AppHandle,
     request: BrowserDownloadComplete,
@@ -14335,6 +14348,12 @@ fn register_browser_download(
         return Err("browser_download_not_found".to_owned());
     }
     let source = source.canonicalize().map_err(|error| error.to_string())?;
+    // The extension reports a download the browser just finished. Registering a
+    // task for any existing path would let a mistaken or forged report make an
+    // old, unrelated file (a key, a document) removable and shareable from here.
+    if !fs::metadata(&source).is_ok_and(|metadata| finished_recently(&metadata)) {
+        return Err("browser_download_not_recent".to_owned());
+    }
     let file_name = source
         .file_name()
         .and_then(|value| value.to_str())
@@ -14599,10 +14618,56 @@ fn decode_hex(value: &str) -> Result<Vec<u8>, String> {
         .collect()
 }
 
+/// Settles an upload that cannot complete: the partial cannot be resumed, so it
+/// is removed and the task is marked failed instead of staying "Downloading".
+fn fail_blob_upload(app: &tauri::AppHandle, upload: &BlobUpload, message: &str) {
+    let _ = fs::remove_file(&upload.partial);
+    if let Ok(mut stops) = app.state::<AppState>().recording_stops.lock() {
+        stops.remove(&upload.task_id);
+    }
+    update_task(app, upload.task_id, true, |task| {
+        task.download_speed = Some(0);
+        task.state = DownloadState::Failed {
+            message: message.to_owned(),
+        };
+    });
+}
+
+/// Browser uploads that stopped sending chunks (the browser or extension died)
+/// are failed so they do not hold a "Downloading" task and a partial forever.
+const BLOB_UPLOAD_IDLE_LIMIT: Duration = Duration::from_secs(600);
+
+fn purge_stale_blob_uploads(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let stale = {
+        let Ok(mut uploads) = state.blob_uploads.lock() else {
+            return;
+        };
+        let ids = uploads
+            .iter()
+            .filter(|(_, upload)| upload.last_activity.elapsed() > BLOB_UPLOAD_IDLE_LIMIT)
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+        ids.into_iter()
+            .filter_map(|id| uploads.remove(&id))
+            .collect::<Vec<_>>()
+    };
+    for upload in stale {
+        diagnostic_log(
+            &state,
+            "WARN",
+            "blob.abandoned",
+            &format!("task={} bytes={}", upload.task_id, upload.received),
+        );
+        fail_blob_upload(app, &upload, "blob_upload_abandoned");
+    }
+}
+
 fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid::Uuid, String> {
     if request.total == 0 && !request.streaming {
         return Err("empty_blob".to_owned());
     }
+    purge_stale_blob_uploads(app);
     let state = app.state::<AppState>();
     let prompt_for_destination = request.prompt_for_destination && !request.recording;
     let directory = if prompt_for_destination {
@@ -14658,6 +14723,7 @@ fn begin_blob_upload(app: &tauri::AppHandle, request: BlobBegin) -> Result<uuid:
                 speed_sample_at: Instant::now(),
                 speed_sample_bytes: 0,
                 smoothed_speed: 0,
+                last_activity: Instant::now(),
             },
         );
     diagnostic_log(
@@ -14695,6 +14761,7 @@ fn append_blob_chunk(app: &tauri::AppHandle, request: BlobChunk) -> Result<(), S
             .and_then(|mut file| file.write_all(&data))
             .map_err(|error| error.to_string())?;
         upload.received += data.len() as u64;
+        upload.last_activity = Instant::now();
         let elapsed = upload.speed_sample_at.elapsed();
         if elapsed >= Duration::from_millis(200) {
             let bytes = upload.received.saturating_sub(upload.speed_sample_bytes);
@@ -14739,10 +14806,20 @@ fn finish_blob_upload(app: &tauri::AppHandle, request: BlobFinish) -> Result<(),
         .map_err(|error| error.to_string())?
         .remove(&request.upload_id)
         .ok_or_else(|| "blob_upload_not_found".to_owned())?;
-    if upload.total.is_some_and(|total| upload.received != total) || upload.received == 0 {
-        return Err("incomplete_blob".to_owned());
+    // The upload is already deregistered, so every failure here must settle the
+    // task itself; otherwise it stays "Downloading" forever with a stray partial.
+    let published = if upload.total.is_some_and(|total| upload.received != total)
+        || upload.received == 0
+    {
+        Err("incomplete_blob".to_owned())
+    } else {
+        apocalipse_core::download::publish_without_replacing(&upload.partial, &upload.destination)
+            .map_err(|error| error.to_string())
+    };
+    if let Err(message) = published {
+        fail_blob_upload(app, &upload, &message);
+        return Err(message);
     }
-    fs::rename(&upload.partial, &upload.destination).map_err(|error| error.to_string())?;
 
     if upload.prompt_for_destination {
         {
@@ -14826,8 +14903,11 @@ fn recording_stop_requested(app: &tauri::AppHandle, request: &BlobFinish) -> Res
         .blob_uploads
         .lock()
         .map_err(|error| error.to_string())?
-        .get(&request.upload_id)
-        .map(|upload| upload.task_id)
+        .get_mut(&request.upload_id)
+        .map(|upload| {
+            upload.last_activity = Instant::now();
+            upload.task_id
+        })
         .ok_or_else(|| "blob_upload_not_found".to_owned())?;
     let stop = state
         .recording_stops
@@ -14911,6 +14991,7 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             "bridge.health",
             "extension heartbeat authenticated",
         );
+        purge_stale_blob_uploads(app);
         let language = {
             let settings = state
                 .settings
@@ -18054,6 +18135,21 @@ mod tests {
 #[cfg(test)]
 mod log_sanitization_tests {
     use super::*;
+
+    #[test]
+    fn only_recently_finished_files_count_as_browser_downloads() {
+        let root = std::env::temp_dir().join(format!("adm-recent-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let fresh = root.join("fresh.bin");
+        fs::write(&fresh, b"x").unwrap();
+        assert!(finished_recently(&fs::metadata(&fresh).unwrap()));
+        let old = root.join("old.bin");
+        let file = fs::File::create(&old).unwrap();
+        file.set_modified(SystemTime::now() - Duration::from_secs(3 * 3600))
+            .unwrap();
+        assert!(!finished_recently(&fs::metadata(&old).unwrap()));
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn one_unreadable_setting_keeps_the_other_preferences() {
