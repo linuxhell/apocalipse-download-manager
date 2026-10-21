@@ -1,153 +1,77 @@
+<p align="center"><img src="assets/branding/apocalipse-a-blue.svg" width="160" alt="Apocalipse"></p>
 
+[Português](README.md) · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
+# Apocalipse Download Manager
 
+Gerenciador de downloads portátil em Rust/Tauri, com extensão para navegador.
 
-<p align="center">
-  <img src="assets/branding/apocalipse-a-blue.svg" width="220" alt="Apocalipse Download Manager modern blue A logo">
-</p>
+## Estado do projeto
 
-<h1 align="center">Apocalipse Download Manager</h1>
+O código desta base é **0.6.1**, com extensão **0.3.206**. A auditoria do código está em andamento; a versão do fonte não significa que as alterações desta branch já tenham sido publicadas.
 
-<p align="center">
-  <strong>Fast, portable, open-source downloads, media capture and torrents.</strong><br>
-  <strong>Downloads rápidos, portáteis e livres, captura de mídia e torrents.</strong><br>
-  <strong>快速、便携、开源的下载、媒体捕获与种子管理工具。</strong>
-</p>
+O ADM continua usando **aria2**, **yt-dlp nightly**, **N_m3u8DL-RE**, **FFmpeg**, **QuickJS**, extrator e player externos. O Nibiru Xtreme está em desenvolvimento separado: a substituição do aria2 pelo Xtreme depende da conclusão do motor e da validação da integração. Esta branch não integra Nibiru M3U8, Power ou Colapse.
 
-<p align="center">
-  <a href="https://github.com/linuxhell/apocalipse-download-manager/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/linuxhell/apocalipse-download-manager?style=flat-square"></a>
-  <a href="LICENSE"><img alt="GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-0aa8c2?style=flat-square"></a>
-  <img alt="Windows Linux macOS" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-182533?style=flat-square">
-  <img alt="Extension 0.3.203" src="https://img.shields.io/badge/browser%20extension-0.3.203-2363ef?style=flat-square">
-</p>
+## Instalação
 
-<p align="center">
-  <a href="https://github.com/linuxhell/apocalipse-download-manager/releases/latest"><strong>Download / Baixar / 下载</strong></a>
-  · <a href="#quick-start--início-rápido--快速开始">Quick start</a>
-  · <a href="CHANGELOG.md">Changelog</a>
-  · <a href="https://github.com/linuxhell/apocalipse-download-manager/issues">Issues</a>
-</p>
+Baixe os arquivos na [página de releases](https://github.com/linuxhell/apocalipse-download-manager/releases/latest). Confira a versão efetivamente publicada antes de escolher a extensão.
 
-## Screenshots / Capturas de tela / 截图
-
-<p align="center">
-  <img alt="Downloads: one dense row per download, blue progress bar, red when failed, green when completed" src="assets/screenshots/downloads.png" width="800">
-</p>
-<p align="center">
-  <img alt="Settings with tabs (Tools tab)" src="assets/screenshots/settings-tools.png" width="395">
-  <img alt="Optional dark mode" src="assets/screenshots/downloads-dark.png" width="395">
-</p>
-<p align="center">
-  <img alt="About page with the city and deer scene, music player and creator photo" src="assets/screenshots/about.png" width="800">
-</p>
-
-<p align="center"><sub>Real interface rendered with sample downloads. / Interface real com downloads de exemplo. / 真实界面，使用示例下载。</sub></p>
-
-> [!IMPORTANT]
-> **Current release: ADM 0.6.1 + browser extension 0.3.206.** Security and stability release after a full code audit (safer Link transfers, fixed queue slots, hardened extension). Previously in 0.6.0: new compact IDM-sized window (980×620): white background, black text, no themes; Downloads, Torrents, Recordings, Donate and About in the sidebar, everything else in tabs inside Settings; blue progress bars (red on failure, green when done). Previously: steadier extension connection (bridge no longer serialized), consistent language between app and extension, fixed extension ID on Chrome/Edge. Earlier fixes: HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). The Firefox XPI in the release is Mozilla-signed (extension 0.3.206).
-
-## Download the current release
-
-| Platform | Package |
+| Plataforma | Pacote |
 | --- | --- |
-| Windows x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-windows-x64-portable.zip) |
-| Linux x64 | [AppImage](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64.AppImage) · [Portable tar.gz](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64-portable.tar.gz) |
-| macOS x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-macos-x64-portable.zip) |
-| Chrome | [Extension 0.3.203](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.203.zip) |
-| Edge | [Extension 0.3.203](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.203.zip) |
-| Firefox | [Mozilla-signed XPI 0.3.203](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.203.xpi) |
+| Windows x64 | ZIP portátil |
+| Linux x64 | AppImage ou tar.gz portátil |
+| macOS x64 | ZIP portátil |
+| Chrome / Edge | ZIP da extensão |
+| Firefox | XPI assinado pela Mozilla, quando fornecido na release |
 
-## Quick start / Início rápido / 快速开始
+Extraia o pacote, abra o aplicativo e configure as ferramentas em **Configurações → Ferramentas**. Instale a extensão correspondente se desejar enviar downloads do navegador. Um XPI de teste sem assinatura não equivale ao pacote assinado para Firefox estável.
 
-### English
+## Recursos e limites
 
-1. Download the portable package for your platform and extract it. On Linux AppImage, mark the file executable before launching.
-2. Install the matching browser extension if you want automatic media detection and browser-to-ADM handoff.
-3. Open **Tools** in ADM and update the engines you use, especially aria2, yt-dlp and FFmpeg.
+- HTTP/HTTPS com retomada, fila, limites de banda, mirrors e verificação SHA-256.
+- Torrents e magnets via aria2, seleção de arquivos e pré-visualização pelo player configurado.
+- Detecção de mídia na extensão e extração por yt-dlp; HLS pelo N_m3u8DL-RE e fluxos de áudio/conversão por FFmpeg.
+- QuickJS como runtime JavaScript do yt-dlp; mantenha seu caminho configurado para sites que exigem desafios JavaScript.
+- Gravações progressivas e exportação de mídia.
+- Apocalipse Link: compartilhamentos escolhidos, TLS e autenticação por conta do sistema para acesso remoto. A descoberta de compartilhamentos SMB depende do sistema.
+- Interface e extensão em português brasileiro, inglês e chinês simplificado.
 
-### Português do Brasil
+A compatibilidade depende do site, das ferramentas instaladas e do sistema operacional. Protótipos de transporte não representam suporte universal ou validação em rede pública. A verificação de manifesto assinado para ferramentas depende de chaves confiáveis configuradas; veja [assinatura de atualizações](docs/tool-update-signing.md).
 
-1. Baixe o pacote portátil da sua plataforma e extraia. No Linux AppImage, marque o arquivo como executável antes de abrir.
-2. Instale a extensão do seu navegador se quiser detecção automática de mídia e envio direto para o ADM.
-3. Abra **Ferramentas** no ADM e atualize os motores que você usa, principalmente aria2, yt-dlp e FFmpeg.
+## Estrutura e desenvolvimento
 
-### 简体中文
+| Caminho | Responsabilidade |
+| --- | --- |
+| `crates/apocalipse-core` | Modelos, classificação, transferências e políticas |
+| `crates/apocalipse-cli` | Interface de linha de comando |
+| `apps/desktop/src-tauri` | Desktop, integração de ferramentas, persistência e bridge |
+| `apps/desktop/ui` | Interface do aplicativo e do Link |
+| `browser-extension` | Captura e envio pelo navegador |
+| `experiments/transport-lab` | Transportes experimentais; dependência utilizada pelo desktop |
+| `tests` | Regressões JavaScript e contratos |
 
-1. 下载适合您平台的便携包并解压。Linux AppImage 首次运行前请先赋予可执行权限。
-2. 如需自动检测网页媒体并发送到 ADM，请安装对应的浏览器扩展。
-3. 在 ADM 中打开**工具**，更新您使用的引擎，尤其是 aria2、yt-dlp 和 FFmpeg。
+Requer Rust estável e Node.js. O desktop Linux também requer WebKitGTK 4.1, GTK/AppIndicator, librsvg, PAM e ferramentas de compilação; os workflows registram os pacotes por distribuição.
 
-## What Apocalipse does
+```sh
+cargo fmt --all -- --check
+cargo test --locked -p apocalipse-core -p apocalipse-cli
+cargo test --workspace --locked
+cargo build --release --locked -p apocalipse-desktop
+node --test tests/*.test.cjs
+```
 
-- Resumable HTTP/HTTPS downloads, mirrors, SHA-256 verification and an adaptive queue
-- Torrent and magnet workflows with file selection, peer/session information and player preview
-- Browser media discovery for video, audio and images; yt-dlp, HLS and FFmpeg workflows
-- Progressive recordings with later MP4/AAC export
-- Apocalipse Link for authenticated, TLS-encrypted file transfers between computers
-- Per-site credentials stored in the operating system secure credential vault
-- Compact IDM-sized window (980×620): white surface, black text, optional dark mode styles; no themes
-- English, Brazilian Portuguese and Simplified Chinese in the desktop app and browser extension
-- Portable Windows, Linux and macOS x64 builds, with no mandatory installer
+Os testes do workspace completo precisam das dependências nativas do desktop. Compilar e passar testes não equivale à validação em uso real em Windows, Linux e macOS.
 
-Sites protected by DRM or access controls are intentionally not bypassed. Download only content you are authorized to save.
+## CI e documentação
 
-## Release 0.4.91 highlights
+- `validate-portable.yml`: testes, compatibilidade Linux e pacotes candidatos nas três plataformas; não publica release.
+- `transport-lab.yml`: regressões dos transportes usados pelo desktop.
+- `release.yml`: compilação e publicação; não deve ser disparado para tratar uma auditoria como versão final.
 
-- **Download button:** a Referer that makes a CDN answer 403 (e.g. `video.twimg.com`) is dropped after a 1-byte probe; sites that need it still get it.
-- **Icon:** the Apocalipse "A" replaces the alien, and the window/taskbar icon is always the blue "A".
+Consulte [histórico](CHANGELOG.md), [roadmap](ROADMAP.md), [segurança](SECURITY.md) e [desempenho](docs/PERFORMANCE.md). Arquivos de downloads, parciais e checkpoints não são lixo de repositório.
 
-## Release 0.4.90 highlights
+## Apoio e licença
 
-This release ships the Mozilla-signed Firefox XPI 0.3.203, so Firefox gets the same connection and overlay fixes as Chrome and Edge.
+[Doar pelo PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL).
 
-## Release 0.4.89 highlights
-
-- **Extension connection:** the local bridge serves each connection on its own thread, the extension stops flooding it with per-scan diagnostics, and the UI restores its language from `settings.json`.
-- **Fixed extension ID** on Chrome/Edge (`lfgkfogkggkgacahaidkbhggdolpojjf`), so reinstalling from another folder keeps the same ID. The pairing token is still per install.
-
-### Earlier in 0.4.88
-
-- **Capture:** HLS playlists served without `.m3u8` in the URL are detected by Content-Type; on pages with several equal-length videos the download uses the playlist of the video on screen; the Download button is back on YouTube Shorts.
-- **Recordings:** repeated recordings (`title.recording (1).webm`) now export to the chosen format, and export errors are shown.
-- **Media downloads:** after a 403 caused by TLS fingerprinting, yt-dlp is retried once impersonating a browser (`--impersonate chrome`) when the installed build supports it.
-- **Tool updates:** signed-manifest verification (signature, anti-rollback, expiry, SHA-256) is wired into the tool installer and stays dormant until a trusted key is added. See [docs/tool-update-signing.md](docs/tool-update-signing.md).
-
-The interface (introduced in 0.4.83) keeps Downloads, Torrents and Recordings in the same narrow, scrollable task column. Pause/resume, the red remove control and the yellow folder control stay visible on each task. On Windows and macOS, the folder action reveals the task file directly when it exists instead of opening an unrelated folder view.
-
-The interface is a single compact white window with black text; the About page keeps the city/deer scene, music player and creator photo, and Logs use balanced diagnostic/event panes.
-
-Browser extension 0.3.202 follows the selected palette. The current release includes Chrome and Edge ZIP packages plus the Mozilla-signed Firefox XPI.
-
-## Performance and engineering
-
-Benchmark details and limitations live in [docs/PERFORMANCE.md](docs/PERFORMANCE.md), keeping the homepage focused on downloading and using the application.
-
-For architecture, development status and security details, see [ROADMAP.md](ROADMAP.md), [SECURITY.md](SECURITY.md) and the [changelog](CHANGELOG.md).
-
-## Português do Brasil
-
-O Apocalipse é um gerenciador de downloads livre e portátil para Windows, Linux e macOS. Ele reúne downloads HTTP retomáveis, torrents/magnet, detecção de mídia no navegador, yt-dlp, HLS, FFmpeg, gravações progressivas e Apocalipse Link em uma única interface.
-
-A versão **0.4.88** corrige a captura de playlists HLS sem `.m3u8` na URL, o download de vídeo errado em páginas com vários vídeos, o botão Baixar nos YouTube Shorts e a exportação de gravações repetidas. Também tenta de novo o yt-dlp imitando um navegador quando o site bloqueia com 403 e liga a verificação de atualizações de ferramentas assinadas (ativa quando uma chave for cadastrada). O Cinema Premium mantém os **28 temas em HD** e as filas compactas. A extensão atual é a **0.3.202**, com XPI do Firefox assinado pela Mozilla.
-
-Os detalhes de desempenho foram movidos para [docs/PERFORMANCE.md](docs/PERFORMANCE.md) para a página inicial ficar mais clara.
-
-## 简体中文
-
-Apocalipse 是适用于 Windows、Linux 和 macOS 的自由开源便携下载管理器。它把可恢复 HTTP 下载、种子/磁力链接、浏览器媒体检测、yt-dlp、HLS、FFmpeg、渐进式录制和 Apocalipse Link 集成在同一界面中。
-
-**0.4.88** 版本修复了 URL 中不含 `.m3u8` 的 HLS 播放列表捕获、多视频页面下载错误视频、YouTube Shorts 下载按钮缺失以及重复录制无法导出的问题。遇到 403（TLS 指纹拦截）时，yt-dlp 会模拟浏览器重试一次，并接入了已签名工具更新的校验（添加受信任密钥后启用）。Cinema Premium 保留 **28 个高清主题**与紧凑队列。当前浏览器扩展版本为 **0.3.202**，Firefox XPI 已由 Mozilla 签名。
-
-性能测试的详细数据与限制已移至 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)，使项目首页更简洁。
-
-## Support the project
-
-If Apocalipse helps you, [donate via PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL) to support continued development.
-
-Se o Apocalipse for útil para você, [faça uma doação pelo PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL) e ajude a manter o desenvolvimento.
-
-如果 Apocalipse 对您有帮助，请[通过 PayPal 捐赠](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=jv12802%40gmail.com&currency_code=BRL)，支持项目继续开发。
-
-## License
-
-GPL-3.0-or-later.
+GPL-3.0-or-later; consulte [LICENSE](LICENSE).
