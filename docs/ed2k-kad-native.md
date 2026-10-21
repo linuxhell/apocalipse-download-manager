@@ -36,8 +36,7 @@ replacement; performance/memory claims require measurements of the final build.
   root-checked ED2K hashsets, verified parts, 32/64-bit offsets and compressed
   block support. Unfinished tasks reopen paused. Resume rehashes saved data.
   The ADM download directory is used; existing destinations are preserved.
-- Uploads/upload queues, shared files, credits, AICH,
-  obfuscation, messaging and full aMule feature parity remain required work.
+- Credits, AICH, messaging and full aMule feature parity remain required work.
 
 An ED2K initialization error disables this feature rather than stopping the
 main ADM from opening. Existing HTTP, media, torrent and Link engines are not
@@ -125,3 +124,33 @@ callback fixture exercises OP_CALLBACKREQUEST, an unrelated incoming peer ID,
 and a completed MD4-verified download from the matching Low-ID source. Pending
 callback registrations are removed on cancellation/drop. This does not implement
 Low-ID to Low-ID NAT traversal.
+
+## Shared files (choose what to share)
+
+The **Shared files** tab works like aMule's: nothing is shared until the user adds it.
+
+- **Choices:** "Add folder…" (with or without subfolders) and "Add files…". Each shared file has an
+  upload priority (very low, low, normal, high, release), request/uploaded counters, a copy-link
+  button and "Stop sharing". Stopping a file found through a folder excludes just that file; removing
+  a folder stops sharing everything that came only from it. Choices, priorities and limits are
+  stored in `shares.json` next to the ED2K identity and restored at launch.
+- **Never shared:** hidden files and folders (any path component starting with a dot), empty files,
+  symbolic links, and anything under ADM's own data folder. A folder that contains ADM's data
+  (for example the whole home directory) or a drive root is refused.
+- **Hashing:** ED2K part hashes are computed in the background with progress shown in the tab;
+  hashes are cached (`share-cache.json`) so unchanged files are not hashed again after a restart.
+- **Serving and publishing:** uploads are served by the incoming TCP listener opened when the user
+  connects to a server, so files are available only while this window is connected. After connecting
+  and after each change the list is offered to the server (`OP_OFFERFILES`). ED2K has no withdraw
+  packet: removed files leave the server's index on the next connection.
+- **Limits:** upload slots (1-20, default 3) and an upload limit in KiB/s.
+- **Dependency:** `nibiru-xtreme` is now pinned to `692b98a` (0.2.0-alpha.3), which contains the
+  uploader, the share registry and the upload queue.
+
+Validation: Rust tests cover choosing folders and files, subfolders, hidden/empty/excluded files,
+removal, priority restore, persistence and the cache; one test serves a chosen 300 KB file to a real
+ED2K client over the listener (MD4-verified) and confirms an unchosen file is refused. UI tests cover
+the tab in en, pt-BR and zh-CN, plain-text rendering of names and the command routing, and the tab was
+rendered in Chromium in all three languages. **Not** verified: serving on the public ED2K network,
+reachability through a NAT/firewall (a Low-ID client cannot be reached by others), compatibility
+with eMule/aMule clients as downloaders, or the Tauri window itself (native folder and file pickers).

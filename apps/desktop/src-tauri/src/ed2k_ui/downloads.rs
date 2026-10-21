@@ -153,7 +153,7 @@ impl Downloads {
                 let sources=sources.ok_or(error)?;
                 tokio::fs::create_dir_all(&task.directory).await.map_err(|e|e.to_string())?;
                 let callbacks=if connection.is_low_id(){None}else{state.incoming.lock().await.as_ref().map(|listener|ed2k::CallbackClient::new(connection.clone(),listener.callbacks()))};
-                let options=ed2k::TransferOptions{identity:state.user_hash,client_id:connection.client_id,callbacks};
+                let options=ed2k::TransferOptions{identity:state.user_hash,client_id:connection.client_id,callbacks,obfuscation:Default::default()};
                 ed2k::download_with_options(&task.file,&task.directory,&sources,options,cancel.clone(),|progress|{
                     let _=queue.update(&id,|task|{
                         task.status=match progress.stage{TransferStage::Connecting=>"connecting",TransferStage::Queued=>"waiting_peer",TransferStage::Checking=>"checking",TransferStage::Downloading=>"downloading",TransferStage::Completed=>"completed"}.into();

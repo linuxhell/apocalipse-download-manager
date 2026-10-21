@@ -1,5 +1,6 @@
 //! Native Nibiru ED2K integration. No aMule executable or daemon is used.
 pub mod downloads;
+pub mod shares;
 use nibiru_xtreme::ed2k::{
     self,
     metadata::{Node, Server},
@@ -24,6 +25,7 @@ struct Library {
 pub struct Ed2kState {
     root: PathBuf,
     downloads: downloads::Downloads,
+    shares: shares::Shares,
     startup_error: Option<String>,
     library: Mutex<Library>,
     server: RwLock<Option<ServerConnection>>,
@@ -36,6 +38,7 @@ impl Ed2kState {
     pub fn unavailable(root: PathBuf, error: String) -> Self {
         Self {
             downloads: downloads::Downloads::empty(root.join("downloads.json")),
+            shares: shares::Shares::new(&root),
             root,
             startup_error: Some(error),
             library: Mutex::new(Library {
@@ -56,9 +59,14 @@ impl Ed2kState {
             .is_none_or(|listener| !listener.status().running)
         {
             *incoming = Some(
-                ed2k::IncomingListener::bind(self.user_hash, 4662)
-                    .await
-                    .map_err(|e| e.to_string())?,
+                ed2k::IncomingListener::bind_with_uploads(
+                    self.user_hash,
+                    4662,
+                    self.shares.registry.clone(),
+                    self.shares.uploads.clone(),
+                )
+                .await
+                .map_err(|e| e.to_string())?,
             );
         }
         Ok(incoming
@@ -103,6 +111,7 @@ impl Ed2kState {
         };
         Ok(Self {
             downloads: downloads::Downloads::load(root.join("downloads.json"))?,
+            shares: shares::Shares::new(&root),
             root,
             startup_error: None,
             library: Mutex::new(library),
@@ -164,8 +173,12 @@ pub async fn open_ed2k_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 #[tauri::command]
-pub async fn ed2k_overview(state: State<'_, Ed2kState>) -> Result<serde_json::Value, String> {
+pub async fn ed2k_overview(
+    app: tauri::AppHandle,
+    state: State<'_, Ed2kState>,
+) -> Result<serde_json::Value, String> {
     state.ready()?;
+    shares::ensure_loaded(&app, &state);
     let incoming = state
         .incoming
         .lock()
@@ -180,7 +193,8 @@ pub async fn ed2k_overview(state: State<'_, Ed2kState>) -> Result<serde_json::Va
         "servers":library.servers,"node_count":library.nodes.len(),"downloads":state.downloads.list()?,"incoming":incoming,
         "server":active.map(|c|&c.server),"client_id":active.map(|c|c.client_id),"low_id":active.is_some_and(|c|c.is_low_id()),
         "kad_bootstrap":*kad,"server_list_url":ed2k::SERVER_LIST_URL,"node_list_url":ed2k::NODE_LIST_URL,
-        "capabilities":{"server_login":true,"server_search":true,"server_sources":true,"kad_bootstrap":true,"kad_routing":false,"peer_download":true,"peer_download_scope":"verified_parts_direct_and_server_callback","server_callback":true,"sharing":false,"messages":false}
+        "capabilities":{"server_login":true,"server_search":true,"server_sources":true,"kad_bootstrap":true,"kad_routing":false,"peer_download":true,"peer_download_scope":"verified_parts_direct_and_server_callback","server_callback":true,"sharing":true,"messages":false},
+        "shares":shares::overview(&state)
     }))
 }
 fn install(state: &Ed2kState, kind: &str, bytes: &[u8]) -> Result<usize, String> {
@@ -302,12 +316,37 @@ pub async fn ed2k_connect(
                     listener.set_client_id(connection.client_id);
                 }
                 *active = Some(connection);
+                drop(active);
+                publish_shares(&state).await;
                 return Ok(());
             }
             Err(error) => last = error.to_string(),
         }
     }
     Err(last)
+}
+/// Offers the shared files to the connected server (ED2K has no withdraw packet: removed files
+/// disappear from the server's index when the connection is renewed).
+pub async fn publish_shares(state: &Ed2kState) {
+    let connection = state
+        .server
+        .read()
+        .await
+        .as_ref()
+        .filter(|connection| connection.is_connected())
+        .cloned();
+    let Some(connection) = connection else {
+        return;
+    };
+    let files = state.shares.registry.offered();
+    if files.is_empty() {
+        shares::set_published(state, 0, None);
+        return;
+    }
+    match connection.offer_files(&files).await {
+        Ok(count) => shares::set_published(state, count, None),
+        Err(error) => shares::set_published(state, 0, Some(error.to_string())),
+    }
 }
 #[tauri::command]
 pub async fn ed2k_disconnect(state: State<'_, Ed2kState>) -> Result<(), String> {

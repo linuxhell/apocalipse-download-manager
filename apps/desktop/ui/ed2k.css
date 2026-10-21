@@ -16,3 +16,5 @@ html[data-mode=dark] body.ed2k-window{--ed2k-bg:#000}
 .ed2k-window button:disabled{opacity:.5;cursor:default}
 
 .ed2k-result-tools{display:flex;gap:16px;align-items:end;margin:0 0 14px}.ed2k-result-tools label:first-child{flex:1}.ed2k-result-tools input,.ed2k-result-tools select{padding:8px 10px;border:1px solid var(--line-strong);border-radius:5px}.ed2k-window td button+button{margin-left:8px}#ed2k-source-panel{margin-top:24px}#ed2k-source-title{overflow-wrap:anywhere}
+
+.ed2k-share-tools{display:flex;align-items:center;gap:12px;margin:0 0 14px;flex-wrap:wrap}.ed2k-window label.ed2k-inline{flex-direction:row;align-items:center;gap:6px}.ed2k-share-limits{margin-top:20px}.ed2k-share-limits label{max-width:360px}.ed2k-window #panel-shares h3{margin:22px 0 8px;font-size:14px}#share-status,#share-uploads{font-size:12px;color:var(--muted)}.ed2k-window td select{padding:3px 6px}
