@@ -7243,6 +7243,7 @@ async fn run_xtreme_download(
     let mut startup_fast_polling = true;
     let mut interval = tokio::time::interval(Duration::from_millis(100));
     let mut status_failing_since: Option<Instant> = None;
+    let mut unexpected_pauses = 0_u8;
     loop {
         tokio::select! {
             biased;
@@ -7470,6 +7471,22 @@ async fn run_xtreme_download(
                         break;
                     }
                     "paused" => {
+                        // A pause RPC from the previous generation of this task can
+                        // land after a quick resume. If the user did not pause, the
+                        // engine's state is stale: resume it instead of stranding
+                        // the task as Paused.
+                        let user_paused = state.queue.lock().map_or(true, |queue| {
+                            queue
+                                .iter()
+                                .any(|item| item.id == id && item.state == DownloadState::Paused)
+                        });
+                        if !user_paused && unexpected_pauses < 3 {
+                            unexpected_pauses += 1;
+                            diagnostic_log(&state, "WARN", "xtreme.unexpected_pause_resumed", &format!("task={id} gid={gid} attempt={unexpected_pauses}"));
+                            if endpoint.resume(&gid).await.is_ok() {
+                                continue;
+                            }
+                        }
                         update_task(&app, id, true, |item| {
                             item.state = DownloadState::Paused;
                             item.download_speed = Some(0);
