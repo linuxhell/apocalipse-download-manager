@@ -648,9 +648,38 @@ Object.assign(catalogs["zh-CN"], {"windowMinimize": "最小化", "windowMaximize
 Object.assign(catalogs.en, {darkMode: "Dark mode", darkModeHint: "Near-black surfaces with light text. Progress colours stay the same.", donate: "Donate", settingsGeneral: "General", settingsNetwork: "Network and proxy", settingsExtension: "Browser extension", settingsLink: "Apocalipse Link"});
 Object.assign(catalogs["pt-BR"], {darkMode: "Modo escuro", darkModeHint: "Superfícies quase pretas com texto claro. As cores do progresso continuam iguais.", donate: "Doação", settingsGeneral: "Geral", settingsNetwork: "Rede e proxy", settingsExtension: "Extensão do navegador", settingsLink: "Apocalipse Link"});
 Object.assign(catalogs["zh-CN"], {darkMode: "深色模式", darkModeHint: "近黑色背景与浅色文字，进度条颜色不变。", donate: "捐赠", settingsGeneral: "常规", settingsNetwork: "网络与代理", settingsExtension: "浏览器扩展", settingsLink: "Apocalipse Link"});
+Object.assign(catalogs.en, {failureDestinationExists: "A file with this name already exists in the destination, so nothing was overwritten.", failureChecksum: "The downloaded data does not match the expected SHA-256, so the file was not published.", failureSize: "The downloaded size does not match the expected size, so the file was not published.", failureIncomplete: "The download ended before the whole file arrived. Retry to continue.", failureM3u8Tool: "Nibiru M3U8 is missing or too old for this stream. Install or update it in Settings > Tools.", failureMetalink: "None of the files listed in the Metalink could be queued.", failureBrowserUpload: "The browser stopped sending the file. Download it again.", failureSignedUrl: "The signed stream link has expired. Capture the video again.", failureXtreme: "Nibiru Xtreme is unavailable. Check it in Settings > Tools and retry.", failureExternalTool: "A required external tool could not be started. Check it in Settings > Tools.", failureDetail: "Technical detail"});
+Object.assign(catalogs["pt-BR"], {failureDestinationExists: "Já existe um arquivo com este nome no destino; nada foi sobrescrito.", failureChecksum: "Os dados baixados não conferem com o SHA-256 esperado; o arquivo não foi publicado.", failureSize: "O tamanho baixado não confere com o esperado; o arquivo não foi publicado.", failureIncomplete: "O download terminou antes de o arquivo chegar inteiro. Tente novamente para continuar.", failureM3u8Tool: "O Nibiru M3U8 está ausente ou antigo demais para este stream. Instale ou atualize em Configurações > Ferramentas.", failureMetalink: "Nenhum dos arquivos listados no Metalink pôde ser enfileirado.", failureBrowserUpload: "O navegador parou de enviar o arquivo. Baixe novamente.", failureSignedUrl: "O link assinado do stream expirou. Capture o vídeo novamente.", failureXtreme: "O Nibiru Xtreme está indisponível. Verifique em Configurações > Ferramentas e tente novamente.", failureExternalTool: "Não foi possível iniciar uma ferramenta externa necessária. Verifique em Configurações > Ferramentas.", failureDetail: "Detalhe técnico"});
+Object.assign(catalogs["zh-CN"], {failureDestinationExists: "目标位置已存在同名文件，未覆盖任何内容。", failureChecksum: "下载的数据与预期的 SHA-256 不符，文件未发布。", failureSize: "下载大小与预期不符，文件未发布。", failureIncomplete: "下载在文件完整到达前结束。请重试以继续。", failureM3u8Tool: "缺少 Nibiru M3U8，或版本过旧，无法处理此流。请在设置 > 工具中安装或更新。", failureMetalink: "Metalink 中列出的文件均无法加入队列。", failureBrowserUpload: "浏览器已停止发送该文件。请重新下载。", failureSignedUrl: "带签名的流链接已过期。请重新捕获视频。", failureXtreme: "Nibiru Xtreme 不可用。请在设置 > 工具中检查后重试。", failureExternalTool: "无法启动所需的外部工具。请在设置 > 工具中检查。", failureDetail: "技术详情"});
+Object.assign(catalogs.en, {associationM3u8: "HLS playlists", associationTorrent: "BitTorrent files", associationMagnet: "Magnet links", associationFtp: "FTP links", associationSftp: "SFTP links"});
+Object.assign(catalogs["pt-BR"], {associationM3u8: "Listas de reprodução HLS", associationTorrent: "Arquivos BitTorrent", associationMagnet: "Links magnet", associationFtp: "Links FTP", associationSftp: "Links SFTP"});
+Object.assign(catalogs["zh-CN"], {associationM3u8: "HLS 播放列表", associationTorrent: "BitTorrent 文件", associationMagnet: "磁力链接", associationFtp: "FTP 链接", associationSftp: "SFTP 链接"});
+Object.assign(catalogs.en, {settingsLoadFailed: "Could not load the settings. Nothing was changed."});
+Object.assign(catalogs["pt-BR"], {settingsLoadFailed: "Não foi possível carregar as configurações. Nada foi alterado."});
+Object.assign(catalogs["zh-CN"], {settingsLoadFailed: "无法加载设置。未做任何更改。"});
 for (const catalog of Object.values(catalogs)) catalog.ed2kKad = "Apocalipse ED2K/Kad";
 let locale = localStorage.getItem("apocalipse.language") || "en";
 let pendingDiagnosticTrace = null;
+// Backend failure codes are technical; show a localized explanation and keep the
+// raw code as detail for diagnostics.
+const failureRules = [
+  [/destination[_ ]already[_ ]exists/i, "failureDestinationExists"],
+  [/sha-?256 mismatch|checksum_mismatch/i, "failureChecksum"],
+  [/size[_ ]mismatch/i, "failureSize"],
+  [/incomplete download|incomplete_output|incomplete_blob|external_output_missing_or_empty/i, "failureIncomplete"],
+  [/hls_requires_nibiru_m3u8|nibiru_m3u8_update_required|nibiru_executable_unavailable/i, "failureM3u8Tool"],
+  [/metalink_children_rejected/i, "failureMetalink"],
+  [/blob_upload_(?:abandoned|aborted)/i, "failureBrowserUpload"],
+  [/signed_stream_url_expired/i, "failureSignedUrl"],
+  [/xtreme_(?:unavailable|rpc_unreachable)/i, "failureXtreme"],
+  [/external_engine_unavailable/i, "failureExternalTool"],
+];
+const failureText = (message) => {
+  const raw = String(message || "");
+  const rule = failureRules.find(([pattern]) => pattern.test(raw));
+  return rule ? `${t(rule[1])}\n${t("failureDetail")}: ${raw}` : raw;
+};
+
 let pendingReferer = null;
 let pendingDuration = null;
 let pendingIsLive = false;
@@ -1115,7 +1144,7 @@ function renderDownloads(force = false) {
         ? t("facebookRecordingFallback")
         : failureMessage === "network_waiting_for_reconnect"
           ? t("networkWaitingHint")
-          : failureMessage;
+          : failureText(failureMessage);
     }
     titleLine.append(state.cloneNode(true));
     const actions = document.createElement("div");
@@ -2096,7 +2125,9 @@ const openSettings = async (target = "general") => {
     targetElement?.focus?.();
     invoke("record_ui_diagnostic", { level: "INFO", event: "settings_section_opened", detail: `section=${target} found=${Boolean(targetElement)}` }).catch(() => {});
   } catch (error) {
-    reportUiError("main", "renderXtremeRpcStatus", error);
+    reportUiError("main", "openSettings", error);
+    // Without this the Settings button silently did nothing when any read failed.
+    window.alert(`${t("settingsLoadFailed")}\n${String(error?.message || error)}`);
   }
 };
 document
@@ -2228,7 +2259,6 @@ document.querySelector("#save-tools").onclick = async (event) => {
       ffmpeg: document.querySelector("#tool-ffmpeg").value,
       ytDlp: document.querySelector("#tool-yt-dlp").value,
       qjs: document.querySelector("#tool-qjs").value,
-      nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
       xtreme: document.querySelector("#tool-xtreme").value,
       power: document.querySelector("#tool-power").value,
       colapse: document.querySelector("#tool-colapse").value,

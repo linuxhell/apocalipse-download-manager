@@ -8,10 +8,13 @@ const js = readFileSync(join(__dirname, '../apps/desktop/ui/app.js'), 'utf8');
 const rust = readFileSync(join(__dirname, '../apps/desktop/src-tauri/src/main.rs'), 'utf8');
 
 test('Tools offers localized Download beside Browse for every configurable item', () => {
-  for (const id of ['ffmpeg', 'yt-dlp', 'qjs', 'n-m3u8dl-re', 'xtreme', 'extractor', 'player']) {
+  for (const id of ['ffmpeg', 'yt-dlp', 'qjs', 'xtreme', 'extractor', 'player']) {
     assert.match(html, new RegExp(`data-tool-download="${id}"`));
     assert.match(html, new RegExp(`data-tool-pick="${id}"`));
   }
+  // N_m3u8DL-RE was retired: Nibiru M3U8 handles HLS/DASH, so it is no longer managed here.
+  assert.doesNotMatch(html, /n-m3u8dl-re/);
+  assert.doesNotMatch(rust, /n_m3u8dl_re_path/);
   assert.doesNotMatch(html, /data-tool-update="extractor"/);
   assert.doesNotMatch(html, /data-tool-update="player"/);
   assert.match(js, /downloadTool: "Download"/);

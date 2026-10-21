@@ -76,7 +76,7 @@
 | `download_directory` | 初始 `null`；在界面中选择 |
 | `xtreme_path`、`power_path`、`m3u8_path`、`colapse_path` | 可选；默认 `data/tools/NAME/NAME[.exe]` |
 | `xtreme_rpc_enabled`、`xtreme_rpc_auto_start` | `true`；`xtreme_rpc_port` 为 `null` 时自动选端口 |
-| `ffmpeg_path`、`yt_dlp_path`、`qjs_path`、`n_m3u8dl_re_path` | 对应流程的可选工具路径 |
+| `ffmpeg_path`、`yt_dlp_path`、`qjs_path` | 对应流程的可选工具路径 |
 | `proxy_enabled`、`proxy_url`、`dns_enabled`、`dns_servers` | 可配置代理/DNS，启用开关初始为 `false` |
 | `language`、`dark_mode` | 语言 `en`、`pt-BR`、`zh-CN`；默认 `en` 和 `false` |
 | `link_quic_enabled` | `false`；独立于 Link TLS 的实验选项 |

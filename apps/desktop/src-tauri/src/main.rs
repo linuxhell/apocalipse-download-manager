@@ -407,8 +407,6 @@ struct UserSettings {
     #[serde(default)]
     qjs_path: Option<PathBuf>,
     #[serde(default)]
-    n_m3u8dl_re_path: Option<PathBuf>,
-    #[serde(default)]
     xtreme_path: Option<PathBuf>,
     #[serde(default)]
     power_path: Option<PathBuf>,
@@ -519,7 +517,6 @@ impl Default for UserSettings {
             ffmpeg_path: None,
             yt_dlp_path: None,
             qjs_path: None,
-            n_m3u8dl_re_path: None,
             xtreme_path: None,
             power_path: None,
             colapse_path: None,
@@ -7902,15 +7899,6 @@ async fn run_external_download(
             (
                 configured_tool(&settings.ffmpeg_path, "ffmpeg"),
                 configured_tool(&settings.yt_dlp_path, "yt-dlp"),
-                configured_tool(
-                    &settings.n_m3u8dl_re_path,
-                    if cfg!(windows) {
-                        "N_m3u8DL-RE.exe"
-                    } else {
-                        "N_m3u8DL-RE"
-                    },
-                ),
-                configured_xtreme(&settings),
                 settings.connections_per_download.clamp(1, 32),
                 settings
                     .proxy_enabled
@@ -7929,12 +7917,6 @@ async fn run_external_download(
             (
                 "ffmpeg".into(),
                 "yt-dlp".into(),
-                "N_m3u8DL-RE".into(),
-                if cfg!(windows) {
-                    "nibiru-xtreme.exe".into()
-                } else {
-                    "xtreme".into()
-                },
                 16,
                 None,
                 None,
@@ -7951,7 +7933,7 @@ async fn run_external_download(
     let task_connections = task
         .connections_override
         .or_else(|| host_rule.as_ref().and_then(|rule| rule.connections))
-        .unwrap_or(tools.4)
+        .unwrap_or(tools.2)
         .clamp(1, 32);
     diagnostic_log(
         &app.state::<AppState>(),
@@ -7961,8 +7943,8 @@ async fn run_external_download(
             "task={id} engine={kind:?} threads={} override={} proxy={} dns_servers={} selected_files={}",
             task_connections,
             task.connections_override.is_some(),
-            tools.5.is_some(),
-            tools.8.len(),
+            tools.3.is_some(),
+            tools.6.len(),
             task.torrent_selection.len(),
         ),
     );
@@ -8012,7 +7994,7 @@ async fn run_external_download(
     let proxy_url = tools
         .5
         .as_deref()
-        .map(|url| external_proxy_url(url, tools.6.as_deref(), tools.7.as_deref()));
+        .map(|url| external_proxy_url(url, tools.4.as_deref(), tools.5.as_deref()));
     // ffmpeg cannot resume and `-y` would replace whatever sits at the destination,
     // so it writes a private partial file that is published without replacing.
     let hls_audio_partial = external_partial_output(&task.destination);
@@ -8659,7 +8641,7 @@ fn engine_log_name(kind: DownloadKind, task: &DownloadTask) -> &'static str {
         {
             "ffmpeg"
         }
-        DownloadKind::Hls => "n-m3u8dl-re",
+        DownloadKind::Hls => "nibiru-m3u8",
         _ => "external",
     }
 }
@@ -8821,7 +8803,6 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "ffmpeg": settings.ffmpeg_path.as_ref().is_some_and(|path| path.is_file()),
             "ytDlp": settings.yt_dlp_path.as_ref().is_some_and(|path| path.is_file()),
             "qjs": settings.qjs_path.as_ref().is_some_and(|path| path.is_file()),
-            "nM3u8DlRe": settings.n_m3u8dl_re_path.as_ref().is_some_and(|path| path.is_file()),
             "xtreme": settings.xtreme_path.as_ref().is_some_and(|path| path.is_file()),
             "xtremeRpcEnabled": settings.xtreme_rpc_enabled,
             "xtremeRpcAutoStart": settings.xtreme_rpc_auto_start,
@@ -10136,6 +10117,20 @@ fn pick_url_list() -> Result<Vec<String>, String> {
     Ok(urls)
 }
 
+/// Version string of an engine whose `capabilities` answer names the expected
+/// engine; `None` when the file is missing, not that engine, or incompatible.
+async fn nibiru_identity(path: Result<PathBuf, String>, engine: &str) -> Option<String> {
+    let path = path.ok().filter(|path| path.is_file())?;
+    let capabilities = nibiru_cli::capabilities(&path, engine).await.ok()?;
+    Some(
+        capabilities
+            .get("version")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown")
+            .to_owned(),
+    )
+}
+
 #[tauri::command]
 async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>, String> {
     let settings = state
@@ -10191,18 +10186,6 @@ async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>
             ),
             ["--version"].as_slice(),
         ),
-        (
-            "n-m3u8dl-re",
-            configured_tool(
-                &settings.n_m3u8dl_re_path,
-                if cfg!(windows) {
-                    "N_m3u8DL-RE.exe"
-                } else {
-                    "N_m3u8DL-RE"
-                },
-            ),
-            ["--version"].as_slice(),
-        ),
     ];
     let mut statuses = definitions
         .into_iter()
@@ -10216,6 +10199,26 @@ async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>
             }
         })
         .collect::<Vec<_>>();
+
+    // "Detected" must mean the executable really is the expected engine speaking
+    // a compatible contract, not merely that some file answers `--version`.
+    let engine_path = |engine: &str| nibiru::executable(&settings, engine);
+    let (m3u8_identity, power_identity, colapse_identity, xtreme_identity) = tokio::join!(
+        nibiru_identity(engine_path("nibiru-m3u8"), "nibiru-m3u8"),
+        nibiru_identity(engine_path("nibiru-power"), "nibiru-power"),
+        nibiru_identity(engine_path("nibiru-colapse"), "nibiru-colapse"),
+        nibiru_identity(engine_path("nibiru-xtreme"), "nibiru-xtreme"),
+    );
+    for (id, identity) in [
+        ("m3u8", m3u8_identity),
+        ("power", power_identity),
+        ("colapse", colapse_identity),
+    ] {
+        if let Some(status) = statuses.iter_mut().find(|status| status.id == id) {
+            status.found = identity.is_some();
+            status.version = identity;
+        }
+    }
 
     let xtreme_path = configured_xtreme(&settings);
     let xtreme_endpoint = {
@@ -10236,8 +10239,8 @@ async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>
     statuses.push(ToolStatus {
         id: "xtreme".to_owned(),
         path: xtreme_path.to_string_lossy().into_owned(),
-        found: xtreme_path.is_file(),
-        version: xtreme_version,
+        found: xtreme_identity.is_some(),
+        version: xtreme_identity.or(xtreme_version),
     });
 
     let extractor = settings.extractor_path.clone().unwrap_or_default();
@@ -10284,7 +10287,6 @@ fn set_tool_paths(
     ffmpeg: String,
     yt_dlp: String,
     qjs: String,
-    n_m3u8dl_re: String,
     xtreme: String,
     power: String,
     colapse: String,
@@ -10295,7 +10297,6 @@ fn set_tool_paths(
     settings.ffmpeg_path = optional_path(ffmpeg);
     settings.yt_dlp_path = optional_path(yt_dlp);
     settings.qjs_path = optional_path(qjs);
-    settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
     settings.xtreme_path = optional_path(xtreme);
     settings.power_path = optional_path(power);
     settings.colapse_path = optional_path(colapse);
@@ -11063,7 +11064,6 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
     let (platform, architecture) = release_platform_architecture()?;
     let tools_root = portable_tools_directory()?;
     let tool_dir = tools_root.join(match id.as_str() {
-        "n-m3u8dl-re" => "n-m3u8dl-re",
         value => value,
     });
     fs::create_dir_all(&tool_dir).map_err(|error| error.to_string())?;
@@ -11127,43 +11127,6 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             let target = tool_dir.join(if cfg!(windows) { "qjs.exe" } else { "qjs" });
             install_validated_executable(&bytes, &target, &["--version"])?;
             target
-        }
-        "n-m3u8dl-re" => {
-            let release = github_latest_release(&client, "nilaoda/N_m3u8DL-RE").await?;
-            let (platform_marker, arch_marker) = match (platform, architecture) {
-                ("windows", "x86_64") => ("win-", "x64"),
-                ("windows", "aarch64") => ("win-", "arm64"),
-                ("linux", "x86_64") => ("linux-", "x64"),
-                ("linux", "aarch64") => ("linux-", "arm64"),
-                ("macos", "x86_64") => ("osx-", "x64"),
-                ("macos", "aarch64") => ("osx-", "arm64"),
-                _ => return Err("tool_download_platform_unsupported:n-m3u8dl-re".to_owned()),
-            };
-            let (asset_name, url) = release_asset(&release, |name| {
-                name.contains(platform_marker)
-                    && name.contains(arch_marker)
-                    && (name.ends_with(".zip") || name.ends_with(".tar.gz"))
-            })?;
-            let bytes = download_tool_asset(&client, &id, &url).await?;
-            let executable_name = if cfg!(windows) {
-                "N_m3u8DL-RE.exe"
-            } else {
-                "N_m3u8DL-RE"
-            };
-            replace_tool_directory(&tool_dir, |staging| {
-                extract_release_archive(&bytes, &asset_name, staging)?;
-                let target = find_named_file(staging, executable_name, 0)
-                    .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
-                        .map_err(|error| error.to_string())?;
-                }
-                version_line(&target, &["--version"])
-                    .ok_or_else(|| "downloaded_tool_validation_failed".to_owned())?;
-                Ok(target)
-            })?
         }
         "ffmpeg" => {
             let (repository, release) = if platform == "macos" {
@@ -11395,14 +11358,6 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &settings.qjs_path,
                 if cfg!(windows) { "qjs.exe" } else { "qjs" },
             ),
-            "n-m3u8dl-re" => configured_tool(
-                &settings.n_m3u8dl_re_path,
-                if cfg!(windows) {
-                    "N_m3u8DL-RE.exe"
-                } else {
-                    "N_m3u8DL-RE"
-                },
-            ),
             "ffmpeg" => configured_tool(
                 &settings.ffmpeg_path,
                 if cfg!(windows) {
@@ -11470,16 +11425,6 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &[],
                 &["--version"],
             ),
-            "n-m3u8dl-re" => (
-                "nilaoda/N_m3u8DL-RE".into(),
-                if cfg!(windows) {
-                    "N_m3u8DL-RE.exe"
-                } else {
-                    "N_m3u8DL-RE"
-                },
-                &[],
-                &["--version"],
-            ),
             "ffmpeg" => (
                 if cfg!(target_os = "macos") {
                     "eugeneware/ffmpeg-static".into()
@@ -11539,18 +11484,6 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                         ("macos", "x86_64") => name == "qjs-darwin-x86_64",
                         _ => false,
                     },
-                    "n-m3u8dl-re" => {
-                        let platform_marker = match platform {
-                            "windows" => "win-",
-                            "linux" => "linux-",
-                            "macos" => "osx-",
-                            _ => return false,
-                        };
-                        let arch_marker = "x64";
-                        name.contains(platform_marker)
-                            && name.contains(arch_marker)
-                            && (name.ends_with(".zip") || name.ends_with(".tar.gz"))
-                    }
                     "ffmpeg" => match platform {
                         "windows" => name.ends_with("win64-gpl.zip") && !name.contains("shared"),
                         "linux" => {
@@ -18157,6 +18090,38 @@ mod tests {
 #[cfg(test)]
 mod log_sanitization_tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn engine_status_requires_the_expected_identity() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("adm-identity-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let script = |name: &str, engine: &str| {
+            let path = root.join(name);
+            fs::write(
+                &path,
+                format!(
+                    "#!/bin/sh\necho '{{\"schema_version\":1,\"engine\":\"{engine}\",\"version\":\"1.2.3\"}}'\n"
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        let right = script("right", "nibiru-power");
+        let wrong = script("wrong", "someone-else");
+        assert_eq!(
+            nibiru_identity(Ok(right), "nibiru-power").await.as_deref(),
+            Some("1.2.3")
+        );
+        assert_eq!(nibiru_identity(Ok(wrong), "nibiru-power").await, None);
+        assert_eq!(
+            nibiru_identity(Ok(root.join("missing")), "nibiru-power").await,
+            None
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn only_recently_finished_files_count_as_browser_downloads() {

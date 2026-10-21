@@ -76,7 +76,7 @@ These are Cargo target names; packages may rename the desktop executable. Add `.
 | `download_directory` | Initially `null`; chosen in the interface |
 | `xtreme_path`, `power_path`, `m3u8_path`, `colapse_path` | Optional; default `data/tools/NAME/NAME[.exe]` |
 | `xtreme_rpc_enabled`, `xtreme_rpc_auto_start` | `true`; automatic port when `xtreme_rpc_port` is `null` |
-| `ffmpeg_path`, `yt_dlp_path`, `qjs_path`, `n_m3u8dl_re_path` | Optional paths for corresponding routes |
+| `ffmpeg_path`, `yt_dlp_path`, `qjs_path` | Optional paths for corresponding routes |
 | `proxy_enabled`, `proxy_url`, `dns_enabled`, `dns_servers` | Configurable proxy/DNS; enabled flags initially `false` |
 | `language`, `dark_mode` | Languages `en`, `pt-BR`, `zh-CN`; defaults `en` and `false` |
 | `link_quic_enabled` | `false`; experimental option separate from Link TLS |

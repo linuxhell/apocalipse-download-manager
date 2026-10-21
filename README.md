@@ -76,7 +76,7 @@ São nomes dos alvos Cargo; o pacote pode renomear o desktop. No Windows, acresc
 | `download_directory` | Inicialmente `null`; diretório escolhido na interface |
 | `xtreme_path`, `power_path`, `m3u8_path`, `colapse_path` | Opcionais; padrão `data/tools/NOME/NOME[.exe]` |
 | `xtreme_rpc_enabled`, `xtreme_rpc_auto_start` | `true`; porta automática quando `xtreme_rpc_port` é `null` |
-| `ffmpeg_path`, `yt_dlp_path`, `qjs_path`, `n_m3u8dl_re_path` | Caminhos opcionais para as rotas correspondentes |
+| `ffmpeg_path`, `yt_dlp_path`, `qjs_path` | Caminhos opcionais para as rotas correspondentes |
 | `proxy_enabled`, `proxy_url`, `dns_enabled`, `dns_servers` | Proxy/DNS configuráveis; habilitação inicia em `false` |
 | `language`, `dark_mode` | Idiomas `en`, `pt-BR`, `zh-CN`; padrões `en` e `false` |
 | `link_quic_enabled` | `false`; opção experimental independente do Link TLS |
