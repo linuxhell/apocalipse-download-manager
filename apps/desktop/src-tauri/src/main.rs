@@ -6375,8 +6375,8 @@ async fn run_adaptive_social_download(
                 None => String::new(),
             };
             match status {
-                Some(status) if status.success() && temporary.is_file() => {
-                    fs::rename(&temporary, &task.destination).map_err(|error| error.to_string())
+                Some(status) if status.success() => {
+                    publish_external_partial(&temporary, &task.destination)
                 }
                 Some(status) => Err(external_error_detail(&error_text, status.code())),
                 None => Err("cancelled".to_owned()),
@@ -6385,6 +6385,7 @@ async fn run_adaptive_social_download(
         Err(error) => Err(format!("ffmpeg_unavailable: {error}")),
     };
     let _ = fs::remove_file(&temporary);
+    let was_cancelled = matches!(&result, Err(message) if message == "cancelled");
     match result {
         Ok(()) => {
             let size = fs::metadata(&task.destination)
@@ -6419,10 +6420,14 @@ async fn run_adaptive_social_download(
             });
         }
     }
-    if let Ok(mut workers) = state.workers.lock() {
-        workers.remove(&id);
+    // A cancelled worker was already deregistered by the pause/remove that
+    // cancelled it; a quick resume may have registered a newer worker since.
+    if !was_cancelled {
+        if let Ok(mut workers) = state.workers.lock() {
+            workers.remove(&id);
+        }
+        start_next_queued(&app);
     }
-    start_next_queued(&app);
 }
 
 async fn run_download(
@@ -6812,7 +6817,17 @@ fn finalize_media_page_download(
     if destination.exists() {
         return Err("yt_dlp_destination_already_exists".to_owned());
     }
-    fs::copy(&source, &destination).map_err(|error| error.to_string())?;
+    // Copy beside the destination and publish without replacing, so a crash
+    // never leaves a truncated final file and a competing file is never lost.
+    let partial = external_partial_output(&destination);
+    let copied = fs::copy(&source, &partial).map_err(|error| error.to_string());
+    if copied.as_ref().is_ok_and(|bytes| *bytes != size) || copied.is_err() {
+        let _ = fs::remove_file(&partial);
+        return Err(copied
+            .err()
+            .unwrap_or_else(|| "yt_dlp_output_copy_incomplete".to_owned()));
+    }
+    publish_external_partial(&partial, &destination)?;
     let _ = fs::remove_dir_all(work_directory);
     update_task(app, id, true, |item| {
         item.destination = destination.clone();
@@ -11316,14 +11331,20 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
     if id == "yt-dlp" {
         let before = version_line(&executable, &["--version"])
             .ok_or_else(|| "yt_dlp_not_found".to_owned())?;
-        let mut command = Command::new(&executable);
-        command.args(["--update-to", YT_DLP_UPDATE_CHANNEL]);
+        let mut command = tokio::process::Command::new(&executable);
+        command
+            .args(["--update-to", YT_DLP_UPDATE_CHANNEL])
+            .stdin(Stdio::null())
+            .kill_on_drop(true);
         #[cfg(target_os = "windows")]
         {
-            use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000);
         }
-        let output = command.output().map_err(|error| error.to_string())?;
+        // The self-update must neither block an async worker nor hang forever.
+        let output = tokio::time::timeout(Duration::from_secs(300), command.output())
+            .await
+            .map_err(|_| "yt_dlp_update_timed_out".to_owned())?
+            .map_err(|error| error.to_string())?;
         if !output.status.success() {
             let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
             return Err(if message.is_empty() {
@@ -12173,7 +12194,19 @@ async fn run_metalink_manifest(
         }
     };
 
-    let bytes = match response.bytes().await {
+    // A manifest is small; cap it, and stay cancellable while it downloads.
+    let bytes = tokio::select! {
+        biased;
+        _ = &mut cancellation => {
+            if let Ok(mut workers) = state.workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
+            return;
+        }
+        bytes = read_response_limited(response, 8 * 1024 * 1024, "metalink_too_large") => bytes,
+    };
+    let bytes = match bytes {
         Ok(bytes) => bytes,
         Err(error) => {
             update_task(&app, id, true, |item| {
@@ -12242,31 +12275,6 @@ async fn run_metalink_manifest(
         return;
     }
 
-    {
-        let mut queue = match state.queue.lock() {
-            Ok(queue) => queue,
-            Err(error) => {
-                update_task(&app, id, true, |item| {
-                    item.state = DownloadState::Failed {
-                        message: error.to_string(),
-                    }
-                });
-                return;
-            }
-        };
-        queue.retain(|item| item.id != id);
-        if let Err(error) = save_queue(&state, &queue) {
-            diagnostic_log(&state, "ERROR", "metalink.queue_replace_failed", &error);
-            return;
-        }
-    }
-    if let Ok(mut identities) = state.request_identities.lock() {
-        identities.remove(&id);
-    }
-    if let Ok(mut workers) = state.workers.lock() {
-        workers.remove(&id);
-    }
-
     let total_children = prepared.len();
     let mut accepted = 0_usize;
     for (primary, name, mirrors, expected_size, sha256) in prepared {
@@ -12302,6 +12310,26 @@ async fn run_metalink_manifest(
         "metalink.expanded",
         &format!("task={id} children={accepted}/{total_children}"),
     );
+    // Replace the manifest task only once its files are queued. Removing it first
+    // lost the whole download when persistence failed or every child was rejected.
+    if accepted == 0 {
+        update_task(&app, id, true, |item| {
+            item.state = DownloadState::Failed {
+                message: "metalink_children_rejected".to_owned(),
+            }
+        });
+    } else if let Ok(mut queue) = state.queue.lock() {
+        queue.retain(|item| item.id != id);
+        if let Err(error) = save_queue(&state, &queue) {
+            diagnostic_log(&state, "ERROR", "metalink.queue_replace_failed", &error);
+        }
+    }
+    if let Ok(mut identities) = state.request_identities.lock() {
+        identities.remove(&id);
+    }
+    if let Ok(mut workers) = state.workers.lock() {
+        workers.remove(&id);
+    }
     start_next_queued(&app);
 }
 
