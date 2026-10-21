@@ -295,7 +295,9 @@ test("audio HLS analysis offers an optional localized FFmpeg conversion", () => 
   assert.match(app, /convertWithFfmpeg: "下载完成后使用 FFmpeg 转换为："/);
   assert.match(app, /const selection = enabled \? `audio:\$\{format\}` : "original"/);
   assert.match(rust, /DownloadKind::Hls[\s\S]*strip_prefix\("audio:"\)[\s\S]*Command::new\(&tools\.0\)/);
-  assert.match(rust, /DownloadKind::Hls[\s\S]*Command::new\(&tools\.2\)/);
+  // Non-audio HLS/DASH is dispatched to Nibiru M3U8; the retired N_m3u8DL-RE command is gone.
+  assert.match(rust, /hls_requires_nibiru_m3u8/);
+  assert.doesNotMatch(rust, /Command::new\(&tools\.2\)/);
 });
 
 test("Windows Link retries Microsoft and Azure account forms after ERROR_LOGON_FAILURE", () => {

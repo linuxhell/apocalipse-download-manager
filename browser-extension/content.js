@@ -293,21 +293,30 @@
     });
     if (!begin?.uploadId) throw new Error(begin?.error || "blob_begin_failed");
     const chunkSize = 64 * 1024;
-    for (let offset = 0; offset < blob.size; offset += chunkSize) {
-      const bytes = new Uint8Array(await blob.slice(offset, offset + chunkSize).arrayBuffer());
-      let data = "";
-      for (const byte of bytes) data += byte.toString(16).padStart(2, "0");
+    try {
+      for (let offset = 0; offset < blob.size; offset += chunkSize) {
+        const bytes = new Uint8Array(await blob.slice(offset, offset + chunkSize).arrayBuffer());
+        let data = "";
+        for (const byte of bytes) data += byte.toString(16).padStart(2, "0");
+        const result = await chrome.runtime.sendMessage({
+          type: "APOCALIPSE_BLOB_CHUNK",
+          request: { uploadId: begin.uploadId, data },
+        });
+        if (result?.error) throw new Error(result.error);
+      }
       const result = await chrome.runtime.sendMessage({
-        type: "APOCALIPSE_BLOB_CHUNK",
-        request: { uploadId: begin.uploadId, data },
+        type: "APOCALIPSE_BLOB_END",
+        request: { uploadId: begin.uploadId },
       });
       if (result?.error) throw new Error(result.error);
+    } catch (error) {
+      // Let the desktop settle the half-received file instead of leaving a stuck task.
+      await chrome.runtime.sendMessage({
+        type: "APOCALIPSE_BLOB_ABORT",
+        request: { uploadId: begin.uploadId },
+      }).catch(() => {});
+      throw error;
     }
-    const result = await chrome.runtime.sendMessage({
-      type: "APOCALIPSE_BLOB_END",
-      request: { uploadId: begin.uploadId },
-    });
-    if (result?.error) throw new Error(result.error);
   };
   const appendBlob = async (uploadId, blob) => {
     const chunkSize = 64 * 1024;
@@ -1904,6 +1913,9 @@
                 trace("recording_completed", "record", { uploadId: begin.uploadId, elapsedMs: Date.now() - startedAt });
               } catch (error) {
                 trace("recording_upload_failed", "record", { uploadId: begin.uploadId, error: String(error) });
+                // Keep what was already received: ending publishes the partial recording.
+                // If the desktop is unreachable this fails too and its idle purge settles it.
+                await chrome.runtime.sendMessage({ type: "APOCALIPSE_BLOB_END", request: { uploadId: begin.uploadId } }).catch(() => {});
                 console.error("Apocalipse recorder upload", error);
                 recordPhase = "error";
                 refreshRecordLabels();

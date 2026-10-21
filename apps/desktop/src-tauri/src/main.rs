@@ -14798,6 +14798,20 @@ fn append_blob_chunk(app: &tauri::AppHandle, request: BlobChunk) -> Result<(), S
     Ok(())
 }
 
+/// The extension gave up on an upload (fetch failed, page closed): settle the
+/// task at once instead of waiting for the idle purge.
+fn abort_blob_upload(app: &tauri::AppHandle, request: BlobFinish) -> Result<(), String> {
+    let upload = app
+        .state::<AppState>()
+        .blob_uploads
+        .lock()
+        .map_err(|error| error.to_string())?
+        .remove(&request.upload_id)
+        .ok_or_else(|| "blob_upload_not_found".to_owned())?;
+    fail_blob_upload(app, &upload, "blob_upload_aborted");
+    Ok(())
+}
+
 fn finish_blob_upload(app: &tauri::AppHandle, request: BlobFinish) -> Result<(), String> {
     let state = app.state::<AppState>();
     let upload = state
@@ -15227,6 +15241,14 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
                 origin,
                 &format!("{{\"stop\":{stop}}}"),
             ),
+            Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
+        }
+    } else if first.starts_with("POST /v1/blob/abort ") {
+        match serde_json::from_str::<BlobFinish>(body)
+            .map_err(|error| error.to_string())
+            .and_then(|request| abort_blob_upload(app, request))
+        {
+            Ok(()) => bridge_response(&mut stream, "200 OK", origin, "{\"ok\":true}"),
             Err(_) => bridge_response(&mut stream, "400 Bad Request", origin, "{\"ok\":false}"),
         }
     } else if first.starts_with("POST /v1/blob/end ") {

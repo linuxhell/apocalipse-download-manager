@@ -1333,6 +1333,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       .catch((error) => reply({ error: String(error) }));
     return true;
   }
+  if (message?.type === "APOCALIPSE_BLOB_ABORT") {
+    bridgeRequest("/v1/blob/abort", { method: "POST", body: JSON.stringify(message.request) }).then(reply)
+      .catch((error) => reply({ error: String(error) }));
+    return true;
+  }
   if (message?.type === "APOCALIPSE_BLOB_END") {
     bridgeRequest("/v1/blob/end", { method: "POST", body: JSON.stringify(message.request) }).then(reply)
       .catch((error) => reply({ error: String(error) }));
@@ -1541,14 +1546,6 @@ function release(url) {
   activeCapturedUrls.delete(url);
 }
 
-async function waitWhilePaused(uploadId) {
-  while (true) {
-    const status = await bridgePost("/v1/blob/status", { uploadId });
-    if (!status?.paused) return;
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-}
-
 async function streamCapturedUrl(request) {
   const recognized = recognizedDownload(request?.url || "") || (request?.force ? genericHttpDownload(request?.url || "") : null);
   if (!recognized) throw new Error("unsupported_pre_download_url");
@@ -1636,7 +1633,6 @@ async function streamCapturedUrl(request) {
       if (value?.length) {
         for (let offset = 0; offset < value.length; offset += 16 * 1024) {
           const slice = value.subarray(offset, Math.min(value.length, offset + 16 * 1024));
-          await waitWhilePaused(uploadId);
           await bridgePost("/v1/blob/chunk", { uploadId, data: hex(slice) });
           state.bytes += slice.length;
           chunks += 1;
@@ -1652,6 +1648,9 @@ async function streamCapturedUrl(request) {
     });
     return { ok: true, kind, bytes: state.bytes };
   } catch (error) {
+    // Tell the desktop to settle the half-received file; otherwise its task
+    // would sit in Downloading until the idle purge.
+    if (uploadId) await bridgePost("/v1/blob/abort", { uploadId }).catch(() => {});
     await diagnostic(`${kind}.prehook.failed`, state, {
       level: "ERROR",
       bytes: state.bytes,
