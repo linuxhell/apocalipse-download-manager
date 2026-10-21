@@ -116,6 +116,31 @@ comportamento com o backend real nem a aparência no WebView2/WebKitGTK/WKWebVie
 Os catálogos das três páginas têm paridade de chaves e de placeholders
 (`ui-i18n-catalogs`).
 
+## Resultado da CI (execução real)
+
+Workflow `Test build artifacts`, disparo manual na branch
+`claude/optimistic-heisenberg-cozrt2`, commit `df0d6ccd`
+([execução 39533307830](https://github.com/linuxhell/apocalipse-download-manager/actions/runs/39533307830)):
+
+| Job | Resultado | Onde parou |
+| --- | --- | --- |
+| Windows x64 portable | **falhou** | passo *Validate* (`cargo test --workspace --locked`), ~14 s |
+| Linux x64 portable | **falhou** | passo *Validate*, ~14 s |
+| macOS x64 portable | **falhou** | passo *Validate*, ~14 s |
+| Browser extensions test packages | **passou** | `node --test tests/*.test.cjs` (349 testes JS, incluindo os novos) e empacotamento |
+
+Causa (igual nas três plataformas): o Cargo não consegue obter a dependência Git
+`nibiru-xtreme` na revisão fixada `0a9fcdde7363aed6881c08f57e157564a0bebd04` (a
+mensagem "network failure… Eof" é como o Cargo relata um fetch recusado; localmente
+o mesmo fetch dá `revision … not found`). A revisão não está publicada. Nenhum
+passo posterior rodou, então **nenhum binário foi construído e nenhum teste Rust foi
+executado em Windows ou macOS**. A revisão do ADM nesta execução é exatamente
+`df0d6ccdc5d04fcd48681b749cd0f29c8a94494a`.
+
+Para a CI ficar verde é preciso publicar, em branches dos repositórios dos
+motores, os commits fixados em `Cargo.lock` e `scripts/nibiru-engines.json`; o passo
+*Write build evidence* (`build-evidence.json` por pacote) só roda depois disso.
+
 ## Pendências reais
 
 - Leitura semântica restante de `main.rs`, servidor Link, extensão e interface.
