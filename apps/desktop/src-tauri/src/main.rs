@@ -5931,8 +5931,37 @@ fn save_queue_in_background(state: &AppState, queue: &[DownloadTask]) {
     }
 }
 
+/// Reads settings so that one field this build cannot parse (a type changed
+/// between versions, or a hand edit) costs only that field instead of every
+/// preference. The original file is kept as `*.corrupt-<time>`.
+fn read_settings_file(path: &Path) -> Option<UserSettings> {
+    let data = fs::read(path).ok()?;
+    if let Ok(settings) = serde_json::from_slice::<UserSettings>(&data) {
+        return Some(settings);
+    }
+    let Ok(serde_json::Value::Object(saved)) = serde_json::from_slice::<serde_json::Value>(&data)
+    else {
+        return read_json_state_file(path);
+    };
+    let mut merged = serde_json::to_value(UserSettings::default()).ok()?;
+    for (key, value) in saved {
+        let mut candidate = merged.clone();
+        candidate[&key] = value;
+        if serde_json::from_value::<UserSettings>(candidate.clone()).is_ok() {
+            merged = candidate;
+        }
+    }
+    let settings = serde_json::from_value::<UserSettings>(merged).ok()?;
+    if let Some(file_name) = path.file_name() {
+        let mut preserved = file_name.to_os_string();
+        preserved.push(format!(".corrupt-{}", epoch_seconds()));
+        let _ = fs::copy(path, path.with_file_name(preserved));
+    }
+    Some(settings)
+}
+
 fn load_settings(path: &Path) -> Result<UserSettings, String> {
-    let mut settings: UserSettings = read_json_state_file(path).unwrap_or_default();
+    let mut settings: UserSettings = read_settings_file(path).unwrap_or_default();
     for share in &mut settings.link_shares {
         if let Ok(metadata) = fs::metadata(&share.path) {
             share.directory = metadata.is_dir();
@@ -18025,6 +18054,31 @@ mod tests {
 #[cfg(test)]
 mod log_sanitization_tests {
     use super::*;
+
+    #[test]
+    fn one_unreadable_setting_keeps_the_other_preferences() {
+        let root = std::env::temp_dir().join(format!("adm-settings-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("settings.json");
+        let mut value = serde_json::to_value(UserSettings::default()).unwrap();
+        value["max_active_downloads"] = serde_json::json!(7);
+        value["connections_per_download"] = serde_json::json!("not a number");
+        fs::write(&path, value.to_string()).unwrap();
+
+        let settings = read_settings_file(&path).expect("tolerant load");
+        assert_eq!(settings.max_active_downloads, 7);
+        assert_eq!(
+            settings.connections_per_download,
+            UserSettings::default().connections_per_download
+        );
+        let preserved = fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".corrupt-"))
+            .count();
+        assert_eq!(preserved, 1);
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn link_account_guessing_is_limited_by_a_shared_failure_budget() {
