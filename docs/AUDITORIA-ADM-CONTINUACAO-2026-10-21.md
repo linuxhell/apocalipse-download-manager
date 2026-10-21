@@ -28,13 +28,13 @@ fixada. O Colapse real foi compilado de `6f92c7e` para o teste de operações.
 | Remoção | "Apagar arquivos" removia arquivo preexistente que a tarefa nunca produziu | Preservado quando anterior à tarefa e não concluída | `badd4997` |
 | Xtreme | Pause atrasado de geração anterior deixava tarefa retomada em Pausada | Retoma o motor se o usuário não pausou (máx. 3) | `f6bce7f8` |
 | Fila salva | Uma entrada ilegível descartava a fila inteira | Leitura entrada por entrada; original em `*.corrupt-<hora>` | `028befd4` |
-| Processos | yt-dlp/ffmpeg sem supervisão de árvore: descendente prendia os pipes e travava a tarefa; sobrava processo após pausa/queda | Grupo de processos / Job Object do Nibiru; pipes drenados com limite de 5 s | ver log |
-| Segredos | Pausa deixava cookie jar e config de senha do yt-dlp em disco | Removidos ao pausar | ver log |
-| HLS áudio | ffmpeg gravava direto no destino com `-y` | Parcial privado, saída vazia rejeitada, publicação sem substituir | ver log |
-| yt-dlp mídia | Cópia final direta e não atômica | Cópia ao lado do destino e publicação sem substituir | ver log |
-| Mux social | `rename` sobrescrevia; worker cancelado removia o registro do worker novo | Publicação sem substituir; remoção só se não cancelado | ver log |
-| Metalink | Tarefa-mãe era removida antes dos filhos (sumia se a gravação falhasse ou todos fossem rejeitados); manifesto sem limite e não cancelável | Mãe só sai após filhos aceitos, senão falha visível; limite de 8 MiB e cancelamento | ver log |
-| yt-dlp | `--update-to` bloqueava um worker e sem timeout | `tokio::process`, timeout de 300 s | ver log |
+| Processos | yt-dlp/ffmpeg sem supervisão de árvore: descendente prendia os pipes e travava a tarefa; sobrava processo após pausa/queda | Grupo de processos / Job Object do Nibiru; pipes drenados com limite de 5 s | `3579e23d` |
+| Segredos | Pausa deixava cookie jar e config de senha do yt-dlp em disco | Removidos ao pausar | `3579e23d` |
+| HLS áudio | ffmpeg gravava direto no destino com `-y` | Parcial privado, saída vazia rejeitada, publicação sem substituir | `3579e23d` |
+| yt-dlp mídia | Cópia final direta e não atômica | Cópia ao lado do destino e publicação sem substituir | `ef86ba33` |
+| Mux social | `rename` sobrescrevia; worker cancelado removia o registro do worker novo | Publicação sem substituir; remoção só se não cancelado | `ef86ba33` |
+| Metalink | Tarefa-mãe era removida antes dos filhos (sumia se a gravação falhasse ou todos fossem rejeitados); manifesto sem limite e não cancelável | Mãe só sai após filhos aceitos, senão falha visível; limite de 8 MiB e cancelamento | `ef86ba33` |
+| yt-dlp | `--update-to` bloqueava um worker e sem timeout | `tokio::process`, timeout de 300 s | `ef86ba33` |
 
 Código morto removido: a linha de comando do N_m3u8DL-RE em
 `run_external_download` (HLS não-áudio vai ao Nibiru M3U8 em `start_download`);
