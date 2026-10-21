@@ -5728,9 +5728,32 @@ fn read_json_state_file<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T
     }
 }
 
+/// Reads the saved queue task by task, so one entry this build cannot parse
+/// (written by another version, or damaged) does not discard every other
+/// download. The original file is kept as `*.corrupt-<time>` before it is
+/// rewritten without the rejected entries.
+fn read_queue_entries(path: &Path) -> (Vec<DownloadTask>, bool) {
+    let Some(items) = read_json_state_file::<Vec<serde_json::Value>>(path) else {
+        return (Vec::new(), false);
+    };
+    let total = items.len();
+    let queue: Vec<DownloadTask> = items
+        .into_iter()
+        .filter_map(|item| serde_json::from_value(item).ok())
+        .collect();
+    let dropped = queue.len() != total;
+    if dropped {
+        if let Some(file_name) = path.file_name() {
+            let mut preserved = file_name.to_os_string();
+            preserved.push(format!(".corrupt-{}", epoch_seconds()));
+            let _ = fs::copy(path, path.with_file_name(preserved));
+        }
+    }
+    (queue, dropped)
+}
+
 fn load_queue(path: &Path) -> Vec<DownloadTask> {
-    let mut queue: Vec<DownloadTask> = read_json_state_file(path).unwrap_or_default();
-    let mut recovered = false;
+    let (mut queue, mut recovered) = read_queue_entries(path);
     for task in &mut queue {
         if matches!(
             task.state,
@@ -17929,6 +17952,33 @@ mod tests {
 #[cfg(test)]
 mod log_sanitization_tests {
     use super::*;
+
+    #[test]
+    fn one_unreadable_queue_entry_does_not_discard_the_other_downloads() {
+        let root = std::env::temp_dir().join(format!("adm-queue-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("queue.json");
+        let good = DownloadTask::new("https://example.com/a.bin", root.join("a.bin"));
+        let items = serde_json::json!([
+            serde_json::to_value(&good).unwrap(),
+            {"id": "not-a-task", "state": 42},
+        ]);
+        fs::write(&path, items.to_string()).unwrap();
+
+        let queue = load_queue(&path);
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].id, good.id);
+        let preserved = fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".corrupt-"))
+            .count();
+        assert_eq!(preserved, 1, "the original file must be kept");
+        let rewritten: Vec<serde_json::Value> =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(rewritten.len(), 1);
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn secrets_are_removed_from_json_and_quoted_assignments() {
