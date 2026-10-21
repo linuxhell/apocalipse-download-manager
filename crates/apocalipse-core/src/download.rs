@@ -2268,6 +2268,29 @@ async fn load_segment_journal(destination: &Path) -> Option<SegmentJournal> {
         .max_by_key(|journal| journal.generation)
 }
 
+/// Moves a finished `.part` file into place without replacing a file that
+/// appeared at the destination after the transfer started (a plain rename would
+/// silently overwrite it). A hard link fails atomically when the name is taken;
+/// filesystems without hard links fall back to a check followed by a rename.
+async fn publish_without_replacing(partial: &Path, destination: &Path) -> Result<()> {
+    match fs::hard_link(partial, destination).await {
+        Ok(()) => {
+            fs::remove_file(partial).await?;
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            bail!("destination already exists")
+        }
+        Err(_) => {
+            if destination.exists() {
+                bail!("destination already exists");
+            }
+            fs::rename(partial, destination).await?;
+            Ok(())
+        }
+    }
+}
+
 async fn persist_segment_journal(destination: &Path, journal: &mut SegmentJournal) -> Result<()> {
     journal.generation = journal.generation.saturating_add(1);
     let paths = journal_slot_paths(destination, "segments");
@@ -2432,10 +2455,14 @@ async fn finish_download(
         }
     }
 
-    if request.overwrite && request.destination.exists() {
-        fs::remove_file(&request.destination).await?;
+    if request.overwrite {
+        if request.destination.exists() {
+            fs::remove_file(&request.destination).await?;
+        }
+        fs::rename(partial, &request.destination).await?;
+    } else {
+        publish_without_replacing(partial, &request.destination).await?;
     }
-    fs::rename(partial, &request.destination).await?;
     if let Err(error) = cleanup_chunk_artifacts(&request.destination).await {
         let _ = events.try_send(DownloadEvent::Diagnostic {
             event: "http.cleanup_failed",
@@ -2586,6 +2613,29 @@ pub async fn cleanup_chunk_artifacts(destination: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn publishing_never_replaces_a_destination_created_during_the_transfer() {
+        let root = std::env::temp_dir().join(format!("adm-publish-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let partial = root.join("file.bin.part");
+        let destination = root.join("file.bin");
+        std::fs::write(&partial, b"downloaded").unwrap();
+        std::fs::write(&destination, b"someone else's file").unwrap();
+        assert!(publish_without_replacing(&partial, &destination)
+            .await
+            .is_err());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"someone else's file");
+        assert_eq!(std::fs::read(&partial).unwrap(), b"downloaded");
+
+        std::fs::remove_file(&destination).unwrap();
+        publish_without_replacing(&partial, &destination)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"downloaded");
+        assert!(!partial.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn partial_names_are_deterministic() {

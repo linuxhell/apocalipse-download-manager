@@ -6516,6 +6516,12 @@ async fn run_download(
                     message: error.to_string(),
                 }
             });
+            // Without this the dead task keeps its worker slot: it counts against
+            // the active limit and a retry fails with download_already_running.
+            if let Ok(mut workers) = app.state::<AppState>().workers.lock() {
+                workers.remove(&id);
+            }
+            start_next_queued(&app);
             return;
         }
     };
@@ -15786,6 +15792,25 @@ async fn remove_downloads(
                     classify_url(&task.source),
                     Some(DownloadKind::Torrent | DownloadKind::Magnet)
                 ) && path == task.destination;
+                // An unfinished task has not produced its destination. A file that
+                // predates the task (the cause of "destination already exists"
+                // failures) belongs to someone else and must survive the removal.
+                if path == task.destination
+                    && !torrent_root
+                    && task.state != DownloadState::Completed
+                    && fs::metadata(&path).is_ok_and(|metadata| {
+                        !produced_after_task_creation(&metadata, task.created_at)
+                    })
+                {
+                    state.diagnostics.record(
+                        "task.removal_preserved_unrelated",
+                        "INFO",
+                        Some(&removal_trace),
+                        Some(&task.id.to_string()),
+                        serde_json::json!({"destination": true}),
+                    );
+                    continue;
+                }
                 remove_path_with_retry(&path, torrent_root).await?;
             }
             for path in derived_output_candidates(task) {
