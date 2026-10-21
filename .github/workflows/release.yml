@@ -50,6 +50,9 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
@@ -82,7 +85,7 @@ jobs:
           binary="target/release/apocalipse-desktop"
           if [[ "$RUNNER_OS" == "Windows" ]]; then binary="$binary.exe"; fi
           "$binary" --verify-media-routing "$RUNNER_TEMP/media-routing.json"
-          python3 - "$RUNNER_TEMP/media-routing.json" <<'PYVERIFY'
+          python - "$RUNNER_TEMP/media-routing.json" <<'PYVERIFY'
           import json, sys, tomllib
           with open(sys.argv[1], encoding="utf-8") as stream:
               report = json.load(stream)
@@ -115,7 +118,7 @@ jobs:
             --header "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/latest" \
             --output "$release_json"
-          read -r asset_id checksum_id asset_name checksum_name < <(python3 - "$release_json" "$ARIA2_SUFFIX" <<'PY'
+          read -r asset_id checksum_id asset_name checksum_name < <(python - "$release_json" "$ARIA2_SUFFIX" <<'PY'
           import json
           import sys
 
@@ -152,7 +155,7 @@ jobs:
             --header "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/FerroDownload/aria2-static-builds/releases/assets/$checksum_id" \
             --output "$RUNNER_TEMP/$checksum_name"
-          python3 - "dist/aria2-backend/$ARIA2_BINARY" "$RUNNER_TEMP/$checksum_name" "$asset_name" <<'PY'
+          python - "dist/aria2-backend/$ARIA2_BINARY" "$RUNNER_TEMP/$checksum_name" "$asset_name" <<'PY'
           import hashlib
           import pathlib
           import sys
@@ -208,7 +211,7 @@ jobs:
           install -m 755 dist/aria2-backend/aria2c "$app/Contents/MacOS/data/tools/aria2/aria2c"
           cp "$RUNNER_TEMP/media-routing.json" "$app/Contents/Resources/build-verification.json"
           cp packaging/macos/Info.plist "$app/Contents/Info.plist"
-          python3 - "$app/Contents/Info.plist" <<'PYMAC'
+          python - "$app/Contents/Info.plist" <<'PYMAC'
           import plistlib
           import sys
           import tomllib
@@ -252,6 +255,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
       - uses: actions/setup-node@v4
         with:
@@ -271,7 +277,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version=$(python3 -c "import json; print(json.load(open('browser-extension/manifest.json'))['version'])")
+          version=$(python -c "import json; print(json.load(open('browser-extension/manifest.json'))['version'])")
           stage=$(mktemp -d)
           cp -R browser-extension "$stage/chromium"
           (cd "$stage/chromium" && zip -qr "$GITHUB_WORKSPACE/dist/apocalipse-chrome-${version}.zip" .)
@@ -283,7 +289,7 @@ jobs:
           if [[ ! -f "$signed" && ${#signed_parts[@]} -gt 0 ]]; then
             cat "${signed_parts[@]}" | base64 --decode > "$signed"
           fi
-          fallback_version=$(python3 - <<'PY'
+          fallback_version=$(python - <<'PY'
           import glob
           import re
 
@@ -298,7 +304,7 @@ jobs:
           if [[ -f "$signed" ]]; then
             # A damaged or mislabeled signed package must stop the release.
             unzip -tq "$signed"
-            python3 - "$signed" "$version" <<'PY'
+            python - "$signed" "$version" <<'PY'
           import json
           import sys
           import zipfile
@@ -324,7 +330,7 @@ jobs:
             echo "::warning::No signed Firefox XPI for extension ${version}; publishing the signed ${fallback_version} package."
           else
             cp -R browser-extension "$stage/firefox"
-            python3 - "$stage/firefox/manifest.json" <<'PY'
+            python - "$stage/firefox/manifest.json" <<'PY'
           import json
           import sys
 
@@ -362,7 +368,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")
+          version=$(python -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")
           tag="v${version}"
           if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "$tag" ]]; then
             echo "::error::Release tag must match Cargo version: $tag"
