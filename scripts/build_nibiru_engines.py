@@ -56,7 +56,12 @@ def main():
                     raise SystemExit(f"Local source repository missing: {name}")
             run(["git", "init", str(source)])
             run(["git", "-C", str(source), "remote", "add", "origin", origin])
-            run(["git", "-C", str(source), "fetch", "--depth=1", "origin", revision])
+            fetched = subprocess.run(["git", "-C", str(source), "fetch", "--depth=1", "origin", revision])
+            if fetched.returncode != 0:
+                raise SystemExit(
+                    f"Revision {revision} of {name} cannot be fetched from {origin}. "
+                    "It is probably not published: push the commit to a branch of that repository."
+                )
             run(["git", "-C", str(source), "checkout", "--detach", "FETCH_HEAD"])
             actual = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
             if actual != revision:
@@ -74,8 +79,9 @@ def main():
             destination.mkdir(exist_ok=True)
             shutil.copy2(binary, destination / binary.name)
             copy_notices(source, destination)
-            records.append({"engine": name, "available": True, "revision": revision,
-                            "sha256": hashlib.file_digest(binary.open("rb"), "sha256").hexdigest()})
+            with binary.open("rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+            records.append({"engine": name, "available": True, "revision": revision, "sha256": digest})
     (output / "build.json").write_text(json.dumps(records, indent=2) + "\n")
 
 

@@ -18190,14 +18190,16 @@ mod log_sanitization_tests {
         std::os::unix::fs::symlink(&secret, shared.join("escape")).unwrap();
         std::os::unix::fs::symlink(shared.join("inside"), shared.join("alias")).unwrap();
 
-        let mut settings = UserSettings::default();
-        settings.link_shares = vec![LinkShare {
-            id: "test-share".into(),
-            name: "test".into(),
-            path: shared.clone(),
-            allow_write: true,
-            directory: true,
-        }];
+        let settings = UserSettings {
+            link_shares: vec![LinkShare {
+                id: "test-share".into(),
+                name: "test".into(),
+                path: shared.clone(),
+                allow_write: true,
+                directory: true,
+            }],
+            ..UserSettings::default()
+        };
         assert!(resolve_link_share(&settings, "/shares/test-share/escape/passwd").is_err());
         assert!(resolve_link_share(&settings, "/shares/test-share/escape/new.txt").is_err());
         assert!(resolve_link_share(&settings, "/shares/test-share/alias/file").is_ok());

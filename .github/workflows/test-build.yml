@@ -111,6 +111,19 @@ jobs:
           cargo test --locked -p apocalipse-desktop nibiru::adapter::tests::real_power_extract_uses_the_adm_runner_and_media_conversion -- --ignored --exact
           cargo test --locked -p apocalipse-desktop nibiru::adapter::tests::real_colapse_executes_all_thirteen_typed_adm_operations -- --ignored --exact
 
+      - name: Write build evidence
+        shell: bash
+        env:
+          ADM_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          suffix=""
+          if [[ "$RUNNER_OS" == "Windows" ]]; then suffix=".exe"; fi
+          python3 scripts/build_evidence.py \
+            --adm-binary "target/release/apocalipse-desktop$suffix" \
+            --engines dist/nibiru-tools \
+            --commit "$ADM_COMMIT" \
+            --output "$RUNNER_TEMP/build-evidence.json"
+
       - name: Stage Windows portable
         if: runner.os == 'Windows'
         shell: pwsh
@@ -122,6 +135,7 @@ jobs:
           Copy-Item "dist/nibiru-tools/*" "$package/data/tools/" -Recurse -Force
           Copy-Item "README.md","LICENSE" $package
           Copy-Item "$env:RUNNER_TEMP/media-routing.json" "$package/build-verification.json"
+          Copy-Item "$env:RUNNER_TEMP/build-evidence.json" "$package/build-evidence.json"
           Compress-Archive -Path $package -DestinationPath "dist/${{ matrix.output }}" -Force
 
       - name: Stage Linux portable
@@ -134,6 +148,7 @@ jobs:
           cp -R dist/nibiru-tools/. "$package/data/tools/"
           cp README.md LICENSE "$package/"
           cp "$RUNNER_TEMP/media-routing.json" "$package/build-verification.json"
+          cp "$RUNNER_TEMP/build-evidence.json" "$package/build-evidence.json"
           appimage="$(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
           test -n "$appimage"
           install -m 755 "$appimage" "dist/apocalipse-download-manager-linux-x64.AppImage"
@@ -149,6 +164,7 @@ jobs:
           chmod +x "$app/Contents/MacOS/Apocalipse Download Manager"
           cp -R dist/nibiru-tools/. "$app/Contents/MacOS/data/tools/"
           cp "$RUNNER_TEMP/media-routing.json" "$app/Contents/Resources/build-verification.json"
+          cp "$RUNNER_TEMP/build-evidence.json" "$app/Contents/Resources/build-evidence.json"
           cp packaging/macos/Info.plist "$app/Contents/Info.plist"
           python3 - "$app/Contents/Info.plist" <<'PYMAC'
           import plistlib
