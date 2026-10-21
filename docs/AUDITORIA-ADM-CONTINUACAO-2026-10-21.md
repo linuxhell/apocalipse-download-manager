@@ -39,6 +39,11 @@ fixada. O Colapse real foi compilado de `6f92c7e` para o teste de operações.
 | Link | Login por conta do sistema sem limite compartilhado: conexões paralelas permitiam adivinhar a senha da conta pela LAN | Orçamento global de 8 falhas por 60 s, depois 429 | `04bc362f` |
 | Link | A listagem mantinha o lock das configurações durante a leitura do disco, travando a interface e a bridge em compartilhamentos lentos | Lock liberado antes de listar | `04bc362f` |
 | Configurações | Um campo ilegível em `settings.json` descartava todas as preferências | Leitura campo a campo; original em `*.corrupt-<hora>` | `247ab185` |
+| Bridge | Upload de blob abandonado (navegador/extensão morreu) deixava a tarefa em Downloading e um parcial para sempre | Expira após 10 min sem atividade (tarefa falha, parcial removido) | `0b53eaf3` |
+| Bridge | Falha no fim do upload (incompleto, destino ocupado) deixava tarefa e parcial órfãos; o `rename` final substituía arquivo existente | Falha a tarefa, remove o parcial, publica sem substituir | `0b53eaf3` |
+| Bridge | `browser-download-complete` aceitava qualquer arquivo existente | Só arquivos modificados nos últimos 15 min | `0b53eaf3` |
+| Extensão | Falha no envio deixava o desktop esperando | Novo `/v1/blob/abort`; gravação com falha ainda finaliza para manter a parte recebida | `e2d1904e` |
+| Extensão | `waitWhilePaused` consultava `/v1/blob/status` a cada 16 KiB por um campo `paused` que o desktop nunca envia | Removido (código morto comprovado) | `e2d1904e` |
 
 Código morto removido: a linha de comando do N_m3u8DL-RE em
 `run_external_download` (HLS não-áudio vai ao Nibiru M3U8 em `start_download`);
@@ -57,7 +62,11 @@ e traduções.
 `supervised_external_process_leaves_no_straggler_holding_its_pipes` (processo
 real, Linux), `link_paths_cannot_escape_a_share_through_a_symlink` (Unix),
 `link_account_guessing_is_limited_by_a_shared_failure_budget`,
-`one_unreadable_setting_keeps_the_other_preferences`.
+`one_unreadable_setting_keeps_the_other_preferences`,
+`only_recently_finished_files_count_as_browser_downloads`, e o teste JS
+`extension-blob-abort`. O teste JS `link-folder-settings` foi atualizado: ele
+ainda esperava a linha de comando do N_m3u8DL-RE removida antes (falha que
+não havia sido detectada porque a suíte JS não foi reexecutada naquele commit).
 
 ## Pendências reais
 
