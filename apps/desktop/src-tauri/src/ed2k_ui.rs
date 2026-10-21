@@ -1,5 +1,6 @@
 //! Native Nibiru ED2K integration. No aMule executable or daemon is used.
 pub mod downloads;
+pub mod ip_filter;
 pub mod kad;
 pub mod shares;
 use nibiru_xtreme::ed2k::{
@@ -35,8 +36,22 @@ pub struct Ed2kState {
     kad: RwLock<Option<BootstrapResult>>,
     kad_session: AsyncMutex<Option<std::sync::Arc<kad::KadSession>>>,
     user_hash: [u8; 16],
+    /// Blocked IPv4 ranges from `ipfilter.dat` in the ED2K data directory.
+    ip_filter: Mutex<std::sync::Arc<ip_filter::IpFilter>>,
 }
 impl Ed2kState {
+    fn ip_filter(&self) -> std::sync::Arc<ip_filter::IpFilter> {
+        self.ip_filter
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+    fn load_ip_filter(root: &Path) -> std::sync::Arc<ip_filter::IpFilter> {
+        // A missing file means no filtering; an unreadable one must not stop ED2K.
+        std::sync::Arc::new(
+            ip_filter::IpFilter::load(&root.join("ipfilter.dat")).unwrap_or_default(),
+        )
+    }
     pub fn unavailable(root: PathBuf, error: String) -> Self {
         Self {
             downloads: downloads::Downloads::empty(root.join("downloads.json")),
@@ -53,6 +68,7 @@ impl Ed2kState {
             kad: RwLock::new(None),
             kad_session: AsyncMutex::new(None),
             user_hash: [0; 16],
+            ip_filter: Mutex::new(std::sync::Arc::new(ip_filter::IpFilter::default())),
         }
     }
     async fn incoming_port(&self) -> Result<u16, String> {
@@ -132,6 +148,7 @@ impl Ed2kState {
             }
             Err(e) => return Err(e.to_string()),
         };
+        let root_for_filter = root.clone();
         Ok(Self {
             downloads: downloads::Downloads::load(root.join("downloads.json"))?,
             shares: shares::Shares::load(&root),
@@ -144,6 +161,7 @@ impl Ed2kState {
             kad: RwLock::new(None),
             kad_session: AsyncMutex::new(None),
             user_hash,
+            ip_filter: Mutex::new(Self::load_ip_filter(&root_for_filter)),
         })
     }
 }
@@ -213,9 +231,29 @@ pub async fn ed2k_overview(state: State<'_, Ed2kState>) -> Result<serde_json::Va
     Ok(serde_json::json!({
         "servers":library.servers,"node_count":library.nodes.len(),"downloads":state.downloads.list()?,"incoming":incoming,
         "server":active.map(|c|&c.server),"client_id":active.map(|c|c.client_id),"low_id":active.is_some_and(|c|c.is_low_id()),
-        "kad_bootstrap":*kad,"kad_session":kad_status,"server_list_url":ed2k::SERVER_LIST_URL,"node_list_url":ed2k::NODE_LIST_URL,
-        "capabilities":{"server_login":true,"server_search":true,"server_sources":true,"kad_bootstrap":true,"kad_routing":true,"kad_keyword_search":false,"kad_publishing":false,"kad_direct_sources":true,"peer_download":true,"peer_download_scope":"verified_parts_direct_and_server_callback","server_callback":true,"sharing":true,"upload":true,"upload_queue":true,"publishing":true,"messages":false}
+        "kad_bootstrap":*kad,"kad_session":kad_status,"ip_filter":{"ranges":state.ip_filter().len(),"skipped_lines":state.ip_filter().skipped()},"server_list_url":ed2k::SERVER_LIST_URL,"node_list_url":ed2k::NODE_LIST_URL,
+        "capabilities":{"server_login":true,"server_search":true,"server_sources":true,"kad_bootstrap":true,"kad_routing":true,"kad_keyword_search":false,"kad_publishing":false,"kad_direct_sources":true,"peer_download":true,"peer_download_scope":"verified_parts_direct_and_server_callback","server_callback":true,"sharing":true,"upload":true,"upload_queue":true,"publishing":true,"messages":false,"ip_filter":true}
     }))
+}
+#[tauri::command]
+pub async fn ed2k_reload_ip_filter(
+    state: State<'_, Ed2kState>,
+) -> Result<serde_json::Value, String> {
+    state.ready()?;
+    let path = state.root.join("ipfilter.dat");
+    // Keep the active filter when the new file cannot be read; "no file" clears it.
+    let filter = match ip_filter::IpFilter::load(&path) {
+        Ok(filter) => filter,
+        Err(_) if !path.exists() => ip_filter::IpFilter::default(),
+        Err(error) => return Err(error),
+    };
+    let filter = std::sync::Arc::new(filter);
+    let summary = serde_json::json!({"ranges": filter.len(), "skipped_lines": filter.skipped()});
+    if let Some(session) = state.kad_session.lock().await.as_ref() {
+        session.set_ip_filter(filter.clone());
+    }
+    *state.ip_filter.lock().map_err(|e| e.to_string())? = filter;
+    Ok(summary)
 }
 fn install(state: &Ed2kState, kind: &str, bytes: &[u8]) -> Result<usize, String> {
     match kind {
@@ -495,6 +533,7 @@ pub async fn ed2k_start_kad(state: State<'_, Ed2kState>) -> Result<kad::Status, 
         false,
     )
     .await?;
+    started.set_ip_filter(state.ip_filter());
     let status = started.status();
     *session = Some(started);
     Ok(status)

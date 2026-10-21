@@ -38,6 +38,14 @@ replacement; performance/memory claims require measurements of the final build.
   Kademlia routing zone: keyword search, publishing, obfuscation, firewall testing
   and buddy/UDP callbacks are not implemented. The UDP socket alone proves no
   public reachability. A diagnostic one-shot bootstrap command remains available.
+- **IP filter (partial).** An optional `ipfilter.dat` in the ED2K data folder (eMule
+  `range , level , description` or PeerGuardian `description:range` text, IPv4 only,
+  up to 64 MiB) blocks ranges whose level is below 127, as aMule/eMule do. Blocked
+  addresses are removed from download sources (server and Kad), are never accepted as
+  Kad contacts, and their Kad datagrams get no reply. *Reload ipfilter.dat* in
+  Preferences applies a new file and evicts matching Kad contacts; an unreadable file
+  keeps the active filter. Not covered yet: incoming ED2K TCP connections (they are
+  accepted by the embedded Nibiru listener), upload-queue clients and IPv6.
 - Direct high-ID peer downloads have a persistent transfer queue, pause/resume,
   root-checked ED2K hashsets, verified parts, 32/64-bit offsets and compressed
   block support. Unfinished tasks reopen paused. Resume rehashes saved data.

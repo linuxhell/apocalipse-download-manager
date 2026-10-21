@@ -93,6 +93,7 @@ struct Inner {
     running: AtomicBool,
     serial: AtomicU64,
     lookup_lock: tokio::sync::Mutex<()>,
+    ip_filter: std::sync::RwLock<Arc<super::ip_filter::IpFilter>>,
 }
 pub struct KadSession {
     inner: Arc<Inner>,
@@ -285,12 +286,19 @@ fn routing_response(bytes: &[u8], target: Id, local: bool) -> Result<Vec<Node>, 
 }
 
 impl Inner {
+    fn blocked(&self, ip: Ipv4Addr) -> bool {
+        self.ip_filter
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .blocks(ip)
+    }
     fn add(&self, node: Node) {
         if node.id == [0; 16]
             || node.id == self.identity
             || node.udp_port == 0
             || node.version < 2
             || !valid_ip(node.host, self.allow_local)
+            || self.blocked(node.host)
         {
             return;
         }
@@ -575,6 +583,7 @@ impl KadSession {
             running: AtomicBool::new(true),
             serial: AtomicU64::new(1),
             lookup_lock: tokio::sync::Mutex::new(()),
+            ip_filter: std::sync::RwLock::new(Arc::new(super::ip_filter::IpFilter::default())),
         });
         // Stored contacts are candidates until a fresh HELLO and random challenge succeed.
         if let Ok(meta) = std::fs::metadata(&inner.path) {
@@ -624,6 +633,11 @@ impl KadSession {
                     || !peer.is_ipv4()
                 {
                     continue;
+                }
+                if let SocketAddr::V4(v4) = peer {
+                    if receive.blocked(*v4.ip()) {
+                        continue;
+                    }
                 }
                 let opcode = buffer[1];
                 if !matches!(opcode, 0x11 | 0x19 | 0x21 | 0x29 | 0x3b | 0x60) {
@@ -811,6 +825,18 @@ impl KadSession {
             }
         });
         Ok(session)
+    }
+    /// Replaces the blocked ranges. Contacts already in the table that the new
+    /// filter blocks are dropped so they are no longer queried or returned.
+    pub fn set_ip_filter(&self, filter: Arc<super::ip_filter::IpFilter>) {
+        *self
+            .inner
+            .ip_filter
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = filter.clone();
+        if let Ok(mut table) = self.inner.contacts.lock() {
+            table.retain(|_, contact| !filter.blocks(contact.node.host));
+        }
     }
     pub fn status(&self) -> Status {
         let contacts = self.inner.contacts.lock().unwrap();
@@ -1183,6 +1209,50 @@ mod tests {
             &packet[2..],
             &socket.local_addr().unwrap().port().to_le_bytes()
         );
+    }
+    #[tokio::test]
+    async fn blocked_ranges_are_ignored_on_the_wire_and_never_enter_the_routing_table() {
+        use super::super::ip_filter::{IpFilter, DEFAULT_LEVEL};
+        let root = tempfile::tempdir().unwrap();
+        let session = unseeded_session(root.path().join("routing.json")).await;
+        let local = session.inner.socket.local_addr().unwrap();
+        let blocked = UdpSocket::bind("127.0.0.2:0").await.unwrap();
+        let allowed = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        session.set_ip_filter(Arc::new(IpFilter::parse(
+            "127.0.0.2 - 127.0.0.2 , 1 , test block\n",
+            DEFAULT_LEVEL,
+        )));
+
+        // The blocked peer gets no HELLO answer and no PONG either.
+        blocked
+            .send_to(&fixture_hello(0x11, [3; 16], 5), local)
+            .await
+            .unwrap();
+        blocked.send_to(&[0xe4, 0x60], local).await.unwrap();
+        // The allowed peer is served, which also proves the blocked packets were processed first.
+        packet_barrier(&allowed, local).await;
+        let mut buffer = [0; 2048];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), blocked.recv_from(&mut buffer))
+                .await
+                .is_err(),
+            "a blocked address must not receive any reply"
+        );
+
+        // Blocked addresses are refused as contacts, and a newly loaded filter evicts them.
+        let mut node = node(4663);
+        node.host = "127.0.0.2".parse().unwrap();
+        session.inner.add(node.clone());
+        assert!(session.inner.contacts.lock().unwrap().is_empty());
+        session.set_ip_filter(Arc::new(IpFilter::default()));
+        session.inner.add(node.clone());
+        assert_eq!(session.inner.contacts.lock().unwrap().len(), 1);
+        session.set_ip_filter(Arc::new(IpFilter::parse(
+            "127.0.0.2-127.0.0.2,1",
+            DEFAULT_LEVEL,
+        )));
+        assert!(session.inner.contacts.lock().unwrap().is_empty());
+        session.stop();
     }
     async fn unseeded_session(path: PathBuf) -> Arc<KadSession> {
         KadSession::start_on_socket(

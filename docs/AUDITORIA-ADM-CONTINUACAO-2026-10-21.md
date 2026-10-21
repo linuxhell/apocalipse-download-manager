@@ -72,6 +72,38 @@ real, Linux), `link_paths_cannot_escape_a_share_through_a_symlink` (Unix),
 ainda esperava a linha de comando do N_m3u8DL-RE removida antes (falha que
 não havia sido detectada porque a suíte JS não foi reexecutada naquele commit).
 
+## ED2K/Kad — comparação com o aMule e o que foi feito
+
+Referência lida: aMule `amule-org/amule` HEAD `7205016` (GPL-2.0+; usado só para
+conferir formatos de pacote e semântica; nenhum código foi copiado). Conferido
+contra `src/kademlia/net/KademliaUDPListener.cpp`, `src/kademlia/kademlia/Search.cpp`
+e `include/protocol/kad2/Client2Client/UDP.h`:
+
+| Item | Resultado |
+| --- | --- |
+| Opcodes Kad2 usados (`0x11/0x19/0x21/0x29/0x34/0x3B/0x60/0x61`) | Conferem |
+| Pedido de fontes `SEARCH_SOURCE_REQ` (alvo, posição u16, tamanho u64) e resposta (remetente, alvo, contagem, entradas com tags) | Conferem |
+| Tags de fonte (`0xFE` IP, `0xFD` porta TCP, `0xFF` tipo, `0xF3` cripto) e tipos de fonte (1 e 4 diretos; 3, 5 e 6 exigem buddy/callback) | Conferem; o ADM aceita só 1 e 4 e descarta fontes que exigem ofuscação (`cripto & 4`) |
+| Roteamento `KADEMLIA2_REQ`/`RES` (tipo, alvo, ID do receptor; contatos de 25 bytes) | Conferem |
+
+Decisão registrada: o ADM **não** responde a `KADEMLIA2_BOOTSTRAP_REQ`. O aMule
+responde a qualquer remetente com até ~521 bytes a um pedido de 2 bytes; sem
+autenticação do endereço de origem isso faz do nó um refletor/amplificador UDP.
+A política atual (só revelar contatos a pares já verificados) foi mantida.
+
+Implementado: filtro de IP (`ed2k_ui/ip_filter.rs`, `ipfilter.dat`), aplicado às
+fontes de download (servidor e Kad), aos contatos Kad e aos datagramas Kad
+recebidos, com recarga pela interface (pt-BR, en, zh-CN). Testes: 4 do parser e
+1 com UDP real em loopback (bloqueado não recebe resposta, não entra na tabela e é
+expulso quando o filtro novo o bloqueia). Isto é paridade **parcial** com o
+`IPFilter.cpp`; não cobre conexões TCP de entrada nem IPv6.
+
+Continuam não implementados (e nenhuma capacidade os anuncia): busca por palavras
+e publicação Kad, teste de firewall UDP, buddy/callback Kad, ofuscação TCP/UDP,
+identificação segura e créditos persistentes, AICH, múltiplas fontes simultâneas
+por arquivo (vive no motor de transferência do Nibiru Xtreme, fora deste
+repositório) e troca de fontes. Nada disso foi exercitado em rede pública.
+
 ## Verificação da interface (renderizada, não validada em uso real)
 
 `scripts/ui-render-check.cjs` abre `index.html`, `link.html` e `ed2k.html` em

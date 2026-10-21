@@ -53,7 +53,7 @@ const stub = (tasksJson) => `
       case "get_link_identity": return { name:"PC-TEST", ip:"192.168.0.10", port:17655, id:"pc-test@192.168.0.10:17655" };
       case "list_link_shares": return [{ id:"s1", name:"Docs", path:"/home/u/Docs", allowWrite:false, directory:true }];
       case "list_local_link_files": return [];
-      case "ed2k_overview": return { server:{connected:false}, kad:{running:false}, downloads:[], servers:[], search:[], uploads:[] };
+      case "ed2k_overview": return { ip_filter:{ranges:3,skipped_lines:1}, server:{connected:false}, kad:{running:false}, downloads:[], servers:[], search:[], uploads:[] };
       case "ed2k_shared_list": return [];
       case "list_host_rules": return [];
       case "read_general_log": return "2026-10-21 INFO sample log line";
@@ -101,6 +101,15 @@ const stub = (tasksJson) => `
     // contrast: sample body text/background colors
     const colors = await p.evaluate(() => { const b = getComputedStyle(document.body); return { fg: b.color, bg: b.backgroundColor }; });
     const tour = [];
+    if (page === "ed2k.html") {
+      const scan = () => p.evaluate(() => { const raw = []; for (const el of document.querySelectorAll("body *")) { const cs = getComputedStyle(el); if (cs.display === "none" || cs.visibility === "hidden") continue; const r = el.getBoundingClientRect(); if (!r.width || !r.height || el.children.length) continue; const t = (el.textContent || "").trim(); if (/^[a-z]+(?:[A-Z][a-z0-9]+)+$/.test(t) && t.length > 5) raw.push(t); } return [...new Set(raw)]; });
+      for (const tabName of await p.$$eval("[data-tab]", nodes => nodes.map(n => n.dataset.tab))) {
+        await p.click(`[data-tab="${tabName}"]`).catch(() => {});
+        await p.waitForTimeout(300);
+        await p.screenshot({ path: path.join(OUT, `tour-ed2k-${tabName}-${lang}-${mode}.png`) });
+        tour.push({ target: `ed2k-${tabName}`, raw: await scan() });
+      }
+    }
     if (page === "index.html") {
       const scan = () => p.evaluate(() => { const raw = []; for (const el of document.querySelectorAll("body *")) { const cs = getComputedStyle(el); if (cs.display === "none" || cs.visibility === "hidden") continue; const r = el.getBoundingClientRect(); if (!r.width || !r.height || el.children.length) continue; const t = (el.textContent || "").trim(); if (/^[a-z]+(?:[A-Z][a-z0-9]+)+$/.test(t) && t.length > 5) raw.push(t); } return [...new Set(raw)]; });
       for (const target of ["torrents", "recordings", "settings", "about", "downloads"]) {

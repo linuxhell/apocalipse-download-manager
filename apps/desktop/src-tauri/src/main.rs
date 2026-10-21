@@ -16567,6 +16567,7 @@ fn main() {
             open_link_window,
             ed2k_ui::open_ed2k_window,
             ed2k_ui::ed2k_overview,
+            ed2k_ui::ed2k_reload_ip_filter,
             ed2k_ui::ed2k_update_list,
             ed2k_ui::ed2k_import_list,
             ed2k_ui::ed2k_connect,

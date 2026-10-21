@@ -162,6 +162,11 @@ impl Downloads {
                     }
                 }
                 if sources.is_empty(){return Err(error);}
+                // Drop peers in blocked ranges. Low-ID sources carry no usable address and stay.
+                let filter=state.ip_filter();
+                let before=sources.len();
+                sources.retain(|source|source.host.is_none_or(|host|!filter.blocks(host)));
+                if sources.is_empty(){return Err(if before>0{"ed2k_sources_blocked_by_ip_filter".to_owned()}else{error});}
 
                 tokio::fs::create_dir_all(&task.directory).await.map_err(|e|e.to_string())?;
                 let callbacks=match connection.as_ref().filter(|c|!c.is_low_id()) { Some(connection)=>state.incoming.lock().await.as_ref().map(|listener|ed2k::CallbackClient::new(connection.clone(),listener.callbacks())), None=>None };
