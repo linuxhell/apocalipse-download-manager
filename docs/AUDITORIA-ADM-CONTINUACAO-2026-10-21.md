@@ -44,13 +44,17 @@ fixada. O Colapse real foi compilado de `6f92c7e` para o teste de operações.
 | Bridge | `browser-download-complete` aceitava qualquer arquivo existente | Só arquivos modificados nos últimos 15 min | `0b53eaf3` |
 | Extensão | Falha no envio deixava o desktop esperando | Novo `/v1/blob/abort`; gravação com falha ainda finaliza para manter a parte recebida | `e2d1904e` |
 | Extensão | `waitWhilePaused` consultava `/v1/blob/status` a cada 16 KiB por um campo `paused` que o desktop nunca envia | Removido (código morto comprovado) | `e2d1904e` |
+| Interface | Motivos de falha técnicos (`destination already exists`, `hls_requires_nibiru_m3u8`…) apareciam crus | Explicação localizada (pt-BR, en, zh-CN) no tooltip, com o código como detalhe técnico | `06439bc9` |
+| Interface | Descrições das associações de arquivo apareciam em inglês em pt-BR e zh-CN | Chaves de tradução nas três línguas | `06439bc9` |
+| Interface | O botão Configurações não fazia nada (sem mensagem) quando qualquer leitura do backend falhava; o erro era registrado com nome de operação errado | Alerta localizado e operação `openSettings` | `06439bc9` |
+| Ferramentas | "Detectado" bastava que qualquer arquivo respondesse `--version` | Engines só são "Detectados" se `capabilities` nomear o motor esperado | `06439bc9` |
+| Ferramentas | N_m3u8DL-RE continuava gerenciável apesar de nenhum fluxo usá-lo | Linha, status, download/atualização e campo de configuração removidos (arquivos antigos continuam carregando) | `06439bc9` |
 
 Código morto removido: a linha de comando do N_m3u8DL-RE em
-`run_external_download` (HLS não-áudio vai ao Nibiru M3U8 em `start_download`);
-`clean_directory`. O campo `n_m3u8dl_re_path` e a gestão da ferramenta na
-interface foram mantidos por compatibilidade com configurações antigas; não são
-mais usados por nenhum fluxo e são candidatos a remoção com ajuste de interface
-e traduções.
+`run_external_download` (HLS não-áudio vai ao Nibiru M3U8 em `start_download`),
+`clean_directory`, e depois a gestão da ferramenta N_m3u8DL-RE (interface,
+status, download/atualização e o campo `n_m3u8dl_re_path`; o alias de leitura
+`n_m3u8dl_re` do plano de estratégia permanece para dados salvos).
 
 ## Testes automáticos adicionados
 
@@ -67,6 +71,18 @@ real, Linux), `link_paths_cannot_escape_a_share_through_a_symlink` (Unix),
 `extension-blob-abort`. O teste JS `link-folder-settings` foi atualizado: ele
 ainda esperava a linha de comando do N_m3u8DL-RE removida antes (falha que
 não havia sido detectada porque a suíte JS não foi reexecutada naquele commit).
+
+## Verificação da interface (renderizada, não validada em uso real)
+
+`scripts/ui-render-check.cjs` abre `index.html`, `link.html` e `ed2k.html` em
+Chromium (Playwright) com uma ponte Tauri simulada, em pt-BR/en/zh-CN × claro/escuro
+(18 combinações), percorre downloads, torrents, gravações, configurações (todas as
+abas), sobre e o diálogo de adicionar, e falha em chave de tradução crua ou erro de
+JavaScript. Resultado nesta revisão: nenhuma chave crua e nenhum erro de JS; o
+único aviso é um 404 (favicon). Os dados são simulados: isto não prova o
+comportamento com o backend real nem a aparência no WebView2/WebKitGTK/WKWebView.
+Os catálogos das três páginas têm paridade de chaves e de placeholders
+(`ui-i18n-catalogs`).
 
 ## Pendências reais
 
