@@ -2272,10 +2272,10 @@ async fn load_segment_journal(destination: &Path) -> Option<SegmentJournal> {
 /// appeared at the destination after the transfer started (a plain rename would
 /// silently overwrite it). A hard link fails atomically when the name is taken;
 /// filesystems without hard links fall back to a check followed by a rename.
-async fn publish_without_replacing(partial: &Path, destination: &Path) -> Result<()> {
-    match fs::hard_link(partial, destination).await {
+pub fn publish_without_replacing(partial: &Path, destination: &Path) -> Result<()> {
+    match std::fs::hard_link(partial, destination) {
         Ok(()) => {
-            fs::remove_file(partial).await?;
+            std::fs::remove_file(partial)?;
             Ok(())
         }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -2285,7 +2285,7 @@ async fn publish_without_replacing(partial: &Path, destination: &Path) -> Result
             if destination.exists() {
                 bail!("destination already exists");
             }
-            fs::rename(partial, destination).await?;
+            std::fs::rename(partial, destination)?;
             Ok(())
         }
     }
@@ -2461,7 +2461,7 @@ async fn finish_download(
         }
         fs::rename(partial, &request.destination).await?;
     } else {
-        publish_without_replacing(partial, &request.destination).await?;
+        publish_without_replacing(partial, &request.destination)?;
     }
     if let Err(error) = cleanup_chunk_artifacts(&request.destination).await {
         let _ = events.try_send(DownloadEvent::Diagnostic {
@@ -2622,16 +2622,12 @@ mod tests {
         let destination = root.join("file.bin");
         std::fs::write(&partial, b"downloaded").unwrap();
         std::fs::write(&destination, b"someone else's file").unwrap();
-        assert!(publish_without_replacing(&partial, &destination)
-            .await
-            .is_err());
+        assert!(publish_without_replacing(&partial, &destination).is_err());
         assert_eq!(std::fs::read(&destination).unwrap(), b"someone else's file");
         assert_eq!(std::fs::read(&partial).unwrap(), b"downloaded");
 
         std::fs::remove_file(&destination).unwrap();
-        publish_without_replacing(&partial, &destination)
-            .await
-            .unwrap();
+        publish_without_replacing(&partial, &destination).unwrap();
         assert_eq!(std::fs::read(&destination).unwrap(), b"downloaded");
         assert!(!partial.exists());
         let _ = std::fs::remove_dir_all(&root);

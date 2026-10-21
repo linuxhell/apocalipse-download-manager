@@ -6,7 +6,7 @@
 use tokio::process::{Child, Command};
 
 #[cfg(unix)]
-pub(super) struct ProcessGroup {
+pub(crate) struct ProcessGroup {
     pgid: libc::pid_t,
 }
 
@@ -24,7 +24,7 @@ impl Drop for ProcessGroup {
 }
 
 #[cfg(unix)]
-pub(super) fn spawn(command: &mut Command) -> Result<(Child, ProcessGroup), String> {
+pub(crate) fn spawn(command: &mut Command) -> Result<(Child, ProcessGroup), String> {
     command.process_group(0);
     let child = command
         .spawn()
@@ -64,7 +64,7 @@ mod windows {
         },
     };
 
-    pub(in super::super) struct ProcessGroup {
+    pub(crate) struct ProcessGroup {
         // Closing the last handle synchronously requests termination of all
         // job members, including descendants whose parent has already exited.
         job: OwnedHandle,
@@ -168,7 +168,7 @@ mod windows {
         Ok(())
     }
 
-    pub(in super::super) fn spawn(command: &mut Command) -> Result<(Child, ProcessGroup), String> {
+    pub(crate) fn spawn(command: &mut Command) -> Result<(Child, ProcessGroup), String> {
         let supervision_error = |error: io::Error| {
             format!(
                 "nibiru_process_supervision_failed:{}",
@@ -191,4 +191,4 @@ mod windows {
 }
 
 #[cfg(windows)]
-pub(super) use windows::spawn;
+pub(crate) use windows::spawn;

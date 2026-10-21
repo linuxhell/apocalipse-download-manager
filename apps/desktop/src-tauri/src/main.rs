@@ -7903,6 +7903,12 @@ async fn run_external_download(
         .5
         .as_deref()
         .map(|url| external_proxy_url(url, tools.6.as_deref(), tools.7.as_deref()));
+    // ffmpeg cannot resume and `-y` would replace whatever sits at the destination,
+    // so it writes a private partial file that is published without replacing.
+    let hls_audio_partial = external_partial_output(&task.destination);
+    if kind == DownloadKind::Hls {
+        let _ = fs::remove_file(&hls_audio_partial);
+    }
     let mut command = match kind {
         DownloadKind::MediaPage => {
             let mut command = tokio::process::Command::new(&tools.1);
@@ -8103,91 +8109,18 @@ async fn run_external_download(
                         command.args(["-c:a", "aac", "-b:a", "256k"]);
                     }
                 }
-                command.arg(&task.destination);
+                command.arg(&hls_audio_partial);
                 command
             } else {
-                let mut command = tokio::process::Command::new(&tools.2);
-                // N_m3u8DL-RE creates its segment workspace relative to the
-                // process directory unless an explicit temporary directory is
-                // supplied. A GUI application launched on Windows can inherit
-                // C:\Windows\System32, where regular users cannot write.
-                command.current_dir(directory);
-                if let Some(proxy_url) = proxy_url.as_deref() {
-                    command.arg("--custom-proxy").arg(proxy_url);
-                }
-                let stem = task
-                    .destination
-                    .file_stem()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("download");
-                command
-                    .arg(&task.source)
-                    .arg("--save-dir")
-                    .arg(directory)
-                    .arg("--tmp-dir")
-                    .arg(directory)
-                    .args([
-                        "--save-name",
-                        stem,
-                        "--auto-select",
-                        "--concurrent-download",
-                        "--download-retry-count",
-                        "10",
-                        "--http-request-timeout",
-                        "30",
-                    ])
-                    .arg("--thread-count")
-                    .arg(task_connections.to_string())
-                    .arg("--ffmpeg-binary-path")
-                    .arg(&tools.0);
-                if bandwidth_limit > 0 {
-                    command.arg("--max-speed").arg(bandwidth_limit.to_string());
-                }
-                if let Some(referer) = task.referer.as_deref() {
-                    command.arg("-H").arg(format!("Referer: {referer}"));
-                    if let Some(origin) = http_origin(referer) {
-                        command.arg("-H").arg(format!("Origin: {origin}"));
+                // Non-audio HLS/DASH is dispatched to Nibiru M3U8 by start_download;
+                // the retired N_m3u8DL-RE command line was unreachable here.
+                update_task(&app, id, true, |item| {
+                    item.state = DownloadState::Failed {
+                        message: "hls_requires_nibiru_m3u8".to_owned(),
                     }
-                }
-                command.arg("-H").arg(format!("User-Agent: {user_agent}"));
-                if let Some(credential) = website_credential.as_ref() {
-                    let basic =
-                        BASE64.encode(format!("{}:{}", credential.username, credential.password));
-                    command
-                        .arg("-H")
-                        .arg(format!("Authorization: Basic {basic}"));
-                }
-                if let Some(cookie) = identity
-                    .as_ref()
-                    .and_then(|value| value.cookie_header.as_deref())
-                {
-                    command.arg("-H").arg(format!("Cookie: {cookie}"));
-                }
-                if task.source.contains("hdsex.org")
-                    || task
-                        .referer
-                        .as_deref()
-                        .is_some_and(|url| url.contains("hdsex.org"))
-                {
-                    command.arg("--append-url-params=true");
-                }
-                // Some video hosts expose completed VOD playlists without ENDLIST and therefore
-                // look live. Treat known finite CDN captures as VOD so the task does not wait forever.
-                if task.known_duration.is_some_and(|duration| duration > 0.0)
-                    || task.source.contains("growcdnssedge.com")
-                {
-                    command.arg("--live-perform-as-vod");
-                }
-                command.args([
-                    "--check-segments-count=true",
-                    "--del-after-done=true",
-                    "--write-meta-json=false",
-                    "--no-log=true",
-                    "--no-ansi-color=true",
-                    "--disable-update-check=true",
-                    "--mux-after-done=format=mp4:muxer=ffmpeg",
-                ]);
-                command
+                });
+                release_worker_slot(&app, id);
+                return;
             }
         }
         _ => {
@@ -8214,8 +8147,8 @@ async fn run_external_download(
     let mut cookie_retry_available = kind == DownloadKind::MediaPage;
     let mut result = loop {
         let mut tls_fingerprint_blocked = false;
-        let attempt = match command.spawn() {
-            Ok(mut child) => {
+        let attempt = match nibiru_cli::spawn_supervised(&mut command) {
+            Ok((mut child, process_group)) => {
                 let mut stdout = child.stdout.take();
                 let mut stderr = child.stderr.take();
                 let output_app = app.clone();
@@ -8240,13 +8173,31 @@ async fn run_external_download(
                     biased;
                     _ = &mut cancellation => {
                         terminate_process_tree(&mut child).await;
+                        if kind == DownloadKind::Hls {
+                            let _ = fs::remove_file(&hls_audio_partial);
+                        }
+                        // The cookie jar and credential config hold secrets and are
+                        // rewritten on resume; do not leave them on disk while paused.
+                        if let Some(directory) = media_work_directory.as_deref() {
+                            let _ = fs::remove_file(directory.join("browser-cookies.txt"));
+                            let _ = fs::remove_file(directory.join("yt-dlp-credentials.txt"));
+                        }
                         return;
                     }
                     status = child.wait() => status,
                 };
-                let mut text =
-                    String::from_utf8_lossy(&output.await.unwrap_or_default()).into_owned();
-                text.push_str(&String::from_utf8_lossy(&errors.await.unwrap_or_default()));
+                // Kill any descendant still holding the pipes before draining them:
+                // waiting for EOF while a straggler lives would hang the task.
+                drop(process_group);
+                let drain = |reader: tokio::task::JoinHandle<Vec<u8>>| async move {
+                    tokio::time::timeout(Duration::from_secs(5), reader)
+                        .await
+                        .ok()
+                        .and_then(Result::ok)
+                        .unwrap_or_default()
+                };
+                let mut text = String::from_utf8_lossy(&drain(output).await).into_owned();
+                text.push_str(&String::from_utf8_lossy(&drain(errors).await));
                 status
                     .map_err(|error| error.to_string())
                     .and_then(|status| {
@@ -8338,9 +8289,13 @@ async fn run_external_download(
     if result.is_ok() {
         if let Some(work_directory) = media_work_directory.as_deref() {
             result = finalize_media_page_download(&app, id, &task.destination, work_directory);
+        } else if kind == DownloadKind::Hls {
+            result = publish_external_partial(&hls_audio_partial, &task.destination);
         }
     } else if let Some(work_directory) = media_work_directory.as_deref() {
         let _ = fs::remove_dir_all(work_directory);
+    } else if kind == DownloadKind::Hls {
+        let _ = fs::remove_file(&hls_audio_partial);
     }
     match result {
         Ok(()) => {
@@ -8378,6 +8333,31 @@ async fn run_external_download(
         workers.remove(&id);
     }
     start_next_queued(&app);
+}
+
+/// Private output name next to the destination for engines that write straight
+/// to the path they are given.
+fn external_partial_output(destination: &Path) -> PathBuf {
+    let name = destination
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download");
+    destination.with_file_name(format!(".adm-partial-{name}"))
+}
+
+/// Publishes a finished engine output. An empty file (an engine that exited 0
+/// without producing media) is a failure, and an existing destination is kept.
+fn publish_external_partial(partial: &Path, destination: &Path) -> Result<(), String> {
+    let produced =
+        fs::metadata(partial).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0);
+    if !produced {
+        let _ = fs::remove_file(partial);
+        return Err("external_output_missing_or_empty".to_owned());
+    }
+    apocalipse_core::download::publish_without_replacing(partial, destination).map_err(|error| {
+        let _ = fs::remove_file(partial);
+        error.to_string()
+    })
 }
 
 /// A 403 from the site is the signature of TLS-fingerprint blocking (Cloudflare
@@ -17952,6 +17932,60 @@ mod tests {
 #[cfg(test)]
 mod log_sanitization_tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn supervised_external_process_leaves_no_straggler_holding_its_pipes() {
+        use tokio::io::AsyncReadExt;
+        let mut command = tokio::process::Command::new("sh");
+        command
+            .args(["-c", "sleep 60 & echo started"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let (mut child, group) = nibiru_cli::spawn_supervised(&mut command).unwrap();
+        let mut stdout = child.stdout.take().unwrap();
+        let reader = tokio::spawn(async move {
+            let mut text = Vec::new();
+            let _ = stdout.read_to_end(&mut text).await;
+            text
+        });
+        assert!(child.wait().await.unwrap().success());
+        // The background `sleep` still owns the pipe; dropping the group ends it.
+        drop(group);
+        let text = tokio::time::timeout(Duration::from_secs(5), reader)
+            .await
+            .expect("pipe must reach EOF once the straggler is killed")
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&text).trim(), "started");
+    }
+
+    #[test]
+    fn external_output_is_published_without_replacing_and_must_not_be_empty() {
+        let root = std::env::temp_dir().join(format!("adm-external-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let destination = root.join("song.mp3");
+        let partial = external_partial_output(&destination);
+        assert_eq!(partial.file_name().unwrap(), ".adm-partial-song.mp3");
+
+        fs::write(&partial, b"").unwrap();
+        assert_eq!(
+            publish_external_partial(&partial, &destination).unwrap_err(),
+            "external_output_missing_or_empty"
+        );
+        assert!(!destination.exists() && !partial.exists());
+
+        fs::write(&destination, b"existing").unwrap();
+        fs::write(&partial, b"converted").unwrap();
+        assert!(publish_external_partial(&partial, &destination).is_err());
+        assert_eq!(fs::read(&destination).unwrap(), b"existing");
+        assert!(!partial.exists());
+
+        fs::remove_file(&destination).unwrap();
+        fs::write(&partial, b"converted").unwrap();
+        publish_external_partial(&partial, &destination).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"converted");
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn one_unreadable_queue_entry_does_not_discard_the_other_downloads() {

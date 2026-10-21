@@ -3,6 +3,7 @@ use std::{path::Path, process::Stdio, time::Duration};
 use tokio::io::AsyncReadExt;
 #[path = "nibiru_process.rs"]
 mod process_group;
+pub(crate) use process_group::spawn as spawn_supervised;
 const MAX_JSON: u64 = 2 * 1024 * 1024;
 /// Drain both pipes concurrently, bounded by bytes and time. Every exit drops
 /// the process-group/job guard, including cancellation and aborting the future.
