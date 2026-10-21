@@ -30,7 +30,7 @@ const catalogs = {
     aiStatusProposed: "Awaiting approval", aiStatusTesting: "Testing", aiStatusSaved: "Saved", aiStatusConfirmed: "Confirmed", aiStatusRejected: "Did not work",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
-    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", aria2Backend: "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent, magnet and ED2K)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "mpv / media player",
+    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", aria2Backend: "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "mpv / media player",
     about: "About", aboutDescription: "About the creator.", aboutCreator: "Creator: Juliano - Brazil", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume", facebookRecordingFallback: "The Facebook extractor failed to read this Reel. Update yt-dlp or try capturing its link again. Recording is available as an alternative.",
     addDownload: "Add download",
     downloadSpeed: "DOWNLOAD SPEED",
@@ -170,6 +170,11 @@ const catalogs = {
     connections: "Connections per download",
     automatic: "Automatic",
     taskConnections: "Threads for this download",
+    rememberSiteThreads: "Remember the thread count for this site",
+    rememberSiteThreadsHint: "Saved for the site of this link. Untick and start the download to forget it.",
+    rememberSiteThreadsFor: "Saved for {host}. Untick and start the download to forget it.",
+    rememberSiteThreadsOffer: "Tick to use this thread count for {host} next time.",
+    siteThreadsForced: "{host} only works with 1 thread, so this is fixed.",
     bandwidthPrompt: "Speed limit in MB/s (0 = unlimited)", verifying: "Verifying",
     taskConnectionsHint: "Only changes this task. Use 1 on sites that reject segmented downloads.",
     downloadBandwidthLimit: "This download limit", megabytesPerSecond: "MB/s", unlimited: "Unlimited", smartAutomation: "Smart automation", bandwidthAction: "Speed limit", bandwidthPanel: "Bandwidth", adaptiveEfficiency: "Adaptive efficiency", adaptiveEfficiencyHint: "Optimizes queue order and connection use for the current workload.", scheduler: "Download schedule", schedulerHint: "Automatically pauses outside the permitted local time window.", scheduleStart: "Start", scheduleEnd: "End", bandwidthPanelHint: "Set limits without changing the window size.", currentBandwidth: "Current usage", globalBandwidthLimit: "Global download limit",
@@ -241,7 +246,7 @@ const catalogs = {
     aiStatusProposed: "Aguardando aprovação", aiStatusTesting: "Em teste", aiStatusSaved: "Guardada", aiStatusConfirmed: "Confirmada", aiStatusRejected: "Não funcionou",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
-    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", aria2Backend: "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent, magnet e ED2K)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "mpv / reprodutor de mídia",
+    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", aria2Backend: "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "mpv / reprodutor de mídia",
     about: "Sobre", aboutDescription: "Sobre o criador.", aboutCreator: "Criador: Juliano - Brasil", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume", facebookRecordingFallback: "O extrator do Facebook falhou ao ler este Reel. Atualize o yt-dlp ou tente capturar o link novamente. Gravar está disponível como alternativa.",
     addDownload: "Adicionar download",
     downloadSpeed: "VELOCIDADE DE DOWNLOAD",
@@ -381,6 +386,11 @@ const catalogs = {
     connections: "Conexões por download",
     automatic: "Automático",
     taskConnections: "Threads para este download",
+    rememberSiteThreads: "Memorizar a quantidade de threads para este site",
+    rememberSiteThreadsHint: "Fica salva para o site deste link. Desmarque e inicie o download para esquecer.",
+    rememberSiteThreadsFor: "Salva para {host}. Desmarque e inicie o download para esquecer.",
+    rememberSiteThreadsOffer: "Marque para usar esta quantidade de threads em {host} da próxima vez.",
+    siteThreadsForced: "{host} só funciona com 1 thread, então este valor é fixo.",
     bandwidthPrompt: "Limite de velocidade em MB/s (0 = ilimitado)", verifying: "Verificando",
     taskConnectionsHint: "Altera somente esta tarefa. Use 1 em sites que não aceitam downloads segmentados.",
     downloadBandwidthLimit: "Limite deste download", megabytesPerSecond: "MB/s", unlimited: "Ilimitado", smartAutomation: "Automação inteligente", bandwidthAction: "Limitar velocidade", bandwidthPanel: "Banda", adaptiveEfficiency: "Eficiência adaptativa", adaptiveEfficiencyHint: "Otimiza a ordem da fila e o uso de conexões para a carga atual.", scheduler: "Agendamento de downloads", schedulerHint: "Pausa automaticamente fora do horário local permitido.", scheduleStart: "Início", scheduleEnd: "Fim", bandwidthPanelHint: "Defina limites sem alterar o tamanho da janela.", currentBandwidth: "Uso atual", globalBandwidthLimit: "Limite global de download",
@@ -452,7 +462,7 @@ const catalogs = {
     aiStatusProposed: "等待批准", aiStatusTesting: "测试中", aiStatusSaved: "已保存", aiStatusConfirmed: "已确认", aiStatusRejected: "未解决",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
-    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", aria2Backend: "Nibiru Xtreme（HTTP/HTTPS、FTP/SFTP、种子、磁力链接和 ED2K）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "mpv / 媒体播放器",
+    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", aria2Backend: "Nibiru Xtreme（HTTP/HTTPS、FTP/SFTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "mpv / 媒体播放器",
     about: "关于", aboutDescription: "关于创作者。", aboutCreator: "创作者：Juliano - 巴西", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量", facebookRecordingFallback: "Facebook 提取器无法读取此 Reel。请更新 yt-dlp 或重新捕获链接。也可以选择录制。",
     addDownload: "添加下载",
     downloadSpeed: "下载速度",
@@ -592,6 +602,11 @@ const catalogs = {
     connections: "每个下载的连接数",
     automatic: "自动",
     taskConnections: "此下载的线程数",
+    rememberSiteThreads: "记住此网站的线程数",
+    rememberSiteThreadsHint: "保存给此链接所在的网站。取消勾选并开始下载即可忘记。",
+    rememberSiteThreadsFor: "已为 {host} 保存。取消勾选并开始下载即可忘记。",
+    rememberSiteThreadsOffer: "勾选后，下次从 {host} 下载将使用此线程数。",
+    siteThreadsForced: "{host} 只能使用 1 个线程，因此此值固定。",
     bandwidthPrompt: "限速（MB/秒，0 = 不限速）", verifying: "校验中",
     taskConnectionsHint: "仅更改此任务。对于不允许分段下载的网站，请使用 1。",
     downloadBandwidthLimit: "此下载的限制", megabytesPerSecond: "MB/秒", unlimited: "不限速", smartAutomation: "智能自动化", bandwidthAction: "限速", bandwidthPanel: "带宽", adaptiveEfficiency: "自适应效率", adaptiveEfficiencyHint: "根据当前负载优化队列顺序和连接使用。", scheduler: "下载计划", schedulerHint: "在允许的本地时间之外自动暂停。", scheduleStart: "开始", scheduleEnd: "结束", bandwidthPanelHint: "无需改变窗口大小即可设置限制。", currentBandwidth: "当前使用量", globalBandwidthLimit: "全局下载限制",
@@ -1346,6 +1361,7 @@ function translate() {
   if (!taskConnectionsManuallyChanged) {
     document.querySelector("#task-connections-value").value = t("automatic");
   }
+  setSiteThreadsNote();
   const activeNavigation = document.querySelector(`nav [data-page="${activePage}"]`);
   if (activeNavigation) document.querySelector("main > header h1").textContent = activeNavigation.querySelector("b")?.textContent || t("downloads");
   document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
@@ -1771,10 +1787,62 @@ async function showTorrentInspection(source, generation = analysisGeneration) {
   document.querySelector("#torrent-inspection").hidden = false;
   return true;
 }
+// What the "remember for this site" box was when the dialog loaded the site's saved value.
+let siteThreads = { host: "", remembered: false, forced: null };
+let siteThreadsRequest = 0;
+function setSiteThreadsNote() {
+  const note = document.querySelector("#remember-site-threads-note");
+  const box = document.querySelector("#remember-site-threads");
+  if (siteThreads.forced) note.textContent = t("siteThreadsForced").replace("{host}", siteThreads.host);
+  else if (siteThreads.host && box.checked) note.textContent = t("rememberSiteThreadsFor").replace("{host}", siteThreads.host);
+  else if (siteThreads.host) note.textContent = t("rememberSiteThreadsOffer").replace("{host}", siteThreads.host);
+  else note.textContent = t("rememberSiteThreadsHint");
+  box.disabled = Boolean(siteThreads.forced);
+  document.querySelector("#task-connections").disabled = Boolean(siteThreads.forced);
+}
+// Saves or forgets the site's thread count as the box says, when the download starts.
+async function applySiteThreadsChoice(source) {
+  if (siteThreads.forced || !/^(?:https?|ftp):\/\//i.test(source)) return;
+  const box = document.querySelector("#remember-site-threads");
+  const threads = Number(document.querySelector("#task-connections").value) || 8;
+  try {
+    if (box.checked) await invoke("set_site_threads", { url: source, threads });
+    else if (siteThreads.remembered) await invoke("set_site_threads", { url: source, threads: null });
+  } catch (error) {
+    reportUiError("main", "siteThreads", error);
+  }
+}
 function resetTaskConnections() {
   taskConnectionsManuallyChanged = false;
-  document.querySelector("#task-connections").value = "16";
+  siteThreadsRequest += 1;
+  siteThreads = { host: "", remembered: false, forced: null };
+  document.querySelector("#task-connections").value = "8";
   document.querySelector("#task-connections-value").value = t("automatic");
+  document.querySelector("#remember-site-threads").checked = false;
+  setSiteThreadsNote();
+}
+// Shows the count saved for this link's site (slider and box), or a fixed 1 for sites that need it.
+async function refreshSiteThreads() {
+  const source = document.querySelector("#url").value.trim();
+  const request = ++siteThreadsRequest;
+  if (!/^(?:https?|ftp):\/\//i.test(source)) return;
+  let found;
+  try {
+    found = await invoke("get_site_threads", { url: source });
+  } catch {
+    return;
+  }
+  if (request !== siteThreadsRequest || source !== document.querySelector("#url").value.trim()) return;
+  siteThreads = { host: found.host, remembered: Boolean(found.remembered), forced: found.forced || null };
+  const slider = document.querySelector("#task-connections");
+  const value = found.forced || found.threads;
+  if (value) {
+    slider.value = String(value);
+    document.querySelector("#task-connections-value").value = String(value);
+    taskConnectionsManuallyChanged = true;
+  }
+  document.querySelector("#remember-site-threads").checked = siteThreads.remembered;
+  setSiteThreadsNote();
 }
 document.querySelectorAll("#add").forEach(
   (button) =>
@@ -2369,7 +2437,7 @@ document.querySelector("#max-tasks").oninput = updateLimitLabels;
 document.querySelector("#connections").oninput = updateLimitLabels;
 document.querySelector("#default-limits").onclick = () => {
   document.querySelector("#max-tasks").value = 3;
-  document.querySelector("#connections").value = 16;
+  document.querySelector("#connections").value = 8;
   updateLimitLabels();
 };
 document.querySelector("#copy-pairing").onclick = () => invoke("copy_bridge_token").catch(error => reportUiError("main", "copy-pairing", error));
@@ -2508,11 +2576,15 @@ document.querySelector("#hls-convert-audio").onchange = updateHlsAudioConversion
 document.querySelector("#hls-audio-format").onchange = updateHlsAudioConversion;
 document.querySelector("#task-connections").oninput = (event) => {
   taskConnectionsManuallyChanged = true;
+  setSiteThreadsNote();
   document.querySelector("#task-connections-value").value = event.target.value;
 };
+document.querySelector("#url").addEventListener("change", refreshSiteThreads);
+document.querySelector("#remember-site-threads").addEventListener("change", setSiteThreadsNote);
 document.querySelector("#analyze").onclick = async () => {
   const url = document.querySelector("#url");
   if (!url.reportValidity()) return;
+  refreshSiteThreads();
   const analyzeButton = document.querySelector("#analyze");
   if (analyzeButton.disabled) return;
   const generation = ++analysisGeneration;
@@ -2741,6 +2813,7 @@ document.querySelector("#enqueue").onclick = async () => {
       chosenFileName = await resolveFileConflict(document.querySelector("#destination").value, chosenFileName, pendingExpectedSize);
       if (chosenFileName === null) return;
     }
+    await applySiteThreadsChoice(url.value);
     const acceptedTask = pendingBrowserAssistedPath
       ? await invoke("import_browser_assisted_download", {
           localPath: pendingBrowserAssistedPath,
@@ -2758,8 +2831,8 @@ document.querySelector("#enqueue").onclick = async () => {
         mirrors: document.querySelector("#mirrors").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
         priority: Number(document.querySelector("#priority").value),
         bandwidthLimit: Math.round((Number(document.querySelector("#download-bandwidth-limit").value) || 0) * 1024 * 1024) || null,
-        connectionsOverride: taskConnectionsManuallyChanged
-          ? Number(document.querySelector("#task-connections").value) || 16
+        connectionsOverride: taskConnectionsManuallyChanged || document.querySelector("#remember-site-threads").checked
+          ? Number(document.querySelector("#task-connections").value) || 8
           : null,
         autoExtract,
         context: {
@@ -2896,6 +2969,7 @@ async function consumeBrowserAssistedDownload() {
     pendingRequestContentType = null;
     resetTaskConnections();
     document.querySelector("#url").value = request.url;
+    refreshSiteThreads();
     const sourceName = String(request.fileName || "").split(/[\\/]/).pop() || "download.zip";
     document.querySelector("#file-name").value = sourceName;
     knownArchiveName = isArchiveFileName(sourceName) ? sourceName : "";
@@ -2942,6 +3016,7 @@ async function consumeBridgeDownload() {
     pendingRequestContentType = request.requestContentType || null;
     resetTaskConnections();
     document.querySelector("#url").value = request.url;
+    refreshSiteThreads();
     const requestedName = request.fileName || "";
     const genericMediaName = /^(?:watch|reel|video|audio|track|download)(?:\.[a-z0-9]{1,10})?$/i.test(requestedName.trim());
     const titleName = String(pendingTitle || "")

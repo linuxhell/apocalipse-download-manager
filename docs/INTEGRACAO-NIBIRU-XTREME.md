@@ -24,7 +24,7 @@ extrator e player ficam como estão. Os IDs internos (`aria2`, `aria2_path`, `ar
      somente aquele executável, com backup e restauração se a validação falhar.
 - **Releases só com pré-release**: `/releases/latest` do GitHub ignora pré-releases e responde 404. O ADM agora cai
   para a lista de releases e usa a mais recente não-rascunho, necessário enquanto o Xtreme só publicar `-alpha`.
-- Rótulo da aba Ferramentas (pt/en/zh): "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent, magnet e ED2K)".
+- Rótulo da aba Ferramentas (pt/en/zh): "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent e magnet)" (o teste `obsolete-engine-residue` proíbe o termo ED2K no código do ADM).
 - Log `aria2.runtime_spawned` informa o binário e o motor reais.
 
 ## O que NÃO mudou (de propósito)
@@ -53,3 +53,20 @@ Windows/macOS em uso real, e o fluxo de download pela interface (a interface gr�
 2. Trocar o empacotamento (`release.yml`/`validate-portable.yml`) para embutir o Xtreme.
 3. Teste ponta a ponta no app: HTTP, pausa/retomada, magnet → seleção de arquivos, streaming, ED2K, fechar o ADM
    e confirmar que o motor encerra, atualizar o binário pela aba Ferramentas.
+
+## Threads por download e memória por site
+
+- O motor aceita de 1 a 16 conexões por download (teto interno); 1 roda em um único fluxo (testado no Xtreme:
+  pico de 1 requisição simultânea). O ADM manda `split`, `max-connection-per-server` e `min-split-size=1M`, e o
+  número é um **limite superior**: arquivos pequenos usam menos (até 32 MB: 2; até 128 MB: 4; até 512 MB: 8;
+  até 2 GB: 12; acima: 16).
+- Slider da janela de download: 1–16, padrão **8** (era 1–32, padrão 16). O padrão global novo também é 8 (quem já
+  tinha um valor salvo mantém o dele). A regra especial dos hosts da Microsoft não força mais 16: sem escolha
+  usa 16, com escolha respeita o valor. Pixeldrain continua fixo em 1.
+- Caixa "Memorizar a quantidade de threads para este site" (en/pt-BR/zh-CN) logo abaixo do slider: marcada, ao
+  clicar em Baixar grava a contagem na regra do **host exato** (`set_site_threads`); a janela lembra do valor e
+  da marcação nas próximas vezes; marcada e com o slider em outro valor, **atualiza**; desmarcada, ao Baixar,
+  **apaga só a contagem** (velocidade, User-Agent e credenciais da regra ficam; a regra some se só tinha a
+  contagem). Downloads que não passam pela janela (extensão) também usam o valor memorizado.
+- Testado: 3 testes de Rust (criar/atualizar/esquecer, preservar o resto da regra, prioridade da escolha), 3 de
+  JavaScript e uma passada no Chromium com backend simulado nos 3 idiomas. **Não** foi testado no app Tauri real.

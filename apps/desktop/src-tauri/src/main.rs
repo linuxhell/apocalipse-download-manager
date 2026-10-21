@@ -335,6 +335,8 @@ async fn discover_official_mirrors(url: &str) -> Vec<String> {
     mirrors
 }
 
+/// Resolves the per-download thread count. An explicit choice (the slider, or the value remembered
+/// for the site) always wins; hosts with special handling only change what happens without one.
 fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize> {
     let host = host_from_url(url);
     if host
@@ -351,12 +353,15 @@ fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize
             || value == "software.download.prss.microsoft.com"
             || value.ends_with(".download.prss.microsoft.com")
     }) {
-        // Microsoft's ISO CDN supports byte ranges. Start wide enough to avoid
-        // the slow single-stream ramp while keeping the setting below the
-        // application's global safety ceiling.
-        Some(requested.unwrap_or(16).max(16).clamp(1, 32))
+        // Microsoft's ISO CDN supports byte ranges. Without an explicit choice start wide enough
+        // to avoid the slow single-stream ramp; a chosen or remembered count is respected.
+        Some(
+            requested
+                .unwrap_or(MAX_DOWNLOAD_CONNECTIONS)
+                .clamp(1, MAX_DOWNLOAD_CONNECTIONS),
+        )
     } else {
-        requested.map(|value| value.clamp(1, 32))
+        requested.map(|value| value.clamp(1, MAX_DOWNLOAD_CONNECTIONS))
     }
 }
 
@@ -472,8 +477,10 @@ fn tray_labels(language: &str) -> (&'static str, &'static str) {
 const fn default_max_active() -> usize {
     3
 }
+/// The Xtreme engine runs at most this many connections per download.
+const MAX_DOWNLOAD_CONNECTIONS: usize = 16;
 const fn default_connections() -> usize {
-    16
+    8
 }
 const fn default_true() -> bool {
     true
@@ -7530,7 +7537,9 @@ async fn run_external_download(
                     },
                 ),
                 configured_aria2(&settings),
-                settings.connections_per_download.clamp(1, 32),
+                settings
+                    .connections_per_download
+                    .clamp(1, MAX_DOWNLOAD_CONNECTIONS),
                 settings
                     .proxy_enabled
                     .then(|| settings.proxy_url.clone())
@@ -7571,7 +7580,7 @@ async fn run_external_download(
         .connections_override
         .or_else(|| host_rule.as_ref().and_then(|rule| rule.connections))
         .unwrap_or(tools.4)
-        .clamp(1, 32);
+        .clamp(1, MAX_DOWNLOAD_CONNECTIONS);
     diagnostic_log(
         &app.state::<AppState>(),
         "INFO",
@@ -11548,7 +11557,12 @@ fn enqueue_download_impl(
     let pixeldrain_single_connection = host_from_url(&url)
         .as_deref()
         .is_some_and(|value| value == "pixeldrain.com" || value.ends_with(".pixeldrain.com"));
-    task.connections_override = site_connection_override(&url, connections_override);
+    let remembered_connections =
+        state.settings.lock().ok().and_then(|settings| {
+            host_rule_for_url(&settings, &url).and_then(|rule| rule.connections)
+        });
+    task.connections_override =
+        site_connection_override(&url, connections_override.or(remembered_connections));
     task.auto_extract = auto_extract.unwrap_or(false) && is_archive_file_name(&file_name);
     task.expected_size = expected_size.filter(|value| *value > 0);
     if let Some(context) = context {
@@ -12802,7 +12816,7 @@ fn save_host_rule(
                     .chars()
                     .any(|character| matches!(character, '\r' | '\n'))
             })
-        || connections.is_some_and(|value| !(1..=32).contains(&value))
+        || connections.is_some_and(|value| !(1..=MAX_DOWNLOAD_CONNECTIONS).contains(&value))
     {
         return Err("invalid_host_rule".to_owned());
     }
@@ -12869,14 +12883,7 @@ fn save_host_rule(
             bandwidth_limit,
         });
     }
-    settings.host_rules.sort_by(|left, right| {
-        let left_exact = !left.pattern.starts_with("*.");
-        let right_exact = !right.pattern.starts_with("*.");
-        right_exact
-            .cmp(&left_exact)
-            .then_with(|| right.pattern.len().cmp(&left.pattern.len()))
-            .then_with(|| left.pattern.cmp(&right.pattern))
-    });
+    sort_host_rules(&mut settings.host_rules);
     save_settings(&state, &settings)?;
     diagnostic_log(
         &state,
@@ -12893,6 +12900,124 @@ fn save_host_rule(
         ),
     );
     Ok(host_rule_summaries(&settings))
+}
+
+fn sort_host_rules(rules: &mut [HostRule]) {
+    rules.sort_by(|left, right| {
+        let left_exact = !left.pattern.starts_with("*.");
+        let right_exact = !right.pattern.starts_with("*.");
+        right_exact
+            .cmp(&left_exact)
+            .then_with(|| right.pattern.len().cmp(&left.pattern.len()))
+            .then_with(|| left.pattern.cmp(&right.pattern))
+    });
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SiteThreads {
+    host: String,
+    /// The count a download from this site would use, from the best matching rule.
+    threads: Option<usize>,
+    /// True only when a rule for exactly this host stores the count (what the checkbox edits).
+    remembered: bool,
+    /// Sites that must stay on one connection regardless of any preference.
+    forced: Option<usize>,
+}
+
+fn url_host_key(url: &str) -> Result<String, String> {
+    let parsed = url::Url::parse(url).map_err(|_| "invalid_site_url".to_owned())?;
+    if !matches!(parsed.scheme(), "http" | "https" | "ftp") {
+        return Err("invalid_site_url".to_owned());
+    }
+    parsed
+        .host_str()
+        .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
+        .filter(|host| !host.is_empty())
+        .ok_or_else(|| "invalid_site_url".to_owned())
+}
+
+#[tauri::command]
+fn get_site_threads(state: State<'_, AppState>, url: String) -> Result<SiteThreads, String> {
+    let host = url_host_key(&url)?;
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    let forced = (host == "pixeldrain.com" || host.ends_with(".pixeldrain.com")).then_some(1);
+    Ok(SiteThreads {
+        threads: host_rule_for_url(&settings, &url)
+            .and_then(|rule| rule.connections)
+            .map(|value| value.clamp(1, MAX_DOWNLOAD_CONNECTIONS)),
+        remembered: settings
+            .host_rules
+            .iter()
+            .any(|rule| rule.pattern == host && rule.connections.is_some()),
+        host,
+        forced,
+    })
+}
+
+/// Stores or clears the thread count in the rule for exactly `pattern`. A rule that holds nothing
+/// else is dropped when its count is cleared, and none is created when there is nothing to store.
+fn apply_site_threads(rules: &mut Vec<HostRule>, pattern: &str, threads: Option<usize>) {
+    match rules.iter().position(|rule| rule.pattern == pattern) {
+        Some(index) => {
+            rules[index].connections = threads;
+            let rule = &rules[index];
+            if rule.connections.is_none()
+                && rule.username.is_none()
+                && rule.password.is_empty()
+                && rule.user_agent.is_none()
+                && rule.bandwidth_limit.is_none()
+            {
+                rules.remove(index);
+            }
+        }
+        None => {
+            if threads.is_some() {
+                rules.push(HostRule {
+                    pattern: pattern.to_owned(),
+                    username: None,
+                    password: String::new(),
+                    user_agent: None,
+                    connections: threads,
+                    bandwidth_limit: None,
+                });
+            }
+        }
+    }
+    sort_host_rules(rules);
+}
+
+/// Remembers (`Some`) or forgets (`None`) the thread count for exactly this site, leaving the
+/// rule's credentials, speed limit and User-Agent untouched.
+#[tauri::command]
+fn set_site_threads(
+    state: State<'_, AppState>,
+    url: String,
+    threads: Option<usize>,
+) -> Result<SiteThreads, String> {
+    let host = url_host_key(&url)?;
+    if threads.is_some_and(|value| !(1..=MAX_DOWNLOAD_CONNECTIONS).contains(&value)) {
+        return Err("invalid_site_threads".to_owned());
+    }
+    let pattern = normalize_host_rule_pattern(&host)?;
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    apply_site_threads(&mut settings.host_rules, &pattern, threads);
+    save_settings(&state, &settings)?;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "host_rule.threads",
+        &format!(
+            "pattern={pattern} threads={}",
+            threads.map_or_else(|| "forgotten".to_owned(), |value| value.to_string())
+        ),
+    );
+    Ok(SiteThreads {
+        threads,
+        remembered: threads.is_some(),
+        forced: None,
+        host,
+    })
 }
 
 #[tauri::command]
@@ -15973,6 +16098,8 @@ fn main() {
             list_host_rules,
             save_host_rule,
             remove_host_rule,
+            get_site_threads,
+            set_site_threads,
             get_dns_setting,
             set_dns_setting,
             get_bridge_pairing,
@@ -16003,6 +16130,107 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    fn rule(pattern: &str, connections: Option<usize>) -> HostRule {
+        HostRule {
+            pattern: pattern.to_owned(),
+            username: None,
+            password: String::new(),
+            user_agent: None,
+            connections,
+            bandwidth_limit: None,
+        }
+    }
+
+    #[test]
+    fn remembering_threads_creates_updates_and_forgets_a_site_rule() {
+        let mut rules = Vec::new();
+        apply_site_threads(&mut rules, "files.example.com", Some(1));
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].connections, Some(1));
+        apply_site_threads(&mut rules, "files.example.com", Some(4));
+        assert_eq!((rules.len(), rules[0].connections), (1, Some(4)));
+        apply_site_threads(&mut rules, "files.example.com", None);
+        assert!(
+            rules.is_empty(),
+            "a rule holding only the count disappears with it"
+        );
+        apply_site_threads(&mut rules, "files.example.com", None);
+        assert!(
+            rules.is_empty(),
+            "forgetting an unknown site creates nothing"
+        );
+    }
+
+    #[test]
+    fn forgetting_threads_keeps_the_rest_of_the_site_rule() {
+        let mut limited = rule("files.example.com", Some(4));
+        limited.bandwidth_limit = Some(1024);
+        let mut agent = rule("agent.example.com", Some(2));
+        agent.user_agent = Some("Custom".to_owned());
+        let mut login = rule("login.example.com", Some(8));
+        login.username = Some("user".to_owned());
+        login.password = "secret".to_owned();
+        let mut rules = vec![limited, agent, login, rule("*.example.com", Some(6))];
+        for site in [
+            "files.example.com",
+            "agent.example.com",
+            "login.example.com",
+        ] {
+            apply_site_threads(&mut rules, site, None);
+        }
+        assert!(rules
+            .iter()
+            .all(|r| r.pattern == "*.example.com" || r.connections.is_none()));
+        assert_eq!(rules.len(), 4, "speed, User-Agent and credentials survive");
+        assert_eq!(
+            rules
+                .iter()
+                .find(|r| r.pattern == "*.example.com")
+                .unwrap()
+                .connections,
+            Some(6),
+            "another rule is never touched"
+        );
+        assert!(
+            rules
+                .iter()
+                .find(|r| r.pattern == "login.example.com")
+                .unwrap()
+                .password
+                == "secret"
+        );
+    }
+
+    #[test]
+    fn a_chosen_thread_count_wins_even_on_hosts_with_special_handling() {
+        let microsoft = "https://software.download.prss.microsoft.com/dbazure/Win.iso?t=1";
+        assert_eq!(
+            site_connection_override(microsoft, None),
+            Some(16),
+            "default stays wide"
+        );
+        assert_eq!(site_connection_override(microsoft, Some(8)), Some(8));
+        assert_eq!(site_connection_override(microsoft, Some(1)), Some(1));
+        assert_eq!(
+            site_connection_override(microsoft, Some(32)),
+            Some(16),
+            "never above the engine's 16"
+        );
+        assert_eq!(
+            site_connection_override("https://example.com/f", Some(24)),
+            Some(16)
+        );
+        assert_eq!(
+            site_connection_override("https://example.com/f", None),
+            None
+        );
+        assert_eq!(
+            site_connection_override("https://pixeldrain.com/u/x", Some(16)),
+            Some(1),
+            "pixeldrain stays on one connection"
+        );
+    }
+
     #[test]
     fn installed_version_is_matched_against_release_tags_exactly() {
         use super::installed_version_matches_tag as matches;
