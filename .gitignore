@@ -11,3 +11,5 @@
 /apocalipse-firefox-*-unsigned*.xpi
 *.log
 /apps/desktop/src-tauri/gen/
+__pycache__/
+*.py[cod]

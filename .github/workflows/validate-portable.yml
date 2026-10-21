@@ -8,6 +8,7 @@ on:
     branches:
       - main
       - engine/aria2-maintained
+      - "audit/**"
 
 permissions:
   contents: read
@@ -39,8 +40,9 @@ jobs:
           manifest = json.loads((source / 'manifest.json').read_text(encoding='utf-8'))
           version = manifest['version']
           firefox = copy.deepcopy(manifest)
+          firefox.pop('key', None)
           worker = firefox.pop('background')['service_worker']
-          firefox['background'] = {'scripts': ['diagnostics-core.js', 'diagnostics-worker.js', worker]}
+          firefox['background'] = {'scripts': [worker]}
           firefox['browser_specific_settings'] = {'gecko': {
               'id': 'apocalipse-download-manager@linuxhell',
               'strict_min_version': '140.0',
@@ -102,15 +104,13 @@ jobs:
       - name: Install Rust
         shell: bash
         run: |
-          export HOME=/root
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Check desktop on distro
         shell: bash
         run: |
-          export HOME=/root
           . "$HOME/.cargo/env"
-          cargo check -p apocalipse-desktop
+          cargo check -p apocalipse-desktop --locked
 
   build:
     name: ${{ matrix.name }}
@@ -154,14 +154,14 @@ jobs:
         shell: bash
         run: |
           cargo fmt --all -- --check
-          cargo test --workspace
+          cargo test --workspace --locked
       - name: Verify prepared media with FFmpeg and FFprobe
         if: runner.os == 'Linux'
         run: |
-          cargo test -p apocalipse-desktop paired_preview_uses_real_mux_and_probe -- --ignored
-          cargo test -p apocalipse-desktop direct_audio_conversion_produces_requested_format_and_preserves_existing_files -- --ignored
+          cargo test -p apocalipse-desktop --locked paired_preview_uses_real_mux_and_probe -- --ignored
+          cargo test -p apocalipse-desktop --locked direct_audio_conversion_produces_requested_format_and_preserves_existing_files -- --ignored
       - name: Build desktop candidate
-        run: cargo build --release -p apocalipse-desktop
+        run: cargo build --release --locked -p apocalipse-desktop
       - uses: actions/setup-node@v7
         if: runner.os == 'Linux'
         with:
@@ -276,6 +276,23 @@ jobs:
           cp packaging/macos/Info.plist "$app/Contents/Info.plist"
           cp README.md LICENSE "$app/Contents/Resources/"
           ditto -c -k --sequesterRsrc --keepParent "$app" 'dist/${{ matrix.output }}'
+      - name: Verify routing in release executable
+        shell: bash
+        run: |
+          binary="target/release/apocalipse-desktop"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then binary="$binary.exe"; fi
+          "$binary" --verify-media-routing "$RUNNER_TEMP/media-routing.json"
+          python3 - "$RUNNER_TEMP/media-routing.json" <<'PYVERIFY'
+          import json, sys, tomllib
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              report = json.load(stream)
+          with open("Cargo.toml", "rb") as stream:
+              version = tomllib.load(stream)["workspace"]["package"]["version"]
+          assert report["verified"] is True, report
+          assert report["version"] == version, report
+          assert report["engine"] == "yt_dlp", report
+          PYVERIFY
+          cp "$RUNNER_TEMP/media-routing.json" dist/build-verification.json
       - name: Record candidate provenance
         shell: bash
         run: |
@@ -288,5 +305,6 @@ jobs:
             dist/${{ matrix.output }}
             dist/apocalipse-download-manager-linux-x64.AppImage
             dist/build-commit.txt
+            dist/build-verification.json
           retention-days: 14
           if-no-files-found: error
