@@ -179,6 +179,40 @@ pub enum MediaOperation {
     },
 }
 
+/// Typed ADM operations and the Colapse capability feature each one requires.
+/// Inspection is the baseline command every compatible build provides.
+const COLAPSE_OPERATION_FEATURES: &[(&str, Option<&str>)] = &[
+    ("inspect", None),
+    ("mp4-faststart", Some("mp4_faststart")),
+    ("flac-encode", Some("flac_encoding")),
+    ("flac-decode", Some("flac_decoding")),
+    ("qoa-encode", Some("qoa_encoding")),
+    ("qoa-decode", Some("qoa_decoding")),
+    ("qoir-encode", Some("qoir_encoding")),
+    ("qoir-decode", Some("qoir_decoding")),
+    ("wav-cut", Some("sample_exact_cut")),
+    ("y4m-cut", Some("y4m_frame_exact_cut")),
+    ("wav-gain", Some("gain_with_clip_report")),
+    ("wav-normalize", Some("peak_normalization")),
+    ("wav-concat", Some("wav_concat")),
+];
+
+fn feature_enabled(capabilities: &Value, feature: &str) -> bool {
+    capabilities
+        .pointer(&format!("/features/{feature}"))
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+/// Operations this Colapse build advertises, in the ADM's typed vocabulary.
+pub fn colapse_operations(capabilities: &Value) -> Vec<&'static str> {
+    COLAPSE_OPERATION_FEATURES
+        .iter()
+        .filter(|(_, feature)| feature.is_none_or(|feature| feature_enabled(capabilities, feature)))
+        .map(|(operation, _)| *operation)
+        .collect()
+}
+
 impl MediaOperation {
     pub fn args(&self) -> Result<Vec<String>, String> {
         let text = |p: &Path| -> Result<String, String> {
@@ -307,8 +341,11 @@ impl MediaOperation {
 
 pub async fn process_media(path: &Path, request: &MediaOperation) -> Result<Value, String> {
     // Identity/schema negotiation fails explicitly for incompatible binaries.
-    capabilities(path, "nibiru-colapse").await?;
+    let advertised = capabilities(path, "nibiru-colapse").await?;
     let args = request.args()?;
+    if !colapse_operations(&advertised).contains(&args[0].as_str()) {
+        return Err(format!("colapse_operation_unsupported:{}", args[0]));
+    }
     let value = run_json(path, &args, Duration::from_secs(6 * 3600)).await?;
     validate_colapse_response(&value, &args[0])?;
     Ok(value)
@@ -328,6 +365,16 @@ fn validate_colapse_response(value: &Value, operation: &str) -> Result<(), Strin
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn colapse_operations_follow_the_advertised_features() {
+        let caps = json!({"features": {"wav_concat": true, "flac_encoding": false, "mp4_faststart": true}});
+        assert_eq!(
+            colapse_operations(&caps),
+            vec!["inspect", "mp4-faststart", "wav-concat"]
+        );
+        assert_eq!(colapse_operations(&json!({})), vec!["inspect"]);
+    }
 
     #[test]
     fn power_conversion_rejects_wrong_operation_or_no_supported_sources() {

@@ -18,7 +18,10 @@ pub fn executable(settings: &super::UserSettings, engine: &str) -> Result<PathBu
         "nibiru-m3u8" => &settings.m3u8_path,
         _ => return Err("unknown_nibiru_engine".into()),
     };
-    if let Some(path) = configured.as_ref().filter(|path| !path.as_os_str().is_empty()) {
+    if let Some(path) = configured
+        .as_ref()
+        .filter(|path| !path.as_os_str().is_empty())
+    {
         return Ok(path.clone());
     }
     let name = format!("{engine}{}", if cfg!(windows) { ".exe" } else { "" });
@@ -60,6 +63,11 @@ pub async fn get_nibiru_capabilities(state: State<'_, AppState>) -> Result<Value
         result.insert(
             engine.into(),
             match capabilities(&path, engine).await {
+                Ok(value) if engine == "nibiru-colapse" => json!({
+                    "available": true,
+                    "operations": adapter::colapse_operations(&value),
+                    "capabilities": value
+                }),
                 Ok(value) => json!({"available":true,"capabilities":value}),
                 Err(error) => json!({"available":false,"error":error}),
             },

@@ -10724,6 +10724,11 @@ fn install_validated_executable(
         let _ = fs::remove_file(&staged);
         "downloaded_tool_validation_failed".to_owned()
     })?;
+    // A backup without a target means an earlier swap was interrupted: it is the
+    // only working copy, so put it back instead of deleting it.
+    if backup.exists() && !target.exists() {
+        fs::rename(&backup, target).map_err(|error| error.to_string())?;
+    }
     let _ = fs::remove_file(&backup);
     if target.exists() {
         fs::rename(target, &backup).map_err(|error| error.to_string())?;
@@ -10747,11 +10752,55 @@ fn copy_validated_executable(
     install_validated_executable(&bytes, target, version_args)
 }
 
-fn clean_directory(directory: &Path) -> Result<(), String> {
-    if directory.exists() {
-        fs::remove_dir_all(directory).map_err(|error| error.to_string())?;
+/// Builds a replacement tool directory beside `directory` and swaps it in only
+/// after `build` has extracted and validated it, so a failed or invalid download
+/// never removes a working installation. `build` returns the executable's path
+/// inside the staging directory; the result is the same file at its final place.
+fn replace_tool_directory(
+    directory: &Path,
+    build: impl FnOnce(&Path) -> Result<PathBuf, String>,
+) -> Result<PathBuf, String> {
+    let parent = directory
+        .parent()
+        .ok_or_else(|| "tool_target_has_no_directory".to_owned())?;
+    let name = directory
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "tool_target_has_no_filename".to_owned())?;
+    let id = uuid::Uuid::new_v4();
+    let staging = parent.join(format!(".{name}.staging-{id}"));
+    let backup = parent.join(format!(".{name}.previous-{id}"));
+    fs::create_dir_all(&staging).map_err(|error| error.to_string())?;
+    let relative = match build(&staging).and_then(|executable| {
+        executable
+            .strip_prefix(&staging)
+            .map(Path::to_path_buf)
+            .map_err(|_| "tool_executable_outside_staging".to_owned())
+    }) {
+        Ok(relative) => relative,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+    };
+    let had_previous = directory.exists();
+    if had_previous {
+        if let Err(error) = fs::rename(directory, &backup) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error.to_string());
+        }
     }
-    fs::create_dir_all(directory).map_err(|error| error.to_string())
+    if let Err(error) = fs::rename(&staging, directory) {
+        if had_previous {
+            let _ = fs::rename(&backup, directory);
+        }
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error.to_string());
+    }
+    if had_previous {
+        let _ = fs::remove_dir_all(&backup);
+    }
+    Ok(directory.join(relative))
 }
 
 async fn install_nibiru_tool(
@@ -10960,24 +11009,25 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                     && (name.ends_with(".zip") || name.ends_with(".tar.gz"))
             })?;
             let bytes = download_tool_asset(&client, &id, &url).await?;
-            clean_directory(&tool_dir)?;
-            extract_release_archive(&bytes, &asset_name, &tool_dir)?;
             let executable_name = if cfg!(windows) {
                 "N_m3u8DL-RE.exe"
             } else {
                 "N_m3u8DL-RE"
             };
-            let target = find_named_file(&tool_dir, executable_name, 0)
-                .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
-                    .map_err(|error| error.to_string())?;
-            }
-            version_line(&target, &["--version"])
-                .ok_or_else(|| "downloaded_tool_validation_failed".to_owned())?;
-            target
+            replace_tool_directory(&tool_dir, |staging| {
+                extract_release_archive(&bytes, &asset_name, staging)?;
+                let target = find_named_file(staging, executable_name, 0)
+                    .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
+                        .map_err(|error| error.to_string())?;
+                }
+                version_line(&target, &["--version"])
+                    .ok_or_else(|| "downloaded_tool_validation_failed".to_owned())?;
+                Ok(target)
+            })?
         }
         "ffmpeg" => {
             let (repository, release) = if platform == "macos" {
@@ -11072,26 +11122,28 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                 if bytes.len() < 500_000 {
                     return Err(format!("downloaded_tool_payload_too_small:{asset_name}"));
                 }
-                clean_directory(&tool_dir)?;
                 let installer = std::env::temp_dir()
                     .join(format!("apocalipse-7zip-{}.exe", uuid::Uuid::new_v4()));
                 fs::write(&installer, bytes).map_err(|error| error.to_string())?;
-                let mut command = Command::new(&installer);
-                command.arg("/S").arg(format!("/D={}", tool_dir.display()));
-                #[cfg(target_os = "windows")]
-                {
-                    use std::os::windows::process::CommandExt;
-                    command.creation_flags(0x08000000);
-                }
-                let status = command.status().map_err(|error| error.to_string())?;
+                let installed = replace_tool_directory(&tool_dir, |staging| {
+                    let mut command = Command::new(&installer);
+                    command.arg("/S").arg(format!("/D={}", staging.display()));
+                    #[cfg(target_os = "windows")]
+                    {
+                        use std::os::windows::process::CommandExt;
+                        command.creation_flags(0x08000000);
+                    }
+                    let status = command.status().map_err(|error| error.to_string())?;
+                    if !status.success() {
+                        return Err("seven_zip_portable_install_failed".to_owned());
+                    }
+                    let target = staging.join("7z.exe");
+                    extractor_version(&target, ExtractorKind::SevenZip)
+                        .ok_or_else(|| "downloaded_tool_validation_failed".to_owned())?;
+                    Ok(target)
+                });
                 let _ = fs::remove_file(&installer);
-                if !status.success() {
-                    return Err("seven_zip_portable_install_failed".to_owned());
-                }
-                let target = tool_dir.join("7z.exe");
-                extractor_version(&target, ExtractorKind::SevenZip)
-                    .ok_or_else(|| "downloaded_tool_validation_failed".to_owned())?;
-                target
+                installed?
             } else {
                 let marker = match (platform, architecture) {
                     ("linux", "x86_64") => "linux-x64.tar.xz",
@@ -11101,19 +11153,20 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                 };
                 let (asset_name, url) = release_asset(&release, |name| name.ends_with(marker))?;
                 let bytes = download_tool_asset(&client, &id, &url).await?;
-                clean_directory(&tool_dir)?;
-                extract_release_archive(&bytes, &asset_name, &tool_dir)?;
-                let target = find_named_file(&tool_dir, "7zz", 0)
-                    .ok_or_else(|| "seven_zip_executable_missing".to_owned())?;
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
-                        .map_err(|error| error.to_string())?;
-                }
-                extractor_version(&target, ExtractorKind::SevenZip)
-                    .ok_or_else(|| "downloaded_tool_validation_failed".to_owned())?;
-                target
+                replace_tool_directory(&tool_dir, |staging| {
+                    extract_release_archive(&bytes, &asset_name, staging)?;
+                    let target = find_named_file(staging, "7zz", 0)
+                        .ok_or_else(|| "seven_zip_executable_missing".to_owned())?;
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
+                            .map_err(|error| error.to_string())?;
+                    }
+                    extractor_version(&target, ExtractorKind::SevenZip)
+                        .ok_or_else(|| "downloaded_tool_validation_failed".to_owned())?;
+                    Ok(target)
+                })?
             }
         }
         "player" => {
@@ -11152,24 +11205,25 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
                         _ => false,
                     })?;
                 let bytes = download_tool_asset(&client, &id, &url).await?;
-                clean_directory(&tool_dir)?;
-                extract_release_archive(&bytes, &asset_name, &tool_dir)?;
                 let executable_name = if platform == "windows" {
                     "mpv.exe"
                 } else {
                     "mpv"
                 };
-                let target = find_named_file(&tool_dir, executable_name, 0)
-                    .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
-                        .map_err(|error| error.to_string())?;
-                }
-                version_line(&target, &["--version"])
-                    .ok_or_else(|| "downloaded_tool_validation_failed".to_owned())?;
-                target
+                replace_tool_directory(&tool_dir, |staging| {
+                    extract_release_archive(&bytes, &asset_name, staging)?;
+                    let target = find_named_file(staging, executable_name, 0)
+                        .ok_or_else(|| format!("replacement_executable_missing:{asset_name}"))?;
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
+                            .map_err(|error| error.to_string())?;
+                    }
+                    version_line(&target, &["--version"])
+                        .ok_or_else(|| "downloaded_tool_validation_failed".to_owned())?;
+                    Ok(target)
+                })?
             }
         }
         _ => return Err("unknown_tool".to_owned()),
@@ -17868,5 +17922,33 @@ mod log_sanitization_tests {
             sanitize_log_detail("task=abc reason=timeout"),
             "task=abc reason=timeout"
         );
+    }
+
+    #[test]
+    fn failed_tool_directory_replacement_keeps_the_working_installation() {
+        let root = tempfile::tempdir().unwrap();
+        let tool = root.path().join("tool");
+        fs::create_dir_all(&tool).unwrap();
+        fs::write(tool.join("exe"), b"working").unwrap();
+
+        let failed = replace_tool_directory(&tool, |staging| {
+            fs::write(staging.join("exe"), b"broken").unwrap();
+            Err("downloaded_tool_validation_failed".to_owned())
+        });
+        assert_eq!(failed.unwrap_err(), "downloaded_tool_validation_failed");
+        assert_eq!(fs::read(tool.join("exe")).unwrap(), b"working");
+        let leftovers = fs::read_dir(root.path()).unwrap().count();
+        assert_eq!(leftovers, 1, "staging directory must be removed");
+
+        let installed = replace_tool_directory(&tool, |staging| {
+            fs::create_dir_all(staging.join("bin")).unwrap();
+            fs::write(staging.join("bin").join("exe"), b"new").unwrap();
+            Ok(staging.join("bin").join("exe"))
+        })
+        .unwrap();
+        assert_eq!(installed, tool.join("bin").join("exe"));
+        assert_eq!(fs::read(&installed).unwrap(), b"new");
+        assert!(!tool.join("exe").exists());
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
     }
 }
