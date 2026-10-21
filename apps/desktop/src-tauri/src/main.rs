@@ -1606,7 +1606,7 @@ fn resolve_link_share(
         .into_iter()
         .find(|share| share.id == id)
         .ok_or_else(|| "path_not_shared".to_owned())?;
-    let mut path = share.path;
+    let mut path = share.path.clone();
     for part in parts {
         if part.is_empty() || part == "." {
             continue;
@@ -1616,7 +1616,30 @@ fn resolve_link_share(
         }
         path.push(part);
     }
+    if !stays_inside_share(&share.path, &path) {
+        return Err("invalid_remote_path".to_owned());
+    }
     Ok((path, share.allow_write))
+}
+
+/// Component checks cannot see a symlink inside the shared folder that points
+/// elsewhere. Resolve the deepest existing part of `path` (the rest cannot be a
+/// link yet) and require it to remain under the resolved share root.
+fn stays_inside_share(root: &Path, path: &Path) -> bool {
+    let Ok(root) = root.canonicalize() else {
+        // The share itself is gone; nothing below it can be reached.
+        return false;
+    };
+    let mut probe = path;
+    loop {
+        if let Ok(resolved) = probe.canonicalize() {
+            return resolved.starts_with(&root);
+        }
+        match probe.parent() {
+            Some(parent) => probe = parent,
+            None => return false,
+        }
+    }
 }
 
 fn list_shared_link_directory(
@@ -4738,6 +4761,31 @@ fn run_network_change_monitor(app: tauri::AppHandle) {
     }
 }
 
+const LINK_AUTH_MAX_FAILURES: usize = 8;
+const LINK_AUTH_FAILURE_WINDOW: Duration = Duration::from_secs(60);
+static LINK_AUTH_FAILURES: Mutex<Vec<Instant>> = Mutex::new(Vec::new());
+
+/// Sliding-window limit on failed OS-account logins over the Link socket. The
+/// 750 ms delay on a failure only slows one connection; a peer can open many in
+/// parallel, so without a shared budget the account password could be guessed
+/// from the LAN.
+fn link_auth_budget_available(failures: &mut Vec<Instant>, now: Instant) -> bool {
+    failures.retain(|at| now.duration_since(*at) < LINK_AUTH_FAILURE_WINDOW);
+    failures.len() < LINK_AUTH_MAX_FAILURES
+}
+
+fn link_auth_attempt_allowed() -> bool {
+    let mut failures = LINK_AUTH_FAILURES.lock().unwrap_or_else(|e| e.into_inner());
+    link_auth_budget_available(&mut failures, Instant::now())
+}
+
+fn record_link_auth_failure() {
+    LINK_AUTH_FAILURES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(Instant::now());
+}
+
 const MAX_LINK_JSON_BODY: usize = 1024 * 1024;
 const LINK_SOCKET_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -5049,8 +5097,21 @@ fn handle_link_connection<S: Read + Write>(
             );
             return;
         };
+        if !link_auth_attempt_allowed() {
+            request.password.zeroize();
+            bridge_response(
+                &mut stream,
+                "429 Too Many Requests",
+                None,
+                "{\"error\":\"too_many_attempts\"}",
+            );
+            return;
+        }
         let authentication = verify_system_account(&request.username, &request.password);
         request.password.zeroize();
+        if authentication.is_err() {
+            record_link_auth_failure();
+        }
         match authentication {
             Ok(()) => {
                 let state = app.state::<AppState>();
@@ -5213,7 +5274,11 @@ fn handle_link_connection<S: Read + Write>(
         );
         return;
     }
-    match list_shared_link_directory(&settings, &request.path)
+    // Listing touches the disk (possibly a slow network share); do not hold the
+    // settings lock, which the whole UI and every bridge request also take.
+    let snapshot = settings.clone();
+    drop(settings);
+    match list_shared_link_directory(&snapshot, &request.path)
         .and_then(|entries| serde_json::to_string(&entries).map_err(|error| error.to_string()))
     {
         Ok(body) => bridge_response(&mut stream, "200 OK", None, &body),
@@ -17960,6 +18025,47 @@ mod tests {
 #[cfg(test)]
 mod log_sanitization_tests {
     use super::*;
+
+    #[test]
+    fn link_account_guessing_is_limited_by_a_shared_failure_budget() {
+        let start = Instant::now();
+        let mut failures = Vec::new();
+        for _ in 0..LINK_AUTH_MAX_FAILURES {
+            assert!(link_auth_budget_available(&mut failures, start));
+            failures.push(start);
+        }
+        assert!(!link_auth_budget_available(&mut failures, start));
+        let later = start + LINK_AUTH_FAILURE_WINDOW + Duration::from_secs(1);
+        assert!(link_auth_budget_available(&mut failures, later));
+        assert!(failures.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_paths_cannot_escape_a_share_through_a_symlink() {
+        let root = std::env::temp_dir().join(format!("adm-share-{}", uuid::Uuid::new_v4()));
+        let shared = root.join("shared");
+        let secret = root.join("secret");
+        fs::create_dir_all(shared.join("inside")).unwrap();
+        fs::create_dir_all(&secret).unwrap();
+        fs::write(secret.join("passwd"), b"secret").unwrap();
+        std::os::unix::fs::symlink(&secret, shared.join("escape")).unwrap();
+        std::os::unix::fs::symlink(shared.join("inside"), shared.join("alias")).unwrap();
+
+        let mut settings = UserSettings::default();
+        settings.link_shares = vec![LinkShare {
+            id: "test-share".into(),
+            name: "test".into(),
+            path: shared.clone(),
+            allow_write: true,
+            directory: true,
+        }];
+        assert!(resolve_link_share(&settings, "/shares/test-share/escape/passwd").is_err());
+        assert!(resolve_link_share(&settings, "/shares/test-share/escape/new.txt").is_err());
+        assert!(resolve_link_share(&settings, "/shares/test-share/alias/file").is_ok());
+        assert!(resolve_link_share(&settings, "/shares/test-share/inside/not-yet/new").is_ok());
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[cfg(unix)]
     #[tokio::test]
