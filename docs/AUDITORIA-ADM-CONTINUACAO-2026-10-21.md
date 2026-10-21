@@ -35,10 +35,10 @@ fixada. O Colapse real foi compilado de `6f92c7e` para o teste de operações.
 | Mux social | `rename` sobrescrevia; worker cancelado removia o registro do worker novo | Publicação sem substituir; remoção só se não cancelado | `ef86ba33` |
 | Metalink | Tarefa-mãe era removida antes dos filhos (sumia se a gravação falhasse ou todos fossem rejeitados); manifesto sem limite e não cancelável | Mãe só sai após filhos aceitos, senão falha visível; limite de 8 MiB e cancelamento | `ef86ba33` |
 | yt-dlp | `--update-to` bloqueava um worker e sem timeout | `tokio::process`, timeout de 300 s | `ef86ba33` |
-| Link | Um symlink dentro de uma pasta compartilhada que aponta para fora permitia ler, listar e gravar fora do compartilhamento | Caminho resolvido (parte existente mais profunda) deve permanecer sob a raiz canônica do compartilhamento | `LINK_COMMIT` |
-| Link | Login por conta do sistema sem limite compartilhado: conexões paralelas permitiam adivinhar a senha da conta pela LAN | Orçamento global de 8 falhas por 60 s, depois 429 | `LINK_COMMIT` |
-| Link | A listagem mantinha o lock das configurações durante a leitura do disco, travando a interface e a bridge em compartilhamentos lentos | Lock liberado antes de listar | `LINK_COMMIT` |
-| Configurações | Um campo ilegível em `settings.json` descartava todas as preferências | Leitura campo a campo; original em `*.corrupt-<hora>` | `SETTINGS_COMMIT` |
+| Link | Um symlink dentro de uma pasta compartilhada que aponta para fora permitia ler, listar e gravar fora do compartilhamento | Caminho resolvido (parte existente mais profunda) deve permanecer sob a raiz canônica do compartilhamento | `04bc362f` |
+| Link | Login por conta do sistema sem limite compartilhado: conexões paralelas permitiam adivinhar a senha da conta pela LAN | Orçamento global de 8 falhas por 60 s, depois 429 | `04bc362f` |
+| Link | A listagem mantinha o lock das configurações durante a leitura do disco, travando a interface e a bridge em compartilhamentos lentos | Lock liberado antes de listar | `04bc362f` |
+| Configurações | Um campo ilegível em `settings.json` descartava todas as preferências | Leitura campo a campo; original em `*.corrupt-<hora>` | `247ab185` |
 
 Código morto removido: a linha de comando do N_m3u8DL-RE em
 `run_external_download` (HLS não-áudio vai ao Nibiru M3U8 em `start_download`);
