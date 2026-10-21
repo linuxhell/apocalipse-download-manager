@@ -54,13 +54,27 @@ impl EncryptedChunkCache {
             .map_err(|_| anyhow::anyhow!("cache encryption failed"))?;
         let parent = target.parent().context("cache target has no parent")?;
         fs::create_dir_all(parent).await?;
-        let temporary = target.with_extension("tmp");
-        let mut file = fs::File::create(&temporary).await?;
-        file.write_all(&[CACHE_VERSION]).await?;
-        file.write_all(&nonce).await?;
-        file.write_all(&encrypted).await?;
-        file.sync_all().await?;
-        fs::rename(temporary, target).await?;
+        // Writers for the same digest must never truncate each other's ciphertext.
+        let temporary = target.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+        let write = async {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)
+                .await?;
+            file.write_all(&[CACHE_VERSION]).await?;
+            file.write_all(&nonce).await?;
+            file.write_all(&encrypted).await?;
+            file.sync_all().await?;
+            // Close before publication, including on Windows.
+            drop(file);
+            fs::rename(&temporary, &target).await
+        }
+        .await;
+        if let Err(error) = write {
+            let _ = fs::remove_file(&temporary).await;
+            return Err(error.into());
+        }
         self.enforce_limit().await?;
         Ok(digest)
     }
@@ -144,6 +158,37 @@ async fn collect_entries(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn concurrent_writes_of_the_same_chunk_do_not_share_a_temporary_file() {
+        let root = std::env::temp_dir().join(format!("adm-cache-{}", uuid::Uuid::new_v4()));
+        let cache = std::sync::Arc::new(EncryptedChunkCache::new(&root, [9; 32], 0));
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(16));
+        let payload = std::sync::Arc::new(vec![42; 256 * 1024]);
+        let mut tasks = Vec::new();
+        for _ in 0..16 {
+            let cache = cache.clone();
+            let barrier = barrier.clone();
+            let payload = payload.clone();
+            tasks.push(tokio::spawn(async move {
+                barrier.wait().await;
+                cache.put(&payload).await
+            }));
+        }
+        let mut failures = Vec::new();
+        for task in tasks {
+            if let Err(error) = task.await.unwrap() {
+                failures.push(error.to_string());
+            }
+        }
+        let restored = cache.get(&EncryptedChunkCache::digest(&payload)).await;
+        let _ = fs::remove_dir_all(root).await;
+        assert!(
+            failures.is_empty(),
+            "concurrent writes failed: {failures:?}"
+        );
+        assert_eq!(restored.unwrap().unwrap(), *payload);
+    }
 
     #[tokio::test]
     async fn cache_is_encrypted_authenticated_and_content_addressed() {

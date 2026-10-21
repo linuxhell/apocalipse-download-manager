@@ -247,6 +247,15 @@ struct SingleResumeJournal {
 }
 
 #[derive(Debug)]
+struct SegmentPlan {
+    total: u64,
+    connections: usize,
+    sources: Vec<String>,
+    identity: ResumeIdentity,
+    prefer_http3: bool,
+}
+
+#[derive(Debug)]
 struct SourceProbe {
     total: Option<u64>,
     etag: Option<String>,
@@ -393,7 +402,7 @@ impl DownloadEngine {
             .await;
             if let Ok(Ok(response)) = h3 {
                 let accepted = response.status() == StatusCode::PARTIAL_CONTENT
-                    && expected.map_or(true, |(start, end, total)| {
+                    && expected.is_none_or(|(start, end, total)| {
                         response
                             .headers()
                             .get(header::CONTENT_RANGE)
@@ -530,7 +539,7 @@ impl DownloadEngine {
                                 request.adaptive_connections,
                             );
                             let initial_connections = if request.adaptive_connections {
-                                useful_connections.min(ADMISSION_INITIAL_WORKERS).max(1)
+                                useful_connections.clamp(1, ADMISSION_INITIAL_WORKERS)
                             } else {
                                 useful_connections
                             };
@@ -563,11 +572,13 @@ impl DownloadEngine {
                                     .download_segmented(
                                         request.clone(),
                                         events.clone(),
-                                        total,
-                                        attempt_connections,
-                                        sources.clone(),
-                                        identity.clone(),
-                                        http3_selected,
+                                        SegmentPlan {
+                                            total,
+                                            connections: attempt_connections,
+                                            sources: sources.clone(),
+                                            identity: identity.clone(),
+                                            prefer_http3: http3_selected,
+                                        },
                                     )
                                     .await;
                                 match segmented {
@@ -905,7 +916,6 @@ impl DownloadEngine {
             let _ = events.try_send(DownloadEvent::Progress { received, total });
         }
         file.flush().await?;
-        clear_single_resume_journal(&request.destination).await;
         finish_download(&request, &partial, received, total, &events).await
     }
 
@@ -913,12 +923,15 @@ impl DownloadEngine {
         &self,
         request: DownloadRequest,
         events: mpsc::Sender<DownloadEvent>,
-        total: u64,
-        connections: usize,
-        sources: Vec<String>,
-        identity: ResumeIdentity,
-        prefer_http3: bool,
+        plan: SegmentPlan,
     ) -> Result<()> {
+        let SegmentPlan {
+            total,
+            connections,
+            sources,
+            identity,
+            prefer_http3,
+        } = plan;
         let planned_chunk_size =
             segmented_chunk_size(total, connections, request.adaptive_connections);
         let partial = partial_path(&request.destination);
@@ -1013,7 +1026,7 @@ impl DownloadEngine {
         let sources = Arc::new(sources);
         let worker_count = connections.min(chunk_count).max(1);
         let initial_active_workers = if request.adaptive_connections {
-            worker_count.min(ADMISSION_INITIAL_WORKERS).max(1)
+            worker_count.clamp(1, ADMISSION_INITIAL_WORKERS)
         } else {
             worker_count
         };
@@ -1040,8 +1053,6 @@ impl DownloadEngine {
         if remaining_parts.load(Ordering::Acquire) == 0 {
             let output = fs::OpenOptions::new().write(true).open(&partial).await?;
             output.sync_all().await?;
-            clear_segment_journal(&request.destination).await;
-            cleanup_chunk_artifacts(&request.destination).await?;
             return finish_download(&request, &partial, total, Some(total), &events).await;
         }
 
@@ -1889,11 +1900,8 @@ impl DownloadEngine {
                                 "responseLatencyMs": response_latency_ms,
                                 "firstByteWaitMs": first_byte_wait_ms,
                                 "transitionGapMs": transition_gap_ms,
-                                "bytesPerSecond": if elapsed_ms > 0 {
-                                    completed_bytes.saturating_mul(1000) / elapsed_ms
-                                } else {
-                                    completed_bytes
-                                },
+                                "bytesPerSecond": completed_bytes.saturating_mul(1000)
+                                    .checked_div(elapsed_ms).unwrap_or(completed_bytes),
                                 "transport": protocol
                             }),
                         });
@@ -1937,8 +1945,6 @@ impl DownloadEngine {
         }
         let output = fs::OpenOptions::new().write(true).open(&partial).await?;
         output.sync_all().await?;
-        clear_segment_journal(&request.destination).await;
-        cleanup_chunk_artifacts(&request.destination).await?;
         finish_download(&request, &partial, total, Some(total), &events).await
     }
 }
@@ -2072,7 +2078,7 @@ fn segmented_target_chunks(connections: usize, adaptive_connections: bool) -> u6
         return max_workers.saturating_mul(TARGET_CHUNKS_PER_WORKER).max(1);
     }
 
-    let initial_workers = connections.min(ADMISSION_INITIAL_WORKERS).max(1) as u64;
+    let initial_workers = connections.clamp(1, ADMISSION_INITIAL_WORKERS) as u64;
     max_workers.max(
         initial_workers
             .saturating_mul(TARGET_CHUNKS_PER_WORKER)
@@ -2385,6 +2391,10 @@ async fn finish_download(
     total: Option<u64>,
     events: &mpsc::Sender<DownloadEvent>,
 ) -> Result<()> {
+    let stored = fs::metadata(partial).await?;
+    if !stored.is_file() || stored.len() != received {
+        bail!("stored download length does not match received bytes");
+    }
     if let Some(expected) = total {
         if received != expected {
             bail!("incomplete download: received {received} of {expected} bytes");
@@ -2432,10 +2442,24 @@ async fn finish_download(
         }
     }
 
-    if request.overwrite && request.destination.exists() {
-        fs::remove_file(&request.destination).await?;
+    if request.overwrite {
+        // A rename replaces atomically; deleting the old file first loses it if
+        // publication fails. Both paths are on the same filesystem.
+        fs::rename(partial, &request.destination).await?;
+    } else {
+        let partial = partial.to_owned();
+        let destination = request.destination.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let staged = tempfile::TempPath::try_from_path(partial)?;
+            if let Err(error) = staged.persist_noclobber(destination) {
+                let _ = error.path.keep();
+                return Err(error.error)
+                    .context("cannot publish without overwriting an existing destination");
+            }
+            Ok(())
+        })
+        .await??;
     }
-    fs::rename(partial, &request.destination).await?;
     if let Err(error) = cleanup_chunk_artifacts(&request.destination).await {
         let _ = events.try_send(DownloadEvent::Diagnostic {
             event: "http.cleanup_failed",
@@ -2586,6 +2610,57 @@ pub async fn cleanup_chunk_artifacts(destination: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn publication_preserves_a_racing_destination_and_retry_checkpoints() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("payload.bin");
+        let partial = partial_path(&destination);
+        fs::write(&partial, b"download").await.unwrap();
+        fs::write(&destination, b"foreign file").await.unwrap();
+        let journal = chunk_directory(&destination).join("resume-a.json");
+        fs::create_dir_all(journal.parent().unwrap()).await.unwrap();
+        fs::write(&journal, b"checkpoint").await.unwrap();
+        let (tx, mut rx) = mpsc::channel(4);
+        let mut request = DownloadRequest {
+            url: "https://example.test/file".into(),
+            destination: destination.clone(),
+            overwrite: false,
+            connections: 1,
+            adaptive_connections: false,
+            network_capacity_hint_bps: None,
+            host_capacity_hint_bps: None,
+            method: "GET".into(),
+            body: None,
+            headers: Vec::new(),
+            expected_size: None,
+            expected_sha256: None,
+            limiters: Vec::new(),
+        };
+        assert!(finish_download(&request, &partial, 8, Some(8), &tx)
+            .await
+            .is_err());
+        assert_eq!(fs::read(&destination).await.unwrap(), b"foreign file");
+        assert_eq!(fs::read(&partial).await.unwrap(), b"download");
+        assert!(journal.exists());
+        assert!(rx.try_recv().is_err());
+        // An authorized replacement that cannot start must also keep the old file.
+        request.overwrite = true;
+        assert!(
+            finish_download(&request, &dir.path().join("missing.part"), 8, Some(8), &tx)
+                .await
+                .is_err()
+        );
+        assert_eq!(fs::read(&destination).await.unwrap(), b"foreign file");
+        request.overwrite = false;
+        fs::remove_file(&destination).await.unwrap();
+        finish_download(&request, &partial, 8, Some(8), &tx)
+            .await
+            .unwrap();
+        assert_eq!(fs::read(&destination).await.unwrap(), b"download");
+        assert!(!partial.exists());
+        assert!(!journal.exists());
+    }
 
     #[test]
     fn partial_names_are_deterministic() {
@@ -2819,9 +2894,7 @@ mod tests {
         fs::create_dir_all(&root).await.unwrap();
         let destination = root.join("payload.zip");
         let partial = partial_path(&destination);
-        fs::write(&partial, b"a payload that is 17 bytes")
-            .await
-            .unwrap();
+        fs::write(&partial, vec![b'x'; 8217]).await.unwrap();
         let (tx, _rx) = mpsc::channel(4);
         let request = DownloadRequest {
             url: "https://uupdump.net/get.php".into(),

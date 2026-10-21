@@ -30,7 +30,9 @@ impl CredentialMetadata {
             bail!("credential origin must be an HTTP or HTTPS site");
         }
         if parsed.scheme() == "http"
-            && !matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "::1"))
+            && !matches!(parsed.host(), Some(url::Host::Domain("localhost")))
+            && !matches!(parsed.host(), Some(url::Host::Ipv4(ip)) if ip.is_loopback())
+            && !matches!(parsed.host(), Some(url::Host::Ipv6(ip)) if ip.is_loopback())
         {
             bail!("credentials require HTTPS except for local services");
         }
@@ -101,6 +103,21 @@ mod tests {
         assert!(
             CredentialMetadata::new("https://example.com/login", None, AuthKind::FormLogin)
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn local_credentials_support_both_loopback_address_families() {
+        for origin in [
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+            "http://[::1]:8000",
+        ] {
+            let credential = CredentialMetadata::new(origin, None, AuthKind::HttpBasic).unwrap();
+            assert!(credential.applies_to(&format!("{origin}/private")));
+        }
+        assert!(
+            CredentialMetadata::new("http://[2001:db8::1]", None, AuthKind::HttpBasic).is_err()
         );
     }
 }

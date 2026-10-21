@@ -55,29 +55,28 @@ pub fn classify_url(input: &str) -> Option<DownloadKind> {
             .collect::<Vec<_>>()
             .windows(2)
             .any(|parts| parts[0] == "comments" && !parts[1].is_empty())
-    {
-        Some(DownloadKind::MediaPage)
-    } else if matches!(
-        url.domain(),
-        Some(
-            "youtube.com"
-                | "www.youtube.com"
-                | "youtu.be"
-                | "facebook.com"
-                | "www.facebook.com"
-                | "m.facebook.com"
-                | "fb.watch"
-                | "tiktok.com"
-                | "www.tiktok.com"
-                | "vm.tiktok.com"
-                | "vt.tiktok.com"
-                | "instagram.com"
-                | "www.instagram.com"
-                | "soundcloud.com"
-                | "www.soundcloud.com"
-                | "m.soundcloud.com"
+        || matches!(
+            url.domain(),
+            Some(
+                "youtube.com"
+                    | "www.youtube.com"
+                    | "youtu.be"
+                    | "facebook.com"
+                    | "www.facebook.com"
+                    | "m.facebook.com"
+                    | "fb.watch"
+                    | "tiktok.com"
+                    | "www.tiktok.com"
+                    | "vm.tiktok.com"
+                    | "vt.tiktok.com"
+                    | "instagram.com"
+                    | "www.instagram.com"
+                    | "soundcloud.com"
+                    | "www.soundcloud.com"
+                    | "m.soundcloud.com"
+            )
         )
-    ) {
+    {
         Some(DownloadKind::MediaPage)
     } else {
         Some(DownloadKind::Http)

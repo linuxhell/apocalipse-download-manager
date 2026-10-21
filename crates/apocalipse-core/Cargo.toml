@@ -22,3 +22,4 @@ tokio.workspace = true
 url.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
+tempfile = "3"

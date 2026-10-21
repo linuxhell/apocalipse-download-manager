@@ -5,6 +5,8 @@ mod audio_conversion;
 
 mod aria2;
 mod diagnostics;
+mod link_files;
+mod link_security;
 mod prepared_preview;
 mod runtime_health;
 mod thumbnail_cache;
@@ -485,7 +487,7 @@ fn default_bridge_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 fn default_aria2_release_repo() -> String {
-    "linuxhell/aria2-ultra".to_owned()
+    "FerroDownload/aria2-static-builds".to_owned()
 }
 fn default_link_password() -> String {
     uuid::Uuid::new_v4().simple().to_string()
@@ -1592,7 +1594,7 @@ fn resolve_link_share(
         .into_iter()
         .find(|share| share.id == id)
         .ok_or_else(|| "path_not_shared".to_owned())?;
-    let mut path = share.path;
+    let mut path = share.path.clone();
     for part in parts {
         if part.is_empty() || part == "." {
             continue;
@@ -1601,6 +1603,9 @@ fn resolve_link_share(
             return Err("invalid_remote_path".to_owned());
         }
         path.push(part);
+    }
+    if !link_security::stays_inside_share(&share.path, &path) {
+        return Err("invalid_remote_path".to_owned());
     }
     Ok((path, share.allow_write))
 }
@@ -1816,10 +1821,13 @@ fn link_remote_parts(id: &str) -> Result<(String, u16, String), String> {
         format!("https://{value}")
     };
     let parsed = url::Url::parse(&normalized).map_err(|error| error.to_string())?;
-    let host = parsed
-        .host_str()
+    let host = match parsed
+        .host()
         .ok_or_else(|| "invalid_remote_id".to_owned())?
-        .to_owned();
+    {
+        url::Host::Ipv6(ip) => ip.to_string(),
+        host => host.to_string(),
+    };
     let port = parsed.port().unwrap_or(LINK_PORT);
     let authority = if host.contains(':') {
         format!("[{host}]:{port}")
@@ -2080,15 +2088,15 @@ fn download_link_file_http_to(
         return Err(format!("remote_http_status:{status}"));
     }
     reporter.set_total(length as u64);
-    let mut file = fs::File::create(destination).map_err(|error| error.to_string())?;
     let initial_len = initial.len().min(length);
-    file.write_all(&initial[..initial_len])
-        .map_err(|error| error.to_string())?;
-    reporter.advance(initial_len as u64);
-    let remaining = length.saturating_sub(initial_len) as u64;
-    copy_link_stream_with_progress(&mut stream, &mut file, Some(remaining), reporter)?;
-    file.flush().map_err(|error| error.to_string())?;
-    Ok(())
+    link_files::staged_replace(destination, |file| {
+        file.write_all(&initial[..initial_len])
+            .map_err(|error| error.to_string())?;
+        reporter.advance(initial_len as u64);
+        let remaining = length.saturating_sub(initial_len) as u64;
+        copy_link_stream_with_progress(&mut stream, file, Some(remaining), reporter)?;
+        reporter.checkpoint()
+    })
 }
 
 fn send_link_directory(
@@ -2171,10 +2179,11 @@ fn copy_local_link_file(
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let mut input = fs::File::open(source).map_err(|error| error.to_string())?;
-    let mut output = fs::File::create(destination).map_err(|error| error.to_string())?;
     let size = input.metadata().map_err(|error| error.to_string())?.len();
-    copy_link_stream_with_progress(&mut input, &mut output, Some(size), reporter)?;
-    output.flush().map_err(|error| error.to_string())
+    link_files::staged_replace(destination, |output| {
+        copy_link_stream_with_progress(&mut input, output, Some(size), reporter)?;
+        reporter.checkpoint()
+    })
 }
 
 #[tauri::command]
@@ -2319,6 +2328,9 @@ async fn download_local_shared_link_item(
             .filter(|value| !value.is_empty())
             .or_else(|| source.file_name().and_then(|value| value.to_str()))
             .unwrap_or("download");
+        if !valid_link_component(name) {
+            return Err("invalid_file_name".to_owned());
+        }
         let destination = parent.join(name);
         let source_for_copy = source.clone();
         let destination_for_copy = destination.clone();
@@ -2510,6 +2522,9 @@ async fn download_remote_link_file(
         .filter(|value| !value.is_empty())
         .unwrap_or(fallback_name)
         .to_owned();
+    if !valid_link_component(&file_name) {
+        return Err("invalid_file_name".to_owned());
+    }
     if directory {
         let Some(destination_parent) = rfd::FileDialog::new().pick_folder() else {
             return Err("cancelled".to_owned());
@@ -4958,6 +4973,17 @@ fn handle_link_connection<S: Read + Write>(
             );
             return;
         };
+        static AUTH_BUDGET: link_security::AuthBudget = link_security::AuthBudget::new();
+        if !AUTH_BUDGET.try_acquire(Instant::now()) {
+            request.password.zeroize();
+            bridge_response(
+                &mut stream,
+                "429 Too Many Requests",
+                None,
+                "{\"error\":\"too_many_attempts\"}",
+            );
+            return;
+        }
         let authentication = verify_system_account(&request.username, &request.password);
         request.password.zeroize();
         match authentication {
@@ -5122,7 +5148,9 @@ fn handle_link_connection<S: Read + Write>(
         );
         return;
     }
-    match list_shared_link_directory(&settings, &request.path)
+    let snapshot = settings.clone();
+    drop(settings);
+    match list_shared_link_directory(&snapshot, &request.path)
         .and_then(|entries| serde_json::to_string(&entries).map_err(|error| error.to_string()))
     {
         Ok(body) => bridge_response(&mut stream, "200 OK", None, &body),
@@ -5731,11 +5759,16 @@ fn save_queue_in_background(state: &AppState, queue: &[DownloadTask]) {
     }
 }
 
-fn load_settings(path: &Path) -> Result<UserSettings, String> {
-    let mut settings: UserSettings = read_json_state_file(path).unwrap_or_default();
-    if settings.aria2_release_repo == "FerroDownload/aria2-static-builds" {
+fn migrate_aria2_release_repo(settings: &mut UserSettings) {
+    // The former default repository was deleted. Keep explicit custom sources.
+    if settings.aria2_release_repo == "linuxhell/aria2-ultra" {
         settings.aria2_release_repo = default_aria2_release_repo();
     }
+}
+
+fn load_settings(path: &Path) -> Result<UserSettings, String> {
+    let mut settings: UserSettings = read_json_state_file(path).unwrap_or_default();
+    migrate_aria2_release_repo(&mut settings);
     for share in &mut settings.link_shares {
         if let Ok(metadata) = fs::metadata(&share.path) {
             share.directory = metadata.is_dir();
@@ -15868,6 +15901,27 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn aria2_release_source_migrates_deleted_default_and_preserves_custom_sources() {
+        assert_eq!(
+            super::default_aria2_release_repo(),
+            "FerroDownload/aria2-static-builds"
+        );
+        for (saved, expected) in [
+            ("linuxhell/aria2-ultra", "FerroDownload/aria2-static-builds"),
+            (
+                "FerroDownload/aria2-static-builds",
+                "FerroDownload/aria2-static-builds",
+            ),
+            ("custom-owner/custom-builds", "custom-owner/custom-builds"),
+        ] {
+            let mut settings = super::UserSettings::default();
+            settings.aria2_release_repo = saved.to_owned();
+            super::migrate_aria2_release_repo(&mut settings);
+            assert_eq!(settings.aria2_release_repo, expected);
+        }
+    }
+
     #[test]
     fn task_preview_accepts_only_own_audio_or_video_payload() {
         let directory = tempfile::tempdir().unwrap();
