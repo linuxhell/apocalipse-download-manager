@@ -4,7 +4,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 test("all packaging workflows fetch xtreme and checksums from the same available source", () => {
-  for (const workflow of ["test-build.yml", "validate-portable.yml", "release.yml"]) {
+  const testBuild = fs.readFileSync(path.join(__dirname, "../.github/workflows/test-build.yml"), "utf8");
+  // The test build compiles the backend from the revision pinned in Cargo.lock, so it does not
+  // depend on a published release.
+  assert.match(testBuild, /cargo install --git https:\/\/github\.com\/linuxhell\/nibiru-xtreme --rev "\$rev"/);
+  assert.doesNotMatch(testBuild, /api\.github\.com\/repos\/linuxhell\/xtreme-ultra\//);
+  for (const workflow of ["validate-portable.yml", "release.yml"]) {
     const source = fs.readFileSync(path.join(__dirname, "../.github/workflows", workflow), "utf8");
     const urls = source.match(/https:\/\/api\.github\.com\/repos\/[^\s"']+\/releases\/[^\s"']+/g) || [];
     const xtreme = urls.filter(url => /xtreme/.test(url));
