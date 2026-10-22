@@ -75,7 +75,18 @@
       </article>
       <p data-i18n="listSafety"></p>
     </section>
-    <section id="panel-log" role="tabpanel" aria-labelledby="tab-log" hidden><div class="ed2k-section-heading"><h2 data-i18n="log"></h2><button id="ed2k-clear-log" data-i18n="clear"></button></div><pre id="ed2k-log" role="log"></pre></section>
+    <section id="panel-log" role="tabpanel" aria-labelledby="tab-log" hidden>
+      <div class="ed2k-section-heading"><h2 data-i18n="log"></h2><button id="ed2k-clear-log" data-i18n="clear"></button></div>
+      <div class="ed2k-log-tools">
+        <select id="ed2k-log-level" aria-label="Level"><option value="all" data-i18n="logAll"></option><option value="warn" data-i18n="logWarnings"></option><option value="error" data-i18n="logErrors"></option></select>
+        <select id="ed2k-log-area" aria-label="Area"><option value="all" data-i18n="logAreaAll"></option><option value="server" data-i18n="area_server"></option><option value="upnp" data-i18n="area_upnp"></option><option value="kad" data-i18n="area_kad"></option><option value="download" data-i18n="area_download"></option><option value="peer" data-i18n="area_peer"></option><option value="share" data-i18n="area_share"></option><option value="ui" data-i18n="area_ui"></option></select>
+        <input id="ed2k-log-search" type="search" autocomplete="off" data-i18n-placeholder="logSearch">
+        <label class="ed2k-log-follow"><input id="ed2k-log-follow" type="checkbox" checked><span data-i18n="logFollow"></span></label>
+        <button id="ed2k-log-copy" data-i18n="logCopy"></button><button id="ed2k-log-save" data-i18n="logSave"></button>
+      </div>
+      <p id="ed2k-log-summary" class="ed2k-log-summary"></p>
+      <div id="ed2k-log" role="log" aria-live="off"></div>
+    </section>
   </main>
   <footer class="ed2k-footer"><span id="ed2k-feedback" role="status"></span><span data-i18n="engine"></span></footer>
   <script src="ed2k.js"></script>

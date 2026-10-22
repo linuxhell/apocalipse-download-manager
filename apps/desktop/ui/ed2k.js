@@ -42,6 +42,9 @@
       stage_waiting_sources: "等待来源，自动重试", retryNow: "立即重试", nextAttempt: "{seconds} 秒后重试", waitingHint: "已验证的分块会保留。无法完成的下载会持续查询来源并重试，直到您暂停；连接服务器或 Kad 时会立即重试。",
       stall_not_connected: "未连接到 ED2K 服务器或 Kad", stall_no_sources: "目前没有找到来源", stall_unreachable: "找到来源，但都无法连接", stall_metadata_timeout: "节点未及时发送文件信息", stall_missing_parts: "已连接的节点还没有缺少的分块", stall_queue_timeout: "节点有所需分块，但让我们在队列中等待", stall_peer_refused: "节点拒绝或未共享该文件", stall_part_failed: "节点在发送分块时失败", stall_sources_failed: "无法查询来源",
   });
+  Object.assign(catalogs.en, {"logAll": "All levels", "logWarnings": "Warnings and errors", "logErrors": "Errors only", "logAreaAll": "All areas", "area_server": "ED2K server", "area_kad": "Kad", "area_upnp": "UPnP", "area_download": "Download", "area_peer": "Peers", "area_share": "Sharing", "area_ui": "Window", "logSearch": "Search the log", "logFollow": "Follow", "logCopy": "Copy", "logSave": "Save to file", "logCopied": "Log copied", "logSavedTo": "Log saved to {path}", "logSaveFailed": "Could not save the log: {error}", "logSummary": "{shown} of {total} entries · {warnings} warnings · {errors} errors", "logEmpty": "Nothing logged yet. Connect to ED2K or start a download.", "kind_unreachable": "could not be reached", "kind_handshake_timeout": "did not answer the handshake", "kind_metadata_timeout": "did not send file info in time", "kind_refused": "refused", "kind_queue_timeout": "upload queue too long", "ev_connecting": "Connecting to an ED2K server — candidates: {candidates}", "ev_connected_high_id": "Connected to {name} ({address}) — High ID {client_id}. UPnP: {upnp}; TCP port {tcp}", "ev_connected_low_id": "Connected to {name} ({address}) — LOW ID {client_id}: the server could not reach the incoming TCP port {tcp} (UPnP: {upnp} {upnp_error}). Sources that need a callback will not work through this server.", "ev_server_failed": "Server {address} failed: {error}", "ev_all_servers_failed": "No ED2K server accepted the connection: {error}", "ev_disconnected": "Disconnected from {name}", "ev_upnp_before_login": "UPnP: forwarding TCP port {tcp} before the login", "ev_upnp_skipped_login": "UPnP: a recent search found no router, so the login does not wait for it ({error})", "ev_upnp_login_wait_expired": "UPnP: the router did not answer within {seconds} s; logging in anyway (probably Low ID)", "ev_upnp_searching": "UPnP: looking for a router…", "ev_upnp_mapped": "UPnP: ports forwarded via {gateway} — external IP {external_ip} — {ports}", "ev_upnp_partial": "UPnP: some ports could not be forwarded ({error}) — {ports}", "ev_upnp_failed": "UPnP: no router found — {error}", "ev_kad_started": "Kad started on UDP {udp} with {seed_nodes} seed nodes", "ev_kad_stopped": "Kad stopped", "ev_attempt": "{name}: new pass — {sources} sources, {verified} of {size} verified (server: {server}, Kad: {kad})", "ev_server_sources": "{name}: the server returned {count} sources", "ev_server_sources_failed": "{name}: the server returned no sources (try {try}): {error}", "ev_kad_sources": "{name}: Kad returned {count} sources", "ev_kad_sources_failed": "{name}: the Kad search failed: {error}", "ev_waiting": "{name}: pass {attempt} ended — {reason}. Next try in {next_in_s}. {detail}", "ev_completed": "{name}: download completed and verified", "ev_paused": "{name}: paused", "ev_failed": "{name}: failed — {error}", "ev_peer_connecting": "{name}: connecting to {peer}", "ev_peer_failed": "{name}: {peer} unusable — {kind}: {error}", "ev_peer_ready": "{name}: {peer} is ready — it has {offers} parts, {wanted} of them still missing here", "ev_peer_nothing_new": "{name}: {peer} has none of the missing parts", "ev_peer_queued": "{name}: {peer} queued us — position {rank}", "ev_peer_queue_failed": "{name}: {peer} gave no upload slot — {kind}: {error}", "ev_peer_slot": "{name}: {peer} granted a slot after {waited_s}", "ev_part_started": "{name}: part {part} requested from {peer}", "ev_part_helping": "{name}: {peer} also fetches part {part} (last stretch)", "ev_part_slow": "{name}: part {part} from {peer} is slow — {received} in {elapsed_s}", "ev_part_done": "{name}: part {part} verified ({bytes} from {peer} in {elapsed_s})", "ev_part_failed": "{name}: part {part} from {peer} failed after {elapsed_s} — {error}", "ev_part_superseded": "{name}: part {part} was finished by another peer; {peer} stopped", "ev_published": "Offered {count} shared files to the server", "ev_publish_failed": "Could not offer the shared files: {error}"});
+  Object.assign(catalogs["pt-BR"], {"logAll": "Todos os níveis", "logWarnings": "Avisos e erros", "logErrors": "Só erros", "logAreaAll": "Todas as áreas", "area_server": "Servidor ED2K", "area_kad": "Kad", "area_upnp": "UPnP", "area_download": "Download", "area_peer": "Peers", "area_share": "Compartilhamento", "area_ui": "Janela", "logSearch": "Buscar no log", "logFollow": "Acompanhar", "logCopy": "Copiar", "logSave": "Salvar em arquivo", "logCopied": "Log copiado", "logSavedTo": "Log salvo em {path}", "logSaveFailed": "Não foi possível salvar o log: {error}", "logSummary": "{shown} de {total} registros · {warnings} avisos · {errors} erros", "logEmpty": "Nada registrado ainda. Conecte ao ED2K ou inicie um download.", "kind_unreachable": "não foi alcançado", "kind_handshake_timeout": "não respondeu ao handshake", "kind_metadata_timeout": "não enviou as informações do arquivo a tempo", "kind_refused": "recusou", "kind_queue_timeout": "fila de envio longa demais", "ev_connecting": "Conectando a um servidor ED2K — candidatos: {candidates}", "ev_connected_high_id": "Conectado a {name} ({address}) — ID alto {client_id}. UPnP: {upnp}; porta TCP {tcp}", "ev_connected_low_id": "Conectado a {name} ({address}) — ID BAIXO {client_id}: o servidor não alcançou a porta TCP de entrada {tcp} (UPnP: {upnp} {upnp_error}). Fontes que exigem retorno de chamada não funcionam por este servidor.", "ev_server_failed": "Servidor {address} falhou: {error}", "ev_all_servers_failed": "Nenhum servidor ED2K aceitou a conexão: {error}", "ev_disconnected": "Desconectado de {name}", "ev_upnp_before_login": "UPnP: encaminhando a porta TCP {tcp} antes do login", "ev_upnp_skipped_login": "UPnP: uma busca recente não achou roteador, então o login não espera por ele ({error})", "ev_upnp_login_wait_expired": "UPnP: o roteador não respondeu em {seconds} s; entrando mesmo assim (provavelmente ID baixo)", "ev_upnp_searching": "UPnP: procurando o roteador…", "ev_upnp_mapped": "UPnP: portas encaminhadas via {gateway} — IP externo {external_ip} — {ports}", "ev_upnp_partial": "UPnP: algumas portas não puderam ser encaminhadas ({error}) — {ports}", "ev_upnp_failed": "UPnP: roteador não encontrado — {error}", "ev_kad_started": "Kad iniciado no UDP {udp} com {seed_nodes} nós iniciais", "ev_kad_stopped": "Kad parado", "ev_attempt": "{name}: nova rodada — {sources} fontes, {verified} de {size} verificados (servidor: {server}, Kad: {kad})", "ev_server_sources": "{name}: o servidor devolveu {count} fontes", "ev_server_sources_failed": "{name}: o servidor não devolveu fontes (tentativa {try}): {error}", "ev_kad_sources": "{name}: o Kad devolveu {count} fontes", "ev_kad_sources_failed": "{name}: a busca no Kad falhou: {error}", "ev_waiting": "{name}: rodada {attempt} terminou — {reason}. Próxima tentativa em {next_in_s}. {detail}", "ev_completed": "{name}: download concluído e verificado", "ev_paused": "{name}: pausado", "ev_failed": "{name}: falhou — {error}", "ev_peer_connecting": "{name}: conectando a {peer}", "ev_peer_failed": "{name}: {peer} inutilizável — {kind}: {error}", "ev_peer_ready": "{name}: {peer} está pronto — tem {offers} partes, {wanted} delas ainda faltam aqui", "ev_peer_nothing_new": "{name}: {peer} não tem nenhuma das partes que faltam", "ev_peer_queued": "{name}: {peer} nos colocou na fila — posição {rank}", "ev_peer_queue_failed": "{name}: {peer} não liberou vaga de envio — {kind}: {error}", "ev_peer_slot": "{name}: {peer} liberou uma vaga após {waited_s}", "ev_part_started": "{name}: parte {part} pedida a {peer}", "ev_part_helping": "{name}: {peer} também busca a parte {part} (reta final)", "ev_part_slow": "{name}: parte {part} de {peer} está lenta — {received} em {elapsed_s}", "ev_part_done": "{name}: parte {part} verificada ({bytes} de {peer} em {elapsed_s})", "ev_part_failed": "{name}: parte {part} de {peer} falhou após {elapsed_s} — {error}", "ev_part_superseded": "{name}: a parte {part} foi concluída por outro peer; {peer} parou", "ev_published": "{count} arquivos compartilhados oferecidos ao servidor", "ev_publish_failed": "Não foi possível oferecer os arquivos compartilhados: {error}"});
+  Object.assign(catalogs["zh-CN"], {"logAll": "所有级别", "logWarnings": "警告和错误", "logErrors": "仅错误", "logAreaAll": "所有类别", "area_server": "ED2K 服务器", "area_kad": "Kad", "area_upnp": "UPnP", "area_download": "下载", "area_peer": "节点", "area_share": "共享", "area_ui": "窗口", "logSearch": "搜索日志", "logFollow": "跟随", "logCopy": "复制", "logSave": "保存到文件", "logCopied": "日志已复制", "logSavedTo": "日志已保存到 {path}", "logSaveFailed": "无法保存日志：{error}", "logSummary": "{shown} / {total} 条 · {warnings} 条警告 · {errors} 条错误", "logEmpty": "暂无记录。请连接 ED2K 或开始下载。", "kind_unreachable": "无法连接", "kind_handshake_timeout": "握手无响应", "kind_metadata_timeout": "未及时发送文件信息", "kind_refused": "已拒绝", "kind_queue_timeout": "上传队列过长", "ev_connecting": "正在连接 ED2K 服务器 — 候选：{candidates}", "ev_connected_high_id": "已连接到 {name}（{address}）— 高 ID {client_id}。UPnP：{upnp}；TCP 端口 {tcp}", "ev_connected_low_id": "已连接到 {name}（{address}）— 低 ID {client_id}：服务器无法访问入站 TCP 端口 {tcp}（UPnP：{upnp} {upnp_error}）。需要回调的来源无法通过此服务器使用。", "ev_server_failed": "服务器 {address} 失败：{error}", "ev_all_servers_failed": "没有 ED2K 服务器接受连接：{error}", "ev_disconnected": "已断开 {name}", "ev_upnp_before_login": "UPnP：登录前转发 TCP 端口 {tcp}", "ev_upnp_skipped_login": "UPnP：最近一次搜索未找到路由器，登录不会等待它（{error}）", "ev_upnp_login_wait_expired": "UPnP：路由器在 {seconds} 秒内未响应；仍然登录（可能是低 ID）", "ev_upnp_searching": "UPnP：正在查找路由器…", "ev_upnp_mapped": "UPnP：端口已通过 {gateway} 转发 — 外部 IP {external_ip} — {ports}", "ev_upnp_partial": "UPnP：部分端口无法转发（{error}）— {ports}", "ev_upnp_failed": "UPnP：未找到路由器 — {error}", "ev_kad_started": "Kad 已在 UDP {udp} 启动，种子节点 {seed_nodes} 个", "ev_kad_stopped": "Kad 已停止", "ev_attempt": "{name}：新一轮 — {sources} 个来源，已验证 {verified} / {size}（服务器：{server}，Kad：{kad}）", "ev_server_sources": "{name}：服务器返回 {count} 个来源", "ev_server_sources_failed": "{name}：服务器未返回来源（第 {try} 次）：{error}", "ev_kad_sources": "{name}：Kad 返回 {count} 个来源", "ev_kad_sources_failed": "{name}：Kad 搜索失败：{error}", "ev_waiting": "{name}：第 {attempt} 轮结束 — {reason}。{next_in_s} 后重试。{detail}", "ev_completed": "{name}：下载完成并已验证", "ev_paused": "{name}：已暂停", "ev_failed": "{name}：失败 — {error}", "ev_peer_connecting": "{name}：正在连接 {peer}", "ev_peer_failed": "{name}：{peer} 不可用 — {kind}：{error}", "ev_peer_ready": "{name}：{peer} 就绪 — 拥有 {offers} 个分块，其中 {wanted} 个本地仍缺失", "ev_peer_nothing_new": "{name}：{peer} 没有任何缺失的分块", "ev_peer_queued": "{name}：{peer} 将我们排入队列 — 位置 {rank}", "ev_peer_queue_failed": "{name}：{peer} 未提供上传名额 — {kind}：{error}", "ev_peer_slot": "{name}：{peer} 在 {waited_s} 后提供了名额", "ev_part_started": "{name}：向 {peer} 请求分块 {part}", "ev_part_helping": "{name}：{peer} 也在获取分块 {part}（最后阶段）", "ev_part_slow": "{name}：来自 {peer} 的分块 {part} 很慢 — {elapsed_s} 内收到 {received}", "ev_part_done": "{name}：分块 {part} 已验证（来自 {peer}，{bytes}，用时 {elapsed_s}）", "ev_part_failed": "{name}：来自 {peer} 的分块 {part} 在 {elapsed_s} 后失败 — {error}", "ev_part_superseded": "{name}：分块 {part} 已由其他节点完成；{peer} 已停止", "ev_published": "已向服务器提供 {count} 个共享文件", "ev_publish_failed": "无法提供共享文件：{error}"});
   let locale = "en";
   try { const cached = localStorage.getItem("apocalipse.language"); if (catalogs[cached]) locale = cached; } catch {}
   const invoke = window.__TAURI__?.core?.invoke;
@@ -49,9 +52,70 @@
   const t = (key, values = {}) => Object.entries(values).reduce((s, [k,v]) => s.replaceAll(`{${k}}`, String(v)), catalogs[locale][key] || catalogs.en[key] || key);
   let overview = null, results = [], sourceView = null, busy = false;
   let feedback = { key: "ready", values: {}, error: false };
-  const logLines = [];
+  // The log shows entries from the backend (what the network layer and the downloads did and why)
+  // plus what this window did. Nothing here is inserted as HTML.
+  const entries = [];
+  let lastEventId = 0, clearedAt = 0, localSeq = 0;
+  const pad = (value, width = 2) => String(value).padStart(width, "0");
+  const clock = at => { const d = new Date(at); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`; };
   function message(key, values = {}, error = false) { feedback = { key, values, error }; $("#ed2k-feedback").textContent = t(key, values); $("#ed2k-feedback").dataset.error = String(error); }
-  function log(text) { logLines.push(`${new Date().toLocaleTimeString(locale)}  ${text}`); if (logLines.length > 300) logLines.shift(); $("#ed2k-log").textContent = logLines.join("\n"); }
+  function log(text, level = "info") { entries.push({ id: 0, seq: ++localSeq, at: Date.now(), level, area: "ui", code: "", fields: {}, text }); if (entries.length > 3000) entries.shift(); renderLog(); }
+  function displayFields(fields) {
+    const shown = {};
+    for (const [key, value] of Object.entries(fields || {})) {
+      let text;
+      if (value === null || value === undefined || value === "") text = "—";
+      else if (Array.isArray(value)) text = value.length ? value.join(", ") : "—";
+      else if (typeof value === "boolean") text = value ? "✓" : "✗";
+      else if (key.endsWith("_s") && typeof value === "number") text = `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value)} s`;
+      else if (["received", "bytes", "verified", "size"].includes(key) && typeof value === "number") text = size(value);
+      else if (key === "kind" || key === "reason") text = t((key === "kind" ? "kind_" : "stall_") + value);
+      else text = String(value);
+      shown[key] = text;
+    }
+    return shown;
+  }
+  function entryText(entry) {
+    if (entry.text) return entry.text;
+    const key = "ev_" + entry.code;
+    return catalogs[locale][key] || catalogs.en[key] ? t(key, displayFields(entry.fields)) : `${entry.code} ${JSON.stringify(entry.fields)}`;
+  }
+  function visibleEntries() {
+    const level = $("#ed2k-log-level").value || "all", area = $("#ed2k-log-area").value || "all";
+    const query = ($("#ed2k-log-search").value || "").trim().toLowerCase();
+    return entries.filter(entry => (entry.id === 0 || entry.id > clearedAt)
+      && (level === "all" || (level === "warn" ? entry.level !== "info" : entry.level === "error"))
+      && (area === "all" || entry.area === area)
+      && (!query || entryText(entry).toLowerCase().includes(query)));
+  }
+  function renderLog() {
+    const box = $("#ed2k-log"), shown = visibleEntries().sort((a, b) => a.at - b.at || a.id - b.id || (a.seq || 0) - (b.seq || 0));
+    const live = entries.filter(entry => entry.id === 0 || entry.id > clearedAt);
+    const rows = shown.slice(-1500).map(entry => {
+      const row = document.createElement("div");
+      row.dataset.level = entry.level;
+      row.textContent = `${clock(entry.at)}  ${t("area_" + entry.area)}  ${entryText(entry)}`;
+      row.title = entry.code ? `${entry.code} ${JSON.stringify(entry.fields)}` : "";
+      return row;
+    });
+    if (!rows.length) { const empty = document.createElement("div"); empty.dataset.level = "empty"; empty.textContent = t("logEmpty"); rows.push(empty); }
+    box.replaceChildren(...rows);
+    $("#ed2k-log-summary").textContent = t("logSummary", { shown: shown.length, total: live.length, warnings: live.filter(e => e.level === "warn").length, errors: live.filter(e => e.level === "error").length });
+    if ($("#ed2k-log-follow").checked !== false) box.scrollTop = box.scrollHeight;
+  }
+  function logAsText() {
+    return [`Apocalipse ED2K log — ${new Date().toISOString()} — ${visibleEntries().length} entries`, ...visibleEntries().sort((a, b) => a.at - b.at || a.id - b.id || (a.seq || 0) - (b.seq || 0)).map(entry => {
+      const stamp = new Date(entry.at), date = `${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())} ${clock(entry.at)}`;
+      return `${date} ${entry.level.toUpperCase().padEnd(5)} ${entry.area.padEnd(8)} ${entryText(entry)}${entry.code ? `  | ${entry.code} ${JSON.stringify(entry.fields)}` : ""}`;
+    })].join("\n");
+  }
+  async function fetchEvents() {
+    const fresh = await invoke("ed2k_events", { after: lastEventId });
+    if (!Array.isArray(fresh) || !fresh.length) return;
+    for (const entry of fresh) { entries.push(entry); lastEventId = Math.max(lastEventId, entry.id); }
+    if (entries.length > 3000) entries.splice(0, entries.length - 3000);
+    renderLog();
+  }
   function controls() {
     const connected = Boolean(overview?.server);
     $("#ed2k-connect").disabled = busy || !overview?.servers?.length;
@@ -109,7 +173,7 @@
         const seconds = Math.max(0, Math.round((task.retry_at || 0) - Date.now() / 1000));
         state += ` · ${t("stall_" + (task.stall || "no_sources"))}` + (task.retry_at ? ` · ${t("nextAttempt", {seconds})}` : "");
       }
-      for (const value of [task.file.name,size(task.file.size),`${new Intl.NumberFormat(locale,{maximumFractionDigits:1}).format(percent)}%`,state,task.peer || "—"]) {
+      for (const value of [task.file.name,size(task.file.size),`${new Intl.NumberFormat(locale,{maximumFractionDigits:1}).format(percent)}%${task.in_flight > 0 ? ` · +${size(task.in_flight)}` : ""}`,state,task.peer || "—"]) {
         const td = document.createElement("td"); td.textContent=String(value); td.title=task.error || `${task.directory} · ${value}`; row.append(td);
       }
       const actions = document.createElement("td");
@@ -202,6 +266,8 @@
   function render() {
     document.documentElement.lang = locale;
     for (const node of document.querySelectorAll("[data-i18n]")) node.textContent = t(node.dataset.i18n);
+    $("#ed2k-log-search").setAttribute("placeholder", t("logSearch"));
+    renderLog();
     message(feedback.key, feedback.values, feedback.error);
     $("#ed2k-status").textContent = `ED2K: ${overview?.server ? t("online") : t("offline")}${overview?.low_id ? ` · ${t("lowId")}` : ""}`;
     $("#ed2k-status").dataset.online = String(Boolean(overview?.server));
@@ -222,7 +288,7 @@
     }
     renderResults(); renderSources(); renderDownloads(); renderShares(); controls();
   }
-  async function refresh() { if (!invoke) return; overview = await invoke("ed2k_overview"); render(); }
+  async function refresh() { if (!invoke) return; overview = await invoke("ed2k_overview"); render(); await fetchEvents(); }
   async function run(command, args = {}, success = () => message("ready")) {
     if (!invoke) { message("desktopRequired", {}, true); return; }
     if (busy) return;
@@ -264,7 +330,12 @@
   };
   $("#ed2k-result-filter").oninput = renderResults;
   $("#ed2k-result-sort").onchange = renderResults;
-  $("#ed2k-clear-log").onclick = () => { logLines.length=0; $("#ed2k-log").textContent=""; };
+  $("#ed2k-clear-log").onclick = () => { clearedAt = lastEventId; for (let i = entries.length - 1; i >= 0; i--) if (entries[i].id === 0) entries.splice(i, 1); renderLog(); };
+  for (const id of ["#ed2k-log-level", "#ed2k-log-area"]) $(id).onchange = renderLog;
+  $("#ed2k-log-search").oninput = renderLog;
+  $("#ed2k-log-follow").onchange = renderLog;
+  $("#ed2k-log-copy").onclick = async () => { try { await navigator.clipboard.writeText(logAsText()); message("logCopied"); } catch (error) { log(String(error), "warn"); } };
+  $("#ed2k-log-save").onclick = async () => { try { const path = await invoke("ed2k_save_log", { text: logAsText() }); message("logSavedTo", { path }); log(t("logSavedTo", { path })); } catch (error) { message("logSaveFailed", { error: String(error) }, true); } };
   function selectTab(name) {
     for (const button of document.querySelectorAll("[data-tab]")) button.setAttribute("aria-selected",String(button.dataset.tab === name));
     for (const panel of document.querySelectorAll("[role=tabpanel]")) panel.hidden = panel.id !== "panel-"+name;

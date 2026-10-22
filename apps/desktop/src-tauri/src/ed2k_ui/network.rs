@@ -35,6 +35,8 @@ pub struct Network {
     prefs_path: PathBuf,
     pub kad: RwLock<Option<Arc<KadSession>>>,
     pub upnp: Arc<Upnp>,
+    /// What the log last said about the router, so it only writes changes.
+    last_logged: Mutex<String>,
 }
 
 impl Network {
@@ -50,6 +52,7 @@ impl Network {
             prefs_path,
             kad: RwLock::new(None),
             upnp: Upnp::new("Apocalipse ED2K"),
+            last_logged: Mutex::new(String::new()),
         }
     }
 
@@ -129,6 +132,7 @@ pub async fn sync_upnp(state: &Ed2kState) {
         .upnp
         .apply(wanted_mappings(&prefs, server_connected, tcp_port, kad_udp))
         .await;
+    log_upnp(state);
 }
 
 /// Forwards the incoming TCP port **before** logging in to an ED2K server.
@@ -160,11 +164,64 @@ pub async fn forward_before_login(state: &Ed2kState) {
             .as_deref()
             .is_some_and(|error| error.starts_with("upnp_no_gateway"));
     if no_router {
+        state.events.warn(
+            "upnp",
+            "upnp_skipped_login",
+            serde_json::json!({"error": status.error}),
+        );
         let upnp = state.net.upnp.clone();
         tauri::async_runtime::spawn(async move { upnp.apply(wanted).await });
         return;
     }
-    let _ = tokio::time::timeout(LOGIN_WAIT, state.net.upnp.apply(wanted)).await;
+    state.events.info(
+        "upnp",
+        "upnp_before_login",
+        serde_json::json!({"tcp": tcp_port}),
+    );
+    if tokio::time::timeout(LOGIN_WAIT, state.net.upnp.apply(wanted))
+        .await
+        .is_err()
+    {
+        state.events.warn(
+            "upnp",
+            "upnp_login_wait_expired",
+            serde_json::json!({"seconds": LOGIN_WAIT.as_secs()}),
+        );
+    }
+    log_upnp(state);
+}
+
+/// Writes the router's state to the log when it changes, with the reason when it failed.
+pub fn log_upnp(state: &Ed2kState) {
+    let status = state.net.upnp.status();
+    let key = format!(
+        "{}|{:?}|{:?}|{}",
+        status.state,
+        status.error,
+        status.external_ip,
+        status.mappings.len()
+    );
+    let mut last = state
+        .net
+        .last_logged
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if *last == key {
+        return;
+    }
+    *last = key;
+    let fields = serde_json::json!({
+        "gateway": status.gateway, "external_ip": status.external_ip,
+        "ports": status.mappings.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>(),
+        "error": status.error,
+    });
+    match status.state {
+        "mapped" => state.events.info("upnp", "upnp_mapped", fields),
+        "partial" => state.events.warn("upnp", "upnp_partial", fields),
+        "failed" => state.events.error("upnp", "upnp_failed", fields),
+        "searching" => state.events.info("upnp", "upnp_searching", fields),
+        _ => {}
+    }
 }
 
 pub fn spawn_sync_upnp(app: tauri::AppHandle) {
@@ -249,12 +306,20 @@ pub async fn start_kad(state: &Ed2kState) -> Result<(), String> {
     .await?;
     session.set_obfuscation(state.net.prefs().obfuscation != Obfuscation::Disabled);
     *state.net.kad.write().await = Some(session);
+    state.events.info(
+        "kad",
+        "kad_started",
+        serde_json::json!({"udp": port, "seed_nodes": state.library.lock().map(|l| l.nodes.len()).unwrap_or(0)}),
+    );
     Ok(())
 }
 
 pub async fn stop_kad(state: &Ed2kState) {
     if let Some(session) = state.net.kad.write().await.take() {
         session.stop();
+        state
+            .events
+            .info("kad", "kad_stopped", serde_json::json!({}));
     }
 }
 

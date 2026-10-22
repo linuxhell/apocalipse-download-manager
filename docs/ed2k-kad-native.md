@@ -243,3 +243,22 @@ e reconectar o ED2K; o Kad não precisava).
   (+1, nos três idiomas).
 - **Não provado:** que o caso real do usuário tenha a causa que o teste reproduz (par que responde ao status mas
   não à lista de hashes); isso precisa de uma transferência real. Também não foi aberta a janela Tauri.
+
+## Log da janela ED2K
+
+A aba **Log** mostra o que a camada de rede e os downloads fizeram e por quê. O backend guarda os últimos
+2000 eventos em memória (`ed2k_ui/events.rs`: `ed2k_events` devolve os novos desde um id, `ed2k_save_log`
+grava o texto exibido na pasta de dados do ED2K). Cada evento tem nível (`info`, `warn`, `error`), área
+(`server`, `upnp`, `kad`, `download`, `peer`, `share`), um código estável e campos; a janela traduz o código
+em en, pt-BR e zh-CN (`ev_<código>`) e mostra o código e os campos no tooltip da linha. Há filtro por nível e
+área, busca, "acompanhar", copiar e salvar (o texto copiado traz também o código e os campos em JSON).
+
+O que é registrado: servidores tentados e resultado (ID alto ou baixo, com o estado do UPnP), UPnP (procurando,
+portas encaminhadas com gateway e IP externo, falha com o motivo, espera antes do login), Kad, e para cada
+download: cada rodada (fontes do servidor e do Kad, bytes verificados), cada peer (conexão, falha por tipo,
+partes oferecidas e faltantes, posição na fila, vaga), cada parte (pedida, lenta, verificada, falha, concluída
+por outro peer) e o motivo de espera entre rodadas.
+
+O engine (nibiru-xtreme 5ef3410) emite esses eventos de peer via `TransferOptions::events` e informa em
+`TransferProgress::in_flight` os bytes de partes ainda não verificadas (a coluna "Verificado" mostra `+X MiB`).
+Na reta final um peer ocioso também busca a parte que outro peer tem há mais de 30 s; o primeiro a terminar vence.

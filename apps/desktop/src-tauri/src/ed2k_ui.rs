@@ -1,5 +1,6 @@
 //! Native Nibiru ED2K integration. No aMule executable or daemon is used.
 pub mod downloads;
+pub mod events;
 pub mod network;
 pub mod preview;
 pub mod retry;
@@ -35,6 +36,7 @@ pub struct Ed2kState {
     incoming: AsyncMutex<Option<ed2k::IncomingListener>>,
     generation: AtomicU64,
     net: network::Network,
+    events: events::Events,
     user_hash: [u8; 16],
 }
 impl Ed2kState {
@@ -52,6 +54,7 @@ impl Ed2kState {
             incoming: AsyncMutex::new(None),
             generation: AtomicU64::new(0),
             net: network::Network::new(&PathBuf::new()),
+            events: events::Events::default(),
             user_hash: [0; 16],
         }
     }
@@ -123,6 +126,7 @@ impl Ed2kState {
             incoming: AsyncMutex::new(None),
             generation: AtomicU64::new(0),
             net: network::Network::new(&root_for_network),
+            events: events::Events::default(),
             user_hash,
         })
     }
@@ -298,6 +302,13 @@ pub async fn ed2k_connect(
             .cloned()
             .collect(),
     };
+    state.events.info(
+        "server",
+        "connecting",
+        serde_json::json!({
+            "candidates": candidates.iter().map(|s| format!("{}:{}", s.host, s.port)).collect::<Vec<_>>(),
+        }),
+    );
     // The server tests our TCP port during login: have the router forward it first.
     network::forward_before_login(&state).await;
     if state.generation.load(Ordering::Acquire) != revision {
@@ -308,6 +319,7 @@ pub async fn ed2k_connect(
         if state.generation.load(Ordering::Acquire) != revision {
             return Err("connection_cancelled".into());
         }
+        let server_address = (server.host.clone(), server.port);
         match ServerConnection::connect_with(
             server,
             state.user_hash,
@@ -326,16 +338,52 @@ pub async fn ed2k_connect(
                 if let Some(listener) = state.incoming.lock().await.as_ref() {
                     listener.set_client_id(connection.client_id);
                 }
+                let (name, client_id, low_id) = (
+                    connection.server.name.clone(),
+                    connection.client_id,
+                    connection.is_low_id(),
+                );
+                let address = format!("{}:{}", connection.server.host, connection.server.port);
                 *active = Some(connection);
                 drop(active);
+                let upnp = state.net.upnp.status();
+                state.events.push(
+                    if low_id { "warn" } else { "info" },
+                    "server",
+                    if low_id {
+                        "connected_low_id"
+                    } else {
+                        "connected_high_id"
+                    },
+                    serde_json::json!({
+                        "name": name, "address": address, "client_id": client_id,
+                        "upnp": upnp.state, "upnp_error": upnp.error,
+                        "tcp": state.incoming.lock().await.as_ref().map(|l| l.status().tcp_port),
+                    }),
+                );
                 network::spawn_sync_upnp(app.clone());
                 state.downloads.wake();
                 publish_shares(&state).await;
                 return Ok(());
             }
-            Err(error) => last = error.to_string(),
+            Err(error) => {
+                last = error.to_string();
+                state.events.warn(
+                    "server",
+                    "server_failed",
+                    serde_json::json!({
+                        "address": format!("{}:{}", server_address.0, server_address.1),
+                        "error": last,
+                    }),
+                );
+            }
         }
     }
+    state.events.error(
+        "server",
+        "all_servers_failed",
+        serde_json::json!({"error": last}),
+    );
     Err(last)
 }
 /// Offers the shared files to the connected server (ED2K has no withdraw packet: removed files
@@ -357,8 +405,20 @@ pub async fn publish_shares(state: &Ed2kState) {
         return;
     }
     match connection.offer_files(&files).await {
-        Ok(count) => shares::set_published(state, count, None),
-        Err(error) => shares::set_published(state, 0, Some(error.to_string())),
+        Ok(count) => {
+            state
+                .events
+                .info("share", "published", serde_json::json!({"count": count}));
+            shares::set_published(state, count, None)
+        }
+        Err(error) => {
+            state.events.warn(
+                "share",
+                "publish_failed",
+                serde_json::json!({"error": error.to_string()}),
+            );
+            shares::set_published(state, 0, Some(error.to_string()))
+        }
     }
 }
 #[tauri::command]
@@ -370,6 +430,11 @@ pub async fn ed2k_disconnect(
     state.generation.fetch_add(1, Ordering::AcqRel);
     if let Some(connection) = state.server.write().await.take() {
         connection.disconnect();
+        state.events.info(
+            "server",
+            "disconnected",
+            serde_json::json!({"name": connection.server.name}),
+        );
     }
     if let Some(listener) = state.incoming.lock().await.as_ref() {
         listener.set_client_id(0);

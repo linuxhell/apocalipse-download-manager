@@ -37,6 +37,9 @@ pub struct Download {
     /// When the next pass starts, in Unix seconds.
     #[serde(default, skip_deserializing)]
     pub retry_at: Option<u64>,
+    /// Bytes of parts being received that are not verified yet.
+    #[serde(default, skip_deserializing)]
+    pub in_flight: u64,
 }
 struct Inner {
     path: PathBuf,
@@ -205,6 +208,7 @@ impl Downloads {
                         .map_or(0, |now| (now + waiting.wait).as_secs());
                     let _ = queue.update(&id, |task| {
                         task.status = "waiting_sources".into();
+                        task.in_flight = 0;
                         task.stall = Some(waiting.code.to_owned());
                         task.attempts = waiting.attempt;
                         task.retry_at = Some(retry_at);
@@ -212,6 +216,15 @@ impl Downloads {
                         task.peer = None;
                         task.queue_rank = None;
                     });
+                    app.state::<Ed2kState>().events.warn(
+                        "download",
+                        "waiting",
+                        serde_json::json!({
+                            "name": task.file.name, "attempt": waiting.attempt,
+                            "reason": waiting.code, "next_in_s": waiting.wait.as_secs(),
+                            "detail": waiting.detail,
+                        }),
+                    );
                     log(
                         "WARN",
                         "ed2k.waiting_sources",
@@ -236,11 +249,28 @@ impl Downloads {
                 "ed2k.download_ended",
                 &format!("task={id} outcome={outcome:?}"),
             );
+            app.state::<Ed2kState>().events.push(
+                match &outcome {
+                    Outcome::Failed(_) => "error",
+                    _ => "info",
+                },
+                "download",
+                match &outcome {
+                    Outcome::Completed => "completed",
+                    Outcome::Cancelled => "paused",
+                    Outcome::Failed(_) => "failed",
+                },
+                serde_json::json!({
+                    "name": task.file.name,
+                    "error": match &outcome { Outcome::Failed(error) => error.as_str(), _ => "" },
+                }),
+            );
             let _ = queue.update(&id, |task| {
                 task.peer = None;
                 task.queue_rank = None;
                 task.stall = None;
                 task.retry_at = None;
+                task.in_flight = 0;
                 match outcome {
                     Outcome::Completed => {
                         task.status = "completed".into();
@@ -340,11 +370,25 @@ async fn attempt_once(
             };
             match found {
                 Ok(found) => {
+                    state.events.info(
+                        "download",
+                        "server_sources",
+                        serde_json::json!({"name": task.file.name, "count": found.len()}),
+                    );
                     sources = found;
                     answered = true;
                     break;
                 }
-                Err(reason) => error = reason.to_string(),
+                Err(reason) => {
+                    state.events.warn(
+                        "download",
+                        "server_sources_failed",
+                        serde_json::json!({
+                            "name": task.file.name, "try": attempt + 1, "error": reason.to_string(),
+                        }),
+                    );
+                    error = reason.to_string();
+                }
             }
             if attempt < 2 {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -359,6 +403,23 @@ async fn attempt_once(
             ) => result,
             _ = wait_cancelled(cancel) => return Err(Failure::Cancelled),
         };
+        match &found {
+            Ok(Ok(list)) => state.events.info(
+                "download",
+                "kad_sources",
+                serde_json::json!({"name": task.file.name, "count": list.len()}),
+            ),
+            Ok(Err(reason)) => state.events.warn(
+                "download",
+                "kad_sources_failed",
+                serde_json::json!({"name": task.file.name, "error": reason.to_string()}),
+            ),
+            Err(_) => state.events.warn(
+                "download",
+                "kad_sources_failed",
+                serde_json::json!({"name": task.file.name, "error": "timeout"}),
+            ),
+        }
         if let Ok(Ok(list)) = found {
             answered = true;
             for source in list {
@@ -401,7 +462,16 @@ async fn attempt_once(
         client_id: server.as_ref().map_or(0, |connection| connection.client_id),
         callbacks,
         obfuscation: state.net.prefs().obfuscation,
+        events: Some(peer_events(app.clone(), task.file.name.clone())),
     };
+    state.events.info(
+        "download",
+        "attempt",
+        serde_json::json!({
+            "name": task.file.name, "sources": sources.len(), "verified": before,
+            "size": task.file.size, "server": server.is_some(), "kad": kad.is_some(),
+        }),
+    );
     let result = ed2k::download_with_options(
         &task.file,
         &task.directory,
@@ -429,6 +499,7 @@ async fn attempt_once(
                 if !unchecked {
                     task.verified = progress.verified;
                 }
+                task.in_flight = progress.in_flight;
                 task.peer = progress.peer;
                 task.queue_rank = progress.queue_rank;
             });
@@ -510,6 +581,7 @@ pub async fn ed2k_add_download(
                 stall: None,
                 attempts: 0,
                 retry_at: None,
+                in_flight: 0,
             },
         );
         if let Err(error) = state.downloads.persist(&tasks) {
@@ -616,6 +688,32 @@ pub async fn ed2k_preview_download(
     super::super::launch_media_target(player, std::ffi::OsStr::new(&url))
 }
 
+/// Turns what the engine does with each peer into log entries, so a stalled download can be
+/// explained afterwards.
+fn peer_events(app: tauri::AppHandle, name: String) -> ed2k::EventSink {
+    use ed2k::TransferEvent::*;
+    use serde_json::json;
+    Arc::new(move |event| {
+        let state = app.state::<Ed2kState>();
+        let events = &state.events;
+        let seconds = |ms: u64| ms as f64 / 1000.0;
+        match event {
+            Connecting { peer } => events.info("peer", "peer_connecting", json!({"name": name, "peer": peer})),
+            PeerFailed { peer, kind, error } => events.warn("peer", "peer_failed", json!({"name": name, "peer": peer, "kind": kind, "error": error})),
+            PeerReady { peer, offers, wanted } => events.info("peer", "peer_ready", json!({"name": name, "peer": peer, "offers": offers, "wanted": wanted})),
+            PeerHasNothingNew { peer } => events.warn("peer", "peer_nothing_new", json!({"name": name, "peer": peer})),
+            Queued { peer, rank } => events.info("peer", "peer_queued", json!({"name": name, "peer": peer, "rank": rank})),
+            QueueFailed { peer, kind, error } => events.warn("peer", "peer_queue_failed", json!({"name": name, "peer": peer, "kind": kind, "error": error})),
+            SlotGranted { peer, waited_ms } => events.info("peer", "peer_slot", json!({"name": name, "peer": peer, "waited_s": seconds(waited_ms)})),
+            PartStarted { peer, index, shadow } => events.info("peer", if shadow { "part_helping" } else { "part_started" }, json!({"name": name, "peer": peer, "part": index + 1})),
+            PartSlow { peer, index, received, elapsed_ms } => events.warn("peer", "part_slow", json!({"name": name, "peer": peer, "part": index + 1, "received": received, "elapsed_s": seconds(elapsed_ms)})),
+            PartDone { peer, index, bytes, elapsed_ms } => events.info("peer", "part_done", json!({"name": name, "peer": peer, "part": index + 1, "bytes": bytes, "elapsed_s": seconds(elapsed_ms)})),
+            PartFailed { peer, index, error, elapsed_ms } => events.warn("peer", "part_failed", json!({"name": name, "peer": peer, "part": index + 1, "error": error, "elapsed_s": seconds(elapsed_ms)})),
+            PartSuperseded { peer, index } => events.info("peer", "part_superseded", json!({"name": name, "peer": peer, "part": index + 1})),
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -641,6 +739,7 @@ mod tests {
             stall: None,
             attempts: 0,
             retry_at: None,
+            in_flight: 0,
         };
         {
             let mut tasks = queue.0.tasks.lock().unwrap();
