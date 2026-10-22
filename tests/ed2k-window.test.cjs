@@ -344,3 +344,15 @@ test('the log explains what happened, in the chosen language, and can be filtere
   f.events.push(unknown);await f.ids.get('ed2k-connect').onclick();
   assert.match(joined(),/future_event \{"x":1\}/);
 });
+
+test('the log says when files you share match a search but the server did not return them',async()=>{
+  const f=await windowFixture({language:'pt-BR',connected:true});
+  const at=Date.UTC(2026,9,22,5,0,0);
+  f.events.push({id:1,at,level:'warn',area:'server',code:'search_own_missing',fields:{query:'shemales',results:0,own_returned:0,own_matching:7,own_total:434,server:'ed2k-rust'}});
+  await f.ids.get('ed2k-connect').onclick();
+  const text=f.ids.get('ed2k-log').children.map(row=>row.textContent).join('\n');
+  assert.match(text,/Busca "shemales": 7 dos seus arquivos compartilhados combinam com as palavras, mas o servidor não devolveu nenhum deles/);
+  assert.match(text,/palavras inteiras do nome do arquivo \(não o nome da pasta\)/);
+  f.language('en');
+  assert.match(f.ids.get('ed2k-log').children.map(row=>row.textContent).join('\n'),/did not return any of them/);
+});

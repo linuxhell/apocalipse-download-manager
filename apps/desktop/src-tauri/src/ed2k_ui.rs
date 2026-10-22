@@ -446,7 +446,7 @@ pub async fn ed2k_disconnect(
 pub async fn ed2k_search(
     state: State<'_, Ed2kState>,
     query: String,
-) -> Result<Vec<ed2k::SearchResult>, String> {
+) -> Result<Vec<serde_json::Value>, String> {
     state.ready()?;
     let connection = state
         .server
@@ -455,7 +455,54 @@ pub async fn ed2k_search(
         .as_ref()
         .cloned()
         .ok_or("ed2k_not_connected")?;
-    connection.search(&query).await.map_err(|e| e.to_string())
+    let found = match connection.search(&query).await {
+        Ok(found) => found,
+        Err(error) => {
+            state.events.warn(
+                "server",
+                "search_failed",
+                serde_json::json!({"query": query, "error": error.to_string()}),
+            );
+            return Err(error.to_string());
+        }
+    };
+    // Servers list what other clients offered; a result that is one of our own shared files is
+    // marked, and the log says when files we share match the words but did not come back.
+    let offered = state.shares.registry.offered();
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    let own_matching = offered
+        .iter()
+        .filter(|file| {
+            let name = file.name.to_lowercase();
+            !words.is_empty() && words.iter().all(|word| name.contains(word.as_str()))
+        })
+        .count();
+    let own_hashes: std::collections::HashSet<String> = offered
+        .iter()
+        .map(|file| file.hash.iter().map(|byte| format!("{byte:02x}")).collect())
+        .collect();
+    let results: Vec<serde_json::Value> = found
+        .iter()
+        .map(|result| {
+            let mut value = serde_json::to_value(result).unwrap_or_default();
+            value["shared"] = own_hashes.contains(&result.hash.to_lowercase()).into();
+            value
+        })
+        .collect();
+    let own_returned = results
+        .iter()
+        .filter(|value| value["shared"].as_bool() == Some(true))
+        .count();
+    let fields = serde_json::json!({
+        "query": query, "results": results.len(), "own_returned": own_returned,
+        "own_matching": own_matching, "own_total": offered.len(),
+        "server": connection.server.name,
+    });
+    state.events.info("server", "search", fields.clone());
+    if own_matching > 0 && own_returned == 0 {
+        state.events.warn("server", "search_own_missing", fields);
+    }
+    Ok(results)
 }
 #[tauri::command]
 pub async fn ed2k_find_sources(
