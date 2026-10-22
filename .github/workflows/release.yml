@@ -4,6 +4,7 @@ name: Release builds
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     tags:
       - "v*"
     paths-ignore:
@@ -108,7 +109,9 @@ jobs:
         run: |
           set -euo pipefail
           release_json="$RUNNER_TEMP/xtreme-release.json"
-          curl --fail --location --retry 3 \
+          # The engine release is validated/published independently. Wait for the exact
+          # release when the owner starts both publications together (404 is retryable here).
+          curl --fail --location --retry 60 --retry-all-errors --retry-delay 15 --retry-max-time 900 \
             --header "Authorization: Bearer $GITHUB_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/linuxhell/nibiru-xtreme/releases/tags/v0.2.0" \
