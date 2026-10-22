@@ -395,44 +395,48 @@ async fn attempt_once(
             }
         }
     }
-    if let Some(kad) = &kad {
-        let found = tokio::select! {
-            result = tokio::time::timeout(
+    // Kad takes seconds: it runs while the transfer starts with what the server gave, and what it
+    // finds joins the transfer as it arrives.
+    let mut late_sources = None;
+    let mut kad_task = None;
+    if let Some(kad) = kad.clone() {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        late_sources = Some(receiver);
+        let (hash_bytes, size, name) = (task.file.hash, task.file.size, task.file.name.clone());
+        let app = app.clone();
+        kad_task = Some(tauri::async_runtime::spawn(async move {
+            let found = tokio::time::timeout(
                 std::time::Duration::from_secs(25),
-                kad.sources(task.file.hash, task.file.size),
-            ) => result,
-            _ = wait_cancelled(cancel) => return Err(Failure::Cancelled),
-        };
-        match &found {
-            Ok(Ok(list)) => state.events.info(
-                "download",
-                "kad_sources",
-                serde_json::json!({"name": task.file.name, "count": list.len()}),
-            ),
-            Ok(Err(reason)) => state.events.warn(
-                "download",
-                "kad_sources_failed",
-                serde_json::json!({"name": task.file.name, "error": reason.to_string()}),
-            ),
-            Err(_) => state.events.warn(
-                "download",
-                "kad_sources_failed",
-                serde_json::json!({"name": task.file.name, "error": "timeout"}),
-            ),
-        }
-        if let Ok(Ok(list)) = found {
-            answered = true;
-            for source in list {
-                if !sources
-                    .iter()
-                    .any(|known| known.host == source.host && known.port == source.port)
-                {
-                    sources.push(source);
+                kad.sources(hash_bytes, size),
+            )
+            .await;
+            let state = app.state::<Ed2kState>();
+            match &found {
+                Ok(Ok(list)) => state.events.info(
+                    "download",
+                    "kad_sources",
+                    serde_json::json!({"name": name, "count": list.len()}),
+                ),
+                Ok(Err(reason)) => state.events.warn(
+                    "download",
+                    "kad_sources_failed",
+                    serde_json::json!({"name": name, "error": reason.to_string()}),
+                ),
+                Err(_) => state.events.warn(
+                    "download",
+                    "kad_sources_failed",
+                    serde_json::json!({"name": name, "error": "timeout"}),
+                ),
+            }
+            if let Ok(Ok(list)) = found {
+                for source in list {
+                    let _ = sender.send(source);
                 }
             }
-        }
+            // The sender goes away here: the transfer knows no more sources are coming.
+        }));
     }
-    if !answered {
+    if !answered && kad.is_none() {
         return Err(Failure::Sources(error));
     }
     tokio::fs::create_dir_all(&task.directory)
@@ -463,6 +467,7 @@ async fn attempt_once(
         callbacks,
         obfuscation: state.net.prefs().obfuscation,
         events: Some(peer_events(app.clone(), task.file.name.clone())),
+        late_sources,
     };
     state.events.info(
         "download",
@@ -506,6 +511,9 @@ async fn attempt_once(
         },
     )
     .await;
+    if let Some(task) = kad_task {
+        task.abort();
+    }
     match result {
         Ok(_) => Ok(()),
         Err(_) if cancel.load(Ordering::Acquire) => Err(Failure::Cancelled),
