@@ -85,14 +85,15 @@ pub fn cleanup(destination: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
     fn root() -> PathBuf {
+        // The clock alone is too coarse on Windows: parallel tests got the same directory and one
+        // removed the files of another.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let path = std::env::temp_dir().join(format!(
-            "adm-sidecars-{}-{:?}",
+            "adm-sidecars-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
+        let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         path
     }
