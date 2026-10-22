@@ -10,6 +10,7 @@ pub fn paths(destination: &Path) -> Vec<PathBuf> {
         ".nibiru-http.part.json.tmp",
         ".nibiru-http.part.json",
         ".nibiru-http.part",
+        ".nibiru-http.json",
         ".nibiru-http.lock",
     ]
     .into_iter()
@@ -78,6 +79,14 @@ pub fn cleanup(destination: &Path) -> io::Result<()> {
     #[cfg(not(windows))]
     remove_file(lock)?;
     drop(lease);
+    // Windows deletes the lock when the exclusive handle closes; if something (an indexer, an
+    // antivirus scan) still has it open the deletion lands a moment later, so make sure it is gone.
+    for _ in 0..20 {
+        match remove_file(lock) {
+            Ok(()) if !lock.exists() => break,
+            Ok(()) | Err(_) => std::thread::sleep(Duration::from_millis(100)),
+        }
+    }
     Ok(())
 }
 
