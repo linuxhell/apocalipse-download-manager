@@ -1,4 +1,10 @@
-# Apocalipse Download Manager 0.6.1 — Extensão 0.3.206
+# Apocalipse Download Manager — Extensão 0.3.206
+
+## 0.7.1 — 2026-10-22
+
+- Slider de threads visível; salvar, atualizar e remover a preferência por site imediatamente, nos três idiomas.
+- A escolha do slider prevalece sobre os padrões do motor e a seleção automática de conexões.
+- Xtreme 0.2.1: confiança TLS do sistema e diagnóstico seguro de certificados; verificação dos três ZIPs do NirSoft.
 
 ## 0.7.0 — 2026-10-22
 

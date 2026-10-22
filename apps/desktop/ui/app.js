@@ -170,13 +170,12 @@ const catalogs = {
     connections: "Connections per download",
     automatic: "Automatic",
     taskConnections: "Threads for this download",
-    rememberSiteThreads: "Remember the thread count for this site",
-    rememberSiteThreadsHint: "Saved for the site of this link. Untick and start the download to forget it.",
-    rememberSiteThreadsFor: "Saved for {host}. Untick and start the download to forget it.",
+    rememberSiteThreads: "Check this box to save how many threads this site will use.",
+    rememberSiteThreadsHint: "Updates when you change the slider. Uncheck to remove the saved preference.",
+    rememberSiteThreadsFor: "Saved for {host}. Slider changes update it; uncheck to remove it.",
     rememberSiteThreadsOffer: "Tick to use this thread count for {host} next time.",
-    siteThreadsForced: "{host} only works with 1 thread, so this is fixed.",
     bandwidthPrompt: "Speed limit in MB/s (0 = unlimited)", verifying: "Verifying",
-    taskConnectionsHint: "Only changes this task. Use 1 on sites that reject segmented downloads.",
+    taskConnectionsHint: "This choice takes priority over the engine defaults. Use 1 for a single stream.",
     downloadBandwidthLimit: "This download limit", megabytesPerSecond: "MB/s", unlimited: "Unlimited", smartAutomation: "Smart automation", bandwidthAction: "Speed limit", bandwidthPanel: "Bandwidth", adaptiveEfficiency: "Adaptive efficiency", adaptiveEfficiencyHint: "Optimizes queue order and connection use for the current workload.", scheduler: "Download schedule", schedulerHint: "Automatically pauses outside the permitted local time window.", scheduleStart: "Start", scheduleEnd: "End", bandwidthPanelHint: "Set limits without changing the window size.", currentBandwidth: "Current usage", globalBandwidthLimit: "Global download limit",
     defaults: "Default",
     extensionPairing: "Browser extension pairing",
@@ -386,13 +385,12 @@ const catalogs = {
     connections: "Conexões por download",
     automatic: "Automático",
     taskConnections: "Threads para este download",
-    rememberSiteThreads: "Memorizar a quantidade de threads para este site",
-    rememberSiteThreadsHint: "Fica salva para o site deste link. Desmarque e inicie o download para esquecer.",
-    rememberSiteThreadsFor: "Salva para {host}. Desmarque e inicie o download para esquecer.",
+    rememberSiteThreads: "Marque essa caixa para salvar quantas threads este site usará.",
+    rememberSiteThreadsHint: "Atualiza ao mudar o slider. Desmarque para remover a preferência salva.",
+    rememberSiteThreadsFor: "Salvo para {host}. Mudar o slider atualiza; desmarcar remove.",
     rememberSiteThreadsOffer: "Marque para usar esta quantidade de threads em {host} da próxima vez.",
-    siteThreadsForced: "{host} só funciona com 1 thread, então este valor é fixo.",
     bandwidthPrompt: "Limite de velocidade em MB/s (0 = ilimitado)", verifying: "Verificando",
-    taskConnectionsHint: "Altera somente esta tarefa. Use 1 em sites que não aceitam downloads segmentados.",
+    taskConnectionsHint: "Este valor prevalece sobre o padrão do motor. Use 1 para uma única conexão.",
     downloadBandwidthLimit: "Limite deste download", megabytesPerSecond: "MB/s", unlimited: "Ilimitado", smartAutomation: "Automação inteligente", bandwidthAction: "Limitar velocidade", bandwidthPanel: "Banda", adaptiveEfficiency: "Eficiência adaptativa", adaptiveEfficiencyHint: "Otimiza a ordem da fila e o uso de conexões para a carga atual.", scheduler: "Agendamento de downloads", schedulerHint: "Pausa automaticamente fora do horário local permitido.", scheduleStart: "Início", scheduleEnd: "Fim", bandwidthPanelHint: "Defina limites sem alterar o tamanho da janela.", currentBandwidth: "Uso atual", globalBandwidthLimit: "Limite global de download",
     defaults: "Padrão",
     extensionPairing: "Conexão com a extensão",
@@ -602,13 +600,12 @@ const catalogs = {
     connections: "每个下载的连接数",
     automatic: "自动",
     taskConnections: "此下载的线程数",
-    rememberSiteThreads: "记住此网站的线程数",
-    rememberSiteThreadsHint: "保存给此链接所在的网站。取消勾选并开始下载即可忘记。",
-    rememberSiteThreadsFor: "已为 {host} 保存。取消勾选并开始下载即可忘记。",
+    rememberSiteThreads: "勾选此框，保存此网站将使用的线程数。",
+    rememberSiteThreadsHint: "更改滑块即更新。取消勾选即可删除已保存的设置。",
+    rememberSiteThreadsFor: "已为 {host} 保存。更改滑块即更新，取消勾选即可删除。",
     rememberSiteThreadsOffer: "勾选后，下次从 {host} 下载将使用此线程数。",
-    siteThreadsForced: "{host} 只能使用 1 个线程，因此此值固定。",
     bandwidthPrompt: "限速（MB/秒，0 = 不限速）", verifying: "校验中",
-    taskConnectionsHint: "仅更改此任务。对于不允许分段下载的网站，请使用 1。",
+    taskConnectionsHint: "此设置优先于引擎默认值。选择 1 使用单连接。",
     downloadBandwidthLimit: "此下载的限制", megabytesPerSecond: "MB/秒", unlimited: "不限速", smartAutomation: "智能自动化", bandwidthAction: "限速", bandwidthPanel: "带宽", adaptiveEfficiency: "自适应效率", adaptiveEfficiencyHint: "根据当前负载优化队列顺序和连接使用。", scheduler: "下载计划", schedulerHint: "在允许的本地时间之外自动暂停。", scheduleStart: "开始", scheduleEnd: "结束", bandwidthPanelHint: "无需改变窗口大小即可设置限制。", currentBandwidth: "当前使用量", globalBandwidthLimit: "全局下载限制",
     defaults: "默认",
     extensionPairing: "浏览器扩展配对",
@@ -1371,7 +1368,7 @@ function translate() {
   document.querySelectorAll("[data-language-choice]").forEach((button) =>
     button.classList.toggle("active", button.dataset.languageChoice === locale));
   if (!taskConnectionsManuallyChanged) {
-    document.querySelector("#task-connections-value").value = t("automatic");
+    document.querySelector("#task-connections-value").value = document.querySelector("#task-connections").value;
   }
   setSiteThreadsNote();
   const activeNavigation = document.querySelector(`nav [data-page="${activePage}"]`);
@@ -1810,59 +1807,74 @@ async function showTorrentInspection(source, generation = analysisGeneration) {
   document.querySelector("#torrent-inspection").hidden = false;
   return true;
 }
-// What the "remember for this site" box was when the dialog loaded the site's saved value.
-let siteThreads = { host: "", remembered: false, forced: null };
+// Site writes are serialized so rapid slider changes and unchecking cannot save out of order.
+let siteThreads = { host: "", remembered: false };
 let siteThreadsRequest = 0;
+let siteThreadsSave = Promise.resolve();
+function siteThreadsHost(source) {
+  try {
+    const url = new URL(source);
+    return /^(https?|ftp):$/.test(url.protocol) ? url.hostname.toLowerCase().replace(/\.$/, "") : "";
+  } catch { return ""; }
+}
 function setSiteThreadsNote() {
   const note = document.querySelector("#remember-site-threads-note");
   const box = document.querySelector("#remember-site-threads");
-  if (siteThreads.forced) note.textContent = t("siteThreadsForced").replace("{host}", siteThreads.host);
-  else if (siteThreads.host && box.checked) note.textContent = t("rememberSiteThreadsFor").replace("{host}", siteThreads.host);
+  if (siteThreads.host && box.checked) note.textContent = t("rememberSiteThreadsFor").replace("{host}", siteThreads.host);
   else if (siteThreads.host) note.textContent = t("rememberSiteThreadsOffer").replace("{host}", siteThreads.host);
   else note.textContent = t("rememberSiteThreadsHint");
-  box.disabled = Boolean(siteThreads.forced);
-  document.querySelector("#task-connections").disabled = Boolean(siteThreads.forced);
+  box.disabled = !siteThreadsHost(document.querySelector("#url").value.trim());
+  document.querySelector("#task-connections").disabled = false;
 }
-// Saves or forgets the site's thread count as the box says, when the download starts.
-async function applySiteThreadsChoice(source) {
-  if (siteThreads.forced || !/^(?:https?|ftp):\/\//i.test(source)) return;
-  const box = document.querySelector("#remember-site-threads");
-  const threads = Number(document.querySelector("#task-connections").value) || 8;
+async function applySiteThreadsChoice(source, forget = false) {
+  source = source.trim();
+  const host = siteThreadsHost(source);
+  if (!host) return;
+  const checked = document.querySelector("#remember-site-threads").checked;
+  if (!checked && !siteThreads.remembered && !forget) return siteThreadsSave;
+  const threads = checked ? Number(document.querySelector("#task-connections").value) || 8 : null;
+  const request = ++siteThreadsRequest;
+  const write = siteThreadsSave.catch(() => {}).then(() => invoke("set_site_threads", { url: source, threads }));
+  siteThreadsSave = write;
   try {
-    if (box.checked) await invoke("set_site_threads", { url: source, threads });
-    else if (siteThreads.remembered) await invoke("set_site_threads", { url: source, threads: null });
+    await write;
+    if (request === siteThreadsRequest && host === siteThreadsHost(document.querySelector("#url").value.trim())) {
+      siteThreads = { host, remembered: checked };
+      setSiteThreadsNote();
+    }
   } catch (error) {
     reportUiError("main", "siteThreads", error);
+    throw error;
   }
 }
 function resetTaskConnections() {
   taskConnectionsManuallyChanged = false;
   siteThreadsRequest += 1;
-  siteThreads = { host: "", remembered: false, forced: null };
+  siteThreads = { host: "", remembered: false };
   document.querySelector("#task-connections").value = "8";
-  document.querySelector("#task-connections-value").value = t("automatic");
+  document.querySelector("#task-connections-value").value = "8";
   document.querySelector("#remember-site-threads").checked = false;
   setSiteThreadsNote();
 }
-// Shows the count saved for this link's site (slider and box), or a fixed 1 for sites that need it.
 async function refreshSiteThreads() {
   const source = document.querySelector("#url").value.trim();
+  const host = siteThreadsHost(source);
+  if (!host) return;
+  // An Analyze click must not replace an explicit choice with an older stored value.
+  if (taskConnectionsManuallyChanged && siteThreads.host === host) return;
   const request = ++siteThreadsRequest;
-  if (!/^(?:https?|ftp):\/\//i.test(source)) return;
+  siteThreads.host = host;
+  setSiteThreadsNote();
   let found;
   try {
+    await siteThreadsSave.catch(() => {});
     found = await invoke("get_site_threads", { url: source });
-  } catch {
-    return;
-  }
+  } catch { return; }
   if (request !== siteThreadsRequest || source !== document.querySelector("#url").value.trim()) return;
-  siteThreads = { host: found.host, remembered: Boolean(found.remembered), forced: found.forced || null };
-  const slider = document.querySelector("#task-connections");
-  const value = found.forced || found.threads;
-  if (value) {
-    slider.value = String(value);
-    document.querySelector("#task-connections-value").value = String(value);
-    taskConnectionsManuallyChanged = true;
+  siteThreads = { host: found.host, remembered: Boolean(found.remembered) };
+  if (found.threads) {
+    document.querySelector("#task-connections").value = String(found.threads);
+    document.querySelector("#task-connections-value").value = String(found.threads);
   }
   document.querySelector("#remember-site-threads").checked = siteThreads.remembered;
   setSiteThreadsNote();
@@ -2508,6 +2520,7 @@ document.querySelector("#url").oninput = () => {
   pendingBrowserAssistedPath = null;
   pendingTorrentMetadataPath = null;
   resetTaskConnections();
+  refreshSiteThreads();
   resetAnalysisForNewRequest();
   knownArchiveName = "";
   document.querySelector("#file-name").value = "";
@@ -2599,11 +2612,23 @@ document.querySelector("#hls-convert-audio").onchange = updateHlsAudioConversion
 document.querySelector("#hls-audio-format").onchange = updateHlsAudioConversion;
 document.querySelector("#task-connections").oninput = (event) => {
   taskConnectionsManuallyChanged = true;
+  siteThreadsRequest += 1;
+  siteThreads.host = siteThreadsHost(document.querySelector("#url").value.trim());
   setSiteThreadsNote();
   document.querySelector("#task-connections-value").value = event.target.value;
 };
 document.querySelector("#url").addEventListener("change", refreshSiteThreads);
-document.querySelector("#remember-site-threads").addEventListener("change", setSiteThreadsNote);
+document.querySelector("#task-connections").addEventListener("change", () => {
+  if (document.querySelector("#remember-site-threads").checked) {
+    applySiteThreadsChoice(document.querySelector("#url").value).catch(() => {});
+  }
+});
+document.querySelector("#remember-site-threads").addEventListener("change", () => {
+  taskConnectionsManuallyChanged = true;
+  siteThreads.host = siteThreadsHost(document.querySelector("#url").value.trim());
+  setSiteThreadsNote();
+  applySiteThreadsChoice(document.querySelector("#url").value, true).catch(() => {});
+});
 document.querySelector("#analyze").onclick = async () => {
   const url = document.querySelector("#url");
   if (!url.reportValidity()) return;
@@ -2854,9 +2879,7 @@ document.querySelector("#enqueue").onclick = async () => {
         mirrors: document.querySelector("#mirrors").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
         priority: Number(document.querySelector("#priority").value),
         bandwidthLimit: Math.round((Number(document.querySelector("#download-bandwidth-limit").value) || 0) * 1024 * 1024) || null,
-        connectionsOverride: taskConnectionsManuallyChanged || document.querySelector("#remember-site-threads").checked
-          ? Number(document.querySelector("#task-connections").value) || 8
-          : null,
+        connectionsOverride: Number(document.querySelector("#task-connections").value) || 8,
         autoExtract,
         context: {
           traceId: pendingDiagnosticTrace,
@@ -2955,6 +2978,7 @@ setInterval(async () => {
     resetTaskConnections();
     const url = document.querySelector("#url");
     url.value = link;
+    refreshSiteThreads();
     knownArchiveName = "";
     document.querySelector("#file-name").value = "";
     document.querySelector("#auto-extract").checked = false;

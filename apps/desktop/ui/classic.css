@@ -397,7 +397,10 @@ dialog .close:focus-visible { outline: 2px solid var(--line-strong); outline-off
 .add-dialog-analysis, .add-dialog-destination { gap: 8px; }
 .media-card { padding: 10px; gap: 14px; }
 .media-card img { width: 128px; height: 72px; }
-.advanced-download .task-connections { margin-top: 12px; }
+.add-dialog-destination > .task-connections { margin: 4px 0; }
+.task-connections > label:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.task-connections > label:first-child span { display: grid; gap: 2px; }
+.task-connections > input[type="range"] { display: block; width: 100%; }
 .remember-site-threads { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; cursor: pointer; }
 .remember-site-threads input { margin-top: 3px; flex: none; }
 .remember-site-threads span { display: grid; gap: 2px; }

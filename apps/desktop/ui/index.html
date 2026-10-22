@@ -335,6 +335,12 @@
           </button>
 </div></div>
 </div>
+<section class="task-connections">
+<label for="task-connections"><span><b data-i18n="taskConnections">Threads for this download</b><small data-i18n="taskConnectionsHint">This choice takes priority over the engine defaults. Use 1 for a single stream.</small></span><output id="task-connections-value">8</output></label>
+<input id="task-connections" max="16" min="1" type="range" value="8"/>
+<div class="range-scale"><span>1</span><span>4</span><span>8</span><span>16</span></div>
+<label class="remember-site-threads" for="remember-site-threads"><input id="remember-site-threads" type="checkbox"/><span><b data-i18n="rememberSiteThreads">Check this box to save how many threads this site will use.</b><small id="remember-site-threads-note" data-i18n="rememberSiteThreadsHint">Updates when you change the slider. Uncheck to remove the saved preference.</small></span></label>
+</section>
 <section class="destination-history">
 <div>
 <b data-i18n="recentLocations">Download locations</b>
@@ -342,6 +348,7 @@
 </div>
 <div id="destination-list"></div>
 </section>
+
 <details class="advanced-download">
 <summary data-i18n="advancedOptions">Advanced options</summary>
 <label data-i18n="mirrorUrls" for="mirrors">Mirror URLs (one per line)</label>
@@ -350,12 +357,7 @@
 <select id="priority"><option data-i18n="priorityHigh" value="10">High</option><option data-i18n="priorityNormal" selected="" value="0">Normal</option><option data-i18n="priorityLow" value="-10">Low</option></select>
 <label data-i18n="downloadBandwidthLimit" for="download-bandwidth-limit">This download limit</label>
 <div class="bandwidth-input"><input id="download-bandwidth-limit" max="10240" min="0" step="0.1" type="number" value="0"/><span data-i18n="megabytesPerSecond">MB/s</span><small data-i18n="unlimited">Unlimited</small></div>
-<section class="task-connections">
-<label for="task-connections"><span><b data-i18n="taskConnections">Threads for this download</b><small data-i18n="taskConnectionsHint">Only changes this task. Use 1 on sites that reject segmented downloads.</small></span><output id="task-connections-value">Automatic</output></label>
-<input id="task-connections" max="16" min="1" type="range" value="8"/>
-<div class="range-scale"><span>1</span><span>4</span><span>8</span><span>16</span></div>
-<label class="remember-site-threads" for="remember-site-threads"><input id="remember-site-threads" type="checkbox"/><span><b data-i18n="rememberSiteThreads">Remember the thread count for this site</b><small id="remember-site-threads-note" data-i18n="rememberSiteThreadsHint">Saved for the site of this link. Untick and start the download to forget it.</small></span></label>
-</section>
+
 </details>
 
 </section>

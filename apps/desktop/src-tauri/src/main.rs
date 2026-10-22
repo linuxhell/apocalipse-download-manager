@@ -342,14 +342,15 @@ async fn discover_official_mirrors(url: &str) -> Vec<String> {
 /// Resolves the per-download thread count. An explicit choice (the slider, or the value remembered
 /// for the site) always wins; hosts with special handling only change what happens without one.
 fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize> {
+    if let Some(chosen) = requested {
+        return Some(chosen.clamp(1, MAX_DOWNLOAD_CONNECTIONS));
+    }
     let host = host_from_url(url);
     if host
         .as_deref()
         .is_some_and(|value| value == "pixeldrain.com" || value.ends_with(".pixeldrain.com"))
     {
-        // Pixeldrain may reject or destabilize segmented requests. Keep the
-        // transfer on its single original stream regardless of the global or
-        // per-task connection preference.
+        // Prefer one stream when the caller has not chosen a count explicitly.
         Some(1)
     } else if host.as_deref().is_some_and(|value| {
         value == "download.microsoft.com"
@@ -359,13 +360,9 @@ fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize
     }) {
         // Microsoft's ISO CDN supports byte ranges. Without an explicit choice start wide enough
         // to avoid the slow single-stream ramp; a chosen or remembered count is respected.
-        Some(
-            requested
-                .unwrap_or(MAX_DOWNLOAD_CONNECTIONS)
-                .clamp(1, MAX_DOWNLOAD_CONNECTIONS),
-        )
+        Some(MAX_DOWNLOAD_CONNECTIONS)
     } else {
-        requested.map(|value| value.clamp(1, MAX_DOWNLOAD_CONNECTIONS))
+        None
     }
 }
 
@@ -11665,7 +11662,7 @@ fn enqueue_download_impl(
             task.destination.display()
         ),
     );
-    if pixeldrain_single_connection {
+    if pixeldrain_single_connection && task.connections_override == Some(1) {
         diagnostic_log(
             state,
             "INFO",
@@ -12180,7 +12177,11 @@ fn start_download(
             destination: task.destination,
             overwrite: false,
             connections,
-            adaptive_connections: true,
+            adaptive_connections: task.connections_override.is_none()
+                && host_rule
+                    .as_ref()
+                    .and_then(|rule| rule.connections)
+                    .is_none(),
             network_capacity_hint_bps,
             host_capacity_hint_bps,
             method: identity
@@ -12929,8 +12930,6 @@ struct SiteThreads {
     threads: Option<usize>,
     /// True only when a rule for exactly this host stores the count (what the checkbox edits).
     remembered: bool,
-    /// Sites that must stay on one connection regardless of any preference.
-    forced: Option<usize>,
 }
 
 fn url_host_key(url: &str) -> Result<String, String> {
@@ -12949,7 +12948,6 @@ fn url_host_key(url: &str) -> Result<String, String> {
 fn get_site_threads(state: State<'_, AppState>, url: String) -> Result<SiteThreads, String> {
     let host = url_host_key(&url)?;
     let settings = state.settings.lock().map_err(|error| error.to_string())?;
-    let forced = (host == "pixeldrain.com" || host.ends_with(".pixeldrain.com")).then_some(1);
     Ok(SiteThreads {
         threads: host_rule_for_url(&settings, &url)
             .and_then(|rule| rule.connections)
@@ -12959,7 +12957,6 @@ fn get_site_threads(state: State<'_, AppState>, url: String) -> Result<SiteThrea
             .iter()
             .any(|rule| rule.pattern == host && rule.connections.is_some()),
         host,
-        forced,
     })
 }
 
@@ -13023,7 +13020,6 @@ fn set_site_threads(
     Ok(SiteThreads {
         threads,
         remembered: threads.is_some(),
-        forced: None,
         host,
     })
 }
@@ -16271,8 +16267,8 @@ mod tests {
         );
         assert_eq!(
             site_connection_override("https://pixeldrain.com/u/x", Some(16)),
-            Some(1),
-            "pixeldrain stays on one connection"
+            Some(16),
+            "an explicit choice wins on every site"
         );
     }
 
@@ -16468,10 +16464,10 @@ mod tests {
     }
 
     #[test]
-    fn pixeldrain_always_uses_one_connection_without_matching_spoofed_hosts() {
+    fn pixeldrain_defaults_to_one_but_respects_explicit_connections() {
         assert_eq!(
             site_connection_override("https://pixeldrain.com/u/example", Some(8)),
-            Some(1)
+            Some(8)
         );
         assert_eq!(
             site_connection_override("https://cdn.pixeldrain.com/api/file/example", None),

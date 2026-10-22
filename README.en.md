@@ -17,6 +17,8 @@ Free, portable download manager for Windows, Linux and macOS x64.
 
 ![Downloads](assets/screenshots/downloads.png)
 
+The thread slider is visible in the new-download dialog and takes priority over engine defaults. The checkbox below saves the site preference immediately; changing the slider updates it and unchecking removes that preference while preserving credentials and other site settings.
+
 ## Get started
 
 1. Download and extract the portable package, then launch the application. It includes Nibiru Xtreme built from the same pinned revision used by ADM.
@@ -31,13 +33,13 @@ Free, portable download manager for Windows, Linux and macOS x64.
 - Apocalipse Link for authenticated TLS transfers between computers.
 - Per-site credentials in the operating system vault; Portuguese, English and Simplified Chinese interfaces.
 
-## Version 0.7.0
+## Version 0.7.1
 
 ED2K **Preview** becomes available after the first MD4-verified part: up to **9,728,000 bytes**, about 9.28 MiB. There is no fixed 30–40 MB total-download threshold. Peers prioritize the beginning and end before middle parts; MP4/AVI may also require the index at the end. Missing ranges wait for data.
 
 Automatic retries preserve the current process's verified preview map while rechecking. The fresh result can invalidate parts; restarting the app or resuming manually requires verification again. If no peer has the remaining parts, the download stays incomplete, retains partial data and retries.
 
-This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.7.0**, Xtreme **0.2.0**, extension **0.3.206**.
+This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.7.1**, Xtreme **0.2.1**, extension **0.3.206**.
 
 ## Build and contribute
 
