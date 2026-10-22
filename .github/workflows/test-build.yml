@@ -103,6 +103,8 @@ jobs:
         shell: bash
         env:
           XTREME_BINARY: ${{ matrix.xtreme_binary }}
+          # Xtreme keeps this in its own .cargo/config.toml, which "cargo install --git" does not read.
+          RUSTFLAGS: --cfg reqwest_unstable
         run: |
           set -euo pipefail
           # The backend is built from the same revision the desktop app links against, so a test
