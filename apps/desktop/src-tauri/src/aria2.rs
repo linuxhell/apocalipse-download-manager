@@ -263,6 +263,10 @@ impl Endpoint {
         Err(format!("aria2_start_timeout:{last_error}"))
     }
 
+    pub async fn is_xtreme(&self) -> bool {
+        self.call("nibiru.getVersion", Vec::new()).await.is_ok()
+    }
+
     pub async fn version(&self) -> Result<String, String> {
         let value = self.call("aria2.getVersion", Vec::new()).await?;
         Ok(value

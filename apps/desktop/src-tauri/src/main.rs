@@ -6,10 +6,12 @@ mod audio_conversion;
 mod aria2;
 mod diagnostics;
 mod ed2k_ui;
+mod nibiru_artifacts;
 mod prepared_preview;
 mod runtime_health;
 mod thumbnail_cache;
 mod tiktok_preview;
+mod transfer_speed;
 
 use apocalipse_core::{
     chunk_directory, classify_url, cleanup_chunk_artifacts, contextual_media_page, parse_metalink,
@@ -7175,9 +7177,12 @@ async fn run_aria2_download(
             }
         }
     };
+    let backend_xtreme = endpoint.is_xtreme().await;
     diagnostic_log(&state,"INFO","aria2.task_started",&format!("task={id} gid={gid} engine={kind:?} connections={} listen_port=6881-6999 dht_listen_port=6881-6999",connections.min(16)));
-    state.diagnostics.record(if is_bittorrent{"torrent.engine_selected"}else{"http.engine_selected"},"INFO",None,Some(&id.to_string()),serde_json::json!({"engine":"aria2-rpc","backend":"aria2-ultra","connections":connections.min(16),"kind":format!("{kind:?}"),"maxConnectionPerServer":connections.min(16),"split":connections.min(16),"listenPort":"6881-6999","dhtListenPort":"6881-6999","fileAllocation":if is_bittorrent{"none"}else{"trunc"}}));
+    state.diagnostics.record(if is_bittorrent{"torrent.engine_selected"}else{"http.engine_selected"},"INFO",None,Some(&id.to_string()),serde_json::json!({"engine":"aria2-rpc","backend":if backend_xtreme{"nibiru-xtreme"}else{"aria2"},"connections":connections.min(16),"kind":format!("{kind:?}"),"maxConnectionPerServer":connections.min(16),"split":connections.min(16),"listenPort":"6881-6999","dhtListenPort":"6881-6999","fileAllocation":if is_bittorrent{"none"}else{"trunc"}}));
 
+    let measure_xtreme_speed = !is_bittorrent && backend_xtreme;
+    let mut speed_window = transfer_speed::TransferSpeed::default();
     let mut last_at = Instant::now();
     let transfer_started_at = startup_started_at;
     let mut last_downloaded = 0_u64;
@@ -7200,7 +7205,7 @@ async fn run_aria2_download(
                 return;
             }
             _ = interval.tick() => {
-                let status = match endpoint.status(&gid).await {
+                let mut status = match endpoint.status(&gid).await {
                     Ok(status) => {
                         status_failing_since = None;
                         status
@@ -7290,6 +7295,14 @@ async fn run_aria2_download(
                 } else {
                     None
                 };
+                let reported_speed = status.speed;
+                if measure_xtreme_speed {
+                    status.speed = if status.status == "active" && first_payload_logged {
+                        speed_window.sample(startup_ms as u64, status.downloaded)
+                    } else {
+                        0
+                    };
+                }
                 update_task(&app, id, false, |item| {
                     item.received = status.downloaded;
                     item.total = (status.total > 0).then_some(status.total);
@@ -7311,9 +7324,9 @@ async fn run_aria2_download(
                     serde_json::json!({
                         "engine": "aria2-rpc",
                         "bytesPerSecond": status.speed,
-                        "reportedBytesPerSecond": status.speed,
+                        "reportedBytesPerSecond": reported_speed,
                         "computedDeltaBytesPerSecond": raw_speed,
-                        "speedSource": "aria2",
+                        "speedSource": if measure_xtreme_speed { "xtreme-byte-window-2s" } else { "aria2" },
                         "receivedBytes": status.downloaded,
                         "totalBytes": status.total,
                         "progressPercent": percent,
@@ -15540,6 +15553,11 @@ async fn remove_downloads(
     if delete_files {
         let mut deleted_torrent_metadata_paths = HashSet::new();
         for task in &removed {
+            let destination = task.destination.clone();
+            tokio::task::spawn_blocking(move || nibiru_artifacts::cleanup(&destination))
+                .await
+                .map_err(|error| error.to_string())?
+                .map_err(|error| error.to_string())?;
             cleanup_chunk_artifacts(&task.destination)
                 .await
                 .map_err(|error| error.to_string())?;
@@ -15602,9 +15620,12 @@ async fn remove_downloads(
                 .map_err(|error| error.to_string())?;
             let partial_remaining = partial_path(&task.destination).exists();
             let chunk_artifacts_remaining = chunk_directory(&task.destination).exists();
+            let nibiru_artifacts_remaining = nibiru_artifacts::paths(&task.destination)
+                .iter()
+                .any(|path| path.exists());
             state.diagnostics.record(
                 "task.removal_disk_cleanup",
-                if partial_remaining || chunk_artifacts_remaining {
+                if partial_remaining || chunk_artifacts_remaining || nibiru_artifacts_remaining {
                     "ERROR"
                 } else {
                     "INFO"
@@ -15613,10 +15634,11 @@ async fn remove_downloads(
                 Some(&task.id.to_string()),
                 serde_json::json!({
                     "partialRemaining": partial_remaining,
-                    "chunkArtifactsRemaining": chunk_artifacts_remaining
+                    "chunkArtifactsRemaining": chunk_artifacts_remaining,
+                    "nibiruArtifactsRemaining": nibiru_artifacts_remaining
                 }),
             );
-            if partial_remaining || chunk_artifacts_remaining {
+            if partial_remaining || chunk_artifacts_remaining || nibiru_artifacts_remaining {
                 return Err("download_cleanup_incomplete".to_owned());
             }
         }

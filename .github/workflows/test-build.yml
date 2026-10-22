@@ -6,7 +6,7 @@ name: Test build artifacts
 on:
   workflow_dispatch:
   push:
-    branches: [prep-aria2-ultra]
+    branches: [prep-aria2-ultra, claude/ed2k-share]
   pull_request:
     branches: [main]
 

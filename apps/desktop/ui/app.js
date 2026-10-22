@@ -53,6 +53,7 @@ const catalogs = {
     sourceUrl: "Source URL",
     cancel: "Cancel",
     analyze: "Analyze",
+    selectTorrentFiles: "Select torrent files",
     torrentMetadataSeeking: "Finding peers and receiving torrent metadata",
     torrentMetadataPeersStalled: "Peers were reached, but none delivered the torrent metadata in time. This may be specific to this swarm or its peers. Try again or use a torrent file if available.",
     torrentMetadataTimeout: "No peers responded with metadata for this torrent/magnet in time. Trackers or DHT may be slow or the swarm may have no active seeds. You can try again, or check the link.",
@@ -269,6 +270,7 @@ const catalogs = {
     sourceUrl: "URL de origem",
     cancel: "Cancelar",
     analyze: "Analisar",
+    selectTorrentFiles: "Escolha os arquivos do torrent",
     torrentMetadataSeeking: "Procurando pares e recebendo metadados do torrent",
     torrentMetadataPeersStalled: "Pares foram alcançados, mas nenhum entregou os metadados do torrent a tempo. Isso pode ser específico deste swarm ou de seus pares. Tente novamente ou use um arquivo .torrent, se disponível.",
     torrentMetadataTimeout: "Nenhum par respondeu com os metadados deste torrent/magnet a tempo. Os trackers ou o DHT podem estar lentos, ou a rede pode não ter seeds ativos no momento. Você pode tentar novamente ou verificar o link.",
@@ -485,6 +487,7 @@ const catalogs = {
     sourceUrl: "来源网址",
     cancel: "取消",
     analyze: "分析",
+    selectTorrentFiles: "选择种子文件",
     torrentMetadataSeeking: "正在查找节点并接收种子元数据",
     torrentMetadataPeersStalled: "已连接到节点，但没有节点及时传送种子元数据。这可能与该种子群或其节点有关。请重试，或使用可用的 .torrent 文件。",
     torrentMetadataTimeout: "没有节点及时返回这个种子/磁力链接的元数据。Tracker 或 DHT 可能响应缓慢，或者该网络目前没有活跃的做种者。您可以重试，或检查链接是否正确。",
@@ -1046,6 +1049,7 @@ function renderDownloads(force = false) {
       textContent: "⇩",
     });
     const requestedThumbnail = task.thumbnail || youtubeThumbnailFallback(task.source);
+    row.classList.toggle("has-thumbnail", Boolean(requestedThumbnail));
     if (requestedThumbnail) {
       resolveThumbnailChain(task.thumbnail, youtubeThumbnailFallback(task.source)).then((resolved) => {
         if (!resolved || !row.isConnected) return;
@@ -1100,12 +1104,22 @@ function renderDownloads(force = false) {
     const webSeedStats = task.torrent_web_seeds ? ` · +${task.torrent_web_seeds} ${t("webMirror")}` : "";
     const torrentStats = task.torrent_seeders !== null && task.torrent_seeders !== undefined
       ? ` · S:${task.torrent_seeders} L:${task.torrent_leechers || 0}${task.torrent_eta ? ` · ETA ${task.torrent_eta}` : ""}${webSeedStats}` : "";
-    details.textContent =
-      speed && task.state === "downloading"
-        ? `${progressText} · ↓ ${formatBytes(speed)}/s · ↑ ${formatBytes(uploadSpeed)}/s${torrentStats}`
-        : `${progressText}${torrentStats}`;
+    details.textContent = `${progressText}${torrentStats}`;
+    details.title = details.textContent;
+    const rates = document.createElement("span");
+    rates.className = "task-transfer-rates";
+    if (task.state === "downloading") {
+      const down = document.createElement("span");
+      down.textContent = `↓ ${formatBytes(speed)}/s`;
+      rates.append(down);
+      if (isTorrent(task) || uploadSpeed > 0) {
+        const up = document.createElement("span");
+        up.textContent = `↑ ${formatBytes(uploadSpeed)}/s`;
+        rates.append(up);
+      }
+    }
     progress.append(bar);
-    info.append(progress, details);
+    info.append(progress, details, rates);
     const resumeCapability = document.createElement("strong");
     resumeCapability.className = "resume-capability";
     const resumeValue = task.resume_supported === true
@@ -2647,7 +2661,7 @@ document.querySelector("#analyze").onclick = async () => {
       const shown = await showTorrentInspection(url.value, generation);
       stopMetadataTimer();
       if (!shown || !current()) return;
-      box.textContent = `${plan.primary} · ${plan.reason}`;
+      box.textContent = t("selectTorrentFiles");
     } else if (plan.reason === "hls_manifest") {
       const select = document.querySelector("#media-format");
       select.replaceChildren();
