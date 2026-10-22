@@ -40,7 +40,7 @@ pub struct DownloadTask {
     /// Persistent .torrent file kept under data/torrents for Torrent/Magnet tasks.
     #[serde(default)]
     pub torrent_metadata_path: Option<PathBuf>,
-    /// xtreme GID persisted across ADM restarts. Classic xtreme can restore
+    /// Native Xtreme GID persisted across ADM restarts. The engine can restore
     /// unfinished transfers from its session file, allowing the UI to reconnect
     /// to a transfer instead of creating a duplicate.
     #[serde(default)]

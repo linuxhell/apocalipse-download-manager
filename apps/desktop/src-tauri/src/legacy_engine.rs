@@ -57,7 +57,7 @@ pub fn migrate(value: &mut Value) {
                         .any(|old| old.as_str() == Some(name))
                 })
             {
-                object.insert("engine".into(), Value::String("nibiru-xtreme".into()));
+                object.insert("engine".into(), Value::String("xtreme_rpc".into()));
             }
             object.values_mut().for_each(migrate);
         }
@@ -68,6 +68,16 @@ pub fn migrate(value: &mut Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retired_engine_values_become_the_native_serialized_enum() {
+        for old in rules()["engineValues"].as_array().unwrap() {
+            let mut value = serde_json::json!({"engine": old});
+            migrate(&mut value);
+            let engine: apocalipse_core::Engine =
+                serde_json::from_value(value["engine"].clone()).unwrap();
+            assert_eq!(engine, apocalipse_core::Engine::XtremeRpc);
+        }
+    }
     #[test]
     fn saved_fields_migrate_without_changing_destinations_or_current_choices() {
         let mapping = rules()["keys"].as_object().unwrap();

@@ -110,7 +110,7 @@
         button.onclick=()=>run("ed2k_download_action", {id:task.id,action}); actions.append(button);
       };
       if (task.status!=="completed") addAction(inactive ? "resume" : "pause",inactive ? "resume" : "pause");
-      if (/\.(mp4|m4v|mkv|webm|mov|avi|ts|m2ts|mpg|mpeg)$/i.test(task.file.name)) {
+      if (/\.(mp4|m4v|mkv|webm|mov|avi|ts)$/i.test(task.file.name)) {
         const button = document.createElement("button"); button.type="button"; button.textContent=t("watch");
         button.dataset.unavailable = String(!task.preview_ready && task.status !== "completed");
         if (button.dataset.unavailable === "true") button.title=t("previewWaiting");

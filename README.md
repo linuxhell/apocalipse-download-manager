@@ -63,19 +63,19 @@
 
 1. Download the portable package for your platform and extract it. On Linux AppImage, mark the file executable before launching.
 2. Install the matching browser extension if you want automatic media detection and browser-to-ADM handoff.
-3. Open **Tools** in ADM and update the engines you use, especially aria2, yt-dlp and FFmpeg.
+3. Open **Tools** in ADM and update the engines you use, especially Nibiru Xtreme, yt-dlp and FFmpeg.
 
 ### Português do Brasil
 
 1. Baixe o pacote portátil da sua plataforma e extraia. No Linux AppImage, marque o arquivo como executável antes de abrir.
 2. Instale a extensão do seu navegador se quiser detecção automática de mídia e envio direto para o ADM.
-3. Abra **Ferramentas** no ADM e atualize os motores que você usa, principalmente aria2, yt-dlp e FFmpeg.
+3. Abra **Ferramentas** no ADM e atualize os motores que você usa, principalmente Nibiru Xtreme, yt-dlp e FFmpeg.
 
 ### 简体中文
 
 1. 下载适合您平台的便携包并解压。Linux AppImage 首次运行前请先赋予可执行权限。
 2. 如需自动检测网页媒体并发送到 ADM，请安装对应的浏览器扩展。
-3. 在 ADM 中打开**工具**，更新您使用的引擎，尤其是 aria2、yt-dlp 和 FFmpeg。
+3. 在 ADM 中打开**工具**，更新您使用的引擎，尤其是 Nibiru Xtreme、yt-dlp 和 FFmpeg。
 
 ## What Apocalipse does
 

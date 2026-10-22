@@ -75,10 +75,13 @@ Nenhuma release, tag, PR ou merge em main faz parte deste trabalho.
 - O navegador de teste não pôde ser instalado neste ambiente (downloads inválidos).
   O ajuste CSS ainda precisa da conferência visual no aplicativo Windows.
 - Core Rust: 50 testes unitários e 2 de integração passaram antes da alteração ED2K.
-- Migração: 2 testes do módulo real passaram. Streaming ED2K: 3 testes do módulo
+- Migração: 3 testes do módulo real passaram. Streaming ED2K: 3 testes do módulo
   real passaram, incluindo Range, token/Host e espera por partes não verificadas.
 - Xtreme: 7 testes de transferência ED2K passaram com peer local real, incluindo
   leitura das partes indicadas no progresso; clippy da biblioteca sem features passou.
+- Teste local adicional com o cliente real `xtreme.rs` e o motor compilado:
+  download HTTP de 16 MiB, pausa, retomada, comparação de todos os bytes e remoção
+  pelas chamadas nativas passaram.
 - A CI e o novo portátil devem ser conferidos após o push; não presumir sucesso.
 
 Não usar os relatórios com pausas para calcular a média dividindo o tamanho total
