@@ -1,5 +1,5 @@
 body.ed2k-window{--ed2k-bg:#fff;display:flex;flex-direction:column;margin:0;min-width:760px;height:100vh;overflow:hidden;font-size:13px;background:var(--ed2k-bg);color:var(--text)}
-.ed2k-header{display:flex;justify-content:space-between;align-items:center;padding:22px 28px 18px;background:var(--ed2k-bg);border-bottom:1px solid var(--line)}.ed2k-header h1{margin:0;font-size:25px;font-weight:650;letter-spacing:-.6px}.ed2k-preview{padding:5px 10px;border:1px solid var(--line);border-radius:4px;color:var(--muted);font-size:11px}
+.ed2k-header{display:flex;justify-content:space-between;align-items:center;padding:22px 28px 18px;background:var(--ed2k-bg);border-bottom:1px solid var(--line)}.ed2k-header h1{margin:0;font-size:25px;font-weight:650;letter-spacing:-.6px}
 .ed2k-toolbar{display:flex;gap:8px;align-items:center;padding:12px 28px;background:var(--ed2k-bg)}.ed2k-toolbar button{padding:8px 15px}.ed2k-toolbar-divider{height:24px;width:1px;background:var(--line);margin:0 5px}.ed2k-indicators{margin-left:auto;display:flex;gap:18px;color:var(--muted);font-size:14px;font-weight:500;line-height:1.5}.ed2k-indicators [data-online=true]{color:#167744}
 html[data-mode=dark] .ed2k-indicators [data-online=true]{color:#6ee7a0}
 .ed2k-tabs{display:flex;gap:4px;padding:0 28px;background:var(--ed2k-bg);border-bottom:1px solid var(--line)}.ed2k-tabs button{background:transparent;border:0;border-radius:0;padding:12px 20px;border-bottom:3px solid transparent;color:inherit}.ed2k-tabs button[aria-selected=true]{color:var(--strong);border-color:var(--strong);font-weight:650}
@@ -19,3 +19,5 @@ html[data-mode=dark] body.ed2k-window{--ed2k-bg:#000}
 
 .ed2k-share-tools{display:flex;align-items:center;gap:12px;margin:0 0 14px;flex-wrap:wrap}.ed2k-window label.ed2k-inline{flex-direction:row;align-items:center;gap:6px}.ed2k-share-limits{margin-top:20px}.ed2k-share-limits label{max-width:360px}.ed2k-window #panel-shares h3{margin:22px 0 8px;font-size:14px}#share-status,#share-uploads{font-size:12px;color:var(--muted)}.ed2k-window td select{padding:3px 6px}
 .ed2k-setting label.ed2k-inline input{width:auto}.ed2k-setting select{padding:8px 10px;border:1px solid var(--line-strong);border-radius:5px}.ed2k-setting p{font-size:12px;color:var(--muted)}
+
+.ed2k-save-directory{display:flex;align-items:end;gap:12px;margin-bottom:12px}.ed2k-save-directory label{flex:1;min-width:0}.ed2k-save-directory input{width:100%;box-sizing:border-box}.ed2k-save-directory button{height:36px}

@@ -572,13 +572,13 @@ async function cookieHeaderFor(urls) {
 // page script, ours included, can override it). By the time
 // chrome.downloads.onDeterminingFilename sees that request, Chrome has
 // already sent it and the single-use token is already spent - too late for
-// aria2-ultra to take over without a 404. The only layer left that can act
+// xtreme-ultra to take over without a 404. The only layer left that can act
 // before the browser's own request reaches the server is the network layer
 // itself: a short-lived, per-tab declarativeNetRequest session rule that
 // redirects the matching request back to the page it came from (a same-tab
 // no-op, not an ERR_BLOCKED interstitial), paired with a non-blocking
 // webRequest.onBeforeRequest observer that captures the real URL at the same
-// moment and hands it to aria2-ultra as the one and only requester.
+// moment and hands it to xtreme-ultra as the one and only requester.
 const DISPOSABLE_INTERCEPT_RULE_ID = 987001;
 const DISPOSABLE_INTERCEPT_HOSTS = [
   { suffix: ".rapidgator.net", urlFilter: "*://*.rapidgator.net/download/*" },

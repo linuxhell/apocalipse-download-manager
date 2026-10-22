@@ -7,7 +7,7 @@
   <script src="color-mode.js"></script>
 </head>
 <body class="ed2k-window">
-  <header class="ed2k-header"><div><h1>Apocalipse ED2K/Kad</h1></div><span class="ed2k-preview" data-i18n="preview"></span></header>
+  <header class="ed2k-header"><div><h1>Apocalipse ED2K/Kad</h1></div></header>
   <section class="ed2k-toolbar" aria-labelledby="tab-networks">
     <button id="ed2k-connect" class="primary" data-i18n="connect"></button><button id="ed2k-disconnect" data-i18n="disconnect" disabled></button>
     <span class="ed2k-toolbar-divider"></span><button id="ed2k-kad-toggle" data-i18n="kadConnect"></button>
@@ -37,6 +37,7 @@
     </section>
     <section id="panel-transfers" role="tabpanel" aria-labelledby="tab-transfers" hidden>
       <div class="ed2k-section-heading"><div><h2 data-i18n="transfers"></h2><p data-i18n="transfersHint"></p></div></div>
+      <div class="ed2k-save-directory"><label><span data-i18n="saveIn"></span><input id="ed2k-save-directory" readonly></label><button id="ed2k-choose-directory" type="button" data-i18n="chooseDirectory"></button></div>
       <form id="ed2k-add-form" class="ed2k-search-form"><label><span data-i18n="fileLink"></span><input id="ed2k-file-link" maxlength="4096" required spellcheck="false"></label><button id="ed2k-add-submit" class="primary" type="submit" data-i18n="addDownload"></button></form>
       <div class="ed2k-table-wrap"><table><thead><tr><th data-i18n="file"></th><th data-i18n="size"></th><th data-i18n="verifiedProgress"></th><th data-i18n="status"></th><th>Peer</th><th></th></tr></thead><tbody id="ed2k-downloads"></tbody></table></div>
       <p data-i18n="retainedFilesHint"></p>

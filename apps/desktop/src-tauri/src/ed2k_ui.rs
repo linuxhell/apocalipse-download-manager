@@ -1,6 +1,7 @@
 //! Native Nibiru ED2K integration. No aMule executable or daemon is used.
 pub mod downloads;
 pub mod network;
+pub mod preview;
 pub mod shares;
 use nibiru_xtreme::ed2k::{
     self,

@@ -40,6 +40,8 @@ async function windowFixture({language='pt-BR',serverName='Fixture',connected=fa
     switch(command){
       case 'get_application_language':return language;
       case 'get_dark_mode':return false;
+      case 'default_download_directory':return 'C:/Downloads';
+      case 'pick_directory':return 'D:/Videos';
       case 'ed2k_overview':return overview;
       case 'ed2k_connect':overview.server=overview.servers[0];return null;
       case 'ed2k_disconnect':overview.server=null;return null;
@@ -224,4 +226,32 @@ test('every language has every sharing string and keeps the privacy warning',()=
   assert.deepEqual(keys[2].sort(),keys[0].slice().sort());
   for(const required of ['sharesHint','shareNotConnected','shareTooBroad','shareAddFolder','shareAddFiles','prioRelease'])assert.ok(keys[0].includes(required),required);
   assert.doesNotMatch(script,/Uploads are still in development|Uploads ainda estão em desenvolvimento|上传仍在开发中/);
+});
+
+
+test('ED2K destination choice is passed to new transfers',async()=>{
+  const f=await windowFixture({connected:true});
+  assert.equal(f.ids.get('ed2k-save-directory').value,'C:/Downloads');
+  await f.ids.get('ed2k-choose-directory').onclick();
+  assert.equal(f.ids.get('ed2k-save-directory').value,'D:/Videos');
+  f.ids.get('ed2k-file-link').value='ed2k://|file|fixture.bin|1024|'+'a'.repeat(32)+'|/';
+  await f.ids.get('ed2k-add-form').onsubmit({preventDefault(){}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.calls.find(c=>c.command==='ed2k_add_download').args.directory,'D:/Videos');
+});
+test('ED2K video preview is beside pause and waits for fresh verified data',async()=>{
+  const f=await windowFixture({connected:true});
+  f.overview.downloads.push({id:'movie',file:{name:'fixture.mkv',size:1024},directory:'C:/Downloads',status:'downloading',verified:512,preview_ready:false});
+  f.language('pt-BR');
+  let actions=f.ids.get('ed2k-downloads').children[0].children[5].children;
+  assert.equal(actions[0].textContent,'Pausar');
+  assert.equal(actions[1].textContent,'Visualizar');
+  assert.equal(actions[1].disabled,true);
+  f.overview.downloads[0].preview_ready=true;
+  f.language('pt-BR');
+  actions=f.ids.get('ed2k-downloads').children[0].children[5].children;
+  assert.equal(actions[1].disabled,false);
+  await actions[1].onclick();
+  assert.equal(f.calls.at(-2).command,'ed2k_preview_download');
+  assert.doesNotMatch(html,/ed2k-preview|data-i18n="preview"/);
 });

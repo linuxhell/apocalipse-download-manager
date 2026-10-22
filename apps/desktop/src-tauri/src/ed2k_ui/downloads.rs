@@ -18,6 +18,10 @@ pub struct Download {
     pub directory: PathBuf,
     pub status: String,
     pub verified: u64,
+    #[serde(skip)]
+    verified_parts: Vec<bool>,
+    #[serde(default, skip_deserializing)]
+    pub preview_ready: bool,
     pub peer: Option<String>,
     pub queue_rank: Option<u32>,
     pub error: Option<String>,
@@ -84,7 +88,36 @@ impl Downloads {
             .map_err(|e| e.to_string())?
             .values()
             .cloned()
+            .map(|mut task| {
+                task.preview_ready =
+                    task.status == "completed" || task.verified_parts.first() == Some(&true);
+                task
+            })
             .collect())
+    }
+    fn preview_snapshot(&self, id: &str) -> Option<super::preview::Snapshot> {
+        let tasks = self.0.tasks.lock().ok()?;
+        let task = tasks.get(id)?;
+        let complete = task.status == "completed";
+        let path = if complete {
+            task.directory.join(&task.file.name)
+        } else {
+            task.directory.join(format!(
+                ".nibiru-ed2k-{}-{}.part",
+                task.file.hash_hex(),
+                task.file.size
+            ))
+        };
+        Some(super::preview::Snapshot {
+            path,
+            size: task.file.size,
+            parts: if complete {
+                vec![true; task.file.part_count()]
+            } else {
+                task.verified_parts.clone()
+            },
+            part_size: 9_728_000,
+        })
     }
     fn persist(&self, tasks: &BTreeMap<String, Download>) -> Result<(), String> {
         let records: Vec<_> = tasks.values().collect();
@@ -117,6 +150,8 @@ impl Downloads {
         }
         let cancel = Arc::new(AtomicBool::new(false));
         self.update(&id, |task| {
+            task.verified_parts.clear();
+            task.preview_ready = false;
             task.status = "queued".into();
             task.error = None;
             task.peer = None;
@@ -186,6 +221,7 @@ impl Downloads {
                 ed2k::download_with_options(&task.file,&task.directory,&sources,options,cancel.clone(),|progress|{
                     let _=queue.update(&id,|task|{
                         task.status=match progress.stage{TransferStage::Connecting=>"connecting",TransferStage::Queued=>"waiting_peer",TransferStage::Checking=>"checking",TransferStage::Downloading=>"downloading",TransferStage::Completed=>"completed"}.into();
+                        task.verified_parts=progress.verified_parts;
                         task.verified=progress.verified;task.peer=progress.peer;task.queue_rank=progress.queue_rank;
                     });
                 }).await.map_err(|e|format!("{e:#}"))?;
@@ -223,12 +259,25 @@ pub async fn ed2k_add_download(
     app: tauri::AppHandle,
     state: State<'_, Ed2kState>,
     link: String,
+    directory: Option<String>,
 ) -> Result<Option<String>, String> {
     state.ready()?;
     let file = FileLink::parse(link.trim()).map_err(|e| e.to_string())?;
     // Use the directory already chosen by the user in ADM preferences.
-    let directory =
-        super::super::configured_download_directory(&app, &app.state::<super::super::AppState>())?;
+    let directory = match directory.filter(|value| !value.trim().is_empty()) {
+        Some(value) => {
+            let path = PathBuf::from(value);
+            if !path.is_absolute() {
+                return Err("invalid_download_directory".into());
+            }
+            std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+            std::fs::canonicalize(path).map_err(|e| e.to_string())?
+        }
+        None => super::super::configured_download_directory(
+            &app,
+            &app.state::<super::super::AppState>(),
+        )?,
+    };
     let id = uuid::Uuid::new_v4().to_string();
     {
         let mut tasks = state.downloads.0.tasks.lock().map_err(|e| e.to_string())?;
@@ -252,6 +301,8 @@ pub async fn ed2k_add_download(
                 directory,
                 status: "paused".into(),
                 verified: 0,
+                verified_parts: Vec::new(),
+                preview_ready: false,
                 peer: None,
                 queue_rank: None,
                 error: None,
@@ -317,6 +368,45 @@ pub fn ed2k_download_action(
     }
 }
 
+/// Open verified ED2K media with the same player selected in ADM settings.
+#[tauri::command]
+pub async fn ed2k_preview_download(
+    app: tauri::AppHandle,
+    state: State<'_, Ed2kState>,
+    id: String,
+) -> Result<(), String> {
+    state.ready()?;
+    let task = state
+        .downloads
+        .list()?
+        .into_iter()
+        .find(|task| task.id == id)
+        .ok_or("ed2k_task_not_found")?;
+    if !super::super::is_previewable_video_path(std::path::Path::new(&task.file.name)) {
+        return Err("media_not_available".into());
+    }
+    if !task.preview_ready {
+        return Err("waiting_for_verified_ed2k_part".into());
+    }
+    let app_state = app.state::<super::super::AppState>();
+    let player = app_state
+        .settings
+        .lock()
+        .map_err(|e| e.to_string())?
+        .media_player_path
+        .clone();
+    let queue = state.downloads.clone();
+    let extension = std::path::Path::new(&task.file.name)
+        .extension()
+        .and_then(|v| v.to_str())
+        .unwrap_or("mkv")
+        .to_ascii_lowercase();
+    let url = super::preview::start(Arc::new(move || queue.preview_snapshot(&id)), &extension)
+        .await
+        .map_err(|e| e.to_string())?;
+    super::super::launch_media_target(player, std::ffi::OsStr::new(&url))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,6 +424,8 @@ mod tests {
             directory: root.path().to_owned(),
             status: "downloading".into(),
             verified: 12,
+            verified_parts: vec![true],
+            preview_ready: true,
             peer: Some("1.2.3.4".into()),
             queue_rank: None,
             error: None,
@@ -348,5 +440,7 @@ mod tests {
         assert_eq!(tasks[0].status, "paused");
         assert_eq!(tasks[0].verified, 12);
         assert!(tasks[0].peer.is_none());
+        assert!(tasks[0].verified_parts.is_empty());
+        assert!(!tasks[0].preview_ready);
     }
 }

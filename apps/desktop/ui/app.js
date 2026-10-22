@@ -30,7 +30,7 @@ const catalogs = {
     aiStatusProposed: "Awaiting approval", aiStatusTesting: "Testing", aiStatusSaved: "Saved", aiStatusConfirmed: "Confirmed", aiStatusRejected: "Did not work",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
-    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", aria2Backend: "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "mpv / media player",
+    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", xtremeBackend: "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "mpv / media player",
     about: "About", aboutDescription: "About the creator.", aboutCreator: "Creator: Juliano - Brazil", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume", facebookRecordingFallback: "The Facebook extractor failed to read this Reel. Update yt-dlp or try capturing its link again. Recording is available as an alternative.",
     addDownload: "Add download",
     downloadSpeed: "DOWNLOAD SPEED",
@@ -53,7 +53,6 @@ const catalogs = {
     sourceUrl: "Source URL",
     cancel: "Cancel",
     analyze: "Analyze",
-    selectTorrentFiles: "Select torrent files",
     torrentMetadataSeeking: "Finding peers and receiving torrent metadata",
     torrentMetadataPeersStalled: "Peers were reached, but none delivered the torrent metadata in time. This may be specific to this swarm or its peers. Try again or use a torrent file if available.",
     torrentMetadataTimeout: "No peers responded with metadata for this torrent/magnet in time. Trackers or DHT may be slow or the swarm may have no active seeds. You can try again, or check the link.",
@@ -152,21 +151,21 @@ const catalogs = {
     dnsProvider: "Provider",
     dnsCustom: "Custom",
     dnsServers: "DNS servers",
-    dnsScopeHint: "Applied to the native HTTP engine. aria2 uses the system resolver; SOCKS5H continues resolving through the proxy.",
-    aria2RpcTitle: "aria2 RPC",
-    aria2RpcEnabled: "Use aria2 RPC",
-    aria2RpcEnabledHint: "Control accelerated HTTP/HTTPS and FTP transfers through the local aria2 engine.",
-    aria2RpcAutoStart: "Start aria2 automatically when needed",
-    aria2RpcAutoStartHint: "Keeps one local aria2 backend for the current Apocalipse session.",
-    aria2RpcPort: "RPC port",
-    aria2RpcPortHint: "Automatic",
-    aria2RpcStatus: "RPC status",
-    aria2RpcConnected: "Connected",
-    aria2RpcDisconnected: "Disconnected",
-    aria2RpcTesting: "Testing…",
-    aria2RpcTest: "Test RPC connection",
-    aria2RpcRegenerateToken: "Regenerate RPC token",
-    aria2RpcTokenRegenerated: "RPC token regenerated",
+    dnsScopeHint: "Applied to the native HTTP engine. xtreme uses the system resolver; SOCKS5H continues resolving through the proxy.",
+    xtremeRpcTitle: "Nibiru Xtreme RPC",
+    xtremeRpcEnabled: "Use Nibiru Xtreme RPC",
+    xtremeRpcEnabledHint: "Control accelerated HTTP/HTTPS and FTP transfers through the local Nibiru Xtreme engine.",
+    xtremeRpcAutoStart: "Start Nibiru Xtreme automatically when needed",
+    xtremeRpcAutoStartHint: "Keeps one local Nibiru Xtreme backend for the current Apocalipse session.",
+    xtremeRpcPort: "RPC port",
+    xtremeRpcPortHint: "Automatic",
+    xtremeRpcStatus: "RPC status",
+    xtremeRpcConnected: "Connected",
+    xtremeRpcDisconnected: "Disconnected",
+    xtremeRpcTesting: "Testing…",
+    xtremeRpcTest: "Test RPC connection",
+    xtremeRpcRegenerateToken: "Regenerate RPC token",
+    xtremeRpcTokenRegenerated: "RPC token regenerated",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
     automatic: "Automatic",
@@ -247,7 +246,7 @@ const catalogs = {
     aiStatusProposed: "Aguardando aprovação", aiStatusTesting: "Em teste", aiStatusSaved: "Guardada", aiStatusConfirmed: "Confirmada", aiStatusRejected: "Não funcionou",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
-    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", aria2Backend: "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "mpv / reprodutor de mídia",
+    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", xtremeBackend: "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "mpv / reprodutor de mídia",
     about: "Sobre", aboutDescription: "Sobre o criador.", aboutCreator: "Criador: Juliano - Brasil", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume", facebookRecordingFallback: "O extrator do Facebook falhou ao ler este Reel. Atualize o yt-dlp ou tente capturar o link novamente. Gravar está disponível como alternativa.",
     addDownload: "Adicionar download",
     downloadSpeed: "VELOCIDADE DE DOWNLOAD",
@@ -270,7 +269,6 @@ const catalogs = {
     sourceUrl: "URL de origem",
     cancel: "Cancelar",
     analyze: "Analisar",
-    selectTorrentFiles: "Escolha os arquivos do torrent",
     torrentMetadataSeeking: "Procurando pares e recebendo metadados do torrent",
     torrentMetadataPeersStalled: "Pares foram alcançados, mas nenhum entregou os metadados do torrent a tempo. Isso pode ser específico deste swarm ou de seus pares. Tente novamente ou use um arquivo .torrent, se disponível.",
     torrentMetadataTimeout: "Nenhum par respondeu com os metadados deste torrent/magnet a tempo. Os trackers ou o DHT podem estar lentos, ou a rede pode não ter seeds ativos no momento. Você pode tentar novamente ou verificar o link.",
@@ -369,21 +367,21 @@ const catalogs = {
     dnsProvider: "Provedor",
     dnsCustom: "Personalizado",
     dnsServers: "Servidores DNS",
-    dnsScopeHint: "Aplicado ao motor HTTP nativo. O aria2 usa a resolução do sistema; o SOCKS5H continua resolvendo pelo proxy.",
-    aria2RpcTitle: "aria2 RPC",
-    aria2RpcEnabled: "Usar aria2 RPC",
-    aria2RpcEnabledHint: "Controla HTTP/HTTPS acelerado e FTP pelo motor aria2 local.",
-    aria2RpcAutoStart: "Iniciar o aria2 automaticamente quando necessário",
-    aria2RpcAutoStartHint: "Mantém um único backend aria2 local durante a sessão atual do Apocalipse.",
-    aria2RpcPort: "Porta RPC",
-    aria2RpcPortHint: "Automática",
-    aria2RpcStatus: "Status RPC",
-    aria2RpcConnected: "Conectado",
-    aria2RpcDisconnected: "Desconectado",
-    aria2RpcTesting: "Testando…",
-    aria2RpcTest: "Testar conexão RPC",
-    aria2RpcRegenerateToken: "Regenerar token RPC",
-    aria2RpcTokenRegenerated: "Token RPC regenerado",
+    dnsScopeHint: "Aplicado ao motor HTTP nativo. O xtreme usa a resolução do sistema; o SOCKS5H continua resolvendo pelo proxy.",
+    xtremeRpcTitle: "Nibiru Xtreme RPC",
+    xtremeRpcEnabled: "Usar Nibiru Xtreme RPC",
+    xtremeRpcEnabledHint: "Controla HTTP/HTTPS acelerado e FTP pelo motor Nibiru Xtreme local.",
+    xtremeRpcAutoStart: "Iniciar o Nibiru Xtreme automaticamente quando necessário",
+    xtremeRpcAutoStartHint: "Mantém um único backend Nibiru Xtreme local durante a sessão atual do Apocalipse.",
+    xtremeRpcPort: "Porta RPC",
+    xtremeRpcPortHint: "Automática",
+    xtremeRpcStatus: "Status RPC",
+    xtremeRpcConnected: "Conectado",
+    xtremeRpcDisconnected: "Desconectado",
+    xtremeRpcTesting: "Testando…",
+    xtremeRpcTest: "Testar conexão RPC",
+    xtremeRpcRegenerateToken: "Regenerar token RPC",
+    xtremeRpcTokenRegenerated: "Token RPC regenerado",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
     automatic: "Automático",
@@ -464,7 +462,7 @@ const catalogs = {
     aiStatusProposed: "等待批准", aiStatusTesting: "测试中", aiStatusSaved: "已保存", aiStatusConfirmed: "已确认", aiStatusRejected: "未解决",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
-    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", aria2Backend: "Nibiru Xtreme（HTTP/HTTPS、FTP/SFTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "mpv / 媒体播放器",
+    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", xtremeBackend: "Nibiru Xtreme（HTTP/HTTPS、FTP/SFTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "mpv / 媒体播放器",
     about: "关于", aboutDescription: "关于创作者。", aboutCreator: "创作者：Juliano - 巴西", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量", facebookRecordingFallback: "Facebook 提取器无法读取此 Reel。请更新 yt-dlp 或重新捕获链接。也可以选择录制。",
     addDownload: "添加下载",
     downloadSpeed: "下载速度",
@@ -487,7 +485,6 @@ const catalogs = {
     sourceUrl: "来源网址",
     cancel: "取消",
     analyze: "分析",
-    selectTorrentFiles: "选择种子文件",
     torrentMetadataSeeking: "正在查找节点并接收种子元数据",
     torrentMetadataPeersStalled: "已连接到节点，但没有节点及时传送种子元数据。这可能与该种子群或其节点有关。请重试，或使用可用的 .torrent 文件。",
     torrentMetadataTimeout: "没有节点及时返回这个种子/磁力链接的元数据。Tracker 或 DHT 可能响应缓慢，或者该网络目前没有活跃的做种者。您可以重试，或检查链接是否正确。",
@@ -586,21 +583,21 @@ const catalogs = {
     dnsProvider: "提供商",
     dnsCustom: "自定义",
     dnsServers: "DNS 服务器",
-    dnsScopeHint: "应用于原生 HTTP 引擎。aria2 使用系统解析器；SOCKS5H 仍通过代理解析。",
-    aria2RpcTitle: "aria2 RPC",
-    aria2RpcEnabled: "使用 aria2 RPC",
-    aria2RpcEnabledHint: "通过本地 aria2 引擎控制加速 HTTP/HTTPS 和 FTP 传输。",
-    aria2RpcAutoStart: "需要时自动启动 aria2",
-    aria2RpcAutoStartHint: "当前 Apocalipse 会话只保留一个本地 aria2 后端。",
-    aria2RpcPort: "RPC 端口",
-    aria2RpcPortHint: "自动",
-    aria2RpcStatus: "RPC 状态",
-    aria2RpcConnected: "已连接",
-    aria2RpcDisconnected: "未连接",
-    aria2RpcTesting: "测试中…",
-    aria2RpcTest: "测试 RPC 连接",
-    aria2RpcRegenerateToken: "重新生成 RPC 令牌",
-    aria2RpcTokenRegenerated: "RPC 令牌已重新生成",
+    dnsScopeHint: "应用于原生 HTTP 引擎。xtreme 使用系统解析器；SOCKS5H 仍通过代理解析。",
+    xtremeRpcTitle: "Nibiru Xtreme RPC",
+    xtremeRpcEnabled: "使用 Nibiru Xtreme RPC",
+    xtremeRpcEnabledHint: "通过本地 Nibiru Xtreme 引擎控制加速 HTTP/HTTPS 和 FTP 传输。",
+    xtremeRpcAutoStart: "需要时自动启动 Nibiru Xtreme",
+    xtremeRpcAutoStartHint: "当前 Apocalipse 会话只保留一个本地 Nibiru Xtreme 后端。",
+    xtremeRpcPort: "RPC 端口",
+    xtremeRpcPortHint: "自动",
+    xtremeRpcStatus: "RPC 状态",
+    xtremeRpcConnected: "已连接",
+    xtremeRpcDisconnected: "未连接",
+    xtremeRpcTesting: "测试中…",
+    xtremeRpcTest: "测试 RPC 连接",
+    xtremeRpcRegenerateToken: "重新生成 RPC 令牌",
+    xtremeRpcTokenRegenerated: "RPC 令牌已重新生成",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
     automatic: "自动",
@@ -824,7 +821,7 @@ function updateSpeeds(tasks) {
     const changed = !previous || task.received !== previous.bytes;
     const changedAt = changed ? now : previous.changedAt;
     // When the backend has an engine-reported byte/s value, display that
-    // value directly. Do not apply a second UI EWMA: aria2, yt-dlp and
+    // value directly. Do not apply a second UI EWMA: xtreme, yt-dlp and
     // N_m3u8DL-RE already report their own live throughput. Byte-delta EWMA
     // remains only as a fallback for engines that cannot provide byte/s.
     const hasEngineSpeed = active
@@ -1529,7 +1526,7 @@ async function showSettingsTab(tab) {
   document.querySelector(".settings-footer").hidden = !["general", "network", "extension"].includes(tab);
   try {
     if (tab === "tools") await refreshToolStatuses();
-    if (tab === "logs") await refreshLogEvents();
+
   } catch (error) { reportUiError("main", "settings-tab", error); }
 }
 function showPage(page) {
@@ -1545,6 +1542,14 @@ function showPage(page) {
   document.querySelector("#moq-capture-panel").hidden = page !== "recordings";
   document.querySelector("#settings-panel").hidden = page !== "settings";
   document.querySelector("#about-panel").hidden = page !== "about";
+  document.querySelector("#logs-page-panel").hidden = page !== "logs";
+  if (page === "logs") {
+    refreshLogEvents().catch(error => reportUiError("main", "open-logs", error));
+    invoke("get_log_editor").then(editor => {
+      document.querySelector("#log-editor").value = editor;
+      updateLogEditorControls();
+    }).catch(error => reportUiError("main", "log-editor", error));
+  }
   document.querySelector("#add").hidden = !list;
   document.querySelector("#torrent-store-controls").hidden = page !== "torrents";
   document.querySelector("#clear-torrent-store").hidden = page !== "torrents";
@@ -2096,17 +2101,17 @@ document.querySelector("#save-host-rule").onclick = async (event) => {
   }
 };
 
-function renderAria2RpcStatus(status = {}) {
-  const target = document.querySelector("#aria2-rpc-status");
+function renderXtremeRpcStatus(status = {}) {
+  const target = document.querySelector("#xtreme-rpc-status");
   if (!target) return;
   if (!status.connected) {
-    target.textContent = t("aria2RpcDisconnected");
+    target.textContent = t("xtremeRpcDisconnected");
     return;
   }
   const details = [
-    t("aria2RpcConnected"),
+    t("xtremeRpcConnected"),
     status.activePort ? `127.0.0.1:${status.activePort}` : "",
-    status.version ? `aria2 ${status.version}` : "",
+    status.version ? `nibiru-xtreme ${status.version}` : "",
   ].filter(Boolean);
   target.textContent = details.join(" · ");
 }
@@ -2123,7 +2128,7 @@ const openSettings = async (target = "general") => {
       invoke("get_log_editor"),
       invoke("get_proxy_setting"),
       invoke("get_dns_setting"),
-      invoke("get_aria2_rpc_settings"),
+      invoke("get_xtreme_rpc_settings"),
       invoke("get_associations"),
       invoke("list_host_rules"),
     ]);
@@ -2164,10 +2169,10 @@ const openSettings = async (target = "general") => {
       ? dnsValue
       : "custom";
     updateDnsControls();
-    document.querySelector("#aria2-rpc-enabled").checked = rpc.enabled;
-    document.querySelector("#aria2-rpc-auto-start").checked = rpc.autoStart;
-    document.querySelector("#aria2-rpc-port").value = rpc.configuredPort || "";
-    renderAria2RpcStatus(rpc);
+    document.querySelector("#xtreme-rpc-enabled").checked = rpc.enabled;
+    document.querySelector("#xtreme-rpc-auto-start").checked = rpc.autoStart;
+    document.querySelector("#xtreme-rpc-port").value = rpc.configuredPort || "";
+    renderXtremeRpcStatus(rpc);
     renderHostRules(hostRules);
     updateLogEditorControls();
     settingsDialog.showModal();
@@ -2178,39 +2183,39 @@ const openSettings = async (target = "general") => {
     targetElement?.focus?.();
     invoke("record_ui_diagnostic", { level: "INFO", event: "settings_section_opened", detail: `section=${target} found=${Boolean(targetElement)}` }).catch(() => {});
   } catch (error) {
-    reportUiError("main", "renderAria2RpcStatus", error);
+    reportUiError("main", "renderXtremeRpcStatus", error);
   }
 };
 document
   .querySelectorAll("[data-settings-close]")
   .forEach((button) => (button.onclick = () => settingsDialog.close()));
-document.querySelector("#aria2-rpc-test").onclick = async () => {
-  const status = document.querySelector("#aria2-rpc-status");
-  const button = document.querySelector("#aria2-rpc-test");
+document.querySelector("#xtreme-rpc-test").onclick = async () => {
+  const status = document.querySelector("#xtreme-rpc-status");
+  const button = document.querySelector("#xtreme-rpc-test");
   button.disabled = true;
-  status.textContent = t("aria2RpcTesting");
+  status.textContent = t("xtremeRpcTesting");
   try {
-    const rpcPortValue = Number(document.querySelector("#aria2-rpc-port").value) || 0;
-    await invoke("set_aria2_rpc_settings", {
-      enabled: document.querySelector("#aria2-rpc-enabled").checked,
-      autoStart: document.querySelector("#aria2-rpc-auto-start").checked,
+    const rpcPortValue = Number(document.querySelector("#xtreme-rpc-port").value) || 0;
+    await invoke("set_xtreme_rpc_settings", {
+      enabled: document.querySelector("#xtreme-rpc-enabled").checked,
+      autoStart: document.querySelector("#xtreme-rpc-auto-start").checked,
       port: rpcPortValue > 0 ? rpcPortValue : null,
     });
-    renderAria2RpcStatus(await invoke("test_aria2_rpc"));
+    renderXtremeRpcStatus(await invoke("test_xtreme_rpc"));
   } catch (error) {
-    status.textContent = `${t("aria2RpcDisconnected")} · ${error}`;
+    status.textContent = `${t("xtremeRpcDisconnected")} · ${error}`;
   } finally {
     button.disabled = false;
   }
 };
-document.querySelector("#aria2-rpc-regenerate-token").onclick = async () => {
-  const button = document.querySelector("#aria2-rpc-regenerate-token");
+document.querySelector("#xtreme-rpc-regenerate-token").onclick = async () => {
+  const button = document.querySelector("#xtreme-rpc-regenerate-token");
   button.disabled = true;
   try {
-    await invoke("regenerate_aria2_rpc_token");
-    document.querySelector("#aria2-rpc-status").textContent = t("aria2RpcTokenRegenerated");
+    await invoke("regenerate_xtreme_rpc_token");
+    document.querySelector("#xtreme-rpc-status").textContent = t("xtremeRpcTokenRegenerated");
   } catch (error) {
-    reportUiError("main", "aria2-rpc-regenerate-token", error);
+    reportUiError("main", "xtreme-rpc-regenerate-token", error);
     window.alert(String(error));
   } finally {
     button.disabled = false;
@@ -2263,10 +2268,10 @@ document.querySelector("#save-settings").onclick = async () => {
         .map((server) => server.trim())
         .filter(Boolean),
     });
-    const rpcPortValue = Number(document.querySelector("#aria2-rpc-port").value) || 0;
-    await invoke("set_aria2_rpc_settings", {
-      enabled: document.querySelector("#aria2-rpc-enabled").checked,
-      autoStart: document.querySelector("#aria2-rpc-auto-start").checked,
+    const rpcPortValue = Number(document.querySelector("#xtreme-rpc-port").value) || 0;
+    await invoke("set_xtreme_rpc_settings", {
+      enabled: document.querySelector("#xtreme-rpc-enabled").checked,
+      autoStart: document.querySelector("#xtreme-rpc-auto-start").checked,
       port: rpcPortValue > 0 ? rpcPortValue : null,
     });
     for (const input of document.querySelectorAll("[data-association]")) {
@@ -2311,7 +2316,7 @@ document.querySelector("#save-tools").onclick = async (event) => {
       ytDlp: document.querySelector("#tool-yt-dlp").value,
       qjs: document.querySelector("#tool-qjs").value,
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
-      aria2: document.querySelector("#tool-aria2").value,
+      xtreme: document.querySelector("#tool-xtreme").value,
       extractor: document.querySelector("#tool-extractor").value,
     });
     await invoke("set_media_player", { path: document.querySelector("#tool-player").value });
@@ -2661,7 +2666,7 @@ document.querySelector("#analyze").onclick = async () => {
       const shown = await showTorrentInspection(url.value, generation);
       stopMetadataTimer();
       if (!shown || !current()) return;
-      box.textContent = t("selectTorrentFiles");
+      box.textContent = "nibiru-xtreme";
     } else if (plan.reason === "hls_manifest") {
       const select = document.querySelector("#media-format");
       select.replaceChildren();
@@ -2699,7 +2704,7 @@ document.querySelector("#analyze").onclick = async () => {
     const message = String(error);
     box.textContent = /connections=0:seeders=0/.test(message)
       ? t("torrentMetadataNoPeers")
-      : /aria2_metadata_timeout:connections=[1-9][0-9]*/.test(message) ? t("torrentMetadataPeersStalled")
+      : /xtreme_metadata_timeout:connections=[1-9][0-9]*/.test(message) ? t("torrentMetadataPeersStalled")
       : /timed? ?out|timeout/i.test(message) ? t("torrentMetadataTimeout") : message;
   } finally {
     stopMetadataTimer();

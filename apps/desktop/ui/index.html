@@ -13,7 +13,7 @@
 <div id="window-drag-region"><span class="title-logo">A</span><span>Apocalipse Download Manager</span></div>
 <div class="window-controls"><button aria-label="Minimize" data-i18n-aria="windowMinimize" data-window-action="minimize" type="button">−</button><button aria-label="Maximize / restore" data-i18n-aria="windowMaximize" data-window-action="maximize" type="button">□</button><button aria-label="Close" data-i18n-aria="windowClose" data-window-action="close" type="button">×</button></div>
 </div>
-<aside><nav><button class="active" data-page="downloads"><b data-i18n="downloads">Downloads</b></button><button data-page="torrents"><b data-i18n="torrents">Torrents</b></button><button data-page="recordings"><b data-i18n="recordings">Recordings</b></button><button id="open-link-window" type="button"><b data-i18n="settingsLink">Apocalipse Link</b></button><button id="open-ed2k-window" type="button"><b data-i18n="ed2kKad">Apocalipse ED2K/Kad</b></button><button data-page="settings"><b data-i18n="settings">Settings</b></button><div class="nav-spacer"></div><button id="donate-paypal" type="button"><b data-i18n="donate">Donate</b></button><button data-page="about"><b data-i18n="about">About</b></button></nav></aside>
+<aside><nav><button class="active" data-page="downloads"><b data-i18n="downloads">Downloads</b></button><button data-page="torrents"><b data-i18n="torrents">Torrents</b></button><button data-page="recordings"><b data-i18n="recordings">Recordings</b></button><button id="open-link-window" type="button"><b data-i18n="settingsLink">Apocalipse Link</b></button><button id="open-ed2k-window" type="button"><b data-i18n="ed2kKad">Apocalipse ED2K/Kad</b></button><button data-page="settings"><b data-i18n="settings">Settings</b></button><button data-page="logs"><b data-i18n="logs">Logs</b></button><div class="nav-spacer"></div><button id="donate-paypal" type="button"><b data-i18n="donate">Donate</b></button><button data-page="about"><b data-i18n="about">About</b></button></nav></aside>
 <main>
 <header>
 <div>
@@ -49,7 +49,7 @@
 
 
 
-<section class="settings-page" hidden id="settings-panel"><div class="settings-tabs" role="tablist"><button class="active" data-settings-tab="general" role="tab" type="button"><span data-i18n="settingsGeneral">General</span></button><button data-settings-tab="language" role="tab" type="button"><span data-i18n="language">Language</span></button><button data-settings-tab="tools" role="tab" type="button"><span data-i18n="tools">Tools</span></button><button data-settings-tab="network" role="tab" type="button"><span data-i18n="settingsNetwork">Network and proxy</span></button><button data-settings-tab="extension" role="tab" type="button"><span data-i18n="settingsExtension">Browser extension</span></button><button data-settings-tab="logs" role="tab" type="button"><span data-i18n="logs">Logs</span></button></div><div class="settings-body"><div class="pane" data-pane="general"><label class="setting-toggle"><input id="dark-mode" type="checkbox"/><span><b data-i18n="darkMode">Dark mode</b><small data-i18n="darkModeHint">Near-black surfaces with light text. Progress colours stay the same.</small></span></label><label class="setting-toggle">
+<section class="settings-page" hidden id="settings-panel"><div class="settings-tabs" role="tablist"><button class="active" data-settings-tab="general" role="tab" type="button"><span data-i18n="settingsGeneral">General</span></button><button data-settings-tab="language" role="tab" type="button"><span data-i18n="language">Language</span></button><button data-settings-tab="tools" role="tab" type="button"><span data-i18n="tools">Tools</span></button><button data-settings-tab="network" role="tab" type="button"><span data-i18n="settingsNetwork">Network and proxy</span></button><button data-settings-tab="extension" role="tab" type="button"><span data-i18n="settingsExtension">Browser extension</span></button></div><div class="settings-body"><div class="pane" data-pane="general"><label class="setting-toggle"><input id="dark-mode" type="checkbox"/><span><b data-i18n="darkMode">Dark mode</b><small data-i18n="darkModeHint">Near-black surfaces with light text. Progress colours stay the same.</small></span></label><label class="setting-toggle">
 <input id="autostart" type="checkbox"/>
 <span><b data-i18n="startWithSystem">Start with the system</b><small data-i18n="startHidden">Open hidden in the system tray</small></span>
 </label><section class="pairing-settings">
@@ -107,7 +107,7 @@
 <label data-tool="yt-dlp"><span>yt-dlp <small></small></span><div><input id="tool-yt-dlp" type="text"/><button data-i18n="browse" data-tool-pick="yt-dlp" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="yt-dlp" type="button">Download</button><button data-i18n="update" data-tool-update="yt-dlp" type="button">Update</button></div></label>
 <label data-tool="qjs"><span>QuickJS (qjs) <small></small></span><div><input id="tool-qjs" type="text"/><button data-i18n="browse" data-tool-pick="qjs" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="qjs" type="button">Download</button><button data-i18n="update" data-tool-update="qjs" type="button">Update</button></div></label>
 <label data-tool="n-m3u8dl-re"><span>N_m3u8DL-RE <small></small></span><div><input id="tool-n-m3u8dl-re" type="text"/><button data-i18n="browse" data-tool-pick="n-m3u8dl-re" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="n-m3u8dl-re" type="button">Download</button><button data-i18n="update" data-tool-update="n-m3u8dl-re" type="button">Update</button></div></label>
-<label data-tool="aria2"><span><span data-i18n="aria2Backend">aria2 (HTTP/HTTPS, FTP, torrent and magnet)</span> <small></small></span><div><input id="tool-aria2" type="text"/><button data-i18n="browse" data-tool-pick="aria2" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="aria2" type="button">Download</button><button data-i18n="update" data-tool-update="aria2" type="button">Update</button></div></label>
+<label data-tool="xtreme"><span><span data-i18n="xtremeBackend">xtreme (HTTP/HTTPS, FTP, torrent and magnet)</span> <small></small></span><div><input id="tool-xtreme" type="text"/><button data-i18n="browse" data-tool-pick="xtreme" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="xtreme" type="button">Download</button><button data-i18n="update" data-tool-update="xtreme" type="button">Update</button></div></label>
 <label data-tool="extractor"><span><span data-i18n="archiveExtractor">Archive extractor</span> <small></small></span><div><input id="tool-extractor" type="text"/><button data-i18n="browse" data-tool-pick="extractor" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="extractor" type="button">Download</button></div></label>
 <label data-tool="player"><span><span data-i18n="mediaPlayer">mpv / media player</span> <small></small></span><div><input id="tool-player" type="text"/><button data-i18n="browse" data-tool-pick="player" type="button">Browse…</button><button data-i18n="downloadTool" data-tool-download="player" type="button">Download</button></div></label>
 </div>
@@ -159,23 +159,23 @@
 </select>
 <label data-i18n="dnsServers" for="dns-servers">DNS servers</label>
 <input id="dns-servers" maxlength="400" placeholder="1.1.1.1, 1.0.0.1" type="text"/>
-<small data-i18n="dnsScopeHint">Applied to the native HTTP engine. aria2 uses the system resolver; SOCKS5H continues resolving through the proxy.</small>
+<small data-i18n="dnsScopeHint">Applied to the native HTTP engine. xtreme uses the system resolver; SOCKS5H continues resolving through the proxy.</small>
 </section><section class="pairing-settings">
-<b data-i18n="aria2RpcTitle">aria2 RPC</b>
+<b data-i18n="xtremeRpcTitle">xtreme RPC</b>
 <label class="setting-toggle compact-toggle">
-<input checked="" id="aria2-rpc-enabled" type="checkbox"/>
-<span><b data-i18n="aria2RpcEnabled">Use aria2 RPC</b><small data-i18n="aria2RpcEnabledHint">Control accelerated HTTP/HTTPS, FTP, torrent and magnet transfers through the local aria2 engine.</small></span>
+<input checked="" id="xtreme-rpc-enabled" type="checkbox"/>
+<span><b data-i18n="xtremeRpcEnabled">Use xtreme RPC</b><small data-i18n="xtremeRpcEnabledHint">Control accelerated HTTP/HTTPS, FTP, torrent and magnet transfers through the local xtreme engine.</small></span>
 </label>
 <label class="setting-toggle compact-toggle">
-<input checked="" id="aria2-rpc-auto-start" type="checkbox"/>
-<span><b data-i18n="aria2RpcAutoStart">Start aria2 automatically when needed</b><small data-i18n="aria2RpcAutoStartHint">Keeps one local aria2 backend for the current Apocalipse session.</small></span>
+<input checked="" id="xtreme-rpc-auto-start" type="checkbox"/>
+<span><b data-i18n="xtremeRpcAutoStart">Start xtreme automatically when needed</b><small data-i18n="xtremeRpcAutoStartHint">Keeps one local xtreme backend for the current Apocalipse session.</small></span>
 </label>
-<label data-i18n="aria2RpcPort" for="aria2-rpc-port">RPC port</label>
-<input data-i18n-placeholder="aria2RpcPortHint" id="aria2-rpc-port" max="65535" min="1024" placeholder="Automatic" step="1" type="number"/>
-<div class="bandwidth-current"><span data-i18n="aria2RpcStatus">RPC status</span><strong id="aria2-rpc-status">Disconnected</strong></div>
+<label data-i18n="xtremeRpcPort" for="xtreme-rpc-port">RPC port</label>
+<input data-i18n-placeholder="xtremeRpcPortHint" id="xtreme-rpc-port" max="65535" min="1024" placeholder="Automatic" step="1" type="number"/>
+<div class="bandwidth-current"><span data-i18n="xtremeRpcStatus">RPC status</span><strong id="xtreme-rpc-status">Disconnected</strong></div>
 <div class="diagnostic-actions">
-<button data-i18n="aria2RpcTest" id="aria2-rpc-test" type="button">Test RPC connection</button>
-<button data-i18n="aria2RpcRegenerateToken" id="aria2-rpc-regenerate-token" type="button">Regenerate RPC token</button>
+<button data-i18n="xtremeRpcTest" id="xtreme-rpc-test" type="button">Test RPC connection</button>
+<button data-i18n="xtremeRpcRegenerateToken" id="xtreme-rpc-regenerate-token" type="button">Regenerate RPC token</button>
 </div>
 </section></div><div class="pane" data-pane="extension" hidden><section class="pairing-settings">
 <b data-i18n="extensionPairing">Browser extension pairing</b>
@@ -185,7 +185,7 @@
 <button data-i18n="copy" id="copy-pairing" type="button">Copy</button>
 </div>
 <button data-i18n="regenerate" id="regenerate-pairing" type="button">Regenerate</button>
-</section></div><div class="pane" data-pane="logs" hidden><section class="logs-panel" id="logs-panel">
+</section></div></div><div class="settings-footer"><button class="primary" data-i18n="save" id="save-settings" type="button">Save</button><button data-i18n="cancel" data-settings-close="" type="button">Cancel</button></div></section><section class="logs-page" hidden="" id="logs-page-panel"><section class="logs-panel" id="logs-panel">
 <header><div><b data-i18n="logs">Logs</b><small data-i18n="logsDescription">End-to-end diagnostics for extension, shortcuts, bridge and downloads.</small></div><span class="log-actions"><button class="primary" data-i18n="exportLog" id="export-logs" type="button">Export log</button><button data-i18n="clearLog" id="clear-logs" type="button">Clear log</button></span></header>
 <div class="log-toolbar"><input data-i18n-placeholder="searchLogs" id="log-search" placeholder="Search events…" type="search"/><select id="log-level"><option data-i18n="allLevels" value="">All levels</option><option>ERROR</option><option>WARN</option><option>INFO</option><option>DEBUG</option></select></div>
 <div class="log-event-list" id="log-event-list"></div>
@@ -204,7 +204,7 @@
 <button data-i18n="clearLog" id="clear-log" type="button">Clear log</button>
 <button data-i18n="removeEditor" id="remove-log-editor" type="button">Remove editor</button>
 </div>
-</section></div></div><div class="settings-footer"><button class="primary" data-i18n="save" id="save-settings" type="button">Save</button><button data-i18n="cancel" data-settings-close="" type="button">Cancel</button></div></section><section class="about-page" hidden="" id="about-panel">
+</section></section><section class="about-page" hidden="" id="about-panel">
 <article class="about-card">
 <audio id="about-audio" preload="auto"></audio>
 <div class="about-toolbar">

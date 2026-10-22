@@ -1,0 +1,26 @@
+{
+  "keys": {
+    "aria2_path": "xtreme_path",
+    "aria2_release_repo": "xtreme_release_repo",
+    "aria2_rpc_enabled": "xtreme_rpc_enabled",
+    "aria2_rpc_auto_start": "xtreme_rpc_auto_start",
+    "aria2_rpc_port": "xtreme_rpc_port",
+    "aria2_rpc_secret": "xtreme_rpc_secret",
+    "aria2_gid": "xtreme_gid"
+  },
+  "retiredRepositories": [
+    "FerroDownload/aria2-static-builds",
+    "linuxhell/aria2-ultra"
+  ],
+  "retiredExecutables": [
+    "aria2c",
+    "aria2c.exe"
+  ],
+  "engineValues": [
+    "aria2",
+    "aria2-rpc",
+    "aria2_rpc",
+    "Aria2Rpc",
+    "aria2-ultra"
+  ]
+}
