@@ -233,7 +233,8 @@ pre#diagnostic-log { max-height: 340px; overflow: auto; background: var(--surfac
 dialog { border: 1px solid var(--line-strong); border-radius: 10px; padding: 0; max-width: 92vw; max-height: 92vh; color: var(--text); background: var(--surface); box-shadow: 0 16px 48px rgba(0, 0, 0, .3); }
 dialog::backdrop { background: rgba(0, 0, 0, .35); }
 dialog form { padding: 16px 20px; display: flex; flex-direction: column; max-height: 90vh; min-width: 360px; }
-#add-dialog form { width: 860px; max-width: 94vw; }
+#add-dialog { max-height: calc(100vh - 48px); }
+#add-dialog form { width: 780px; max-width: 94vw; max-height: calc(100vh - 48px); padding: 14px 20px; box-sizing: border-box; }
 .dialog-head, dialog header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .dialog-head small { display: block; font-size: 11px; letter-spacing: 1px; color: var(--faint); }
 .dialog-head h2, dialog header h2 { margin: 0; font-size: 18px; }
@@ -241,7 +242,7 @@ dialog form { padding: 16px 20px; display: flex; flex-direction: column; max-hei
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
 .dialog-copy { color: var(--muted); margin: 0 0 8px; }
 .add-dialog-viewport { position: relative; flex: 1; min-height: 0; display: flex; }
-.add-dialog-scroll { flex: 1; min-height: 0; max-height: 62vh; overflow-y: auto; padding-right: 10px; }
+.add-dialog-scroll { flex: 1; min-height: 0; max-height: none; overflow-y: auto; padding-right: 10px; }
 .add-dialog-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
 .add-dialog-analysis, .add-dialog-destination { min-width: 0; }
 .analysis { margin: 8px 0; padding: 8px 10px; background: var(--surface-2); border-radius: 6px; }
@@ -358,7 +359,6 @@ dialog .close:focus-visible { outline: 2px solid var(--line-strong); outline-off
 .conflict-protected { margin: 10px 0 0; padding: 9px 12px; border: 1px solid var(--yellow); border-radius: 10px; font-size: 12px; color: var(--text); background: color-mix(in srgb, var(--yellow) 12%, var(--surface)); }
 
 /* Add download — concept A: three steps in one column. */
-#add-dialog form { width: 660px; }
 .add-dialog-grid { grid-template-columns: 1fr; gap: 18px 0; }
 .add-dialog-analysis, .add-dialog-destination { display: flex; flex-direction: column; gap: 10px; }
 .add-dialog-grid .step { display: flex; align-items: center; gap: 10px; }
@@ -392,7 +392,6 @@ dialog .close:focus-visible { outline: 2px solid var(--line-strong); outline-off
 .destination-card .destination-remove:hover { color: var(--red); }
 .add-dialog-destination .destination-history > div:first-child button { padding: 5px 12px; min-height: 0; font-size: 12px; }
 
-.add-dialog-scroll { max-height: calc(100vh - 215px); }
 .add-dialog-grid { gap: 14px 0; }
 .add-dialog-analysis, .add-dialog-destination { gap: 8px; }
 .media-card { padding: 10px; gap: 14px; }
@@ -410,9 +409,7 @@ dialog .close:focus-visible { outline: 2px solid var(--line-strong); outline-off
 .media-card { padding: 8px 10px; gap: 12px; }
 .media-card > div { gap: 2px; }
 #media-duration { margin-bottom: 2px; }
-#add-dialog form { padding: 14px 20px; }
 #add-dialog .dialog-head { margin-bottom: 4px; }
-.add-dialog-scroll { max-height: calc(100vh - 190px); }
 .add-dialog-destination .destination-history > div:first-child button { border: 0 !important; background: transparent !important; text-decoration: underline; font-weight: 500 !important; min-height: 0; padding: 0; color: var(--muted); }
 .destination-card .destination-select { padding: 7px 24px 7px 11px; }
 #destination-list { gap: 8px; margin-top: 8px; }

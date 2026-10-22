@@ -33,13 +33,15 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.7.1
+## Versão 0.7.2
+
+A janela se amplia ao abrir **Adicionar download**, dando mais espaço ao formulário, ao controle de threads e às opções avançadas. Ao fechar, ela recupera o tamanho e a posição anteriores; em telas pequenas, a rolagem continua disponível.
 
 O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada por MD4: até **9.728.000 bytes**, cerca de 9,28 MiB. Não existe um limite fixo de 30–40 MB baixados. Os peers priorizam o começo e o final do arquivo antes do meio; MP4/AVI podem precisar do índice no final. Trechos ainda ausentes aguardam os dados.
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.7.1**, Xtreme **0.2.1**, extensão **0.3.206**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.7.2**, Xtreme **0.2.1**, extensão **0.3.206**.
 
 ## Compilar e contribuir
 

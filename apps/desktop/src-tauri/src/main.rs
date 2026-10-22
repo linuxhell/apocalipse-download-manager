@@ -13418,14 +13418,91 @@ fn main_window_ready(app: tauri::AppHandle) {
     reveal_main_window_after_start(&app);
 }
 
+// The download form temporarily borrows more height, then restores the user's window.
+struct DownloadWindowGeometry {
+    size: tauri::PhysicalSize<u32>,
+    position: Option<tauri::PhysicalPosition<i32>>,
+}
+static DOWNLOAD_WINDOW_GEOMETRY: Mutex<Option<DownloadWindowGeometry>> = Mutex::new(None);
+
+#[tauri::command]
+fn set_download_dialog_expanded(app: tauri::AppHandle, expanded: bool) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let Some(window) = handle.get_webview_window("main") else {
+            return;
+        };
+        let Ok(mut previous) = DOWNLOAD_WINDOW_GEOMETRY.lock() else {
+            return;
+        };
+        if !expanded {
+            if let Some(geometry) = previous.take() {
+                let _ = window.set_size(geometry.size);
+                if let Some(position) = geometry.position {
+                    let _ = window.set_position(position);
+                }
+            }
+            return;
+        }
+        if previous.is_some()
+            || window.is_maximized().unwrap_or(false)
+            || window.is_fullscreen().unwrap_or(false)
+        {
+            return;
+        }
+        let Ok(Some(monitor)) = window.current_monitor() else {
+            return;
+        };
+        let Ok(size) = window.inner_size() else {
+            return;
+        };
+        let work = monitor.work_area();
+        let scale = monitor.scale_factor();
+        let decorations = window
+            .outer_size()
+            .map(|outer| outer.height.saturating_sub(size.height))
+            .unwrap_or((40.0 * scale).round() as u32);
+        let height = ((1000.0 * scale).round() as u32).min(
+            work.size
+                .height
+                .saturating_sub(decorations)
+                .saturating_sub((24.0 * scale).round() as u32),
+        );
+        if height <= size.height {
+            return;
+        }
+        let position = window.outer_position().ok();
+        if window
+            .set_size(tauri::PhysicalSize::new(size.width, height))
+            .is_err()
+        {
+            return;
+        }
+        *previous = Some(DownloadWindowGeometry { size, position });
+        if let Some(position) = position {
+            let rightmost = work.position.x + work.size.width.saturating_sub(size.width) as i32;
+            let x = position.x.clamp(work.position.x, rightmost);
+            let y =
+                work.position.y + work.size.height.saturating_sub(height + decorations) as i32 / 2;
+            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        }
+    });
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     let main_app = app.clone();
     let _ = app.run_on_main_thread(move || {
         if let Some(window) = main_app.get_webview_window("main") {
-            // Always reopen at the compact IDM size (980x620), centred.
-            let _ = window.unmaximize();
-            let _ = window.set_size(tauri::LogicalSize::new(980.0, 620.0));
-            let _ = window.center();
+            // A browser handoff must not shrink a download form that is already open.
+            if DOWNLOAD_WINDOW_GEOMETRY
+                .lock()
+                .map(|geometry| geometry.is_none())
+                .unwrap_or(false)
+            {
+                let _ = window.unmaximize();
+                let _ = window.set_size(tauri::LogicalSize::new(980.0, 620.0));
+                let _ = window.center();
+            }
             let _ = window.show();
             let _ = window.unminimize();
             let _ = window.set_always_on_top(true);
@@ -16038,6 +16115,7 @@ fn main() {
             pick_executable,
             pick_url_list,
             activate_main_window,
+            set_download_dialog_expanded,
             open_apocalipse_releases,
             open_paypal_donation,
             get_tool_statuses,

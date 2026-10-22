@@ -1417,6 +1417,17 @@ function acceptEnqueuedTask(task) {
 }
 
 const dialog = document.querySelector("#add-dialog");
+let downloadWindowResize = Promise.resolve();
+function resizeDownloadWindow(expanded) {
+  downloadWindowResize = downloadWindowResize.catch(() => {}).then(() => invoke("set_download_dialog_expanded", { expanded }));
+  downloadWindowResize.catch(error => reportUiError("main", "download-window-size", error, "WARN"));
+}
+function showDownloadDialog() {
+  if (dialog.open) return;
+  dialog.showModal();
+  resizeDownloadWindow(true);
+}
+
 const clearDialog = document.querySelector("#clear-dialog");
 // Settings and Tools are pages now; these keep the old dialog call sites working.
 const settingsDialog = { open: false, showModal() {}, close() { showPage("downloads"); } };
@@ -1747,6 +1758,7 @@ function resetAnalysisForNewRequest() {
 }
 const analysisIsCurrent = (generation) => generation === analysisGeneration;
 dialog.addEventListener("close", () => {
+  resizeDownloadWindow(false);
   analysisGeneration += 1;
   document.querySelector("#analyze").disabled = false;
 });
@@ -1907,7 +1919,7 @@ document.querySelectorAll("#add").forEach(
         })
         .catch(error => reportUiError("main", "resetTaskConnections", error));
       refreshDestinationHistory();
-      dialog.showModal();
+      showDownloadDialog();
     }),
 );
 const selectLanguage = (language) => {
@@ -2986,7 +2998,7 @@ setInterval(async () => {
     resetAnalysisForNewRequest();
     resetMediaInspection();
     await invoke("activate_main_window");
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) showDownloadDialog();
     url.focus();
   } catch (error) {
     reportUiError("main", "enqueue", error);
@@ -3026,7 +3038,7 @@ async function consumeBrowserAssistedDownload() {
     refreshAutoExtractOption();
     await refreshDestinationHistory();
     await invoke("activate_main_window");
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) showDownloadDialog();
     document.querySelector("#url").focus();
   } catch (error) {
     reportUiError("main", "consumeBrowserAssistedDownload", error);
@@ -3090,7 +3102,7 @@ async function consumeBridgeDownload() {
     document.querySelector("#destination").value = await invoke("default_download_directory");
     await refreshDestinationHistory();
     await invoke("activate_main_window");
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) showDownloadDialog();
     invoke("record_ui_diagnostic", { level: "INFO", event: "save_dialog_opened", detail: `trace=${pendingDiagnosticTrace || "none"}` }).catch(() => {});
     document.querySelector("#url").focus();
   } catch (error) { reportUiError("main", "consumeBridgeDownload", error); }
