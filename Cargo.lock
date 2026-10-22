@@ -134,7 +134,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "apocalipse-cli"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "apocalipse-core",
@@ -144,7 +144,7 @@ dependencies = [
 
 [[package]]
 name = "apocalipse-core"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "apocalipse-desktop"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "apocalipse-core",
@@ -3604,8 +3604,8 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nibiru-xtreme"
-version = "0.2.0-alpha.4"
-source = "git+https://github.com/linuxhell/nibiru-xtreme?rev=1a410627bd55edb0e5007f31f406896f2a134964#1a410627bd55edb0e5007f31f406896f2a134964"
+version = "0.2.0"
+source = "git+https://github.com/linuxhell/nibiru-xtreme?rev=7d537d406a2daf4d258a4b40fa891fbe039954cc#7d537d406a2daf4d258a4b40fa891fbe039954cc"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

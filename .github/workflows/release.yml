@@ -4,8 +4,6 @@ name: Release builds
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
     tags:
       - "v*"
     paths-ignore:
@@ -34,7 +32,7 @@ jobs:
             xtreme_suffix: windows-x64.exe
             xtreme_binary: nibiru-xtreme.exe
           - name: Linux x64 portable
-            os: ubuntu-latest
+            os: ubuntu-22.04
             artifact: apocalipse-download-manager-linux-x64-portable
             output: apocalipse-download-manager-linux-x64-portable.tar.gz
             xtreme_suffix: linux-x64
@@ -66,7 +64,6 @@ jobs:
         shell: bash
         run: |
           cargo fmt --all -- --check
-          cargo update -p zip --precise 2.4.2
           cargo test --workspace --locked
 
       - name: Verify prepared media with FFmpeg and FFprobe
@@ -114,15 +111,16 @@ jobs:
           curl --fail --location --retry 3 \
             --header "Authorization: Bearer $GITHUB_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/linuxhell/nibiru-xtreme/releases" \
+            "https://api.github.com/repos/linuxhell/nibiru-xtreme/releases/tags/v0.2.0" \
             --output "$release_json"
           read -r asset_id checksum_id asset_name checksum_name < <(python3 - "$release_json" "$XTREME_SUFFIX" <<'PY'
           import json
           import sys
 
           with open(sys.argv[1], encoding="utf-8") as stream:
-              releases = json.load(stream)
-              release = next(item for item in releases if not item.get("draft"))
+              release = json.load(stream)
+          if release.get("tag_name") != "v0.2.0" or release.get("draft") or release.get("prerelease"):
+              raise SystemExit("Nibiru Xtreme v0.2.0 stable release is required")
           suffix = sys.argv[2].lower()
           assets = release.get("assets", [])
           selected = None

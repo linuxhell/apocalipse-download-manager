@@ -41,6 +41,37 @@ pub struct Download {
     #[serde(default, skip_deserializing)]
     pub in_flight: u64,
 }
+impl Download {
+    fn apply_progress(&mut self, progress: ed2k::TransferProgress) {
+        self.status = match progress.stage {
+            TransferStage::Connecting => "connecting",
+            TransferStage::Queued => "waiting_peer",
+            TransferStage::Checking => "checking",
+            TransferStage::Downloading => "downloading",
+            TransferStage::Completed => "completed",
+        }
+        .into();
+        // An automatic retry re-hashes the same partial file. Its initial Checking event
+        // has an empty map; it does not invalidate parts authenticated in this process.
+        // The next non-Checking event publishes the full result, including invalidated parts.
+        // Explicit resume and application restart still begin with an empty map.
+        if !matches!(progress.stage, TransferStage::Checking) {
+            self.verified_parts = progress.verified_parts;
+        }
+        let unchecked = progress.verified == 0
+            && matches!(
+                progress.stage,
+                TransferStage::Connecting | TransferStage::Checking
+            );
+        if !unchecked {
+            self.verified = progress.verified;
+        }
+        self.in_flight = progress.in_flight;
+        self.peer = progress.peer;
+        self.queue_rank = progress.queue_rank;
+    }
+}
+
 struct Inner {
     path: PathBuf,
     tasks: Mutex<BTreeMap<String, Download>>,
@@ -485,28 +516,7 @@ async fn attempt_once(
         cancel.clone(),
         |progress| {
             let _ = queue.update(id, |task| {
-                task.status = match progress.stage {
-                    TransferStage::Connecting => "connecting",
-                    TransferStage::Queued => "waiting_peer",
-                    TransferStage::Checking => "checking",
-                    TransferStage::Downloading => "downloading",
-                    TransferStage::Completed => "completed",
-                }
-                .into();
-                task.verified_parts = progress.verified_parts;
-                // Before the partial file has been checked the engine has nothing verified to
-                // report; keep showing what the last pass reached rather than a false zero.
-                let unchecked = progress.verified == 0
-                    && matches!(
-                        progress.stage,
-                        TransferStage::Connecting | TransferStage::Checking
-                    );
-                if !unchecked {
-                    task.verified = progress.verified;
-                }
-                task.in_flight = progress.in_flight;
-                task.peer = progress.peer;
-                task.queue_rank = progress.queue_rank;
+                task.apply_progress(progress);
             });
         },
     )
@@ -814,6 +824,25 @@ mod tests {
             retry_at: None,
             in_flight: 0,
         };
+        // Automatic source retries must not make a playable prefix disappear while rechecking.
+        let mut retry = task.clone();
+        let progress = |stage, parts| ed2k::TransferProgress {
+            stage,
+            verified: 0,
+            verified_parts: parts,
+            total: 123,
+            peer: None,
+            queue_rank: None,
+            in_flight: 0,
+        };
+        retry.apply_progress(progress(TransferStage::Checking, vec![false]));
+        assert_eq!(retry.verified_parts, vec![true]);
+        retry.apply_progress(progress(TransferStage::Connecting, vec![false]));
+        assert_eq!(
+            retry.verified_parts,
+            vec![false],
+            "a failed recheck must revoke preview access"
+        );
         {
             let mut tasks = queue.0.tasks.lock().unwrap();
             tasks.insert(id.clone(), task);

@@ -9,7 +9,8 @@ const html = fs.readFileSync(path.join(root, "apps/desktop/ui/index.html"), "utf
 const linkHtml = fs.readFileSync(path.join(root, "apps/desktop/ui/link.html"), "utf8");
 const linkJs = fs.readFileSync(path.join(root, "apps/desktop/ui/link.js"), "utf8");
 const rust = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
-const workflow = fs.readFileSync(path.join(root, ".github/workflows/validate-portable.yml"), "utf8");
+const packaging = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
+const workflow = fs.readFileSync(path.join(root, ".github/workflows/linux-compatibility.yml"), "utf8");
 
 test("Link exposes only explicit shares with per-share write permission", () => {
   assert.doesNotMatch(linkHtml, /id="link-allow-write"/);
@@ -309,9 +310,9 @@ test("Linux validation covers Debian Fedora Arch and publishes an AppImage", () 
   assert.match(workflow, /Debian 12/);
   assert.match(workflow, /fedora:latest/);
   assert.match(workflow, /archlinux:latest/);
-  assert.match(workflow, /cargo check -p apocalipse-desktop/);
-  assert.match(workflow, /@tauri-apps\/cli@2 build --bundles appimage/);
-  assert.match(workflow, /apocalipse-download-manager-linux-x64\.AppImage/);
-  assert.match(workflow, /ubuntu-22\.04/);
+  assert.match(workflow, /cargo check --locked -p apocalipse-desktop/);
+  assert.match(packaging, /@tauri-apps\/cli@2 build --bundles appimage/);
+  assert.match(packaging, /apocalipse-download-manager-linux-x64\.AppImage/);
+  assert.match(packaging, /ubuntu-22\.04/);
 });
 

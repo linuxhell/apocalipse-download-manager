@@ -6,7 +6,7 @@ name: Test build artifacts
 on:
   workflow_dispatch:
   push:
-    branches: [claude/ed2k-share]
+    branches: [claude/ed2k-share, "audit/**"]
   pull_request:
     branches: [main]
 
@@ -31,7 +31,7 @@ jobs:
             xtreme_suffix: windows-x64.exe
             xtreme_binary: nibiru-xtreme.exe
           - name: Linux x64 portable
-            os: ubuntu-latest
+            os: ubuntu-22.04
             artifact: apocalipse-download-manager-linux-x64-portable
             output: apocalipse-download-manager-linux-x64-portable.tar.gz
             xtreme_suffix: linux-x64
@@ -63,7 +63,6 @@ jobs:
         shell: bash
         run: |
           cargo fmt --all -- --check
-          cargo update -p zip --precise 2.4.2
           cargo test --workspace --locked
 
       - name: Verify prepared media with FFmpeg and FFprobe

@@ -75,7 +75,7 @@ Windows/macOS em uso real, e o fluxo de download pela interface (a interface gr�
 ## Falta para a troca ficar completa
 
 1. Existir uma release (pré-release) do `nibiru-xtreme` com os três binários e `.sha256`.
-2. Trocar o empacotamento (`release.yml`/`validate-portable.yml`) para embutir o Xtreme.
+2. Trocar o empacotamento (`release.yml`/`test-build.yml`) para embutir o Xtreme.
 3. Teste ponta a ponta no app: HTTP, pausa/retomada, magnet → seleção de arquivos, streaming, ED2K, fechar o ADM
    e confirmar que o motor encerra, atualizar o binário pela aba Ferramentas.
 

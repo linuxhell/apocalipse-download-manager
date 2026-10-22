@@ -1,5 +1,12 @@
 # Apocalipse Download Manager 0.6.1 — Extensão 0.3.206
 
+## 0.7.0 — 2026-10-22
+
+- ED2K: cooperative header/tail scheduling for early verified video preview; stable preview readiness across automatic rechecking.
+- Portable packages pin Nibiru Xtreme 0.2.0 and verify its checksum.
+- Remove duplicated portable candidate workflow; retain Linux distro checks and separate test artifacts from final publication.
+- Keep the lockfile fixed during validation and packaging.
+
 ## Português do Brasil
 
 Versão de segurança e estabilidade após uma auditoria completa do código. Link: nomes de arquivos enviados por outros dispositivos não podem mais sair da pasta escolhida, apagar a raiz de um compartilhamento, nem zerar um arquivo em um upload sem tamanho; a senha agora é comparada em tempo constante. Torrents com estrutura muito aninhada não travam mais o app. Tarefas que falhavam antes de iniciar não ocupam mais uma vaga da fila, e aumentar o limite de downloads simultâneos inicia a fila na hora. Arquivos temporários com senha e cookies agora são sempre apagados, e os cookies ficam com permissão apenas do usuário. Interface: o controle de threads do download funciona de novo, textos que apareciam como chaves foram traduzidos, e a seleção não vale mais para itens ocultos. A extensão 0.3.206 recusa pedidos de download forjados por páginas (redes privadas e corpos de outra origem), tem timeout nas chamadas ao desktop e o XPI do Firefox é assinado pela Mozilla.

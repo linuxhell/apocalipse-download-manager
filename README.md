@@ -18,7 +18,7 @@
   <a href="https://github.com/linuxhell/apocalipse-download-manager/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/linuxhell/apocalipse-download-manager?style=flat-square"></a>
   <a href="LICENSE"><img alt="GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-0aa8c2?style=flat-square"></a>
   <img alt="Windows Linux macOS" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-182533?style=flat-square">
-  <img alt="Extension 0.3.203" src="https://img.shields.io/badge/browser%20extension-0.3.203-2363ef?style=flat-square">
+  <img alt="Extension 0.3.206" src="https://img.shields.io/badge/browser%20extension-0.3.206-2363ef?style=flat-square">
 </p>
 
 <p align="center">
@@ -44,7 +44,13 @@
 <p align="center"><sub>Real interface rendered with sample downloads. / Interface real com downloads de exemplo. / 真实界面，使用示例下载。</sub></p>
 
 > [!IMPORTANT]
-> **Current release: ADM 0.6.1 + browser extension 0.3.206.** Security and stability release after a full code audit (safer Link transfers, fixed queue slots, hardened extension). Previously in 0.6.0: new compact IDM-sized window (980×620): white background, black text, no themes; Downloads, Torrents, Recordings, Donate and About in the sidebar, everything else in tabs inside Settings; blue progress bars (red on failure, green when done). Previously: steadier extension connection (bridge no longer serialized), consistent language between app and extension, fixed extension ID on Chrome/Edge. Earlier fixes: HLS playlists without `.m3u8`, wrong-video downloads on multi-video pages, the Download button on YouTube Shorts and recording export, plus a TLS-impersonation retry for 403 blocks and signed tool-update verification (off until a key is configured). The Firefox XPI in the release is Mozilla-signed (extension 0.3.206).
+> **ADM 0.7.0 + Nibiru Xtreme 0.2.0 + browser extension 0.3.206.** Native ED2K/Kad downloads, explicit sharing, UPnP, automatic retry and early video preview. The portable packages include the exact Xtreme release with checksum verification.
+>
+> **Prévia ED2K:** “Visualizar” é liberado quando a primeira parte está verificada por MD4 (até 9.728.000 bytes), sem exigir 30–40 MB no total. Outros peers ajudam a terminar o início e o fim antes das partes do meio. A verificação de uma nova tentativa automática mantém a prévia já autenticada nesta execução; reiniciar o aplicativo ou retomar manualmente exige nova conferência. MP4/AVI podem precisar também do índice no final; trechos ausentes aguardam dados. Se as fontes não têm as partes restantes, o ADM conserva o parcial e tenta novamente.
+>
+> **ED2K preview:** available after the first MD4-verified part, rather than a fixed total download size. Header/tail parts receive peer assistance before middle parts. Automatic retries preserve the current process's preview map while checking; a fresh check can revoke it. Missing ranges wait for data, and missing source parts remain pending.
+>
+> **ED2K 预览：** 首个分块通过 MD4 校验即可启用，无需固定的 30–40 MB 总下载量。其他来源优先协助完成开头和末尾；尚未下载的范围等待数据，缺少来源的分块会保留并重试。
 
 ## Download the current release
 
