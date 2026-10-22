@@ -143,8 +143,12 @@ Ferro como padrão, **reverta só o trecho do slot, não o resto**, e atualize o
 - **Xtreme**: `f8f65b2` — rodei localmente `cargo fmt`, `clippy --all-targets --all-features -D warnings`, e a
   suíte inteira (todas as suítes `ok`); a CI desse commit **não foi observada por mim**. Falha **intermitente**
   já vista: `tests/interop_amule.py` (`ED2K peer read timed out`) em `692b98a`; re-execução passou.
-- **ADM**: `test-build.yml` (`workflow_dispatch`) disparado para `claude/ed2k-share`; o último disparo foi no
-  commit `2b496395` (merge). **Resultado não observado até a escrita deste arquivo.** Esse workflow roda
+- **ADM**: `test-build.yml` (`workflow_dispatch`) em `claude/ed2k-share`, commit `2b496395` (merge), **run nº 147**
+  (https://github.com/linuxhell/apocalipse-download-manager/actions/runs/39698241303). Observado às 00:41 UTC:
+  **Linux x64 portable = sucesso** (fmt, testes do workspace, build, AppImage); **Windows x64 portable**: validação
+  (fmt+testes) passou e o **artefato `apocalipse-download-manager-windows-x64-portable` foi gerado** (68,6 MB, sha256
+  `15a483511d96529f2b25326a7dc34453c9283c1096af919356bcebc83168c503`, expira em 05/11/2026); macOS: validação
+  passou, build final ainda rodando. O run ainda estava `in_progress` quando conferi; **confirme o resultado final**. Esse workflow roda
   `cargo fmt --check`, `cargo update -p zip --precise 2.4.2`, `cargo test --workspace --locked`, build release,
   `--verify-media-routing` e empacota o portátil do Windows (artefato `apocalipse-download-manager-windows-x64-portable`,
   precisa de login no GitHub para baixar). Tenho um lembrete agendado para conferir; **se você assumir antes, confira
