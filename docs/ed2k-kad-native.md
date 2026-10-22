@@ -211,3 +211,35 @@ The user separately observed public ED2K verified download progress, Kad contact
 and the Low-ID warning disappearing. Those observations do not establish public
 upload interoperability or preview playback in the new build; the latter still
 requires testing with the user's selected player.
+
+## Retomada automática, espera por fontes e ID alto (22/10/2026)
+
+Corrige o que o usuário relatou: download ED2K parado em 89,5 % com 12 fontes (`ED2K peer metadata timed out:
+deadline has elapsed`), retomada que não avançava, e **ID baixo logo depois de conectar** (só sumia ao desconectar
+e reconectar o ED2K; o Kad não precisava).
+
+- **Parada que não se resolvia sozinha.** Antes, quando o motor desistia, a tarefa virava `error` e ficava
+  parada até um clique; nada tentava de novo, nem ao reconectar o ED2K ou o Kad. Agora (`ed2k_ui/retry.rs`) o
+  download entra em **`waiting_sources`**: espera 15 s, 30 s, 60 s, 2 min e depois 5 min (recomeça em 15 s se a
+  tentativa baixou algo), pede fontes de novo ao servidor e ao Kad e tenta outra vez, **até concluir ou o usuário
+  pausar**. Conectar ao ED2K ou ao Kad dispara a próxima tentativa na hora, e há o botão **Tentar agora**. Só erros
+  que esperar não resolve (disco, destino já existente, link inválido) viram `error`. As partes verificadas
+  nunca são descartadas. A vaga de download é liberada durante a espera.
+- **Motivo da parada.** A janela mostra, em vez de uma frase genérica: sem conexão com servidor/Kad, nenhuma
+  fonte agora, fontes inalcançáveis, pares que não enviaram as informações do arquivo a tempo, pares conectados
+  **sem as partes que faltam**, pares que nos mantiveram na fila, pares que recusaram, parte com falha; o
+  detalhe do motor (contagens e último erro) fica no texto ao passar o mouse e no log
+  (`ed2k.waiting_sources`, `ed2k.download_started`, `ed2k.download_ended`).
+- **Progresso real ao retomar.** O ADM não zera mais a porcentagem enquanto o parcial ainda não foi conferido, e o
+  motor (ver `docs/protocols.md` do Xtreme, "Retomada ED2K") confere o parcial **antes** de falar com qualquer par
+  quando tem o hashset guardado.
+- **ID baixo ao conectar.** O servidor testa a porta TCP durante o login. O UPnP só era pedido **depois** de
+  conectar (em segundo plano), então o primeiro login saía com ID baixo. Agora `ed2k_connect` mapeia a porta
+  **antes** do login (espera até 12 s pelo roteador) e, se uma busca recente já não achou roteador, não atrasa o
+  login de novo. Testado contra um roteador simulado (`the_tcp_port_is_forwarded_before_the_server_login…`) e
+  com uma trava que impede o mapeamento de voltar a depois do login. **Não testado com roteador nem servidor
+  ED2K reais.**
+- **Testes:** `retry.rs` (5), `network.rs` (+2, com roteador simulado), `ed2k_ui.rs` (+1), `ed2k-window.test.cjs`
+  (+1, nos três idiomas).
+- **Não provado:** que o caso real do usuário tenha a causa que o teste reproduz (par que responde ao status mas
+  não à lista de hashes); isso precisa de uma transferência real. Também não foi aberta a janela Tauri.

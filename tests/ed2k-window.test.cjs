@@ -48,7 +48,7 @@ async function windowFixture({language='pt-BR',serverName='Fixture',connected=fa
       case 'ed2k_search':return [{name:'<script>untrusted</script>.txt',size:1024,sources:3,hash:'a'.repeat(32),link:'ed2k://|file|test|1024|'+'a'.repeat(32)+'|/'}];
       case 'ed2k_find_sources':return [{client_id:123,host:null,port:4662,requires_callback:true},{client_id:0x04030201,host:'1.2.3.4',port:4662,requires_callback:false}];
       case 'ed2k_add_download':overview.downloads.push({id:'test-id',file:{name:'fixture.bin',size:1024},directory:'C:/Downloads',status:'paused',verified:0,peer:null,queue_rank:null});return 'test-id';
-      case 'ed2k_download_action':if(args.action==='resume')overview.downloads[0].status='queued';else if(args.action==='pause')overview.downloads[0].status='paused';else overview.downloads=[];return null;
+      case 'ed2k_download_action':if(args.action==='resume')overview.downloads[0].status='queued';else if(args.action==='pause')overview.downloads[0].status='paused';else if(args.action==='retry'){/* wakes the waiting download; nothing changes here */}else overview.downloads=[];return null;
       case 'ed2k_import_list':return null;
       case 'ed2k_kad_connect':overview.network.kad={running:true,tcp_port:4662,udp_port:4672,contacts:12,verified_contacts:5};overview.network.upnp={state:'mapped',gateway:'192.168.0.1',external_ip:'203.0.113.7',mappings:[],error:null};return null;
       case 'ed2k_kad_disconnect':overview.network.kad=null;return null;
@@ -254,4 +254,29 @@ test('ED2K video preview is beside pause and waits for fresh verified data',asyn
   await actions[1].onclick();
   assert.equal(f.calls.at(-2).command,'ed2k_preview_download');
   assert.doesNotMatch(html,/ed2k-preview|data-i18n="preview"/);
+});
+
+test('a download waiting for sources shows why, when it retries, and can retry at once, in every language',async()=>{
+  const f=await windowFixture({language:'pt-BR',connected:true});
+  const args=command=>JSON.parse(JSON.stringify(f.calls.find(c=>c.command===command).args));
+  f.overview.downloads=[{id:'wait-id',file:{name:'filme.mkv',size:1000},directory:'C:/Downloads',status:'waiting_sources',verified:895,peer:null,queue_rank:null,error:'12 sources tried: 7 did not send the file information in time; 16 of 150 parts still missing',stall:'metadata_timeout',attempts:2,retry_at:Math.round(Date.now()/1000)+40,preview_ready:false}];
+  const row=()=>f.ids.get('ed2k-downloads').children[0];
+  const state=()=>row().children[3].textContent;
+  f.language('pt-BR');
+  assert.match(state(),/Aguardando fontes — tentando de novo automaticamente/);
+  assert.match(state(),/Os peers não enviaram as informações do arquivo a tempo/);
+  assert.match(state(),/próxima tentativa em (39|40|41) s/);
+  assert.match(row().children[3].title,/12 sources tried/,'the engine detail stays available on hover');
+  assert.match(row().children[2].textContent,/89,5%/,'the verified progress is kept, not reset');
+  const labels=row().children[5].children.map(button=>button.textContent);
+  assert.deepEqual(labels.slice(0,2),['Pausar','Tentar agora']);
+  assert.ok(!labels.includes('Retomar')&&!labels.includes('Remover da lista'),'a waiting download is paused, not resumed or removed');
+  row().children[5].children[1].onclick();await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(args('ed2k_download_action'),{id:'wait-id',action:'retry'});
+  f.language('en');assert.match(state(),/Waiting for sources — retrying automatically · Peers did not send the file information in time · next attempt in/);
+  f.language('zh-CN');assert.match(state(),/等待来源，自动重试 · 节点未及时发送文件信息 · 40 秒后重试|等待来源，自动重试 · 节点未及时发送文件信息 · 39 秒后重试|等待来源，自动重试 · 节点未及时发送文件信息 · 41 秒后重试/);
+  for(const [code] of [['not_connected'],['no_sources'],['unreachable'],['metadata_timeout'],['missing_parts'],['queue_timeout'],['peer_refused'],['part_failed'],['sources_failed']]){
+    for(const language of ['en','pt-BR','zh-CN'])assert.ok(f.context.testCatalogs[language]['stall_'+code],`${language} needs stall_${code}`);
+  }
+  for(const language of ['en','pt-BR','zh-CN'])for(const key of ['stage_waiting_sources','retryNow','nextAttempt','waitingHint'])assert.ok(f.context.testCatalogs[language][key],`${language} needs ${key}`);
 });

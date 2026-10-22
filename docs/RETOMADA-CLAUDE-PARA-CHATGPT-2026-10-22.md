@@ -283,3 +283,57 @@ ou algo real). **Não concluir sem investigar**; uma investigação cega pode "c
    `nibiru-xtreme.exe` também terminou.
 7. Enviar ao Claude/ChatGPT: relatório do `diagnose` (`nibiru-diagnose-report.txt`), logs e capturas de tela de
    qualquer erro.
+
+
+---
+
+## 8. Atualização posterior (22/10, depois de receber o pacote do ChatGPT)
+
+O usuário devolveu o pacote `Retomada-completa-ADM-Nibiru-Claude-2026-10-21.zip` (README, estado e testes,
+pendências, checklist 1.0, prompt). **As referências de commit dele estão defasadas**: ele cita `15884553`
+(ADM) e `1942ae1` (Xtreme), mas o remoto já tinha avanços do ChatGPT (ADM `af10c66e`…`a843dc87`: cliente nativo do
+Xtreme, destino e **Visualizar** no ED2K, Logs, remoção do selo "prévia", velocidade; Xtreme `15d2537`/`4f17e8e`:
+mapa de partes verificadas). Trabalhei **a partir das cabeças atuais do remoto**, não das do pacote. O pacote
+também fala de "correções locais ainda não commitadas" (velocidade, limpeza de `.nibiru-http.*`, layout, Logs,
+Visualizar/Salvar): **o que existe no remoto está preservado; correções que só estejam na máquina do ChatGPT eu
+não vejo** — se faltar algo, ele precisa publicá-las.
+
+### 8.1 Erro meu corrigido
+Eu havia dito que o zip da retomada "não foi commitado". **Estava errado:** o `git add -A` do commit `c241c740` o
+incluiu no ADM. Removido do índice e do repositório e adicionado ao `.gitignore`; os zips agora são gerados fora do
+repositório.
+
+### 8.2 Bug P0 (ED2K parado em 89,5 %) — o que foi feito e o que NÃO foi provado
+- **Reproduzido em teste** (Xtreme `f9eb551`): par que responde ao nome e ao status mas não à lista de hashes
+  → `ED2K peer metadata timed out: deadline has elapsed` e a transferência não avança (a mutação que desliga o
+  hashset guardado devolve exatamente a mensagem do usuário). Causas no código: o hashset validado não era
+  guardado; o parcial só era conferido depois que o primeiro par conectava; o erro final mostrava só o último erro
+  de qualquer par.
+- **Corrigido:** hashset autenticado guardado ao lado do parcial (revalidado a cada leitura); parcial conferido
+  antes dos pares; pares não são mais obrigados a enviar o hashset; relatório `Stalled` com o motivo; ADM com
+  espera automática por fontes (`waiting_sources`), nova tentativa ao conectar ED2K/Kad, "Tentar agora", motivo
+  traduzido nos 3 idiomas, log, e progresso que não zera ao retomar. Detalhes: `docs/protocols.md` (Xtreme) e
+  `docs/ed2k-kad-native.md` (ADM).
+- **NÃO provado:** que seja a causa do caso real do usuário (não há log do par nem da rede). A transferência
+  parada dele foi criada pelo motor **antigo**: não tem `.hashset` ao lado; o primeiro par que enviar a lista de
+  hashes cria o arquivo. **Peça ao usuário para repetir esse download real**; se ainda parar, o relatório novo
+  (motivo + contagens no tooltip e no log `ed2k.waiting_sources`) dirá por quê. A RPC do Xtreme continua com
+  uma passada só por tarefa.
+
+### 8.3 ID baixo ao conectar (relato do usuário)
+O UPnP era pedido **depois** do login ED2K; o servidor testa a porta durante o login, então o primeiro login
+saía com ID baixo e só a reconexão (já com o mapeamento) dava ID alto. `ed2k_connect` agora mapeia a porta
+**antes** do login, esperando até 12 s, sem atrasar de novo se uma busca recente não achou roteador. Teste com
+roteador simulado + trava de ordem no código. **Não testado com roteador/servidor reais.**
+
+### 8.4 1.0
+README (pt/en/zh), descrição do projeto (`docs/DESCRICAO-DO-PROJETO.md`), doação PayPal
+(`jv12802@gmail.com`) e `docs/CHECKLIST-1.0.md` no Xtreme. **A 1.0 NÃO foi preparada para publicação nem versionada
+como 1.0.0**: os bloqueantes do checklist (retomada ED2K real, UPnP em roteador real, CI verde, ID alto real)
+seguem abertos. O campo "About" do GitHub precisa ser colado por quem tem acesso às configurações.
+
+### 8.5 Estado dos commits
+- Xtreme `audit/code-review-2026-10-21`: `f9eb551` (motor ED2K) e `b729f5c` (docs/README/checklist; é o que fica na
+  ponta; o ADM está fixado em `f9eb551`, que tem todo o código).
+- ADM `claude/ed2k-share`: ver o último commit da branch. Testes locais: 152 de Rust (binário do app) e 344 de
+  Node; o `test-build.yml` é o gate de Windows/Linux/macOS.

@@ -2,6 +2,7 @@
 pub mod downloads;
 pub mod network;
 pub mod preview;
+pub mod retry;
 pub mod shares;
 use nibiru_xtreme::ed2k::{
     self,
@@ -297,6 +298,11 @@ pub async fn ed2k_connect(
             .cloned()
             .collect(),
     };
+    // The server tests our TCP port during login: have the router forward it first.
+    network::forward_before_login(&state).await;
+    if state.generation.load(Ordering::Acquire) != revision {
+        return Err("connection_cancelled".into());
+    }
     let mut last = "empty_server_list".to_owned();
     for server in candidates {
         if state.generation.load(Ordering::Acquire) != revision {
@@ -323,6 +329,7 @@ pub async fn ed2k_connect(
                 *active = Some(connection);
                 drop(active);
                 network::spawn_sync_upnp(app.clone());
+                state.downloads.wake();
                 publish_shares(&state).await;
                 return Ok(());
             }
@@ -433,6 +440,16 @@ pub fn ed2k_copy_link(app: tauri::AppHandle, link: String) -> Result<(), String>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_port_is_forwarded_before_connecting_to_a_server() {
+        // The server tests our TCP port while we log in; forwarding it afterwards gave a Low ID
+        // until the user disconnected and reconnected.
+        let source = include_str!("ed2k_ui.rs");
+        let connect = &source[source.find("pub async fn ed2k_connect").unwrap()..];
+        let forward = connect.find("network::forward_before_login").unwrap();
+        let login = connect.find("ServerConnection::connect_with").unwrap();
+        assert!(forward < login);
+    }
     #[test]
     fn initial_lists_and_identity_are_available_without_fetching() {
         let root = tempfile::tempdir().unwrap();

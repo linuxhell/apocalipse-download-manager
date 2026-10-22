@@ -11,3 +11,6 @@
 /apocalipse-firefox-*-unsigned*.xpi
 *.log
 /apps/desktop/src-tauri/gen/
+
+# Handoff archives are delivered outside the repository.
+/RETOMADA-*.zip

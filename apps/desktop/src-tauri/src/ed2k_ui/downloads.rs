@@ -1,4 +1,7 @@
-use super::{save_file, Ed2kState};
+use super::{
+    retry::{self, Failure, Outcome},
+    save_file, Ed2kState,
+};
 use nibiru_xtreme::ed2k::{self, FileLink, TransferStage};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -25,12 +28,23 @@ pub struct Download {
     pub peer: Option<String>,
     pub queue_rank: Option<u32>,
     pub error: Option<String>,
+    /// Why the download is waiting for its next pass (a short code the window translates).
+    #[serde(default, skip_deserializing)]
+    pub stall: Option<String>,
+    /// Passes that ended without finishing since the task was started.
+    #[serde(default, skip_deserializing)]
+    pub attempts: u32,
+    /// When the next pass starts, in Unix seconds.
+    #[serde(default, skip_deserializing)]
+    pub retry_at: Option<u64>,
 }
 struct Inner {
     path: PathBuf,
     tasks: Mutex<BTreeMap<String, Download>>,
     active: Mutex<BTreeMap<String, Arc<AtomicBool>>>,
     slots: Arc<tokio::sync::Semaphore>,
+    /// Wakes downloads that are waiting for sources (a server or Kad connected, or "retry now").
+    wake: tokio::sync::Notify,
 }
 #[derive(Clone)]
 pub struct Downloads(Arc<Inner>);
@@ -41,7 +55,12 @@ impl Downloads {
             tasks: Mutex::new(BTreeMap::new()),
             active: Mutex::new(BTreeMap::new()),
             slots: Arc::new(tokio::sync::Semaphore::new(2)),
+            wake: tokio::sync::Notify::new(),
         }))
+    }
+    /// Starts the next pass of every download that is waiting for sources.
+    pub fn wake(&self) {
+        self.0.wake.notify_waiters();
     }
     pub fn load(path: PathBuf) -> Result<Self, String> {
         let queue = Self::empty(path);
@@ -156,91 +175,83 @@ impl Downloads {
             task.error = None;
             task.peer = None;
             task.queue_rank = None;
+            task.stall = None;
+            task.attempts = 0;
+            task.retry_at = None;
         })?;
         active.insert(id.clone(), cancel.clone());
         drop(active);
         let queue = self.clone();
         tauri::async_runtime::spawn(async move {
-            let result:Result<(),String>=async {
-                let _permit=tokio::select! {
-                    result=queue.0.slots.clone().acquire_owned()=>result.map_err(|e|e.to_string())?,
-                    _=async{while !cancel.load(Ordering::Acquire){tokio::time::sleep(std::time::Duration::from_millis(50)).await;}}=>return Err("cancelled".into()),
-                };
-                if cancel.load(Ordering::Acquire){return Err("cancelled".into());}
-                let state=app.state::<Ed2kState>();
-                // Sources come from the connected server and from Kad, so a download also works
-                // when only one of them is available.
-                let server=state.server.read().await.as_ref().cloned();
-                let kad=state.net.kad_session().await;
-                if server.is_none()&&kad.is_none(){return Err("ed2k_not_connected".into());}
-                queue.update(&id,|task|task.status="connecting".into())?;
-                let hash=task.file.hash_hex();
-                let mut sources:Vec<ed2k::FileSource>=Vec::new();
-                let mut error="ed2k_no_sources".to_owned();
-                let mut answered=false;
-                if let Some(connection)=&server{
-                    for attempt in 0..3 {
-                        if cancel.load(Ordering::Acquire){return Err("cancelled".into());}
-                        let found = tokio::select! {
-                            result=connection.sources(&hash)=>result,
-                            _=async{while !cancel.load(Ordering::Acquire){tokio::time::sleep(std::time::Duration::from_millis(50)).await;}}=>return Err("cancelled".into()),
-                        };
-                        match found {
-                            Ok(found)=>{sources=found;answered=true;break;},
-                            Err(reason)=>error=reason.to_string(),
-                        }
-                        if attempt<2 {tokio::time::sleep(std::time::Duration::from_secs(1)).await;}
-                    }
-                }
-                if let Some(kad)=&kad{
-                    let found = tokio::select! {
-                        result=tokio::time::timeout(std::time::Duration::from_secs(25),kad.sources(task.file.hash,task.file.size))=>result,
-                        _=async{while !cancel.load(Ordering::Acquire){tokio::time::sleep(std::time::Duration::from_millis(50)).await;}}=>return Err("cancelled".into()),
-                    };
-                    if let Ok(Ok(list))=found{
-                        answered=true;
-                        for source in list{
-                            if !sources.iter().any(|known|known.host==source.host&&known.port==source.port){sources.push(source);}
-                        }
-                    }
-                }
-                if !answered {return Err(error);}
-                tokio::fs::create_dir_all(&task.directory).await.map_err(|e|e.to_string())?;
-                // A Low-ID source is reached through a server that gave us a High ID, through Kad, or both.
-                let listener=state.incoming.lock().await.as_ref().map(|listener|(listener.callbacks(),listener.status().tcp_port));
-                let callbacks=listener.and_then(|(registry,port)|{
-                    let by_server=server.as_ref().filter(|connection|!connection.is_low_id()).map(|connection|ed2k::CallbackClient::new(connection.clone(),registry.clone()));
-                    match(by_server,kad.clone()){
-                        (Some(client),Some(kad))=>Some(client.with_kad(kad,port)),
-                        (Some(client),None)=>Some(client),
-                        (None,Some(kad))=>Some(ed2k::CallbackClient::kad_only(registry,kad,port)),
-                        (None,None)=>None,
-                    }
-                });
-                let options=ed2k::TransferOptions{identity:state.user_hash,client_id:server.as_ref().map_or(0,|connection|connection.client_id),callbacks,obfuscation:state.net.prefs().obfuscation};
-                ed2k::download_with_options(&task.file,&task.directory,&sources,options,cancel.clone(),|progress|{
-                    let _=queue.update(&id,|task|{
-                        task.status=match progress.stage{TransferStage::Connecting=>"connecting",TransferStage::Queued=>"waiting_peer",TransferStage::Checking=>"checking",TransferStage::Downloading=>"downloading",TransferStage::Completed=>"completed"}.into();
-                        task.verified_parts=progress.verified_parts;
-                        task.verified=progress.verified;task.peer=progress.peer;task.queue_rank=progress.queue_rank;
+            let log = |level: &str, event: &str, detail: &str| {
+                super::super::diagnostic_log(
+                    &app.state::<super::super::AppState>(),
+                    level,
+                    event,
+                    detail,
+                );
+            };
+            log(
+                "INFO",
+                "ed2k.download_started",
+                &format!("task={id} verified={}", task.verified),
+            );
+            let outcome = retry::run(
+                |_| attempt_once(&queue, &app, &id, &task, &cancel),
+                |pause| wait_or_wake(&queue, &cancel, pause),
+                |waiting| {
+                    let retry_at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |now| (now + waiting.wait).as_secs());
+                    let _ = queue.update(&id, |task| {
+                        task.status = "waiting_sources".into();
+                        task.stall = Some(waiting.code.to_owned());
+                        task.attempts = waiting.attempt;
+                        task.retry_at = Some(retry_at);
+                        task.error = Some(waiting.detail.clone());
+                        task.peer = None;
+                        task.queue_rank = None;
                     });
-                }).await.map_err(|e|format!("{e:#}"))?;
-                Ok(())
-            }.await;
+                    log(
+                        "WARN",
+                        "ed2k.waiting_sources",
+                        &format!(
+                            "task={id} attempt={} reason={} next_in_s={} detail={}",
+                            waiting.attempt,
+                            waiting.code,
+                            waiting.wait.as_secs(),
+                            waiting.detail
+                        ),
+                    );
+                },
+                &cancel,
+            )
+            .await;
+            log(
+                if matches!(outcome, Outcome::Failed(_)) {
+                    "ERROR"
+                } else {
+                    "INFO"
+                },
+                "ed2k.download_ended",
+                &format!("task={id} outcome={outcome:?}"),
+            );
             let _ = queue.update(&id, |task| {
                 task.peer = None;
                 task.queue_rank = None;
-                match result {
-                    Ok(()) => {
+                task.stall = None;
+                task.retry_at = None;
+                match outcome {
+                    Outcome::Completed => {
                         task.status = "completed".into();
                         task.verified = task.file.size;
                         task.error = None;
                     }
-                    Err(_) if cancel.load(Ordering::Acquire) => {
+                    Outcome::Cancelled => {
                         task.status = "paused".into();
                         task.error = None;
                     }
-                    Err(error) => {
+                    Outcome::Failed(error) => {
                         task.status = "error".into();
                         task.error = Some(error);
                     }
@@ -251,6 +262,196 @@ impl Downloads {
             }
         });
         Ok(())
+    }
+}
+
+async fn wait_cancelled(cancel: &AtomicBool) {
+    while !cancel.load(Ordering::Acquire) {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
+
+/// Sleeps until the next pass is due, or earlier when a server or Kad connects, the user asks to
+/// retry now, or the task is paused.
+async fn wait_or_wake(queue: &Downloads, cancel: &AtomicBool, pause: std::time::Duration) {
+    let wake = queue.0.wake.notified();
+    tokio::pin!(wake);
+    wake.as_mut().enable();
+    tokio::select! {
+        _ = tokio::time::sleep(pause) => {}
+        _ = &mut wake => {}
+        _ = wait_cancelled(cancel) => {}
+    }
+}
+
+/// One pass: ask the connected server and Kad for sources, then fetch what is missing. Nothing is
+/// thrown away: the engine starts from the verified parts already on disk.
+async fn attempt_once(
+    queue: &Downloads,
+    app: &tauri::AppHandle,
+    id: &str,
+    task: &Download,
+    cancel: &Arc<AtomicBool>,
+) -> Result<(), Failure> {
+    let _permit = tokio::select! {
+        result = queue.0.slots.clone().acquire_owned() => result.map_err(|e| Failure::Fatal(e.to_string()))?,
+        _ = wait_cancelled(cancel) => return Err(Failure::Cancelled),
+    };
+    if cancel.load(Ordering::Acquire) {
+        return Err(Failure::Cancelled);
+    }
+    let state = app.state::<Ed2kState>();
+    // Sources come from the connected server and from Kad, so a download also works when only
+    // one of them is available.
+    let server = state
+        .server
+        .read()
+        .await
+        .as_ref()
+        .filter(|connection| connection.is_connected())
+        .cloned();
+    let kad = state.net.kad_session().await;
+    if server.is_none() && kad.is_none() {
+        return Err(Failure::NotConnected);
+    }
+    let _ = queue.update(id, |task| {
+        task.status = "connecting".into();
+        task.error = None;
+        task.stall = None;
+        task.retry_at = None;
+    });
+    let before = queue
+        .list()
+        .ok()
+        .and_then(|tasks| tasks.into_iter().find(|t| t.id == id))
+        .map_or(0, |t| t.verified);
+    let hash = task.file.hash_hex();
+    let mut sources: Vec<ed2k::FileSource> = Vec::new();
+    let mut error = "ed2k_no_sources".to_owned();
+    let mut answered = false;
+    if let Some(connection) = &server {
+        for attempt in 0..3 {
+            if cancel.load(Ordering::Acquire) {
+                return Err(Failure::Cancelled);
+            }
+            let found = tokio::select! {
+                result = connection.sources(&hash) => result,
+                _ = wait_cancelled(cancel) => return Err(Failure::Cancelled),
+            };
+            match found {
+                Ok(found) => {
+                    sources = found;
+                    answered = true;
+                    break;
+                }
+                Err(reason) => error = reason.to_string(),
+            }
+            if attempt < 2 {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        }
+    }
+    if let Some(kad) = &kad {
+        let found = tokio::select! {
+            result = tokio::time::timeout(
+                std::time::Duration::from_secs(25),
+                kad.sources(task.file.hash, task.file.size),
+            ) => result,
+            _ = wait_cancelled(cancel) => return Err(Failure::Cancelled),
+        };
+        if let Ok(Ok(list)) = found {
+            answered = true;
+            for source in list {
+                if !sources
+                    .iter()
+                    .any(|known| known.host == source.host && known.port == source.port)
+                {
+                    sources.push(source);
+                }
+            }
+        }
+    }
+    if !answered {
+        return Err(Failure::Sources(error));
+    }
+    tokio::fs::create_dir_all(&task.directory)
+        .await
+        .map_err(|e| Failure::Fatal(e.to_string()))?;
+    // A Low-ID source is reached through a server that gave us a High ID, through Kad, or both.
+    let listener = state
+        .incoming
+        .lock()
+        .await
+        .as_ref()
+        .map(|listener| (listener.callbacks(), listener.status().tcp_port));
+    let callbacks = listener.and_then(|(registry, port)| {
+        let by_server = server
+            .as_ref()
+            .filter(|connection| !connection.is_low_id())
+            .map(|connection| ed2k::CallbackClient::new(connection.clone(), registry.clone()));
+        match (by_server, kad.clone()) {
+            (Some(client), Some(kad)) => Some(client.with_kad(kad, port)),
+            (Some(client), None) => Some(client),
+            (None, Some(kad)) => Some(ed2k::CallbackClient::kad_only(registry, kad, port)),
+            (None, None) => None,
+        }
+    });
+    let options = ed2k::TransferOptions {
+        identity: state.user_hash,
+        client_id: server.as_ref().map_or(0, |connection| connection.client_id),
+        callbacks,
+        obfuscation: state.net.prefs().obfuscation,
+    };
+    let result = ed2k::download_with_options(
+        &task.file,
+        &task.directory,
+        &sources,
+        options,
+        cancel.clone(),
+        |progress| {
+            let _ = queue.update(id, |task| {
+                task.status = match progress.stage {
+                    TransferStage::Connecting => "connecting",
+                    TransferStage::Queued => "waiting_peer",
+                    TransferStage::Checking => "checking",
+                    TransferStage::Downloading => "downloading",
+                    TransferStage::Completed => "completed",
+                }
+                .into();
+                task.verified_parts = progress.verified_parts;
+                // Before the partial file has been checked the engine has nothing verified to
+                // report; keep showing what the last pass reached rather than a false zero.
+                let unchecked = progress.verified == 0
+                    && matches!(
+                        progress.stage,
+                        TransferStage::Connecting | TransferStage::Checking
+                    );
+                if !unchecked {
+                    task.verified = progress.verified;
+                }
+                task.peer = progress.peer;
+                task.queue_rank = progress.queue_rank;
+            });
+        },
+    )
+    .await;
+    match result {
+        Ok(_) => Ok(()),
+        Err(_) if cancel.load(Ordering::Acquire) => Err(Failure::Cancelled),
+        Err(error) => match error.downcast_ref::<ed2k::Stalled>() {
+            Some(report) => {
+                let after = queue
+                    .list()
+                    .ok()
+                    .and_then(|tasks| tasks.into_iter().find(|t| t.id == id))
+                    .map_or(0, |t| t.verified);
+                Err(Failure::Stalled {
+                    report: report.clone(),
+                    progressed: after > before,
+                })
+            }
+            None => Err(Failure::Fatal(format!("{error:#}"))),
+        },
     }
 }
 
@@ -306,6 +507,9 @@ pub async fn ed2k_add_download(
                 peer: None,
                 queue_rank: None,
                 error: None,
+                stall: None,
+                attempts: 0,
+                retry_at: None,
             },
         );
         if let Err(error) = state.downloads.persist(&tasks) {
@@ -336,6 +540,11 @@ pub fn ed2k_download_action(
     state.ready()?;
     match action.as_str() {
         "resume" => state.downloads.start(app, id),
+        // Skip the wait: ask for sources and try again now.
+        "retry" => {
+            state.downloads.wake();
+            Ok(())
+        }
         "pause" => {
             let active = state.downloads.0.active.lock().map_err(|e| e.to_string())?;
             if let Some(cancel) = active.get(&id) {
@@ -429,6 +638,9 @@ mod tests {
             peer: Some("1.2.3.4".into()),
             queue_rank: None,
             error: None,
+            stall: None,
+            attempts: 0,
+            retry_at: None,
         };
         {
             let mut tasks = queue.0.tasks.lock().unwrap();
