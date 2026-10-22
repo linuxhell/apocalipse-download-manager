@@ -10942,12 +10942,6 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
     // Nothing usable at the configured path: install the latest release into the tools folder and
     // hand the new path back so the user only has to save. Other engines in the folder are untouched.
     // An unrelated executable is preserved; the native engine is installed in its own folder.
-    let engine_repository = state
-        .settings
-        .lock()
-        .map_err(|error| error.to_string())?
-        .xtreme_release_repo
-        .clone();
     let version_probe: &[&str] = if id == "ffmpeg" {
         &["-version"]
     } else {

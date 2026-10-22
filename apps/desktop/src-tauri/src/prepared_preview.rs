@@ -60,7 +60,7 @@ struct Slot;
 impl Slot {
     fn acquire() -> Result<Self, String> {
         ACTIVE
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                 (n < 4).then_some(n + 1)
             })
             .map(|_| Self)

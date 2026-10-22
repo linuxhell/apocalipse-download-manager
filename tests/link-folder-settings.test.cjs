@@ -9,8 +9,8 @@ const html = fs.readFileSync(path.join(root, "apps/desktop/ui/index.html"), "utf
 const linkHtml = fs.readFileSync(path.join(root, "apps/desktop/ui/link.html"), "utf8");
 const linkJs = fs.readFileSync(path.join(root, "apps/desktop/ui/link.js"), "utf8");
 const rust = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
-const packaging = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
-const workflow = fs.readFileSync(path.join(root, ".github/workflows/linux-compatibility.yml"), "utf8");
+const packaging = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
 
 test("Link exposes only explicit shares with per-share write permission", () => {
   assert.doesNotMatch(linkHtml, /id="link-allow-write"/);

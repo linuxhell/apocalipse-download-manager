@@ -1,22 +1,22 @@
-# Build-only artifact generation for testing. No tagging, no
-# GitHub Release publication, no gh release/delete calls - mirrors
-# release.yml's build job verbatim, minus its release job.
-name: Test build artifacts
-
+name: CI
 on:
-  workflow_dispatch:
-  push:
-    branches: [claude/ed2k-share, "audit/**"]
   pull_request:
-    branches: [main]
-
+  workflow_dispatch:
+    inputs:
+      distribution_checks:
+        description: 'Also compile on Debian, Fedora and Arch'
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      distribution_checks:
+        type: boolean
+        default: false
 permissions:
   contents: read
-
 concurrency:
-  group: test-build-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   build:
     name: ${{ matrix.name }}
@@ -28,23 +28,20 @@ jobs:
             os: windows-latest
             artifact: apocalipse-download-manager-windows-x64-portable
             output: apocalipse-download-manager-windows-x64-portable.zip
-            xtreme_suffix: windows-x64.exe
             xtreme_binary: nibiru-xtreme.exe
           - name: Linux x64 portable
             os: ubuntu-22.04
             artifact: apocalipse-download-manager-linux-x64-portable
             output: apocalipse-download-manager-linux-x64-portable.tar.gz
-            xtreme_suffix: linux-x64
             xtreme_binary: nibiru-xtreme
           - name: macOS x64 portable
             os: macos-15-intel
             artifact: apocalipse-download-manager-macos-x64-portable
             output: apocalipse-download-manager-macos-x64-portable.zip
-            xtreme_suffix: macos-x64
             xtreme_binary: nibiru-xtreme
 
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python for packaging checks
@@ -56,18 +53,32 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libpam0g-dev patchelf ffmpeg
 
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: 1.97.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          cache-on-failure: true
+          workspaces: |
+            . -> target
+            experiments/transport-lab -> target
       - uses: actions/setup-node@v4
         if: runner.os == 'Linux'
         with:
           node-version: '22'
+
+      - name: Assign secondary macOS loopback source for transport tests
+        if: runner.os == 'macOS'
+        run: sudo ifconfig lo0 alias 127.0.0.2 up
 
       - name: Validate
         shell: bash
         run: |
           cargo fmt --all -- --check
           cargo test --workspace --locked
+          cargo fmt --manifest-path experiments/transport-lab/Cargo.toml -- --check
+          cargo test --locked --manifest-path experiments/transport-lab/Cargo.toml --all-features
 
       - name: Verify prepared media with FFmpeg and FFprobe
         if: runner.os == 'Linux'
@@ -108,6 +119,7 @@ jobs:
           XTREME_BINARY: ${{ matrix.xtreme_binary }}
           # Xtreme keeps this in its own .cargo/config.toml, which "cargo install --git" does not read.
           RUSTFLAGS: --cfg reqwest_unstable
+          CARGO_TARGET_DIR: target/xtreme-backend
         run: |
           set -euo pipefail
           # The backend is built from the same revision the desktop app links against, so a test
@@ -131,7 +143,7 @@ jobs:
           Copy-Item "target/release/apocalipse-desktop.exe" "$package/Apocalipse Download Manager.exe"
           New-Item -ItemType Directory -Force "$package/data/tools/nibiru-xtreme" | Out-Null
           Copy-Item "dist/xtreme-backend/nibiru-xtreme.exe" "$package/data/tools/nibiru-xtreme/nibiru-xtreme.exe"
-          Copy-Item "README.md","LICENSE" $package
+          Copy-Item "README.md","README.en.md","README.zh-CN.md","LICENSE" $package
           Copy-Item "$env:RUNNER_TEMP/media-routing.json" "$package/build-verification.json"
           Compress-Archive -Path $package -DestinationPath "dist/${{ matrix.output }}" -Force
 
@@ -143,7 +155,7 @@ jobs:
           mkdir -p "$package/data/tools/nibiru-xtreme"
           install -m 755 target/release/apocalipse-desktop "$package/apocalipse-download-manager"
           install -m 755 dist/xtreme-backend/nibiru-xtreme "$package/data/tools/nibiru-xtreme/nibiru-xtreme"
-          cp README.md LICENSE "$package/"
+          cp README.md README.en.md README.zh-CN.md LICENSE "$package/"
           cp "$RUNNER_TEMP/media-routing.json" "$package/build-verification.json"
           appimage="$(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
           test -n "$appimage"
@@ -177,7 +189,7 @@ jobs:
           with open(path, "wb") as stream:
               plistlib.dump(info, stream, sort_keys=False)
           PYMAC
-          cp README.md LICENSE "$app/Contents/Resources/"
+          cp README.md README.en.md README.zh-CN.md LICENSE "$app/Contents/Resources/"
           ditto -c -k --sequesterRsrc --keepParent "$app" "dist/${{ matrix.output }}"
 
       - uses: actions/upload-artifact@v4
@@ -211,9 +223,7 @@ jobs:
           node-version: '22'
       - name: Validate extension JavaScript
         run: |
-          node --check browser-extension/background.js
-          node --check browser-extension/page-hook.js
-          node --check browser-extension/content.js
+          for file in browser-extension/*.js apps/desktop/ui/*.js; do node --check "$file"; done
           node --test tests/*.test.cjs
       - name: Package Chrome, Edge and unsigned Firefox
         shell: bash
@@ -260,3 +270,48 @@ jobs:
             dist/apocalipse-firefox-*-unsigned.xpi
           if-no-files-found: error
           retention-days: 14
+
+  linux-compatibility:
+    if: inputs.distribution_checks == true
+    name: Linux compatibility · ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debian 12
+            image: debian:bookworm
+          - name: Fedora
+            image: fedora:latest
+          - name: Arch Linux
+            image: archlinux:latest
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Debian dependencies
+        if: matrix.name == 'Debian 12'
+        shell: bash
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential curl pkg-config libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libpam0g-dev libssl-dev
+      - name: Install Fedora dependencies
+        if: matrix.name == 'Fedora'
+        shell: bash
+        run: |
+          dnf install -y gcc gcc-c++ make curl pkgconf-pkg-config webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel pam-devel openssl-devel
+      - name: Install Arch dependencies
+        if: matrix.name == 'Arch Linux'
+        shell: bash
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed base-devel curl pkgconf webkit2gtk-4.1 libappindicator-gtk3 librsvg pam openssl
+      - name: Install Rust
+        shell: bash
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> "$GITHUB_PATH"
+      - name: Check desktop on distro
+        shell: bash
+        run: |
+          . "$HOME/.cargo/env"
+          cargo check --locked -p apocalipse-desktop

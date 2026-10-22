@@ -155,7 +155,7 @@ mod tests {
     fn accepts_trusted_manifest_and_rejects_rollback() {
         let (encoded, public_key) = signed(12, 2_000);
         assert_eq!(
-            verify_update_manifest(&encoded, &[public_key.clone()], 12, 1_000)
+            verify_update_manifest(&encoded, std::slice::from_ref(&public_key), 12, 1_000)
                 .unwrap()
                 .sequence,
             12
@@ -166,7 +166,9 @@ mod tests {
     #[test]
     fn rejects_tampering_and_expiration() {
         let (encoded, public_key) = signed(12, 2_000);
-        assert!(verify_update_manifest(&encoded, &[public_key.clone()], 0, 2_000).is_err());
+        assert!(
+            verify_update_manifest(&encoded, std::slice::from_ref(&public_key), 0, 2_000).is_err()
+        );
         let mut value: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
         value["signed"]["version"] = serde_json::json!("9.9.9");
         assert!(verify_update_manifest(
@@ -210,30 +212,55 @@ mod tests {
         let (encoded, key) = signed_tool(&payload, 3);
         let target = tool_artifact_target("yt-dlp", "windows", "x86_64");
         assert_eq!(
-            verify_tool_download(&encoded, &[key.clone()], 3, 1_000, &target, &payload).unwrap(),
+            verify_tool_download(
+                &encoded,
+                std::slice::from_ref(&key),
+                3,
+                1_000,
+                &target,
+                &payload
+            )
+            .unwrap(),
             3
         );
         let mut tampered = payload.clone();
         tampered[0] ^= 1;
-        assert!(
-            verify_tool_download(&encoded, &[key.clone()], 0, 1_000, &target, &tampered).is_err()
-        );
-        assert!(
-            verify_tool_download(&encoded, &[key.clone()], 0, 1_000, &target, &payload[..32])
-                .is_err()
-        );
         assert!(verify_tool_download(
             &encoded,
-            &[key.clone()],
+            std::slice::from_ref(&key),
+            0,
+            1_000,
+            &target,
+            &tampered
+        )
+        .is_err());
+        assert!(verify_tool_download(
+            &encoded,
+            std::slice::from_ref(&key),
+            0,
+            1_000,
+            &target,
+            &payload[..32]
+        )
+        .is_err());
+        assert!(verify_tool_download(
+            &encoded,
+            std::slice::from_ref(&key),
             0,
             1_000,
             "ffmpeg/windows-x86_64",
             &payload
         )
         .is_err());
-        assert!(
-            verify_tool_download(&encoded, &[key.clone()], 4, 1_000, &target, &payload).is_err()
-        );
+        assert!(verify_tool_download(
+            &encoded,
+            std::slice::from_ref(&key),
+            4,
+            1_000,
+            &target,
+            &payload
+        )
+        .is_err());
         assert!(verify_tool_download(&encoded, &[key], 0, 5_000, &target, &payload).is_err());
     }
 

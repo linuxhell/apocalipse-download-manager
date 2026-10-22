@@ -393,7 +393,7 @@ impl DownloadEngine {
             .await;
             if let Ok(Ok(response)) = h3 {
                 let accepted = response.status() == StatusCode::PARTIAL_CONTENT
-                    && expected.map_or(true, |(start, end, total)| {
+                    && expected.is_none_or(|(start, end, total)| {
                         response
                             .headers()
                             .get(header::CONTENT_RANGE)

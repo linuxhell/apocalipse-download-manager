@@ -95,7 +95,7 @@ pub(super) fn serve_ticket<S: Write>(app: &tauri::AppHandle, headers: &str, stre
         }
     };
     if ACTIVE_SERVERS
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
             (count < 8).then_some(count + 1)
         })
         .is_err()

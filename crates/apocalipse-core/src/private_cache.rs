@@ -34,6 +34,7 @@ impl EncryptedChunkCache {
         if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             bail!("invalid cache digest")
         }
+        let digest = digest.to_ascii_lowercase();
         Ok(self
             .root
             .join(&digest[..2])
@@ -54,13 +55,19 @@ impl EncryptedChunkCache {
             .map_err(|_| anyhow::anyhow!("cache encryption failed"))?;
         let parent = target.parent().context("cache target has no parent")?;
         fs::create_dir_all(parent).await?;
-        let temporary = target.with_extension("tmp");
-        let mut file = fs::File::create(&temporary).await?;
+        // Each writer owns a separate temporary file, including identical chunks.
+        let temporary = Temporary(target.with_extension(format!("{}.tmp", uuid::Uuid::new_v4())));
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary.0)
+            .await?;
         file.write_all(&[CACHE_VERSION]).await?;
         file.write_all(&nonce).await?;
         file.write_all(&encrypted).await?;
         file.sync_all().await?;
-        fs::rename(temporary, target).await?;
+        drop(file);
+        fs::rename(&temporary.0, target).await?;
         self.enforce_limit().await?;
         Ok(digest)
     }
@@ -77,12 +84,16 @@ impl EncryptedChunkCache {
             bail!("invalid encrypted cache entry")
         }
         let cipher = XChaCha20Poly1305::new((&*self.key).into());
-        let clear = cipher
-            .decrypt(
-                XNonce::from_slice(&encrypted[1..1 + NONCE_BYTES]),
-                &encrypted[1 + NONCE_BYTES..],
-            )
-            .map_err(|_| anyhow::anyhow!("cache authentication failed"))?;
+        let clear = match cipher.decrypt(
+            XNonce::from_slice(&encrypted[1..1 + NONCE_BYTES]),
+            &encrypted[1 + NONCE_BYTES..],
+        ) {
+            Ok(clear) => clear,
+            Err(_) => {
+                let _ = fs::remove_file(&target).await;
+                bail!("cache authentication failed");
+            }
+        };
         if Self::digest(&clear) != digest.to_ascii_lowercase() {
             let _ = fs::remove_file(target).await;
             bail!("cache digest mismatch")
@@ -107,6 +118,13 @@ impl EncryptedChunkCache {
             }
         }
         Ok(())
+    }
+}
+
+struct Temporary(PathBuf);
+impl Drop for Temporary {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
     }
 }
 
@@ -154,5 +172,66 @@ mod tests {
         assert!(!stored.windows(13).any(|window| window == b"private chunk"));
         assert_eq!(cache.get(&digest).await.unwrap().unwrap(), b"private chunk");
         let _ = fs::remove_dir_all(root).await;
+    }
+}
+
+#[cfg(test)]
+mod regression_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn cache_regression_concurrent_identical_puts_are_atomic() {
+        let root = std::env::temp_dir().join(format!("adm-cache-race-{}", uuid::Uuid::new_v4()));
+        let cache = Arc::new(EncryptedChunkCache::new(&root, [9; 32], 0));
+        let gate = Arc::new(tokio::sync::Barrier::new(16));
+        let mut tasks = Vec::new();
+        for _ in 0..16 {
+            let (cache, gate) = (cache.clone(), gate.clone());
+            tasks.push(tokio::spawn(async move {
+                gate.wait().await;
+                cache.put(&vec![42; 64 * 1024]).await
+            }));
+        }
+        for task in tasks {
+            task.await.unwrap().unwrap();
+        }
+        let digest = EncryptedChunkCache::digest(&vec![42; 64 * 1024]);
+        assert_eq!(
+            cache.get(&digest).await.unwrap().unwrap(),
+            vec![42; 64 * 1024]
+        );
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cache_regression_uppercase_digest_reads_the_same_entry() {
+        let root = std::env::temp_dir().join(format!("adm-cache-case-{}", uuid::Uuid::new_v4()));
+        let cache = EncryptedChunkCache::new(&root, [9; 32], 0);
+        let digest = cache.put(b"payload").await.unwrap();
+        assert_eq!(
+            cache
+                .get(&digest.to_ascii_uppercase())
+                .await
+                .unwrap()
+                .unwrap(),
+            b"payload"
+        );
+        fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cache_regression_corrupt_entry_can_be_replaced() {
+        let root = std::env::temp_dir().join(format!("adm-cache-corrupt-{}", uuid::Uuid::new_v4()));
+        let cache = EncryptedChunkCache::new(&root, [9; 32], 0);
+        let digest = cache.put(b"payload").await.unwrap();
+        let path = cache.path(&digest).unwrap();
+        let mut stored = fs::read(&path).await.unwrap();
+        *stored.last_mut().unwrap() ^= 1;
+        fs::write(&path, stored).await.unwrap();
+        assert!(cache.get(&digest).await.is_err());
+        cache.put(b"payload").await.unwrap();
+        assert_eq!(cache.get(&digest).await.unwrap().unwrap(), b"payload");
+        fs::remove_dir_all(root).await.unwrap();
     }
 }
