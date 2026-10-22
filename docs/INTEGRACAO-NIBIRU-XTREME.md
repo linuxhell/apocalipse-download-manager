@@ -1,4 +1,29 @@
-# Integração do Nibiru Xtreme no slot do aria2
+# Integração nativa do Nibiru Xtreme no ADM
+
+## Estado em 22/10/2026 — branch `claude/ed2k-share`
+
+A implementação atual está em `c6b57cc`; as seções históricas abaixo descrevem
+etapas anteriores. O resumo atual das correções e das verificações está em
+[CORRECOES-TESTE-WINDOWS-2026-10-22.md](CORRECOES-TESTE-WINDOWS-2026-10-22.md).
+
+- Runtime em `src/xtreme.rs`, lançamento por `serve`, sessão nativa e chamadas
+  `nibiru.*`. Pausa/retomada usam `pause`/`resume`; limpeza usa `remove`/`removeResult`.
+- Código, comandos e modelos usam identificadores Xtreme. Os campos de versões
+  anteriores são migrados por um dicionário JSON para preservar fila e configurações;
+  o enum salvo passa a `xtreme_rpc`, validado por desserialização no enum real.
+- Os três workflows de empacotamento usam os assets nativos com SHA256. No portátil,
+  o motor está em `data/tools/nibiru-xtreme/nibiru-xtreme(.exe)`.
+- O atualizador usa releases publicadas, incluindo pré-releases. O pacote de teste
+  de hoje usa o artefato da CI alpha.4, ainda distinto de uma release publicada.
+- Player, extrator e demais ferramentas mantêm suas configurações. Torrent exibe
+  `nibiru-xtreme` na seleção de arquivos. A janela ED2K usa a biblioteca embutida,
+  fixada em `15d2537`, e oferece pasta por transferência e prévia de partes verificadas.
+- Passaram localmente 343 testes Node, 50 testes unitários + 2 de integração do core,
+  3 testes de migração e 3 de streaming ED2K. Um teste com o cliente RPC e motor
+  reais baixou 16 MiB, pausou, retomou, comparou cada byte e removeu a tarefa.
+  A validação de aplicativo nativo e o empacotamento são registrados na CI.
+
+## Registro histórico da integração inicial
 
 Escopo (decisão do usuário): **só o aria2-ultra é substituído**. yt-dlp (nightly), N_m3u8DL-RE, FFmpeg, QuickJS,
 extrator e player ficam como estão. Os IDs internos (`aria2`, `aria2_path`, `aria2_release_repo`, comandos

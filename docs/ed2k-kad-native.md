@@ -1,4 +1,4 @@
-# Apocalipse ED2K/Kad — native alpha integration
+# Apocalipse ED2K/Kad — native integration
 
 The sidebar entry directly below Apocalipse Link opens a separate, reusable
 Tauri window. Its UI follows the saved ADM language (en, pt-BR, zh-CN), including
@@ -35,7 +35,8 @@ replacement; performance/memory claims require measurements of the final build.
 - Direct high-ID peer downloads have a persistent transfer queue, pause/resume,
   root-checked ED2K hashsets, verified parts, 32/64-bit offsets and compressed
   block support. Unfinished tasks reopen paused. Resume rehashes saved data.
-  The ADM download directory is used; existing destinations are preserved.
+  The ADM download directory is suggested; users can choose a destination for each
+  new transfer. Existing destinations are preserved.
 - Credits, AICH, messaging and full aMule feature parity remain required work.
 
 An ED2K initialization error disables this feature rather than stopping the
@@ -98,8 +99,8 @@ duplicate sources and request throttling. UI behaviour and live themes are teste
 ## Verified peer transfers
 
 Search results can be added directly to Transfers, or users can paste a standard
-ED2K file link. Two tasks may run concurrently; each native transfer uses one
-peer and bounded block requests, trying at most 16 direct sources per attempt.
+ED2K file link. Two tasks may run concurrently; each native transfer uses
+up to four peers and bounded block requests, trying at most 16 sources per attempt.
 Low-ID sources are never dialed as IP addresses. If the requester has a High-ID
 server session and an incoming listener, it registers a bounded callback and
 asks the server to arrange the peer connection. The incoming client ID must
@@ -107,7 +108,7 @@ match the requested source before it enters the verified transfer path. An incom
 attempt keeps verified parts and can be resumed to refresh server sources.
 
 Persisted task records are bounded and atomically saved. Partial files use a
-hash/size filename and an OS file lock. Resume never trusts task progress alone:
+hash/size filename and a separate writer coordination lock. Resume never trusts task progress alone:
 it reads and hashes saved parts. A peer hashset must first match the requested
 root hash. Files are synced and published without replacing an existing target.
 Removing a record preserves completed and partial files. Queued work can be
@@ -144,7 +145,7 @@ The **Shared files** tab works like aMule's: nothing is shared until the user ad
   and after each change the list is offered to the server (`OP_OFFERFILES`). ED2K has no withdraw
   packet: removed files leave the server's index on the next connection.
 - **Limits:** upload slots (1-20, default 3) and an upload limit in KiB/s.
-- **Dependency:** `nibiru-xtreme` is pinned to `f8f65b2` (0.2.0-alpha.4), which contains the uploader,
+- **Dependency:** `nibiru-xtreme` is pinned to `15d2537` (0.2.0-alpha.4), which contains the uploader,
   the share registry, the upload queue, the Kad session and the UPnP module.
 
 Validation: Rust tests cover choosing folders and files, subfolders, hidden/empty/excluded files,
@@ -176,3 +177,37 @@ location). ADM tests cover which ports are forwarded and when, preference persis
 the listener's port and stopping, and the window behaviour in en, pt-BR and zh-CN. **Not** verified: any
 real router (models differ a lot; CGNAT cannot be fixed by UPnP), Kad on the public network, and the
 Tauri window.
+
+
+## Destination and video preview — 2026-10-22
+
+The transfer form shows **Save in** and a native **Choose folder…** picker, initially
+using ADM's configured folder. Search-result **Download** fills this form so the
+link and destination can be reviewed before adding the task. Each task retains its
+own destination through pause/resume and restart. The preview-version badge was
+removed from the header in all three languages.
+
+For video files, **Preview** appears beside Pause/Resume and launches the player
+selected in the main ADM settings. The button becomes available when the first
+part has been verified in the current run, or the task has completed. A private
+loopback HTTP endpoint supports HEAD and single byte ranges; a fresh part bitmap
+from the engine authorizes every read. A total byte count never authorizes sparse
+holes. The engine reports a part only after its hash matches and its data is
+flushed. On Windows, a separate delete-on-close writer lock allows verified data
+reads while the transfer continues. Unix retains the coordination file to avoid
+unlink races between writers.
+
+Missing parts can block a read for up to 90 seconds; playback/seek depends on the
+available parts and container format. ED2K preview does not prioritize parts asked
+for by the player. Some MP4 files need data at the end before playback starts.
+After restart, resume the partial to rehash it before previewing. Removing the ED2K
+record still preserves downloaded files, as its existing label states.
+
+Validation: 343 local Node tests, including destination and preview button routing;
+3 local tests of the real stream module cover byte ranges, token/Host validation,
+and waiting for verification. A real-peer Xtreme fixture opens and compares every
+part marked available while the writer remains active; this passed in Windows CI.
+The user separately observed public ED2K verified download progress, Kad contacts,
+and the Low-ID warning disappearing. Those observations do not establish public
+upload interoperability or preview playback in the new build; the latter still
+requires testing with the user's selected player.
