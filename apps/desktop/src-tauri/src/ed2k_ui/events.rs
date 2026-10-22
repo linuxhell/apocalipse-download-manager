@@ -66,11 +66,14 @@ pub fn ed2k_events(state: tauri::State<'_, super::Ed2kState>, after: Option<u64>
     state.events.since(after.unwrap_or(0))
 }
 
-/// Writes the text the window shows into the ED2K data folder and returns where it went.
+/// Saves the text the window shows. With `ask`, a save dialog (starting in the ED2K data folder)
+/// lets the user choose where; an empty answer means the dialog was cancelled. Without it the file
+/// goes into the ED2K data folder. Returns the path written.
 #[tauri::command]
-pub fn ed2k_save_log(
+pub async fn ed2k_save_log(
     state: tauri::State<'_, super::Ed2kState>,
     text: String,
+    ask: Option<bool>,
 ) -> Result<String, String> {
     if text.len() > 4 * 1024 * 1024 {
         return Err("log_too_large".into());
@@ -79,7 +82,26 @@ pub fn ed2k_save_log(
         "ed2k-log-{}.txt",
         chrono::Local::now().format("%Y%m%d-%H%M%S")
     );
-    let path = state.root.join(name);
+    let path = if ask.unwrap_or(false) {
+        let start = state.root.clone();
+        let chosen = tokio::task::spawn_blocking(move || {
+            rfd::FileDialog::new()
+                .set_directory(start)
+                .set_file_name(name)
+                .add_filter("Text", &["txt", "log"])
+                .save_file()
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        match chosen {
+            Some(path) => path,
+            None => return Ok(String::new()),
+        }
+    } else {
+        state.root.join(name)
+    };
+    let parent = path.parent().ok_or("invalid_log_path")?.to_owned();
+    std::fs::create_dir_all(&parent).map_err(|e| e.to_string())?;
     super::save_file(&path, text.as_bytes())?;
     Ok(path.display().to_string())
 }

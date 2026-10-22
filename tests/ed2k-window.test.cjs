@@ -34,7 +34,7 @@ async function windowFixture({language='pt-BR',serverName='Fixture',connected=fa
   const overview={servers:[{host:'192.0.2.1',port:4661,name:serverName,description:'Test fixture'}],node_count:20,downloads:[],server:connected?{name:serverName}:null,kad_bootstrap:null,
     network:{obfuscation:'prefer',upnp_enabled:true,kad:null,upnp:{state:'idle',gateway:null,external_ip:null,mappings:[],error:null}},
     shares:{folders:[{path:'/media/videos',recursive:true}],files:[{path:'/media/videos/a.mkv',name:'<b>a.mkv</b>',size:2048,hash:'b'.repeat(32),link:'ed2k://|file|a.mkv|2048|'+'b'.repeat(32)+'|/',priority:2,explicit:false,requests:3,accepted:1,uploaded:1024}],upload_kib:0,slots:3,uploads:{active:[{name:'peer',address:'203.0.113.9',file:'b'.repeat(32),uploaded:512,rank:null,seconds:4}],waiting:[{name:'late',address:'203.0.113.10',file:'b'.repeat(32),uploaded:0,rank:2,seconds:9}],total_uploaded:1024,files:[]},work:null,published:{files:1,error:null},error:null}};
-  const calls=[]; const events=[]; const clipboard={text:null}; let languageListener, modeListener; const listeners={};
+  const calls=[]; const events=[]; const clipboard={text:null}; const behaviour={saveCancelled:false}; let languageListener, modeListener; const listeners={};
   const window={addEventListener:(name,fn)=>{listeners[name]=fn;},__TAURI__:{core:{invoke:async(command,args)=>{
     calls.push({command,args});
     switch(command){
@@ -44,7 +44,7 @@ async function windowFixture({language='pt-BR',serverName='Fixture',connected=fa
       case 'pick_directory':return 'D:/Videos';
       case 'ed2k_overview':return overview;
       case 'ed2k_events':return events.filter(e=>e.id>args.after);
-      case 'ed2k_save_log':return 'C:/Users/me/AppData/ed2k-log-test.txt';
+      case 'ed2k_save_log':return behaviour.saveCancelled?'':'C:/Users/me/AppData/ed2k-log-test.txt';
       case 'ed2k_connect':overview.server=overview.servers[0];return null;
       case 'ed2k_disconnect':overview.server=null;return null;
       case 'ed2k_search':return [{name:'<script>untrusted</script>.txt',size:1024,sources:3,hash:'a'.repeat(32),link:'ed2k://|file|test|1024|'+'a'.repeat(32)+'|/'}];
@@ -65,7 +65,7 @@ async function windowFixture({language='pt-BR',serverName='Fixture',connected=fa
   const context={navigator:{clipboard:{writeText:async text=>{clipboard.text=text;}}},window,document,localStorage:{getItem:k=>cache.get(k),setItem:(k,v)=>cache.set(k,v)},setInterval:()=>1,clearInterval(){},URL,Intl,Date};
   vm.runInNewContext(script.replace('const catalogs =','const catalogs = globalThis.testCatalogs ='),context);
   await new Promise(resolve=>setImmediate(resolve));
-  return {ids,all,calls,events,clipboard,overview,document,context,language:value=>languageListener({payload:value}),listeners,mode:value=>modeListener({payload:value})};
+  return {ids,all,calls,events,clipboard,behaviour,overview,document,context,language:value=>languageListener({payload:value}),listeners,mode:value=>modeListener({payload:value})};
 }
 
 test('independent ED2K window uses the saved ADM language and updates while open',async()=>{
@@ -290,7 +290,7 @@ test('the log explains what happened, in the chosen language, and can be filtere
     {id:1,at,level:'info',area:'server',code:'connected_low_id',fields:{name:'Fixture',address:'192.0.2.1:4661',client_id:4660,upnp:'failed',upnp_error:'upnp_no_gateway: no router answered',tcp:4662}},
     {id:2,at:at+1,level:'error',area:'upnp',code:'upnp_failed',fields:{gateway:null,external_ip:null,ports:[],error:'upnp_no_gateway: no router answered'}},
     {id:3,at:at+2,level:'warn',area:'peer',code:'part_slow',fields:{name:'filme.avi',peer:'1.2.3.4:4662',part:87,received:65536,elapsed_s:42.5}},
-    {id:4,at:at+3,level:'info',area:'peer',code:'part_done',fields:{name:'filme.avi',peer:'1.2.3.4:4662',part:86,bytes:9728000,elapsed_s:12.25}},
+    {id:4,at:at+3,level:'info',area:'peer',code:'part_done',fields:{name:'filme.avi',peer:'1.2.3.4:4662',peers:3,part:86,bytes:9728000,elapsed_s:12.25}},
     {id:5,at:at+4,level:'info',area:'download',code:'waiting',fields:{name:'filme.avi',attempt:2,reason:'metadata_timeout',next_in_s:30,detail:'12 sources tried'}},
     {id:6,at:at+5,level:'info',area:'peer',code:'peer_failed',fields:{name:'filme.avi',peer:'9.9.9.9:4662',kind:'handshake_timeout',error:'ED2K peer handshake timed out'}},
   );
@@ -302,7 +302,7 @@ test('the log explains what happened, in the chosen language, and can be filtere
   assert.match(joined(),/ID BAIXO 4660/);
   assert.match(joined(),/roteador não encontrado — upnp_no_gateway: no router answered/);
   assert.match(joined(),/parte 87 de 1\.2\.3\.4:4662 está lenta — 64 KiB em 42,5 s/);
-  assert.match(joined(),/parte 86 verificada \(9,28 MiB de 1\.2\.3\.4:4662 em 12,3 s\)/);
+  assert.match(joined(),/parte 86 verificada \(9,28 MiB, blocos de 3 peers, o último de 1\.2\.3\.4:4662, em 12,3 s\)/);
   assert.match(joined(),/rodada 2 terminou — .*não enviaram as informações do arquivo a tempo\. Próxima tentativa em 30 s/);
   assert.match(joined(),/9\.9\.9\.9:4662 inutilizável — não respondeu ao handshake/);
   assert.match(f.ids.get('ed2k-log-summary').textContent,/\d+ de \d+ registros · 1 avisos · 1 erros/);
@@ -326,6 +326,14 @@ test('the log explains what happened, in the chosen language, and can be filtere
   await f.ids.get('ed2k-log-save').onclick();
   assert.equal(f.calls.find(c=>c.command==='ed2k_save_log').args.text,f.clipboard.text.replace(/^[^\n]*/,m=>f.calls.find(c=>c.command==='ed2k_save_log').args.text.split('\n')[0]));
   assert.match(f.ids.get('ed2k-feedback').textContent,/ed2k-log-test\.txt/);
+  assert.equal(f.calls.find(c=>c.command==='ed2k_save_log').args.ask,true,'the save dialog is asked for by default');
+  f.ids.get('ed2k-log-ask').checked=false;f.ids.get('ed2k-log-ask').onchange();
+  await f.ids.get('ed2k-log-save').onclick();
+  assert.equal(f.calls.filter(c=>c.command==='ed2k_save_log').at(-1).args.ask,false);
+  f.ids.get('ed2k-log-ask').checked=true;f.behaviour.saveCancelled=true;
+  await f.ids.get('ed2k-log-save').onclick();
+  assert.match(f.ids.get('ed2k-feedback').textContent,/Save cancelled/);
+  f.behaviour.saveCancelled=false;
   f.ids.get('ed2k-clear-log').onclick();
   assert.match(joined(),/Nothing logged yet/);
   f.events.push({id:7,at:at+9,level:'info',area:'kad',code:'kad_started',fields:{udp:4672,seed_nodes:20}});

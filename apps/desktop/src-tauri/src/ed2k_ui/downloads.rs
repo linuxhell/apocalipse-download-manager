@@ -603,7 +603,7 @@ pub async fn ed2k_add_download(
     Ok(Some(id))
 }
 #[tauri::command]
-pub fn ed2k_download_action(
+pub async fn ed2k_download_action(
     app: tauri::AppHandle,
     state: State<'_, Ed2kState>,
     id: String,
@@ -633,6 +633,29 @@ pub fn ed2k_download_action(
             }
         }
         "remove" => {
+            let running = state
+                .downloads
+                .0
+                .active
+                .lock()
+                .map_err(|e| e.to_string())?
+                .contains_key(&id);
+            if running {
+                return Err("pause_ed2k_task_before_removing".into());
+            }
+            // An unfinished download leaves its partial file, saved hashes and lock next to the
+            // destination; removing the entry removes them too.
+            let unfinished = state
+                .downloads
+                .list()?
+                .into_iter()
+                .find(|task| task.id == id)
+                .filter(|task| task.status != "completed");
+            if let Some(task) = unfinished {
+                tokio::task::spawn_blocking(move || discard_leftovers(&task))
+                    .await
+                    .map_err(|e| e.to_string())??;
+            }
             let active = state.downloads.0.active.lock().map_err(|e| e.to_string())?;
             if active.contains_key(&id) {
                 return Err("pause_ed2k_task_before_removing".into());
@@ -688,6 +711,49 @@ pub async fn ed2k_preview_download(
     super::super::launch_media_target(player, std::ffi::OsStr::new(&url))
 }
 
+/// The files an unfinished download keeps next to its destination: the partial data, the
+/// authenticated hashes and the writer lock.
+fn leftovers(task: &Download) -> [PathBuf; 3] {
+    let stem = format!(".nibiru-ed2k-{}-{}", task.file.hash_hex(), task.file.size);
+    ["part", "hashset", "lock"].map(|extension| task.directory.join(format!("{stem}.{extension}")))
+}
+
+/// Deletes exactly those files. Anything else in the folder is left alone, and a folder (or link)
+/// at one of those names stops the removal instead of being deleted.
+fn discard_leftovers(task: &Download) -> Result<(), String> {
+    for path in leftovers(task) {
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_file() => {
+                // The engine may still be letting go of the file right after a pause.
+                let mut last = None;
+                for _ in 0..20 {
+                    match std::fs::remove_file(&path) {
+                        Ok(()) => {
+                            last = None;
+                            break;
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                            last = None;
+                            break;
+                        }
+                        Err(error) => {
+                            last = Some(error);
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                        }
+                    }
+                }
+                if let Some(error) = last {
+                    return Err(format!("cannot_remove_ed2k_leftover: {error}"));
+                }
+            }
+            Ok(_) => return Err("ed2k_leftover_is_not_a_file".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(())
+}
+
 /// Turns what the engine does with each peer into log entries, so a stalled download can be
 /// explained afterwards.
 fn peer_events(app: tauri::AppHandle, name: String) -> ed2k::EventSink {
@@ -707,9 +773,8 @@ fn peer_events(app: tauri::AppHandle, name: String) -> ed2k::EventSink {
             SlotGranted { peer, waited_ms } => events.info("peer", "peer_slot", json!({"name": name, "peer": peer, "waited_s": seconds(waited_ms)})),
             PartStarted { peer, index, shadow } => events.info("peer", if shadow { "part_helping" } else { "part_started" }, json!({"name": name, "peer": peer, "part": index + 1})),
             PartSlow { peer, index, received, elapsed_ms } => events.warn("peer", "part_slow", json!({"name": name, "peer": peer, "part": index + 1, "received": received, "elapsed_s": seconds(elapsed_ms)})),
-            PartDone { peer, index, bytes, elapsed_ms } => events.info("peer", "part_done", json!({"name": name, "peer": peer, "part": index + 1, "bytes": bytes, "elapsed_s": seconds(elapsed_ms)})),
+            PartDone { peers, peer, index, bytes, elapsed_ms } => events.info("peer", "part_done", json!({"name": name, "peer": peer, "peers": peers, "part": index + 1, "bytes": bytes, "elapsed_s": seconds(elapsed_ms)})),
             PartFailed { peer, index, error, elapsed_ms } => events.warn("peer", "part_failed", json!({"name": name, "peer": peer, "part": index + 1, "error": error, "elapsed_s": seconds(elapsed_ms)})),
-            PartSuperseded { peer, index } => events.info("peer", "part_superseded", json!({"name": name, "peer": peer, "part": index + 1})),
         }
     })
 }
@@ -753,5 +818,46 @@ mod tests {
         assert!(tasks[0].peer.is_none());
         assert!(tasks[0].verified_parts.is_empty());
         assert!(!tasks[0].preview_ready);
+    }
+    #[test]
+    fn removing_an_unfinished_download_deletes_only_its_own_leftovers() {
+        let root = tempfile::tempdir().unwrap();
+        let file = FileLink::parse("ed2k://|file|test.bin|123|0123456789abcdef0123456789abcdef|/")
+            .unwrap();
+        let task = Download {
+            id: "t".into(),
+            file,
+            directory: root.path().to_owned(),
+            status: "paused".into(),
+            verified: 0,
+            verified_parts: Vec::new(),
+            preview_ready: false,
+            peer: None,
+            queue_rank: None,
+            error: None,
+            stall: None,
+            attempts: 0,
+            retry_at: None,
+            in_flight: 0,
+        };
+        let [part, hashset, lock] = leftovers(&task);
+        for path in [&part, &hashset, &lock] {
+            std::fs::write(path, b"x").unwrap();
+        }
+        let neighbour = root.path().join(".nibiru-ed2k-other-123.part");
+        let finished = root.path().join("test.bin");
+        std::fs::write(&neighbour, b"keep").unwrap();
+        std::fs::write(&finished, b"keep").unwrap();
+        discard_leftovers(&task).unwrap();
+        assert!(!part.exists() && !hashset.exists() && !lock.exists());
+        assert!(neighbour.exists() && finished.exists());
+        discard_leftovers(&task).unwrap();
+        std::fs::create_dir(&part).unwrap();
+        std::fs::write(part.join("keep"), b"user file").unwrap();
+        assert_eq!(
+            discard_leftovers(&task).unwrap_err(),
+            "ed2k_leftover_is_not_a_file"
+        );
+        assert!(part.join("keep").exists());
     }
 }

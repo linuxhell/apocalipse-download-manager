@@ -212,7 +212,10 @@ pub fn log_upnp(state: &Ed2kState) {
     *last = key;
     let fields = serde_json::json!({
         "gateway": status.gateway, "external_ip": status.external_ip,
-        "ports": status.mappings.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>(),
+        "ports": status.mappings.iter().map(|m| format!("{} {}", match m.proto {
+            nibiru_xtreme::upnp::Proto::Tcp => "TCP",
+            nibiru_xtreme::upnp::Proto::Udp => "UDP",
+        }, m.port)).collect::<Vec<_>>(),
         "error": status.error,
     });
     match status.state {
@@ -305,11 +308,15 @@ pub async fn start_kad(state: &Ed2kState) -> Result<(), String> {
     )
     .await?;
     session.set_obfuscation(state.net.prefs().obfuscation != Obfuscation::Disabled);
+    let udp = session.status().udp_port;
     *state.net.kad.write().await = Some(session);
     state.events.info(
         "kad",
         "kad_started",
-        serde_json::json!({"udp": port, "seed_nodes": state.library.lock().map(|l| l.nodes.len()).unwrap_or(0)}),
+        serde_json::json!({
+            "udp": udp, "tcp": port,
+            "seed_nodes": state.library.lock().map(|l| l.nodes.len()).unwrap_or(0),
+        }),
     );
     Ok(())
 }
