@@ -28,7 +28,7 @@ pub struct RequestContext {
     pub method: String,
     pub headers: HashMap<String, String>,
     pub body: String,
-    /// Classic aria2 HTTP/HTTPS/FTP proxy URI.
+    /// Native transfer HTTP/HTTPS/FTP proxy URI.
     pub proxy_url: Option<String>,
     pub proxy_username: Option<String>,
     pub proxy_password: Option<String>,
@@ -47,11 +47,11 @@ pub struct RuntimeStatus {
     // BitTorrent-only: populated when tellStatus includes a "bittorrent"
     // object, absent for plain HTTP/FTP transfers.
     pub seeders: Option<u64>,
-    // Number of HTTP/HTTPS webseed URIs aria2 is actively pulling from
+    // Number of HTTP/HTTPS webseed URIs xtreme is actively pulling from
     // alongside the BT swarm for this download (0 for a plain HTTP/FTP
     // task, where every file only ever has its own source URI "in use").
     pub web_seeds: u64,
-    /// Sum of aria2-reported lengths for selected torrent files.
+    /// Sum of xtreme-reported lengths for selected torrent files.
     pub selected_file_bytes: u64,
 }
 
@@ -89,7 +89,7 @@ impl Runtime {
         secret: &str,
     ) -> Result<Self, String> {
         if !executable.is_file() {
-            return Err("aria2_not_found".to_owned());
+            return Err("xtreme_not_found".to_owned());
         }
         fs::create_dir_all(runtime_root).map_err(|e| e.to_string())?;
         let attempts = if requested_port.is_some() { 1 } else { 4 };
@@ -115,51 +115,33 @@ impl Runtime {
         secret: &str,
     ) -> Result<Self, String> {
         let port = reserve_loopback_port(requested_port)?;
-        let session = runtime_root.join("aria2.session");
-        if !session.exists() {
-            fs::write(&session, b"").map_err(|e| e.to_string())?
-        }
-        let log = runtime_root.join("aria2.log");
+        let session = runtime_root.join("xtreme-session.json");
+        let log = runtime_root.join("xtreme.log");
         let mut command = Command::new(executable);
         command.current_dir(runtime_root);
         command
-            .arg("--enable-rpc=true")
-            .arg("--rpc-listen-all=false")
-            .arg("--rpc-allow-origin-all=false")
-            .arg(format!("--rpc-listen-port={port}"))
-            .arg(format!("--rpc-secret={secret}"))
-            .arg(format!("--stop-with-process={}", std::process::id()))
-            .arg("--continue=true")
-            // No explicit --file-allocation here: aria2-ultra's own compiled
-            // default (trunc) is what we want for direct/HTTP downloads, and
-            // it auto-downgrades to none for BitTorrent (v1/v2/hybrid) on its
-            // own (see RequestGroup::setDownloadContext upstream). Forcing
-            // "none" here as vanilla aria2 builds typically do would silently
-            // defeat that and make every direct download slower.
-            .arg("--auto-file-renaming=false")
-            .arg("--allow-overwrite=true")
-            .arg("--max-concurrent-downloads=20")
-            .arg("--summary-interval=0")
-            .arg("--console-log-level=warn")
-            .arg("--log-level=info")
-            .arg(format!("--log={}", log.display()))
-            .arg("--download-result=hide")
-            .arg(format!("--input-file={}", session.display()))
-            .arg(format!("--save-session={}", session.display()))
-            .arg("--save-session-interval=30")
-            .arg("--enable-dht=true")
-            .arg("--enable-dht6=true")
-            .arg("--enable-peer-exchange=true")
-            .arg("--bt-enable-lpd=true")
-            .arg("--bt-min-crypto-level=arc4")
-            .arg("--bt-require-crypto=false")
-            .arg("--follow-torrent=true")
-            .arg("--listen-port=6881-6999")
-            .arg("--dht-listen-port=6881-6999")
-            .arg("--bt-max-peers=50")
-            .arg("--bt-request-peer-speed-limit=50K")
-            .arg("--seed-time=0")
-            .arg("--seed-ratio=0.0")
+            .arg("serve")
+            .arg("--port")
+            .arg(port.to_string())
+            .arg("--secret")
+            .arg(secret)
+            .arg("--dir")
+            .arg(runtime_root)
+            .arg("--log")
+            .arg(&log)
+            .arg("--session-file")
+            .arg(&session)
+            .arg("--stop-with-process")
+            .arg(std::process::id().to_string())
+            .arg("--listen-port")
+            .arg("6881-6999")
+            .arg("--enable-lpd")
+            .arg("--bt-max-peers")
+            .arg("50")
+            .arg("--seed-time-minutes")
+            .arg("0")
+            .arg("--seed-ratio")
+            .arg("0")
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         #[cfg(target_os = "windows")]
@@ -170,7 +152,7 @@ impl Runtime {
         let mut child = command.spawn().map_err(|e| e.to_string())?;
         std::thread::sleep(Duration::from_millis(150));
         if let Ok(Some(status)) = child.try_wait() {
-            return Err(format!("aria2_exited_early:{status}"));
+            return Err(format!("xtreme_exited_early:{status}"));
         }
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(2))
@@ -242,29 +224,29 @@ impl Endpoint {
             let message = error
                 .get("message")
                 .and_then(Value::as_str)
-                .unwrap_or("aria2_rpc_error");
-            return Err(format!("aria2_rpc_error:{code}:{message}"));
+                .unwrap_or("xtreme_rpc_error");
+            return Err(format!("xtreme_rpc_error:{code}:{message}"));
         }
         payload
             .get("result")
             .cloned()
-            .ok_or_else(|| "aria2_rpc_missing_result".to_owned())
+            .ok_or_else(|| "xtreme_rpc_missing_result".to_owned())
     }
 
     pub async fn wait_ready(&self) -> Result<(), String> {
         let mut last_error = String::new();
         for _ in 0..80 {
-            match self.call("aria2.getVersion", Vec::new()).await {
+            match self.call("nibiru.getVersion", Vec::new()).await {
                 Ok(_) => return Ok(()),
                 Err(error) => last_error = error,
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        Err(format!("aria2_start_timeout:{last_error}"))
+        Err(format!("xtreme_start_timeout:{last_error}"))
     }
 
     pub async fn version(&self) -> Result<String, String> {
-        let value = self.call("aria2.getVersion", Vec::new()).await?;
+        let value = self.call("nibiru.getVersion", Vec::new()).await?;
         Ok(value
             .get("version")
             .and_then(Value::as_str)
@@ -284,10 +266,10 @@ impl Endpoint {
         if !context.body.is_empty()
             || (!context.method.is_empty() && !context.method.eq_ignore_ascii_case("GET"))
         {
-            return Err("aria2_request_requires_native_http".to_owned());
+            return Err("xtreme_request_requires_native_http".to_owned());
         }
         if context.proxy_required && context.proxy_url.is_none() {
-            return Err("aria2_proxy_scheme_unsupported".to_owned());
+            return Err("xtreme_proxy_scheme_unsupported".to_owned());
         }
         let directory = destination.parent().unwrap_or_else(|| Path::new("."));
         let mut options = Map::new();
@@ -296,8 +278,7 @@ impl Endpoint {
             Value::String(directory.to_string_lossy().into_owned()),
         );
         options.insert("continue".into(), Value::String("true".into()));
-        // No explicit file-allocation override: let the daemon's default
-        // (aria2-ultra: trunc) apply to direct/HTTP/FTP downloads.
+        // Native transfers choose their validated staging and allocation strategy.
         if download_limit > 0 {
             options.insert(
                 "max-download-limit".into(),
@@ -346,13 +327,13 @@ impl Endpoint {
         }
         let v = self
             .call(
-                "aria2.addUri",
+                "nibiru.addUri",
                 vec![json!([source]), Value::Object(options)],
             )
             .await?;
         v.as_str()
             .map(str::to_owned)
-            .ok_or_else(|| "aria2_gid_missing".to_owned())
+            .ok_or_else(|| "xtreme_gid_missing".to_owned())
     }
 
     pub async fn status(&self, gid: &str) -> Result<RuntimeStatus, String> {
@@ -370,7 +351,7 @@ impl Endpoint {
         ]);
         let v = self
             .call(
-                "aria2.tellStatus",
+                "nibiru.tellStatus",
                 vec![Value::String(gid.to_owned()), keys],
             )
             .await?;
@@ -462,7 +443,7 @@ impl Endpoint {
         let encoded = base64::engine::general_purpose::STANDARD.encode(torrent_bytes);
         let value = self
             .call(
-                "aria2.addTorrent",
+                "nibiru.addTorrent",
                 vec![
                     Value::String(encoded),
                     Value::Array(Vec::new()),
@@ -473,12 +454,12 @@ impl Endpoint {
         value
             .as_str()
             .map(str::to_owned)
-            .ok_or_else(|| "aria2_gid_missing".to_owned())
+            .ok_or_else(|| "xtreme_gid_missing".to_owned())
     }
 
     /// Downloads only Magnet metadata and persists it as a real .torrent file.
     /// No torrent payload is started here. The saved file is later parsed by ADM
-    /// and passed back to aria2 with the user's select-file indexes.
+    /// and passed back to xtreme with the user's select-file indexes.
     pub async fn save_magnet_metadata(
         &self,
         magnet: &str,
@@ -498,13 +479,13 @@ impl Endpoint {
         let request_started = tokio::time::Instant::now();
         let gid = self
             .call(
-                "aria2.addUri",
+                "nibiru.addUri",
                 vec![json!([magnet]), Value::Object(options)],
             )
             .await?
             .as_str()
             .map(str::to_owned)
-            .ok_or_else(|| "aria2_gid_missing".to_owned())?;
+            .ok_or_else(|| "xtreme_gid_missing".to_owned())?;
 
         let started = tokio::time::Instant::now();
         let deadline = started + Duration::from_secs(150);
@@ -519,7 +500,7 @@ impl Endpoint {
         let result = loop {
             let value = self
                 .call(
-                    "aria2.tellStatus",
+                    "nibiru.tellStatus",
                     vec![
                         Value::String(gid.clone()),
                         json!([
@@ -670,7 +651,7 @@ impl Endpoint {
             Value::String(bytes_per_second.to_string()),
         );
         self.call(
-            "aria2.changeOption",
+            "nibiru.changeOption",
             vec![Value::String(gid.to_owned()), Value::Object(options)],
         )
         .await
@@ -683,42 +664,39 @@ impl Endpoint {
             "max-overall-download-limit".into(),
             Value::String(bytes_per_second.to_string()),
         );
-        self.call("aria2.changeGlobalOption", vec![Value::Object(options)])
+        self.call("nibiru.changeGlobalOption", vec![Value::Object(options)])
             .await
             .map(|_| ())
     }
 
     pub async fn pause(&self, gid: &str) -> Result<(), String> {
-        self.call("aria2.pause", vec![Value::String(gid.to_owned())])
+        self.call("nibiru.pause", vec![Value::String(gid.to_owned())])
             .await
             .map(|_| ())
     }
 
     pub async fn resume(&self, gid: &str) -> Result<(), String> {
-        self.call("aria2.unpause", vec![Value::String(gid.to_owned())])
+        self.call("nibiru.resume", vec![Value::String(gid.to_owned())])
             .await
             .map(|_| ())
     }
 
     pub async fn remove(&self, gid: &str) -> Result<(), String> {
         match self
-            .call("aria2.remove", vec![Value::String(gid.to_owned())])
+            .call("nibiru.remove", vec![Value::String(gid.to_owned())])
             .await
         {
             Ok(_) => Ok(()),
             Err(_) => self
-                .call("aria2.forceRemove", vec![Value::String(gid.to_owned())])
+                .call("nibiru.remove", vec![Value::String(gid.to_owned())])
                 .await
                 .map(|_| ()),
         }
     }
 
     pub async fn remove_result(&self, gid: &str) -> Result<(), String> {
-        self.call(
-            "aria2.removeDownloadResult",
-            vec![Value::String(gid.to_owned())],
-        )
-        .await
-        .map(|_| ())
+        self.call("nibiru.removeResult", vec![Value::String(gid.to_owned())])
+            .await
+            .map(|_| ())
     }
 }

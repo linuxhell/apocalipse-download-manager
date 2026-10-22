@@ -3,12 +3,16 @@
 mod advanced_transports;
 mod audio_conversion;
 
-mod aria2;
 mod diagnostics;
+mod ed2k_ui;
+mod legacy_engine;
+mod nibiru_artifacts;
 mod prepared_preview;
 mod runtime_health;
 mod thumbnail_cache;
 mod tiktok_preview;
+mod transfer_speed;
+mod xtreme;
 
 use apocalipse_core::{
     chunk_directory, classify_url, cleanup_chunk_artifacts, contextual_media_page, parse_metalink,
@@ -228,8 +232,8 @@ struct AppState {
     recording_stops: Mutex<HashSet<DownloadId>>,
     request_identities: Mutex<HashMap<DownloadId, RequestIdentity>>,
     link_transfers: Mutex<HashMap<String, Arc<LinkTransferControl>>>,
-    aria2_runtime: Mutex<Option<aria2::Runtime>>,
-    aria2_tasks: Mutex<HashMap<DownloadId, String>>,
+    xtreme_runtime: Mutex<Option<xtreme::Runtime>>,
+    xtreme_tasks: Mutex<HashMap<DownloadId, String>>,
     log_path: PathBuf,
     log_write_lock: Mutex<()>,
     runtime_health: runtime_health::RuntimeHealth,
@@ -335,6 +339,8 @@ async fn discover_official_mirrors(url: &str) -> Vec<String> {
     mirrors
 }
 
+/// Resolves the per-download thread count. An explicit choice (the slider, or the value remembered
+/// for the site) always wins; hosts with special handling only change what happens without one.
 fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize> {
     let host = host_from_url(url);
     if host
@@ -351,12 +357,15 @@ fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize
             || value == "software.download.prss.microsoft.com"
             || value.ends_with(".download.prss.microsoft.com")
     }) {
-        // Microsoft's ISO CDN supports byte ranges. Start wide enough to avoid
-        // the slow single-stream ramp while keeping the setting below the
-        // application's global safety ceiling.
-        Some(requested.unwrap_or(16).max(16).clamp(1, 32))
+        // Microsoft's ISO CDN supports byte ranges. Without an explicit choice start wide enough
+        // to avoid the slow single-stream ramp; a chosen or remembered count is respected.
+        Some(
+            requested
+                .unwrap_or(MAX_DOWNLOAD_CONNECTIONS)
+                .clamp(1, MAX_DOWNLOAD_CONNECTIONS),
+        )
     } else {
-        requested.map(|value| value.clamp(1, 32))
+        requested.map(|value| value.clamp(1, MAX_DOWNLOAD_CONNECTIONS))
     }
 }
 
@@ -396,25 +405,20 @@ struct UserSettings {
     #[serde(default)]
     n_m3u8dl_re_path: Option<PathBuf>,
     #[serde(default)]
-    aria2_path: Option<PathBuf>,
-    // GitHub "owner/repo" the "Download"/"Update" buttons for the aria2 tool
-    // fetch a release from. Defaults to the upstream static-build repo so
-    // existing installs keep working unchanged; point this at a fork (e.g.
-    // aria2-ultra) to have the updater track that fork's releases instead
-    // of silently reverting a manually-installed fork binary back to
-    // vanilla aria2 the next time "Update" is clicked.
-    #[serde(default = "default_aria2_release_repo")]
-    aria2_release_repo: String,
+    xtreme_path: Option<PathBuf>,
+    // Repository used by the native Nibiru Xtreme tool updater.
+    #[serde(default = "default_xtreme_release_repo")]
+    xtreme_release_repo: String,
     #[serde(default)]
     extractor_path: Option<PathBuf>,
     #[serde(default = "default_true")]
-    aria2_rpc_enabled: bool,
+    xtreme_rpc_enabled: bool,
     #[serde(default = "default_true")]
-    aria2_rpc_auto_start: bool,
+    xtreme_rpc_auto_start: bool,
     #[serde(default)]
-    aria2_rpc_port: Option<u16>,
-    #[serde(default = "default_aria2_rpc_secret", skip_serializing)]
-    aria2_rpc_secret: String,
+    xtreme_rpc_port: Option<u16>,
+    #[serde(default = "default_xtreme_rpc_secret", skip_serializing)]
+    xtreme_rpc_secret: String,
     #[serde(default)]
     media_player_path: Option<PathBuf>,
     #[serde(default)]
@@ -472,20 +476,42 @@ fn tray_labels(language: &str) -> (&'static str, &'static str) {
 const fn default_max_active() -> usize {
     3
 }
+/// The Xtreme engine runs at most this many connections per download.
+const MAX_DOWNLOAD_CONNECTIONS: usize = 16;
 const fn default_connections() -> usize {
-    16
+    8
 }
 const fn default_true() -> bool {
     true
 }
-fn default_aria2_rpc_secret() -> String {
+fn default_xtreme_rpc_secret() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 fn default_bridge_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
-fn default_aria2_release_repo() -> String {
-    "linuxhell/aria2-ultra".to_owned()
+/// Native Nibiru Xtreme release source for the transfer slot.
+const XTREME_RELEASE_REPO: &str = "linuxhell/nibiru-xtreme";
+
+fn engine_asset_prefix(_repository: &str) -> &'static str {
+    "nibiru-xtreme-"
+}
+fn engine_executable_name(_repository: &str) -> &'static str {
+    if cfg!(windows) {
+        "nibiru-xtreme.exe"
+    } else {
+        "nibiru-xtreme"
+    }
+}
+fn engine_directory_name(_repository: &str) -> &'static str {
+    "nibiru-xtreme"
+}
+fn engine_label(_repository: &str) -> &'static str {
+    "nibiru-xtreme"
+}
+
+fn default_xtreme_release_repo() -> String {
+    XTREME_RELEASE_REPO.to_owned()
 }
 fn default_link_password() -> String {
     uuid::Uuid::new_v4().simple().to_string()
@@ -508,13 +534,13 @@ impl Default for UserSettings {
             yt_dlp_path: None,
             qjs_path: None,
             n_m3u8dl_re_path: None,
-            aria2_path: None,
-            aria2_release_repo: default_aria2_release_repo(),
+            xtreme_path: None,
+            xtreme_release_repo: default_xtreme_release_repo(),
             extractor_path: None,
-            aria2_rpc_enabled: true,
-            aria2_rpc_auto_start: true,
-            aria2_rpc_port: None,
-            aria2_rpc_secret: default_aria2_rpc_secret(),
+            xtreme_rpc_enabled: true,
+            xtreme_rpc_auto_start: true,
+            xtreme_rpc_port: None,
+            xtreme_rpc_secret: default_xtreme_rpc_secret(),
             media_player_path: None,
             user_agent: None,
             log_editor_path: None,
@@ -2917,7 +2943,7 @@ fn validated_torrent_metadata_path(state: &AppState, value: Option<String>) -> O
 
 async fn materialize_torrent_metadata_file(
     state: &AppState,
-    endpoint: Option<&aria2::Endpoint>,
+    endpoint: Option<&xtreme::Endpoint>,
     source: &str,
 ) -> Result<PathBuf, String> {
     let local = PathBuf::from(source);
@@ -2940,7 +2966,7 @@ async fn materialize_torrent_metadata_file(
         return Err("not_a_torrent".to_owned());
     }
 
-    let endpoint = endpoint.ok_or_else(|| "aria2_endpoint_required".to_owned())?;
+    let endpoint = endpoint.ok_or_else(|| "xtreme_endpoint_required".to_owned())?;
     let directory = torrent_store_directory(state)?;
     let info_hash = url::Url::parse(source).ok().and_then(|url| {
         url.query_pairs().find_map(|(key, value)| {
@@ -2973,7 +2999,7 @@ async fn materialize_torrent_metadata_file(
     diagnostic_log(
         state,
         "INFO",
-        "aria2.metadata_save_started",
+        "xtreme.metadata_save_started",
         &format!("directory={}", directory.display()),
     );
     let metadata_started = std::time::Instant::now();
@@ -2985,7 +3011,7 @@ async fn materialize_torrent_metadata_file(
                 diagnostic_log(
                     state,
                     "INFO",
-                    "aria2.metadata_save_progress",
+                    "xtreme.metadata_save_progress",
                     &format!(
                         "elapsed={elapsed}s status={status} connections={connections} seeders={seeders} total={total} completed={completed} info_hash={} diagnostics={diagnostics}",
                         info_hash.unwrap_or("none")
@@ -2998,7 +3024,7 @@ async fn materialize_torrent_metadata_file(
         diagnostic_log(
             state,
             "ERROR",
-            "aria2.metadata_save_failed",
+            "xtreme.metadata_save_failed",
             &format!(
                 "elapsed_ms={} error={error}",
                 metadata_started.elapsed().as_millis()
@@ -3009,7 +3035,7 @@ async fn materialize_torrent_metadata_file(
     diagnostic_log(
         state,
         "INFO",
-        "aria2.metadata_saved",
+        "xtreme.metadata_saved",
         &format!(
             "path={} bytes={} elapsed_ms={}",
             path.display(),
@@ -3042,7 +3068,7 @@ struct ToolStatus {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Aria2RpcSettingsStatus {
+struct XtremeRpcSettingsStatus {
     enabled: bool,
     auto_start: bool,
     configured_port: Option<u16>,
@@ -3353,14 +3379,10 @@ fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(fallback))
 }
 
-fn configured_aria2(settings: &UserSettings) -> PathBuf {
+fn configured_xtreme(settings: &UserSettings) -> PathBuf {
     configured_tool(
-        &settings.aria2_path,
-        if cfg!(windows) {
-            "aria2c.exe"
-        } else {
-            "aria2c"
-        },
+        &settings.xtreme_path,
+        engine_executable_name(&settings.xtreme_release_repo),
     )
 }
 
@@ -4091,40 +4113,40 @@ fn maybe_auto_extract_completed(app: &tauri::AppHandle, id: DownloadId) {
     });
 }
 
-async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::Endpoint, String> {
+async fn xtreme_endpoint(state: &AppState, force_start: bool) -> Result<xtreme::Endpoint, String> {
     let settings = state
         .settings
         .lock()
         .map_err(|error| error.to_string())?
         .clone();
-    if !settings.aria2_rpc_enabled {
-        return Err("aria2_rpc_disabled".to_owned());
+    if !settings.xtreme_rpc_enabled {
+        return Err("xtreme_rpc_disabled".to_owned());
     }
-    let executable = configured_aria2(&settings);
+    let executable = configured_xtreme(&settings);
     let runtime_root = state
         .queue_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join("aria2-rpc");
+        .join("xtreme-rpc");
     let mut spawned = None;
     let endpoint = {
         let mut runtime = state
-            .aria2_runtime
+            .xtreme_runtime
             .lock()
             .map_err(|error| error.to_string())?;
-        let reuse = runtime.as_mut().is_some_and(aria2::Runtime::is_running);
+        let reuse = runtime.as_mut().is_some_and(xtreme::Runtime::is_running);
         if !reuse {
-            if !force_start && !settings.aria2_rpc_auto_start {
-                return Err("aria2_rpc_not_running".to_owned());
+            if !force_start && !settings.xtreme_rpc_auto_start {
+                return Err("xtreme_rpc_not_running".to_owned());
             }
             if let Some(current) = runtime.as_mut() {
                 current.terminate();
             }
-            *runtime = Some(aria2::Runtime::spawn(
+            *runtime = Some(xtreme::Runtime::spawn(
                 &executable,
                 &runtime_root,
-                settings.aria2_rpc_port,
-                &settings.aria2_rpc_secret,
+                settings.xtreme_rpc_port,
+                &settings.xtreme_rpc_secret,
             )?);
             if let Some(current) = runtime.as_ref() {
                 spawned = Some((current.pid(), current.port()));
@@ -4132,8 +4154,8 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
         }
         runtime
             .as_ref()
-            .map(aria2::Runtime::endpoint)
-            .ok_or_else(|| "aria2_rpc_runtime_missing".to_owned())?
+            .map(xtreme::Runtime::endpoint)
+            .ok_or_else(|| "xtreme_rpc_runtime_missing".to_owned())?
     };
     let runtime_spawned = spawned.is_some();
     if runtime_spawned {
@@ -4143,19 +4165,25 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
             .await?;
     }
     if let Some((pid, port)) = spawned {
-        // Logged after wait_ready() so we can include the actual aria2
-        // version string (aria2-ultra vs. a stray vanilla aria2c on PATH is
+        // Logged after wait_ready() so we can include the actual xtreme
+        // version string (the native engine vs. an unrelated executable on PATH is
         // otherwise indistinguishable from the diagnostics bundle alone).
         let version = endpoint
             .version()
             .await
             .unwrap_or_else(|_| "unknown".to_owned());
+        let binary = executable
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("engine")
+            .to_owned();
+        let backend = engine_label(&settings.xtreme_release_repo);
         diagnostic_log(
             state,
             "INFO",
-            "aria2.runtime_spawned",
+            "xtreme.runtime_spawned",
             &format!(
-                "pid={pid} parent_pid={} port={port} binary=aria2c backend=aria2-ultra version={version} listen_port=6881-6999 dht_listen_port=6881-6999 stop_with_parent=true",
+                "pid={pid} parent_pid={} port={port} binary={binary} backend={backend} version={version} listen_port=6881-6999 dht_listen_port=6881-6999 stop_with_parent=true",
                 std::process::id()
             ),
         );
@@ -4163,8 +4191,8 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
     Ok(endpoint)
 }
 
-fn stop_aria2_runtime(state: &AppState) {
-    if let Ok(mut runtime) = state.aria2_runtime.lock() {
+fn stop_xtreme_runtime(state: &AppState) {
+    if let Ok(mut runtime) = state.xtreme_runtime.lock() {
         if let Some(runtime) = runtime.as_mut() {
             let pid = runtime.pid();
             let port = runtime.port();
@@ -4172,7 +4200,7 @@ fn stop_aria2_runtime(state: &AppState) {
             diagnostic_log(
                 state,
                 "INFO",
-                "aria2.runtime_stopped",
+                "xtreme.runtime_stopped",
                 &format!("pid={pid} port={port}"),
             );
         }
@@ -4180,8 +4208,8 @@ fn stop_aria2_runtime(state: &AppState) {
     }
 }
 
-fn running_aria2_endpoint(state: &AppState) -> Option<aria2::Endpoint> {
-    let mut runtime = state.aria2_runtime.lock().ok()?;
+fn running_xtreme_endpoint(state: &AppState) -> Option<xtreme::Endpoint> {
+    let mut runtime = state.xtreme_runtime.lock().ok()?;
     let runtime = runtime.as_mut()?;
     if !runtime.is_running() {
         return None;
@@ -4560,11 +4588,11 @@ fn reconnect_active_downloads_after_network_change(
         let _ = cancel.send(());
     }
     if !ids.is_empty() {
-        // aria2 restores unfinished session entries with the same GID.
+        // xtreme restores unfinished session entries with the same GID.
         // Keep ADM's task->GID mapping so the restarted runtime can reconnect
         // to the restored transfer. If a GID was not persisted by the engine,
-        // run_aria2_download detects it as stale and safely recreates the task.
-        stop_aria2_runtime(&state);
+        // run_xtreme_download detects it as stale and safely recreates the task.
+        stop_xtreme_runtime(&state);
     }
     if current.is_some() {
         if let Ok(queue) = state.queue.lock() {
@@ -5318,7 +5346,7 @@ async fn resolve_file_host_url(url: String) -> Result<FileHostResolution, String
 #[tauri::command]
 fn inspect_url(url: String) -> Result<PlanResponse, String> {
     let capabilities = Capabilities {
-        aria2: true,
+        xtreme: true,
         yt_dlp: true,
         n_m3u8dl_re: true,
     };
@@ -5603,7 +5631,10 @@ fn write_file_atomically(path: &Path, data: &[u8]) -> std::io::Result<()> {
 /// default, so that fallback never overwrites the only copy of the data.
 fn read_json_state_file<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
     let data = fs::read(path).ok()?;
-    match serde_json::from_slice(&data) {
+    match serde_json::from_slice::<serde_json::Value>(&data).and_then(|mut value| {
+        legacy_engine::migrate(&mut value);
+        serde_json::from_value(value)
+    }) {
         Ok(value) => Some(value),
         Err(_) => {
             if let Some(file_name) = path.file_name() {
@@ -5625,7 +5656,7 @@ fn load_queue(path: &Path) -> Vec<DownloadTask> {
             DownloadState::Downloading | DownloadState::Inspecting | DownloadState::Verifying
         ) {
             // Workers do not survive a process restart. Keep the partial data
-            // and persisted aria2 GID, but present the task as paused
+            // and persisted xtreme GID, but present the task as paused
             // until the user resumes it (or the scheduler explicitly queues it).
             task.state = DownloadState::Paused;
             task.download_speed = Some(0);
@@ -5641,11 +5672,11 @@ fn load_queue(path: &Path) -> Vec<DownloadTask> {
     queue
 }
 
-fn restored_aria2_task_map(queue: &[DownloadTask]) -> HashMap<DownloadId, String> {
+fn restored_xtreme_task_map(queue: &[DownloadTask]) -> HashMap<DownloadId, String> {
     queue
         .iter()
         .filter(|task| task.state != DownloadState::Completed)
-        .filter_map(|task| task.aria2_gid.clone().map(|gid| (task.id, gid)))
+        .filter_map(|task| task.xtreme_gid.clone().map(|gid| (task.id, gid)))
         .collect()
 }
 
@@ -5731,11 +5762,15 @@ fn save_queue_in_background(state: &AppState, queue: &[DownloadTask]) {
     }
 }
 
+fn migrate_xtreme_release_repo(settings: &mut UserSettings) {
+    if legacy_engine::retired_repository(&settings.xtreme_release_repo) {
+        settings.xtreme_release_repo = default_xtreme_release_repo();
+    }
+}
+
 fn load_settings(path: &Path) -> Result<UserSettings, String> {
     let mut settings: UserSettings = read_json_state_file(path).unwrap_or_default();
-    if settings.aria2_release_repo == "FerroDownload/aria2-static-builds" {
-        settings.aria2_release_repo = default_aria2_release_repo();
-    }
+    migrate_xtreme_release_repo(&mut settings);
     for share in &mut settings.link_shares {
         if let Ok(metadata) = fs::metadata(&share.path) {
             share.directory = metadata.is_dir();
@@ -6772,7 +6807,7 @@ async fn log_network_route(state: &AppState, operation: &str, engine: &str) {
     }
 }
 
-fn aria2_http_proxy_url(settings: &UserSettings) -> Option<String> {
+fn xtreme_http_proxy_url(settings: &UserSettings) -> Option<String> {
     if !settings.proxy_enabled {
         return None;
     }
@@ -6781,10 +6816,10 @@ fn aria2_http_proxy_url(settings: &UserSettings) -> Option<String> {
     (parsed.scheme() == "http").then(|| raw.to_owned())
 }
 
-fn aria2_request_context(
+fn xtreme_request_context(
     state: &AppState,
     task: &DownloadTask,
-) -> (aria2::RequestContext, usize, u64) {
+) -> (xtreme::RequestContext, usize, u64) {
     let settings = state
         .settings
         .lock()
@@ -6841,7 +6876,7 @@ fn aria2_request_context(
         .or_else(|| host_rule.as_ref().and_then(|rule| rule.bandwidth_limit))
         .unwrap_or_default();
     (
-        aria2::RequestContext {
+        xtreme::RequestContext {
             method: identity
                 .as_ref()
                 .map(|value| value.request_method.clone())
@@ -6850,7 +6885,7 @@ fn aria2_request_context(
             body: identity
                 .and_then(|value| value.request_body)
                 .unwrap_or_default(),
-            proxy_url: aria2_http_proxy_url(&settings),
+            proxy_url: xtreme_http_proxy_url(&settings),
             proxy_username: settings.proxy_username.clone(),
             proxy_password: settings.proxy_password.clone(),
             proxy_required: settings.proxy_enabled,
@@ -6914,7 +6949,7 @@ async fn referer_causes_forbidden(url: &str, headers: &HashMap<String, String>) 
         && matches!(probe(&client, url, headers, false).await, Some(200 | 206))
 }
 
-async fn run_aria2_download(
+async fn run_xtreme_download(
     app: tauri::AppHandle,
     id: DownloadId,
     task: DownloadTask,
@@ -6935,14 +6970,14 @@ async fn run_aria2_download(
     let route_operation = id.to_string();
     tauri::async_runtime::spawn(async move {
         let state = route_app.state::<AppState>();
-        log_network_route(&state, &route_operation, "aria2").await;
+        log_network_route(&state, &route_operation, "xtreme").await;
     });
-    let endpoint = match aria2_endpoint(&state, false).await {
+    let endpoint = match xtreme_endpoint(&state, false).await {
         Ok(endpoint) => endpoint,
         Err(message) => {
             update_task(&app, id, true, |item| {
                 item.state = DownloadState::Failed {
-                    message: format!("aria2_unavailable:{message}"),
+                    message: format!("xtreme_unavailable:{message}"),
                 }
             });
             if let Ok(mut workers) = state.workers.lock() {
@@ -6955,15 +6990,15 @@ async fn run_aria2_download(
     diagnostic_log(
         &state,
         "INFO",
-        "aria2.endpoint_ready",
+        "xtreme.endpoint_ready",
         &format!(
             "task={id} elapsed_ms={}",
             startup_started_at.elapsed().as_millis()
         ),
     );
-    let (context, connections, download_limit) = aria2_request_context(&state, &task);
+    let (context, connections, download_limit) = xtreme_request_context(&state, &task);
     let existing_task = state
-        .aria2_tasks
+        .xtreme_tasks
         .lock()
         .ok()
         .and_then(|items| items.get(&id).cloned());
@@ -6974,13 +7009,13 @@ async fn run_aria2_download(
                 diagnostic_log(
                     &state,
                     "WARN",
-                    "aria2.restored_gid_stale",
+                    "xtreme.restored_gid_stale",
                     &format!("task={id} gid={gid} error={error} recreating=true"),
                 );
-                if let Ok(mut items) = state.aria2_tasks.lock() {
+                if let Ok(mut items) = state.xtreme_tasks.lock() {
                     items.remove(&id);
                 }
-                update_task(&app, id, true, |item| item.aria2_gid = None);
+                update_task(&app, id, true, |item| item.xtreme_gid = None);
                 None
             }
         },
@@ -6992,7 +7027,7 @@ async fn run_aria2_download(
                 if let Err(error) = endpoint.resume(&gid).await {
                     update_task(&app, id, true, |item| {
                         item.state = DownloadState::Failed {
-                            message: format!("aria2_resume_failed:{error}"),
+                            message: format!("xtreme_resume_failed:{error}"),
                         }
                     });
                     if let Ok(mut workers) = state.workers.lock() {
@@ -7018,7 +7053,7 @@ async fn run_aria2_download(
                 diagnostic_log(
                     &state,
                     "INFO",
-                    "aria2.referer_dropped",
+                    "xtreme.referer_dropped",
                     &format!(
                         "task={id} reason=403_with_referer_only url={}",
                         redact_url(&task.source)
@@ -7027,7 +7062,7 @@ async fn run_aria2_download(
                 update_task(&app, id, true, |item| item.referer = None);
             }
             let added = if is_bittorrent && context.proxy_required {
-                Err("aria2_bittorrent_proxy_unsupported".to_owned())
+                Err("xtreme_bittorrent_proxy_unsupported".to_owned())
             } else if is_bittorrent {
                 // Every Torrent/Magnet task is started from a real .torrent
                 // persisted under data/torrents. This keeps metadata discovery
@@ -7066,7 +7101,7 @@ async fn run_aria2_download(
                     Err(error) => Err(error),
                 }
             } else if context.proxy_required && context.proxy_url.is_none() {
-                Err("aria2_proxy_scheme_unsupported".to_owned())
+                Err("xtreme_proxy_scheme_unsupported".to_owned())
             } else {
                 endpoint
                     .add_download(
@@ -7084,23 +7119,23 @@ async fn run_aria2_download(
                     diagnostic_log(
                         &state,
                         "INFO",
-                        "aria2.add_uri_returned",
+                        "xtreme.add_uri_returned",
                         &format!(
                             "task={id} gid={gid} add_ms={} total_startup_ms={}",
                             add_uri_started_at.elapsed().as_millis(),
                             startup_started_at.elapsed().as_millis()
                         ),
                     );
-                    if let Ok(mut items) = state.aria2_tasks.lock() {
+                    if let Ok(mut items) = state.xtreme_tasks.lock() {
                         items.insert(id, gid.clone());
                     }
-                    update_task(&app, id, true, |item| item.aria2_gid = Some(gid.clone()));
+                    update_task(&app, id, true, |item| item.xtreme_gid = Some(gid.clone()));
                     gid
                 }
                 Err(error) => {
                     update_task(&app, id, true, |item| {
                         item.state = DownloadState::Failed {
-                            message: format!("aria2_create_failed:{error}"),
+                            message: format!("xtreme_create_failed:{error}"),
                         }
                     });
                     if let Ok(mut workers) = state.workers.lock() {
@@ -7112,9 +7147,12 @@ async fn run_aria2_download(
             }
         }
     };
-    diagnostic_log(&state,"INFO","aria2.task_started",&format!("task={id} gid={gid} engine={kind:?} connections={} listen_port=6881-6999 dht_listen_port=6881-6999",connections.min(16)));
-    state.diagnostics.record(if is_bittorrent{"torrent.engine_selected"}else{"http.engine_selected"},"INFO",None,Some(&id.to_string()),serde_json::json!({"engine":"aria2-rpc","backend":"aria2-ultra","connections":connections.min(16),"kind":format!("{kind:?}"),"maxConnectionPerServer":connections.min(16),"split":connections.min(16),"listenPort":"6881-6999","dhtListenPort":"6881-6999","fileAllocation":if is_bittorrent{"none"}else{"trunc"}}));
+    let backend_xtreme = true;
+    diagnostic_log(&state,"INFO","xtreme.task_started",&format!("task={id} gid={gid} engine={kind:?} connections={} listen_port=6881-6999 dht_listen_port=6881-6999",connections.min(16)));
+    state.diagnostics.record(if is_bittorrent{"torrent.engine_selected"}else{"http.engine_selected"},"INFO",None,Some(&id.to_string()),serde_json::json!({"engine":"xtreme-rpc","backend":if backend_xtreme{"nibiru-xtreme"}else{"xtreme"},"connections":connections.min(16),"kind":format!("{kind:?}"),"maxConnectionPerServer":connections.min(16),"split":connections.min(16),"listenPort":"6881-6999","dhtListenPort":"6881-6999","fileAllocation":if is_bittorrent{"none"}else{"trunc"}}));
 
+    let measure_xtreme_speed = !is_bittorrent && backend_xtreme;
+    let mut speed_window = transfer_speed::TransferSpeed::default();
     let mut last_at = Instant::now();
     let transfer_started_at = startup_started_at;
     let mut last_downloaded = 0_u64;
@@ -7133,30 +7171,30 @@ async fn run_aria2_download(
             biased;
             _ = &mut cancellation => {
                 let _ = endpoint.pause(&gid).await;
-                diagnostic_log(&state, "INFO", "aria2.paused", &format!("task={id} gid={gid}"));
+                diagnostic_log(&state, "INFO", "xtreme.paused", &format!("task={id} gid={gid}"));
                 return;
             }
             _ = interval.tick() => {
-                let status = match endpoint.status(&gid).await {
+                let mut status = match endpoint.status(&gid).await {
                     Ok(status) => {
                         status_failing_since = None;
                         status
                     }
                     Err(error) => {
                         // The runtime this loop captured can disappear under it:
-                        // changing the RPC port/token, updating aria2 in Tools and
+                        // changing the RPC port/token, updating xtreme in Tools and
                         // a network change all stop it. Retrying forever used to
                         // leave the task frozen in Downloading, hold its worker
                         // slot (blocking the queue) and log a WARN every 350 ms.
                         let first_failure = status_failing_since.is_none();
                         let failing_since = *status_failing_since.get_or_insert_with(Instant::now);
-                        if aria2_status_outage_exceeded(failing_since.elapsed()) {
-                            diagnostic_log(&state, "ERROR", "aria2.status_unreachable", &format!("task={id} gid={gid} error={error}"));
-                            // Keep the GID: a retry reconnects to aria2's restored
+                        if xtreme_status_outage_exceeded(failing_since.elapsed()) {
+                            diagnostic_log(&state, "ERROR", "xtreme.status_unreachable", &format!("task={id} gid={gid} error={error}"));
+                            // Keep the GID: a retry reconnects to xtreme's restored
                             // session entry, or detects it stale and recreates it.
                             update_task(&app, id, true, |item| {
                                 item.state = DownloadState::Failed {
-                                    message: format!("aria2_rpc_unreachable:{error}"),
+                                    message: format!("xtreme_rpc_unreachable:{error}"),
                                 };
                                 item.download_speed = Some(0);
                                 item.upload_speed = Some(0);
@@ -7164,7 +7202,7 @@ async fn run_aria2_download(
                             break;
                         }
                         if first_failure {
-                            diagnostic_log(&state, "WARN", "aria2.status_failed", &format!("task={id} error={error}"));
+                            diagnostic_log(&state, "WARN", "xtreme.status_failed", &format!("task={id} error={error}"));
                         }
                         continue;
                     }
@@ -7176,7 +7214,7 @@ async fn run_aria2_download(
                     diagnostic_log(
                         &state,
                         "INFO",
-                        "aria2.first_payload_byte",
+                        "xtreme.first_payload_byte",
                         &format!(
                             "task={id} gid={gid} elapsed_ms={startup_ms} bytes={} connections={}",
                             status.downloaded, status.connections
@@ -7184,10 +7222,10 @@ async fn run_aria2_download(
                     );
                 }
                 for (threshold, logged, event) in [
-                    (2_u64, &mut workers_2_logged, "aria2.workers_2"),
-                    (4_u64, &mut workers_4_logged, "aria2.workers_4"),
-                    (8_u64, &mut workers_8_logged, "aria2.workers_8"),
-                    (16_u64, &mut workers_16_logged, "aria2.workers_16"),
+                    (2_u64, &mut workers_2_logged, "xtreme.workers_2"),
+                    (4_u64, &mut workers_4_logged, "xtreme.workers_4"),
+                    (8_u64, &mut workers_8_logged, "xtreme.workers_8"),
+                    (16_u64, &mut workers_16_logged, "xtreme.workers_16"),
                 ] {
                     if !*logged && status.connections >= threshold {
                         *logged = true;
@@ -7227,6 +7265,14 @@ async fn run_aria2_download(
                 } else {
                     None
                 };
+                let reported_speed = status.speed;
+                if measure_xtreme_speed {
+                    status.speed = if status.status == "active" && first_payload_logged {
+                        speed_window.sample(startup_ms as u64, status.downloaded)
+                    } else {
+                        0
+                    };
+                }
                 update_task(&app, id, false, |item| {
                     item.received = status.downloaded;
                     item.total = (status.total > 0).then_some(status.total);
@@ -7246,11 +7292,11 @@ async fn run_aria2_download(
                     None,
                     Some(&id.to_string()),
                     serde_json::json!({
-                        "engine": "aria2-rpc",
+                        "engine": "xtreme-rpc",
                         "bytesPerSecond": status.speed,
-                        "reportedBytesPerSecond": status.speed,
+                        "reportedBytesPerSecond": reported_speed,
                         "computedDeltaBytesPerSecond": raw_speed,
-                        "speedSource": "aria2",
+                        "speedSource": if measure_xtreme_speed { "xtreme-byte-window-2s" } else { "xtreme" },
                         "receivedBytes": status.downloaded,
                         "totalBytes": status.total,
                         "progressPercent": percent,
@@ -7269,7 +7315,7 @@ async fn run_aria2_download(
                             diagnostic_log(
                                 &state,
                                 "ERROR",
-                                "aria2.torrent_expected_size_mismatch",
+                                "xtreme.torrent_expected_size_mismatch",
                                 &format!(
                                     "task={id} gid={gid} reported_total={} expected_min={}",
                                     status.total,
@@ -7278,11 +7324,11 @@ async fn run_aria2_download(
                             );
                             update_task(&app, id, true, |item| {
                                 item.state = DownloadState::Failed {
-                                    message: "aria2_torrent_expected_size_mismatch".to_owned(),
+                                    message: "xtreme_torrent_expected_size_mismatch".to_owned(),
                                 };
-                                item.aria2_gid = None;
+                                item.xtreme_gid = None;
                             });
-                            if let Ok(mut items) = state.aria2_tasks.lock() {
+                            if let Ok(mut items) = state.xtreme_tasks.lock() {
                                 items.remove(&id);
                             }
                             break;
@@ -7291,7 +7337,7 @@ async fn run_aria2_download(
                             diagnostic_log(
                                 &state,
                                 "ERROR",
-                                "aria2.torrent_size_mismatch",
+                                "xtreme.torrent_size_mismatch",
                                 &format!(
                                     "task={id} gid={gid} reported_total={} selected_file_bytes={}",
                                     status.total, status.selected_file_bytes
@@ -7299,11 +7345,11 @@ async fn run_aria2_download(
                             );
                             update_task(&app, id, true, |item| {
                                 item.state = DownloadState::Failed {
-                                    message: "aria2_torrent_size_mismatch".to_owned(),
+                                    message: "xtreme_torrent_size_mismatch".to_owned(),
                                 };
-                                item.aria2_gid = None;
+                                item.xtreme_gid = None;
                             });
-                            if let Ok(mut items) = state.aria2_tasks.lock() {
+                            if let Ok(mut items) = state.xtreme_tasks.lock() {
                                 items.remove(&id);
                             }
                             break;
@@ -7316,21 +7362,21 @@ async fn run_aria2_download(
                             item.upload_speed = Some(0);
                             item.state = DownloadState::Completed;
                             item.completed_at = Some(epoch_seconds());
-                            item.aria2_gid = None;
+                            item.xtreme_gid = None;
                         });
                         maybe_auto_extract_completed(&app, id);
                         let _ = endpoint.remove_result(&gid).await;
-                        if let Ok(mut items) = state.aria2_tasks.lock() {
+                        if let Ok(mut items) = state.xtreme_tasks.lock() {
                             items.remove(&id);
                         }
                         break;
                     }
                     "error" | "removed" => {
-                        let engine_tag = if is_bittorrent { "aria2_torrent_error" } else { "aria2_task_failed" };
+                        let engine_tag = if is_bittorrent { "xtreme_torrent_error" } else { "xtreme_task_failed" };
                         diagnostic_log(
                             &state,
                             "ERROR",
-                            if is_bittorrent { "aria2.torrent_error" } else { "aria2.http_error" },
+                            if is_bittorrent { "xtreme.torrent_error" } else { "xtreme.http_error" },
                             &format!(
                                 "task={id} gid={gid} status={} reason={}",
                                 status.status,
@@ -7347,9 +7393,9 @@ async fn run_aria2_download(
                             };
                             item.download_speed = Some(0);
                             item.upload_speed = Some(0);
-                            item.aria2_gid = None;
+                            item.xtreme_gid = None;
                         });
-                        if let Ok(mut items) = state.aria2_tasks.lock() {
+                        if let Ok(mut items) = state.xtreme_tasks.lock() {
                             items.remove(&id);
                         }
                         break;
@@ -7373,13 +7419,13 @@ async fn run_aria2_download(
     start_next_queued(&app);
 }
 
-/// How long aria2's status RPC may fail continuously before a running task
+/// How long xtreme's status RPC may fail continuously before a running task
 /// is released as Failed. Long enough to ride out a busy engine (each call
 /// already has a 15 s timeout), short enough not to freeze the queue.
-const ARIA2_STATUS_OUTAGE_LIMIT: Duration = Duration::from_secs(30);
+const XTREME_STATUS_OUTAGE_LIMIT: Duration = Duration::from_secs(30);
 
-fn aria2_status_outage_exceeded(failing_for: Duration) -> bool {
-    failing_for >= ARIA2_STATUS_OUTAGE_LIMIT
+fn xtreme_status_outage_exceeded(failing_for: Duration) -> bool {
+    failing_for >= XTREME_STATUS_OUTAGE_LIMIT
 }
 
 /// Frees the worker slot of a task that ended before its normal cleanup and
@@ -7480,8 +7526,10 @@ async fn run_external_download(
                         "N_m3u8DL-RE"
                     },
                 ),
-                configured_aria2(&settings),
-                settings.connections_per_download.clamp(1, 32),
+                configured_xtreme(&settings),
+                settings
+                    .connections_per_download
+                    .clamp(1, MAX_DOWNLOAD_CONNECTIONS),
                 settings
                     .proxy_enabled
                     .then(|| settings.proxy_url.clone())
@@ -7501,9 +7549,9 @@ async fn run_external_download(
                 "yt-dlp".into(),
                 "N_m3u8DL-RE".into(),
                 if cfg!(windows) {
-                    "aria2c.exe".into()
+                    "nibiru-xtreme.exe".into()
                 } else {
-                    "aria2".into()
+                    "xtreme".into()
                 },
                 16,
                 None,
@@ -7522,7 +7570,7 @@ async fn run_external_download(
         .connections_override
         .or_else(|| host_rule.as_ref().and_then(|rule| rule.connections))
         .unwrap_or(tools.4)
-        .clamp(1, 32);
+        .clamp(1, MAX_DOWNLOAD_CONNECTIONS);
     diagnostic_log(
         &app.state::<AppState>(),
         "INFO",
@@ -8412,9 +8460,9 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "ytDlp": settings.yt_dlp_path.as_ref().is_some_and(|path| path.is_file()),
             "qjs": settings.qjs_path.as_ref().is_some_and(|path| path.is_file()),
             "nM3u8DlRe": settings.n_m3u8dl_re_path.as_ref().is_some_and(|path| path.is_file()),
-            "aria2": settings.aria2_path.as_ref().is_some_and(|path| path.is_file()),
-            "aria2RpcEnabled": settings.aria2_rpc_enabled,
-            "aria2RpcAutoStart": settings.aria2_rpc_auto_start,
+            "xtreme": settings.xtreme_path.as_ref().is_some_and(|path| path.is_file()),
+            "xtremeRpcEnabled": settings.xtreme_rpc_enabled,
+            "xtremeRpcAutoStart": settings.xtreme_rpc_auto_start,
             "mediaPlayer": settings.media_player_path.as_ref().is_some_and(|path| path.is_file()),
         },
         "pairingTokenPresent": !settings.bridge_token.is_empty(),
@@ -8509,8 +8557,8 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "bridge"
         } else if event.starts_with("link.") || event.contains("link_transfer") {
             "link"
-        } else if event.starts_with("aria2.") {
-            "aria2"
+        } else if event.starts_with("xtreme.") {
+            "xtreme"
         } else if event.starts_with("torrent.") {
             "torrent"
         } else if event.starts_with("http.") {
@@ -8577,9 +8625,9 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             }
         }
     }
-    let aria2_log = runtime_root.join("aria2-rpc").join("aria2.log");
-    if let Some(bytes) = read_sanitized_log_tail(&aria2_log, 1024 * 1024) {
-        entries.push(("engines/aria2-runtime.log".to_owned(), bytes));
+    let xtreme_log = runtime_root.join("xtreme-rpc").join("xtreme.log");
+    if let Some(bytes) = read_sanitized_log_tail(&xtreme_log, 1024 * 1024) {
+        entries.push(("engines/xtreme-runtime.log".to_owned(), bytes));
     }
     let debugger_index = serde_json::json!({
         "format": "Apocalipse Forensic Debugger V4",
@@ -8595,7 +8643,7 @@ fn export_diagnostic_bundle(state: State<'_, AppState>) -> Result<Option<String>
             "browserExtension": "logs/by-component/extension-shortcuts-overlays.jsonl",
             "socialMedia": "social/player-debugger.jsonl",
             "link": "logs/by-component/link.jsonl",
-            "aria2": ["logs/by-component/aria2.jsonl", "engines/aria2-runtime.log"],
+            "xtreme": ["logs/by-component/xtreme.jsonl", "engines/xtreme-runtime.log"],
             "torrent": "logs/by-component/torrent.jsonl",
             "http": "logs/by-component/http.jsonl",
             "externalMediaEngines": ["logs/by-component/external-media-engines.jsonl", "engines/"],
@@ -8735,11 +8783,26 @@ fn get_dark_mode(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn set_dark_mode(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+fn set_dark_mode(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
     settings.dark_mode = enabled;
     save_settings(&state, &settings)?;
     drop(settings);
+    if let Some(window) = app.get_webview_window("apocalipse-ed2k-kad") {
+        window
+            .set_theme(Some(if enabled {
+                tauri::Theme::Dark
+            } else {
+                tauri::Theme::Light
+            }))
+            .map_err(|e| e.to_string())?;
+    }
+    app.emit("apocalipse-mode-changed", enabled)
+        .map_err(|e| e.to_string())?;
     diagnostic_log(
         &state,
         "INFO",
@@ -8750,7 +8813,11 @@ fn set_dark_mode(state: State<'_, AppState>, enabled: bool) -> Result<(), String
 }
 
 #[tauri::command]
-fn set_application_language(state: State<'_, AppState>, language: String) -> Result<(), String> {
+fn set_application_language(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    language: String,
+) -> Result<(), String> {
     if !matches!(language.as_str(), "en" | "pt-BR" | "zh-CN") {
         return Err("unsupported_language".to_owned());
     }
@@ -8773,6 +8840,8 @@ fn set_application_language(state: State<'_, AppState>, language: String) -> Res
         "application.language_changed",
         &format!("language={language}"),
     );
+    app.emit("apocalipse-language-changed", &language)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -9771,27 +9840,27 @@ async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>
         })
         .collect::<Vec<_>>();
 
-    let aria2_path = configured_aria2(&settings);
-    let aria2_endpoint = {
+    let xtreme_path = configured_xtreme(&settings);
+    let xtreme_endpoint = {
         let mut runtime = state
-            .aria2_runtime
+            .xtreme_runtime
             .lock()
             .map_err(|error| error.to_string())?;
-        if runtime.as_mut().is_some_and(aria2::Runtime::is_running) {
-            runtime.as_ref().map(aria2::Runtime::endpoint)
+        if runtime.as_mut().is_some_and(xtreme::Runtime::is_running) {
+            runtime.as_ref().map(xtreme::Runtime::endpoint)
         } else {
             None
         }
     };
-    let aria2_version = match aria2_endpoint {
+    let xtreme_version = match xtreme_endpoint {
         Some(endpoint) => endpoint.version().await.ok(),
         None => None,
     };
     statuses.push(ToolStatus {
-        id: "aria2".to_owned(),
-        path: aria2_path.to_string_lossy().into_owned(),
-        found: aria2_path.is_file(),
-        version: aria2_version,
+        id: "xtreme".to_owned(),
+        path: xtreme_path.to_string_lossy().into_owned(),
+        found: xtreme_path.is_file(),
+        version: xtreme_version,
     });
 
     let extractor = settings.extractor_path.clone().unwrap_or_default();
@@ -9839,7 +9908,7 @@ fn set_tool_paths(
     yt_dlp: String,
     qjs: String,
     n_m3u8dl_re: String,
-    aria2: String,
+    xtreme: String,
     extractor: String,
 ) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
@@ -9847,15 +9916,15 @@ fn set_tool_paths(
     settings.yt_dlp_path = optional_path(yt_dlp);
     settings.qjs_path = optional_path(qjs);
     settings.n_m3u8dl_re_path = optional_path(n_m3u8dl_re);
-    settings.aria2_path = optional_path(aria2);
+    settings.xtreme_path = optional_path(xtreme);
     settings.extractor_path = optional_path(extractor);
     save_settings(&state, &settings)
 }
 
 #[tauri::command]
-async fn get_aria2_rpc_settings(
+async fn get_xtreme_rpc_settings(
     state: State<'_, AppState>,
-) -> Result<Aria2RpcSettingsStatus, String> {
+) -> Result<XtremeRpcSettingsStatus, String> {
     let settings = state
         .settings
         .lock()
@@ -9863,17 +9932,17 @@ async fn get_aria2_rpc_settings(
         .clone();
     let (connected, active_port, endpoint) = {
         let mut runtime = state
-            .aria2_runtime
+            .xtreme_runtime
             .lock()
             .map_err(|error| error.to_string())?;
-        let connected = runtime.as_mut().is_some_and(aria2::Runtime::is_running);
+        let connected = runtime.as_mut().is_some_and(xtreme::Runtime::is_running);
         let active_port = if connected {
-            runtime.as_ref().map(aria2::Runtime::port)
+            runtime.as_ref().map(xtreme::Runtime::port)
         } else {
             None
         };
         let endpoint = if connected {
-            runtime.as_ref().map(aria2::Runtime::endpoint)
+            runtime.as_ref().map(xtreme::Runtime::endpoint)
         } else {
             None
         };
@@ -9883,10 +9952,10 @@ async fn get_aria2_rpc_settings(
         Some(endpoint) => endpoint.version().await.ok(),
         None => None,
     };
-    Ok(Aria2RpcSettingsStatus {
-        enabled: settings.aria2_rpc_enabled,
-        auto_start: settings.aria2_rpc_auto_start,
-        configured_port: settings.aria2_rpc_port,
+    Ok(XtremeRpcSettingsStatus {
+        enabled: settings.xtreme_rpc_enabled,
+        auto_start: settings.xtreme_rpc_auto_start,
+        configured_port: settings.xtreme_rpc_port,
         connected,
         active_port,
         version,
@@ -9894,44 +9963,44 @@ async fn get_aria2_rpc_settings(
 }
 
 #[tauri::command]
-fn set_aria2_rpc_settings(
+fn set_xtreme_rpc_settings(
     state: State<'_, AppState>,
     enabled: bool,
     auto_start: bool,
     port: Option<u16>,
 ) -> Result<(), String> {
     if port.is_some_and(|port| port < 1024) {
-        return Err("aria2_rpc_port_invalid".to_owned());
+        return Err("xtreme_rpc_port_invalid".to_owned());
     }
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    let changed = settings.aria2_rpc_enabled != enabled
-        || settings.aria2_rpc_auto_start != auto_start
-        || settings.aria2_rpc_port != port;
-    settings.aria2_rpc_enabled = enabled;
-    settings.aria2_rpc_auto_start = auto_start;
-    settings.aria2_rpc_port = port;
+    let changed = settings.xtreme_rpc_enabled != enabled
+        || settings.xtreme_rpc_auto_start != auto_start
+        || settings.xtreme_rpc_port != port;
+    settings.xtreme_rpc_enabled = enabled;
+    settings.xtreme_rpc_auto_start = auto_start;
+    settings.xtreme_rpc_port = port;
     save_settings(&state, &settings)?;
     drop(settings);
     if changed {
-        stop_aria2_runtime(&state);
+        stop_xtreme_runtime(&state);
     }
     Ok(())
 }
 
 #[tauri::command]
-async fn test_aria2_rpc(state: State<'_, AppState>) -> Result<Aria2RpcSettingsStatus, String> {
-    let endpoint = aria2_endpoint(&state, true).await?;
+async fn test_xtreme_rpc(state: State<'_, AppState>) -> Result<XtremeRpcSettingsStatus, String> {
+    let endpoint = xtreme_endpoint(&state, true).await?;
     endpoint.version().await?;
-    get_aria2_rpc_settings(state).await
+    get_xtreme_rpc_settings(state).await
 }
 
 #[tauri::command]
-fn regenerate_aria2_rpc_token(state: State<'_, AppState>) -> Result<(), String> {
+fn regenerate_xtreme_rpc_token(state: State<'_, AppState>) -> Result<(), String> {
     let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    settings.aria2_rpc_secret = default_aria2_rpc_secret();
+    settings.xtreme_rpc_secret = default_xtreme_rpc_secret();
     save_settings(&state, &settings)?;
     drop(settings);
-    stop_aria2_runtime(&state);
+    stop_xtreme_runtime(&state);
     Ok(())
 }
 
@@ -10131,12 +10200,8 @@ fn release_platform_architecture() -> Result<(&'static str, &'static str), Strin
     Ok((platform, architecture))
 }
 
-/// aria2 publishes exact, versioned asset names (e.g.
-/// `aria2-2.8.1-linux-x86_64`), unlike upstream aria2's static builds
-/// which this used to match by substring. Matching the exact suffix (minus
-/// the version, which changes every release) is both simpler and safer than
-/// substring markers here.
-fn aria2_asset_suffix() -> Result<&'static str, String> {
+/// Match the platform suffix of versioned Nibiru Xtreme release assets.
+fn xtreme_asset_suffix() -> Result<&'static str, String> {
     if cfg!(target_os = "windows") && cfg!(target_arch = "x86_64") {
         Ok("windows-x64.exe")
     } else if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
@@ -10144,7 +10209,7 @@ fn aria2_asset_suffix() -> Result<&'static str, String> {
     } else if cfg!(target_os = "macos") && cfg!(target_arch = "x86_64") {
         Ok("macos-x64")
     } else {
-        Err("manual_update_required:aria2".to_owned())
+        Err("manual_update_required:xtreme".to_owned())
     }
 }
 
@@ -10199,23 +10264,8 @@ fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
             player.display()
         ),
     );
-    let mut command = Command::new(&player);
-    #[cfg(target_os = "linux")]
-    if player
-        .extension()
-        .and_then(|value| value.to_str())
-        .is_some_and(|value| value.eq_ignore_ascii_case("AppImage"))
-    {
-        command.env("APPIMAGE_EXTRACT_AND_RUN", "1");
-    }
-    command.arg(&video);
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
-    match command.spawn() {
-        Ok(_) => {
+    match launch_media_target(Some(player.clone()), video.as_os_str()) {
+        Ok(()) => {
             diagnostic_log(
                 &state,
                 "INFO",
@@ -10234,6 +10284,30 @@ fn preview_torrent(state: State<'_, AppState>, id: DownloadId) -> Result<(), Str
             Err(error.to_string())
         }
     }
+}
+
+fn launch_media_target(player: Option<PathBuf>, target: &std::ffi::OsStr) -> Result<(), String> {
+    let player =
+        player.unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "vlc.exe" } else { "vlc" }));
+    let mut command = Command::new(&player);
+    #[cfg(target_os = "linux")]
+    if player
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("AppImage"))
+    {
+        command.env("APPIMAGE_EXTRACT_AND_RUN", "1");
+    }
+    command.arg(target);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn portable_tools_directory() -> Result<PathBuf, String> {
@@ -10267,17 +10341,44 @@ where
         .ok_or_else(|| "compatible_release_asset_not_found".to_owned())
 }
 
+/// GitHub's `/releases/latest` skips drafts and prereleases. A repository that so far publishes only
+/// prereleases (Nibiru Xtreme's alpha builds) answers 404 there, so fall back to the newest
+/// published, non-draft release.
 async fn github_latest_release(
     client: &reqwest::Client,
     repository: &str,
 ) -> Result<serde_json::Value, String> {
-    client
+    let latest = client
         .get(format!(
             "https://api.github.com/repos/{repository}/releases/latest"
         ))
         .send()
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    if latest.status() == reqwest::StatusCode::NOT_FOUND {
+        let releases: Vec<serde_json::Value> = client
+            .get(format!(
+                "https://api.github.com/repos/{repository}/releases?per_page=10"
+            ))
+            .send()
+            .await
+            .map_err(|error| error.to_string())?
+            .error_for_status()
+            .map_err(|error| error.to_string())?
+            .json()
+            .await
+            .map_err(|error| error.to_string())?;
+        return releases
+            .into_iter()
+            .find(|release| {
+                !release
+                    .get("draft")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            })
+            .ok_or_else(|| format!("no_published_release:{repository}"));
+    }
+    latest
         .error_for_status()
         .map_err(|error| error.to_string())?
         .json()
@@ -10285,8 +10386,39 @@ async fn github_latest_release(
         .map_err(|error| error.to_string())
 }
 
+/// True when the installed tool's `--version` line names exactly the release `tag`
+/// (`v0.2.0` does not match `0.2.0-alpha.2`). Tags that are not versions never match.
+fn installed_version_matches_tag(installed: &str, tag: &str) -> bool {
+    let wanted = tag
+        .trim()
+        .trim_start_matches(['v', 'V'])
+        .to_ascii_lowercase();
+    if wanted.is_empty() || !wanted.starts_with(|character: char| character.is_ascii_digit()) {
+        return false;
+    }
+    let installed = installed.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(offset) = installed[from..].find(&wanted) {
+        let start = from + offset;
+        let end = start + wanted.len();
+        let before_ok = installed[..start]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '.' || c == '-'));
+        let after_ok = installed[end..]
+            .chars()
+            .next()
+            .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '.' || c == '-'));
+        if before_ok && after_ok {
+            return true;
+        }
+        from = start + 1;
+    }
+    false
+}
+
 /// Public keys allowed to sign `tools-manifest.json`. While this list is empty
-/// the tool-update path behaves as before (SHA-256 sidecar for aria2, `--version`
+/// the tool-update path behaves as before (SHA-256 sidecar for xtreme, `--version`
 /// sanity check for the rest). Once a key is added, every managed-tool download
 /// must match a signed manifest entry, or the install is refused.
 /// Generate keys and sign manifests with
@@ -10447,8 +10579,15 @@ fn clean_directory(directory: &Path) -> Result<(), String> {
 async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String, String> {
     let (platform, architecture) = release_platform_architecture()?;
     let tools_root = portable_tools_directory()?;
+    let engine_repository = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .xtreme_release_repo
+        .clone();
     let tool_dir = tools_root.join(match id.as_str() {
         "n-m3u8dl-re" => "n-m3u8dl-re",
+        "xtreme" => engine_directory_name(&engine_repository),
         value => value,
     });
     fs::create_dir_all(&tool_dir).map_err(|error| error.to_string())?;
@@ -10498,17 +10637,12 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             install_validated_executable(&bytes, &target, &["--version"])?;
             target
         }
-        "aria2" => {
-            let aria2_release_repo = state
-                .settings
-                .lock()
-                .map_err(|error| error.to_string())?
-                .aria2_release_repo
-                .clone();
-            let release = github_latest_release(&client, &aria2_release_repo).await?;
-            let suffix = aria2_asset_suffix()?;
+        "xtreme" => {
+            let release = github_latest_release(&client, &engine_repository).await?;
+            let suffix = xtreme_asset_suffix()?;
+            let prefix = engine_asset_prefix(&engine_repository);
             let (asset_name, url) = release_asset(&release, |name| {
-                name.starts_with("aria2c-") && name.ends_with(suffix) && !name.ends_with(".sha256")
+                name.starts_with(prefix) && name.ends_with(suffix) && !name.ends_with(".sha256")
             })?;
             let checksum_name = format!("{asset_name}.sha256");
             let (_, checksum_url) = release_asset(&release, |name| name == checksum_name)?;
@@ -10517,11 +10651,9 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             let checksum_text =
                 String::from_utf8(checksum_bytes).map_err(|error| error.to_string())?;
             verify_release_sha256(&checksum_text, &asset_name, &bytes)?;
-            let target = tool_dir.join(if cfg!(windows) {
-                "aria2c.exe"
-            } else {
-                "aria2c"
-            });
+            let target = tool_dir.join(engine_executable_name(&engine_repository));
+            // The running engine holds its executable open on Windows.
+            stop_xtreme_runtime(&state);
             install_validated_executable(&bytes, &target, &["--version"])?;
             target
         }
@@ -10783,7 +10915,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &settings.qjs_path,
                 if cfg!(windows) { "qjs.exe" } else { "qjs" },
             ),
-            "aria2" => configured_aria2(&settings),
+            "xtreme" => configured_xtreme(&settings),
             "n-m3u8dl-re" => configured_tool(
                 &settings.n_m3u8dl_re_path,
                 if cfg!(windows) {
@@ -10805,6 +10937,34 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
     };
     if executable.is_dir() {
         return Err("tool_target_must_be_a_file".to_owned());
+    }
+
+    // Nothing usable at the configured path: install the latest release into the tools folder and
+    // hand the new path back so the user only has to save. Other engines in the folder are untouched.
+    // An unrelated executable is preserved; the native engine is installed in its own folder.
+    let engine_repository = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .xtreme_release_repo
+        .clone();
+    let version_probe: &[&str] = if id == "ffmpeg" {
+        &["-version"]
+    } else {
+        &["--version"]
+    };
+    // A bare name is resolved through PATH, so it counts as present when it runs.
+    let present = executable.is_file()
+        || (executable.components().count() == 1
+            && version_line(&executable, version_probe).is_some());
+    let foreign_engine = id == "xtreme"
+        && !executable
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .is_some_and(|stem| stem.eq_ignore_ascii_case("nibiru-xtreme"));
+    if !present || foreign_engine {
+        let installed = download_tool(state.clone(), id.clone()).await?;
+        return Ok(format!("{id} installed: {installed}"));
     }
 
     // `yt-dlp --update-to nightly` verifies against yt-dlp's own checksums, not ours. With signed
@@ -10841,12 +11001,12 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
 
     {
         let (platform, architecture) = release_platform_architecture()?;
-        let aria2_suffix = aria2_asset_suffix()?;
-        let aria2_release_repo = state
+        let xtreme_suffix = xtreme_asset_suffix()?;
+        let xtreme_release_repo = state
             .settings
             .lock()
             .map_err(|error| error.to_string())?
-            .aria2_release_repo
+            .xtreme_release_repo
             .clone();
         let (repository, executable_name, asset_markers, version_args): (
             std::borrow::Cow<'static, str>,
@@ -10860,14 +11020,10 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &[],
                 &["--version"],
             ),
-            "aria2" => (
-                aria2_release_repo.into(),
-                if cfg!(windows) {
-                    "aria2c.exe"
-                } else {
-                    "aria2c"
-                },
-                std::slice::from_ref(&aria2_suffix),
+            "xtreme" => (
+                xtreme_release_repo.clone().into(),
+                engine_executable_name(&xtreme_release_repo),
+                std::slice::from_ref(&xtreme_suffix),
                 &["--version"],
             ),
             "n-m3u8dl-re" => (
@@ -10903,23 +11059,23 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             .user_agent("Apocalipse-Download-Manager")
             .build()
             .map_err(|error| error.to_string())?;
-        // GitHub's /latest endpoint excludes drafts and prereleases.
-        let release: serde_json::Value = client
-            .get(format!(
-                "https://api.github.com/repos/{repository}/releases/latest"
-            ))
-            .send()
-            .await
-            .map_err(|error| error.to_string())?
-            .error_for_status()
-            .map_err(|error| error.to_string())?
-            .json()
-            .await
-            .map_err(|error| error.to_string())?;
+        let release = github_latest_release(&client, &repository).await?;
         let tag = release
             .get("tag_name")
             .and_then(|value| value.as_str())
             .unwrap_or("latest");
+        // Look before downloading: when the release names the version already installed there is
+        // nothing to fetch. Releases whose tag is not a version (rolling "latest" builds) fall
+        // through and are compared after download.
+        if installed_version_matches_tag(&before, tag) {
+            diagnostic_log(
+                &state,
+                "INFO",
+                "tool.already_current",
+                &format!("tool={id} version={before} tag={tag}"),
+            );
+            return Ok(format!("{id} already current ({before})"));
+        }
         let assets = release
             .get("assets")
             .and_then(|value| value.as_array())
@@ -10964,9 +11120,9 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                         }
                         _ => false,
                     },
-                    "aria2" => {
-                        name.starts_with("aria2c-")
-                            && name.ends_with(aria2_suffix)
+                    "xtreme" => {
+                        name.starts_with(engine_asset_prefix(&xtreme_release_repo))
+                            && name.ends_with(xtreme_suffix)
                             && !name.ends_with(".sha256")
                     }
 
@@ -10996,7 +11152,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             .map_err(|error| error.to_string())?;
         verify_tool_download_signature(&client, &id, &bytes).await?;
         let sha256 = format!("{:x}", Sha256::digest(&bytes));
-        if id == "aria2" {
+        if id == "xtreme" {
             let checksum_name = format!("{asset_name}.sha256");
             let checksum_asset = assets
                 .iter()
@@ -11024,7 +11180,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         let temporary =
             std::env::temp_dir().join(format!("apocalipse-tool-update-{}", uuid::Uuid::new_v4()));
         let (replacement, ffprobe_replacement) =
-            if id == "qjs" || id == "aria2" || (id == "ffmpeg" && platform == "macos") {
+            if id == "qjs" || id == "xtreme" || (id == "ffmpeg" && platform == "macos") {
                 let ffprobe_replacement = if id == "ffmpeg" {
                     let marker = "x64";
                     let expected = format!("ffprobe-darwin-{marker}");
@@ -11087,8 +11243,8 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         if replacement.len() < 32_768 || (id == "ffmpeg" && ffprobe_replacement.len() < 32_768) {
             return Err(format!("replacement_executable_invalid:{asset_name}"));
         }
-        if id == "aria2" {
-            stop_aria2_runtime(&state);
+        if id == "xtreme" {
+            stop_xtreme_runtime(&state);
         }
         let parent = executable
             .parent()
@@ -11227,9 +11383,9 @@ async fn inspect_torrent_metadata(
             .map_err(|error| error.to_string())?
             .proxy_enabled
         {
-            return Err("aria2_bittorrent_proxy_unsupported".to_owned());
+            return Err("xtreme_bittorrent_proxy_unsupported".to_owned());
         }
-        Some(aria2_endpoint(&state, true).await?)
+        Some(xtreme_endpoint(&state, true).await?)
     } else {
         None
     };
@@ -11240,7 +11396,7 @@ async fn inspect_torrent_metadata(
             diagnostic_log(
                 &state,
                 "WARN",
-                "aria2.metadata_save_failed",
+                "xtreme.metadata_save_failed",
                 &format!("error={error}"),
             );
             error
@@ -11250,7 +11406,7 @@ async fn inspect_torrent_metadata(
     diagnostic_log(
         &state,
         "INFO",
-        "aria2.metadata_parsed",
+        "xtreme.metadata_parsed",
         &format!(
             "path={} name={} files={} total_size={}",
             path.display(),
@@ -11415,7 +11571,12 @@ fn enqueue_download_impl(
     let pixeldrain_single_connection = host_from_url(&url)
         .as_deref()
         .is_some_and(|value| value == "pixeldrain.com" || value.ends_with(".pixeldrain.com"));
-    task.connections_override = site_connection_override(&url, connections_override);
+    let remembered_connections =
+        state.settings.lock().ok().and_then(|settings| {
+            host_rule_for_url(&settings, &url).and_then(|rule| rule.connections)
+        });
+    task.connections_override =
+        site_connection_override(&url, connections_override.or(remembered_connections));
     task.auto_extract = auto_extract.unwrap_or(false) && is_archive_file_name(&file_name);
     task.expected_size = expected_size.filter(|value| *value > 0);
     if let Some(context) = context {
@@ -11895,10 +12056,10 @@ fn start_download(
         diagnostic_log(
             state,
             "INFO",
-            "aria2.dispatched",
+            "xtreme.dispatched",
             &format!("task={} engine={kind:?}", task.id),
         );
-        tauri::async_runtime::spawn(run_aria2_download(
+        tauri::async_runtime::spawn(run_xtreme_download(
             app.clone(),
             task.id,
             task,
@@ -11920,13 +12081,13 @@ fn start_download(
                         .as_deref()
                         .is_some_and(|body| !body.is_empty())
             });
-    let aria2_http_network_compatible =
-        !limits.dns_enabled && (!limits.proxy_enabled || aria2_http_proxy_url(&limits).is_some());
+    let xtreme_http_network_compatible =
+        !limits.dns_enabled && (!limits.proxy_enabled || xtreme_http_proxy_url(&limits).is_some());
     let needs_native_integrity = native_http_integrity_route(&task);
     let native_http_compatibility = kind == DownloadKind::Http
         && (requires_native_http_compatibility(&task.source)
             || special_http_request
-            || !aria2_http_network_compatible
+            || !xtreme_http_network_compatible
             || needs_native_integrity
             || audio_conversion::format(task.format_selection.as_deref()).is_some());
     if native_http_compatibility {
@@ -11940,7 +12101,7 @@ fn start_download(
                 if needs_native_integrity {
                     "mirrors_or_sha256"
                 } else {
-                    "aria2_rpc_compatibility"
+                    "xtreme_rpc_compatibility"
                 },
                 host_from_url(&task.source).unwrap_or_default()
             ),
@@ -11950,10 +12111,10 @@ fn start_download(
         diagnostic_log(
             state,
             "INFO",
-            "aria2.dispatched",
+            "xtreme.dispatched",
             &format!("task={} engine={kind:?}", task.id),
         );
-        tauri::async_runtime::spawn(run_aria2_download(
+        tauri::async_runtime::spawn(run_xtreme_download(
             app.clone(),
             task.id,
             task,
@@ -12088,8 +12249,8 @@ fn start_download(
 }
 
 /// Mirrors and an expected SHA-256 are only honored by the native HTTP
-/// engine: the aria2 route hands `aria2.addUri` the primary URL alone and no
-/// `checksum` option. Before this, an HTTP task (the default aria2 route)
+/// engine: the xtreme route hands `xtreme.addUri` the primary URL alone and no
+/// `checksum` option. Before this, an HTTP task (the default xtreme route)
 /// silently dropped its mirrors - manual ones, Metalink ones and the
 /// auto-discovered Apache/GNU ones - and a Metalink file's SHA-256 was never
 /// checked, yet the task still ended "Completed". The native engine probes
@@ -12215,7 +12376,7 @@ fn resume_download(
 /// different folder or drive (e.g. onto larger external storage), so the
 /// existing partial bytes are reused instead of starting over. This does
 /// not move any file itself: the caller is expected to have already moved
-/// the destination file (and its matching `.part`/`.aria2` sidecar, if
+/// the destination file (and its matching `.part`/`.xtreme` sidecar, if
 /// any) into `new_directory` outside the app. Safety is unchanged from an
 /// ordinary resume: the engine still re-validates the partial data against
 /// the remote resource (ETag/Last-Modified/size) before continuing, so a
@@ -12263,13 +12424,13 @@ fn relocate_download(
     let task = task.clone();
     save_queue(&state, &queue)?;
     drop(queue);
-    if let Ok(mut mappings) = state.aria2_tasks.lock() {
+    if let Ok(mut mappings) = state.xtreme_tasks.lock() {
         mappings.remove(&id);
     }
     {
         let mut queue = state.queue.lock().map_err(|error| error.to_string())?;
         if let Some(item) = queue.iter_mut().find(|item| item.id == id) {
-            item.aria2_gid = None;
+            item.xtreme_gid = None;
         }
         save_queue(&state, &queue)?;
     }
@@ -12427,7 +12588,7 @@ async fn set_transfer_limits(
             global_bandwidth_limit: settings.global_bandwidth_limit,
         }
     };
-    if let Some(endpoint) = running_aria2_endpoint(&state) {
+    if let Some(endpoint) = running_xtreme_endpoint(&state) {
         endpoint
             .set_global_download_limit(result.global_bandwidth_limit)
             .await?;
@@ -12471,11 +12632,11 @@ async fn set_download_bandwidth_limit(
         }
     }
     let gid = state
-        .aria2_tasks
+        .xtreme_tasks
         .lock()
         .ok()
         .and_then(|items| items.get(&id).cloned());
-    if let (Some(gid), Some(endpoint)) = (gid, running_aria2_endpoint(&state)) {
+    if let (Some(gid), Some(endpoint)) = (gid, running_xtreme_endpoint(&state)) {
         endpoint.set_download_limit(&gid, limit).await?;
     }
     Ok(limit)
@@ -12669,7 +12830,7 @@ fn save_host_rule(
                     .chars()
                     .any(|character| matches!(character, '\r' | '\n'))
             })
-        || connections.is_some_and(|value| !(1..=32).contains(&value))
+        || connections.is_some_and(|value| !(1..=MAX_DOWNLOAD_CONNECTIONS).contains(&value))
     {
         return Err("invalid_host_rule".to_owned());
     }
@@ -12736,14 +12897,7 @@ fn save_host_rule(
             bandwidth_limit,
         });
     }
-    settings.host_rules.sort_by(|left, right| {
-        let left_exact = !left.pattern.starts_with("*.");
-        let right_exact = !right.pattern.starts_with("*.");
-        right_exact
-            .cmp(&left_exact)
-            .then_with(|| right.pattern.len().cmp(&left.pattern.len()))
-            .then_with(|| left.pattern.cmp(&right.pattern))
-    });
+    sort_host_rules(&mut settings.host_rules);
     save_settings(&state, &settings)?;
     diagnostic_log(
         &state,
@@ -12760,6 +12914,124 @@ fn save_host_rule(
         ),
     );
     Ok(host_rule_summaries(&settings))
+}
+
+fn sort_host_rules(rules: &mut [HostRule]) {
+    rules.sort_by(|left, right| {
+        let left_exact = !left.pattern.starts_with("*.");
+        let right_exact = !right.pattern.starts_with("*.");
+        right_exact
+            .cmp(&left_exact)
+            .then_with(|| right.pattern.len().cmp(&left.pattern.len()))
+            .then_with(|| left.pattern.cmp(&right.pattern))
+    });
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SiteThreads {
+    host: String,
+    /// The count a download from this site would use, from the best matching rule.
+    threads: Option<usize>,
+    /// True only when a rule for exactly this host stores the count (what the checkbox edits).
+    remembered: bool,
+    /// Sites that must stay on one connection regardless of any preference.
+    forced: Option<usize>,
+}
+
+fn url_host_key(url: &str) -> Result<String, String> {
+    let parsed = url::Url::parse(url).map_err(|_| "invalid_site_url".to_owned())?;
+    if !matches!(parsed.scheme(), "http" | "https" | "ftp") {
+        return Err("invalid_site_url".to_owned());
+    }
+    parsed
+        .host_str()
+        .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
+        .filter(|host| !host.is_empty())
+        .ok_or_else(|| "invalid_site_url".to_owned())
+}
+
+#[tauri::command]
+fn get_site_threads(state: State<'_, AppState>, url: String) -> Result<SiteThreads, String> {
+    let host = url_host_key(&url)?;
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    let forced = (host == "pixeldrain.com" || host.ends_with(".pixeldrain.com")).then_some(1);
+    Ok(SiteThreads {
+        threads: host_rule_for_url(&settings, &url)
+            .and_then(|rule| rule.connections)
+            .map(|value| value.clamp(1, MAX_DOWNLOAD_CONNECTIONS)),
+        remembered: settings
+            .host_rules
+            .iter()
+            .any(|rule| rule.pattern == host && rule.connections.is_some()),
+        host,
+        forced,
+    })
+}
+
+/// Stores or clears the thread count in the rule for exactly `pattern`. A rule that holds nothing
+/// else is dropped when its count is cleared, and none is created when there is nothing to store.
+fn apply_site_threads(rules: &mut Vec<HostRule>, pattern: &str, threads: Option<usize>) {
+    match rules.iter().position(|rule| rule.pattern == pattern) {
+        Some(index) => {
+            rules[index].connections = threads;
+            let rule = &rules[index];
+            if rule.connections.is_none()
+                && rule.username.is_none()
+                && rule.password.is_empty()
+                && rule.user_agent.is_none()
+                && rule.bandwidth_limit.is_none()
+            {
+                rules.remove(index);
+            }
+        }
+        None => {
+            if threads.is_some() {
+                rules.push(HostRule {
+                    pattern: pattern.to_owned(),
+                    username: None,
+                    password: String::new(),
+                    user_agent: None,
+                    connections: threads,
+                    bandwidth_limit: None,
+                });
+            }
+        }
+    }
+    sort_host_rules(rules);
+}
+
+/// Remembers (`Some`) or forgets (`None`) the thread count for exactly this site, leaving the
+/// rule's credentials, speed limit and User-Agent untouched.
+#[tauri::command]
+fn set_site_threads(
+    state: State<'_, AppState>,
+    url: String,
+    threads: Option<usize>,
+) -> Result<SiteThreads, String> {
+    let host = url_host_key(&url)?;
+    if threads.is_some_and(|value| !(1..=MAX_DOWNLOAD_CONNECTIONS).contains(&value)) {
+        return Err("invalid_site_threads".to_owned());
+    }
+    let pattern = normalize_host_rule_pattern(&host)?;
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    apply_site_threads(&mut settings.host_rules, &pattern, threads);
+    save_settings(&state, &settings)?;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "host_rule.threads",
+        &format!(
+            "pattern={pattern} threads={}",
+            threads.map_or_else(|| "forgotten".to_owned(), |value| value.to_string())
+        ),
+    );
+    Ok(SiteThreads {
+        threads,
+        remembered: threads.is_some(),
+        forced: None,
+        host,
+    })
 }
 
 #[tauri::command]
@@ -15204,32 +15476,32 @@ async fn remove_downloads(
         (removed, retained_torrent_metadata_paths)
     };
 
-    let aria2_targets = {
-        let aria2_tasks = state
-            .aria2_tasks
+    let xtreme_targets = {
+        let xtreme_tasks = state
+            .xtreme_tasks
             .lock()
             .map_err(|error| error.to_string())?;
         removed
             .iter()
             .filter_map(|task| {
-                aria2_tasks
+                xtreme_tasks
                     .get(&task.id)
                     .cloned()
                     .map(|gid| (task.clone(), gid))
             })
             .collect::<Vec<_>>()
     };
-    if !aria2_targets.is_empty() {
-        match aria2_endpoint(&state, true).await {
+    if !xtreme_targets.is_empty() {
+        match xtreme_endpoint(&state, true).await {
             Ok(endpoint) => {
-                for (task, gid) in &aria2_targets {
+                for (task, gid) in &xtreme_targets {
                     let _ = endpoint.remove(gid).await;
                     let _ = endpoint.remove_result(gid).await;
-                    if let Ok(mut items) = state.aria2_tasks.lock() {
+                    if let Ok(mut items) = state.xtreme_tasks.lock() {
                         items.remove(&task.id);
                     }
                     state.diagnostics.record(
-                        "aria2.task_removed",
+                        "xtreme.task_removed",
                         "INFO",
                         Some(&removal_trace),
                         Some(&task.id.to_string()),
@@ -15245,7 +15517,7 @@ async fn remove_downloads(
                 diagnostic_log(
                     &state,
                     "WARN",
-                    "aria2.remove_unavailable",
+                    "xtreme.remove_unavailable",
                     &format!("error={error}"),
                 );
             }
@@ -15254,6 +15526,11 @@ async fn remove_downloads(
     if delete_files {
         let mut deleted_torrent_metadata_paths = HashSet::new();
         for task in &removed {
+            let destination = task.destination.clone();
+            tokio::task::spawn_blocking(move || nibiru_artifacts::cleanup(&destination))
+                .await
+                .map_err(|error| error.to_string())?
+                .map_err(|error| error.to_string())?;
             cleanup_chunk_artifacts(&task.destination)
                 .await
                 .map_err(|error| error.to_string())?;
@@ -15316,9 +15593,12 @@ async fn remove_downloads(
                 .map_err(|error| error.to_string())?;
             let partial_remaining = partial_path(&task.destination).exists();
             let chunk_artifacts_remaining = chunk_directory(&task.destination).exists();
+            let nibiru_artifacts_remaining = nibiru_artifacts::paths(&task.destination)
+                .iter()
+                .any(|path| path.exists());
             state.diagnostics.record(
                 "task.removal_disk_cleanup",
-                if partial_remaining || chunk_artifacts_remaining {
+                if partial_remaining || chunk_artifacts_remaining || nibiru_artifacts_remaining {
                     "ERROR"
                 } else {
                     "INFO"
@@ -15327,10 +15607,11 @@ async fn remove_downloads(
                 Some(&task.id.to_string()),
                 serde_json::json!({
                     "partialRemaining": partial_remaining,
-                    "chunkArtifactsRemaining": chunk_artifacts_remaining
+                    "chunkArtifactsRemaining": chunk_artifacts_remaining,
+                    "nibiruArtifactsRemaining": nibiru_artifacts_remaining
                 }),
             );
-            if partial_remaining || chunk_artifacts_remaining {
+            if partial_remaining || chunk_artifacts_remaining || nibiru_artifacts_remaining {
                 return Err("download_cleanup_incomplete".to_owned());
             }
         }
@@ -15340,7 +15621,7 @@ async fn remove_downloads(
     if let Ok(mut identities) = state.request_identities.lock() {
         identities.retain(|id, _| !ids.contains(id));
     }
-    if let Ok(mut mappings) = state.aria2_tasks.lock() {
+    if let Ok(mut mappings) = state.xtreme_tasks.lock() {
         mappings.retain(|id, _| !ids.contains(id));
     }
     save_queue(&state, &queue)?;
@@ -15418,10 +15699,6 @@ async fn clear_torrent_store(state: State<'_, AppState>) -> Result<usize, String
 fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
     let partial = partial_path(&task.destination);
     let mut paths = vec![task.destination.clone(), partial];
-    let aria2_control = PathBuf::from(format!("{}.aria2", task.destination.display()));
-    if !paths.contains(&aria2_control) {
-        paths.push(aria2_control);
-    }
 
     let recording_source = PathBuf::from(&task.source);
     if task.source.ends_with(".recording.webm") && recording_source.is_absolute() {
@@ -15538,7 +15815,7 @@ fn main() {
     {
         let source = "https://www.reddit.com/r/UFOs/comments/1wlkure/guillermo_del_toro_shares_his_terrifying_ufo/";
         let capabilities = Capabilities {
-            aria2: true,
+            xtreme: true,
             yt_dlp: true,
             n_m3u8dl_re: true,
         };
@@ -15568,13 +15845,14 @@ fn main() {
             let log_path = app_data.join("logs").join("apocalipse.log");
             let mut initial_settings =
                 load_settings(&settings_path).map_err(std::io::Error::other)?;
-            if initial_settings.aria2_path.is_none() {
-                let aria2_dir = app_data.join("tools").join("aria2");
-                fs::create_dir_all(&aria2_dir)?;
-                initial_settings.aria2_path = Some(aria2_dir.join(if cfg!(windows) {
-                    "aria2c.exe"
+            if initial_settings.xtreme_path.is_none() {
+                // The portable package includes the native transfer engine.
+                let xtreme_dir = app_data.join("tools").join("nibiru-xtreme");
+                fs::create_dir_all(&xtreme_dir)?;
+                initial_settings.xtreme_path = Some(xtreme_dir.join(if cfg!(windows) {
+                    "nibiru-xtreme.exe"
                 } else {
-                    "aria2c"
+                    "nibiru-xtreme"
                 }));
                 write_settings(&settings_path, &initial_settings).map_err(std::io::Error::other)?;
             }
@@ -15604,7 +15882,12 @@ fn main() {
                 initial_settings.global_bandwidth_limit,
             ));
             let initial_queue = load_queue(&queue_path);
-            let initial_aria2_tasks = restored_aria2_task_map(&initial_queue);
+            let initial_xtreme_tasks = restored_xtreme_task_map(&initial_queue);
+            let ed2k_root = app_data.join("ed2k-kad");
+            app.manage(
+                ed2k_ui::Ed2kState::new(ed2k_root.clone())
+                    .unwrap_or_else(|error| ed2k_ui::Ed2kState::unavailable(ed2k_root, error)),
+            );
             app.manage(AppState {
                 queue: Mutex::new(initial_queue),
                 queue_path,
@@ -15621,8 +15904,8 @@ fn main() {
                 recording_stops: Mutex::new(HashSet::new()),
                 request_identities: Mutex::new(HashMap::new()),
                 link_transfers: Mutex::new(HashMap::new()),
-                aria2_runtime: Mutex::new(None),
-                aria2_tasks: Mutex::new(initial_aria2_tasks),
+                xtreme_runtime: Mutex::new(None),
+                xtreme_tasks: Mutex::new(initial_xtreme_tasks),
                 log_path,
                 log_write_lock: Mutex::new(()),
                 runtime_health: runtime_health::RuntimeHealth::default(),
@@ -15769,10 +16052,10 @@ fn main() {
             open_paypal_donation,
             get_tool_statuses,
             set_tool_paths,
-            get_aria2_rpc_settings,
-            set_aria2_rpc_settings,
-            test_aria2_rpc,
-            regenerate_aria2_rpc_token,
+            get_xtreme_rpc_settings,
+            set_xtreme_rpc_settings,
+            test_xtreme_rpc,
+            regenerate_xtreme_rpc_token,
             get_media_player,
             get_app_version,
             check_app_update,
@@ -15803,6 +16086,30 @@ fn main() {
             set_application_language,
             control_main_window,
             open_link_window,
+            ed2k_ui::open_ed2k_window,
+            ed2k_ui::ed2k_overview,
+            ed2k_ui::events::ed2k_events,
+            ed2k_ui::events::ed2k_save_log,
+            ed2k_ui::ed2k_update_list,
+            ed2k_ui::ed2k_import_list,
+            ed2k_ui::ed2k_connect,
+            ed2k_ui::ed2k_disconnect,
+            ed2k_ui::ed2k_search,
+            ed2k_ui::ed2k_find_sources,
+            ed2k_ui::downloads::ed2k_add_download,
+            ed2k_ui::downloads::ed2k_download_action,
+            ed2k_ui::downloads::ed2k_preview_download,
+            ed2k_ui::network::ed2k_kad_connect,
+            ed2k_ui::network::ed2k_kad_disconnect,
+            ed2k_ui::network::ed2k_set_prefs,
+            ed2k_ui::ed2k_copy_link,
+            ed2k_ui::shares::ed2k_share_add_folder,
+            ed2k_ui::shares::ed2k_share_add_files,
+            ed2k_ui::shares::ed2k_share_remove_folder,
+            ed2k_ui::shares::ed2k_share_remove_file,
+            ed2k_ui::shares::ed2k_share_set_priority,
+            ed2k_ui::shares::ed2k_share_rescan,
+            ed2k_ui::shares::ed2k_share_set_limits,
             main_window_ready,
             resolve_archive_conflict,
             check_file_conflict,
@@ -15838,6 +16145,8 @@ fn main() {
             list_host_rules,
             save_host_rule,
             remove_host_rule,
+            get_site_threads,
+            set_site_threads,
             get_dns_setting,
             set_dns_setting,
             get_bridge_pairing,
@@ -15853,6 +16162,10 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("failed to build Apocalipse Download Manager")
         .run(|_app, _event| {
+            if let tauri::RunEvent::Exit = _event {
+                // Take the forwarded ports off the router again.
+                ed2k_ui::network::release_on_exit(_app);
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = _event {
                 for url in urls {
@@ -15868,6 +16181,176 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    fn rule(pattern: &str, connections: Option<usize>) -> HostRule {
+        HostRule {
+            pattern: pattern.to_owned(),
+            username: None,
+            password: String::new(),
+            user_agent: None,
+            connections,
+            bandwidth_limit: None,
+        }
+    }
+
+    #[test]
+    fn remembering_threads_creates_updates_and_forgets_a_site_rule() {
+        let mut rules = Vec::new();
+        apply_site_threads(&mut rules, "files.example.com", Some(1));
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].connections, Some(1));
+        apply_site_threads(&mut rules, "files.example.com", Some(4));
+        assert_eq!((rules.len(), rules[0].connections), (1, Some(4)));
+        apply_site_threads(&mut rules, "files.example.com", None);
+        assert!(
+            rules.is_empty(),
+            "a rule holding only the count disappears with it"
+        );
+        apply_site_threads(&mut rules, "files.example.com", None);
+        assert!(
+            rules.is_empty(),
+            "forgetting an unknown site creates nothing"
+        );
+    }
+
+    #[test]
+    fn forgetting_threads_keeps_the_rest_of_the_site_rule() {
+        let mut limited = rule("files.example.com", Some(4));
+        limited.bandwidth_limit = Some(1024);
+        let mut agent = rule("agent.example.com", Some(2));
+        agent.user_agent = Some("Custom".to_owned());
+        let mut login = rule("login.example.com", Some(8));
+        login.username = Some("user".to_owned());
+        login.password = "secret".to_owned();
+        let mut rules = vec![limited, agent, login, rule("*.example.com", Some(6))];
+        for site in [
+            "files.example.com",
+            "agent.example.com",
+            "login.example.com",
+        ] {
+            apply_site_threads(&mut rules, site, None);
+        }
+        assert!(rules
+            .iter()
+            .all(|r| r.pattern == "*.example.com" || r.connections.is_none()));
+        assert_eq!(rules.len(), 4, "speed, User-Agent and credentials survive");
+        assert_eq!(
+            rules
+                .iter()
+                .find(|r| r.pattern == "*.example.com")
+                .unwrap()
+                .connections,
+            Some(6),
+            "another rule is never touched"
+        );
+        assert!(
+            rules
+                .iter()
+                .find(|r| r.pattern == "login.example.com")
+                .unwrap()
+                .password
+                == "secret"
+        );
+    }
+
+    #[test]
+    fn a_chosen_thread_count_wins_even_on_hosts_with_special_handling() {
+        let microsoft = "https://software.download.prss.microsoft.com/dbazure/Win.iso?t=1";
+        assert_eq!(
+            site_connection_override(microsoft, None),
+            Some(16),
+            "default stays wide"
+        );
+        assert_eq!(site_connection_override(microsoft, Some(8)), Some(8));
+        assert_eq!(site_connection_override(microsoft, Some(1)), Some(1));
+        assert_eq!(
+            site_connection_override(microsoft, Some(32)),
+            Some(16),
+            "never above the engine's 16"
+        );
+        assert_eq!(
+            site_connection_override("https://example.com/f", Some(24)),
+            Some(16)
+        );
+        assert_eq!(
+            site_connection_override("https://example.com/f", None),
+            None
+        );
+        assert_eq!(
+            site_connection_override("https://pixeldrain.com/u/x", Some(16)),
+            Some(1),
+            "pixeldrain stays on one connection"
+        );
+    }
+
+    #[test]
+    fn installed_version_is_matched_against_release_tags_exactly() {
+        use super::installed_version_matches_tag as matches;
+        assert!(matches("nibiru-xtreme 0.2.0-alpha.2", "v0.2.0-alpha.2"));
+        assert!(matches("nibiru-xtreme 0.2.0-alpha.2", "0.2.0-alpha.2"));
+        assert!(!matches("nibiru-xtreme 0.2.0-alpha.2", "v0.2.0"));
+        assert!(!matches("nibiru-xtreme 0.2.0-alpha.2", "v0.2.0-alpha.3"));
+        assert!(!matches("nibiru-xtreme 0.2.0-alpha.10", "v0.2.0-alpha.1"));
+        assert!(!matches("nibiru-xtreme 10.2.0", "v0.2.0"));
+        assert!(matches("N_m3u8DL-RE 0.5.1-beta", "v0.5.1-beta"));
+        assert!(!matches("anything", "latest"));
+        assert!(!matches("anything", ""));
+    }
+
+    #[test]
+    fn engine_slot_names_follow_the_release_repository() {
+        use super::{engine_asset_prefix, engine_directory_name, engine_executable_name};
+        assert_eq!(
+            engine_asset_prefix("linuxhell/nibiru-xtreme"),
+            "nibiru-xtreme-"
+        );
+        assert_eq!(
+            engine_directory_name("linuxhell/nibiru-xtreme"),
+            "nibiru-xtreme"
+        );
+        assert!(engine_executable_name("linuxhell/nibiru-xtreme").starts_with("nibiru-xtreme"));
+        assert_eq!(engine_asset_prefix("someone/xtreme-fork"), "nibiru-xtreme-");
+        assert_eq!(
+            engine_directory_name("someone/xtreme-fork"),
+            "nibiru-xtreme"
+        );
+        assert!(engine_executable_name("someone/xtreme-fork").starts_with("nibiru-xtreme"));
+    }
+
+    #[test]
+    fn xtreme_release_source_migrates_deleted_default_and_preserves_custom_sources() {
+        assert_eq!(
+            super::default_xtreme_release_repo(),
+            "linuxhell/nibiru-xtreme"
+        );
+        let legacy: serde_json::Value =
+            serde_json::from_str(include_str!("../legacy-engine-fields.json")).unwrap();
+        let mut cases: Vec<(String, String)> = legacy["retiredRepositories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| {
+                (
+                    value.as_str().unwrap().to_owned(),
+                    super::default_xtreme_release_repo(),
+                )
+            })
+            .collect();
+        cases.push((
+            "linuxhell/nibiru-xtreme".into(),
+            "linuxhell/nibiru-xtreme".into(),
+        ));
+        cases.push((
+            "custom-owner/custom-builds".into(),
+            "custom-owner/custom-builds".into(),
+        ));
+        for (saved, expected) in cases {
+            let mut settings = super::UserSettings::default();
+            settings.xtreme_release_repo = saved.to_owned();
+            super::migrate_xtreme_release_repo(&mut settings);
+            assert_eq!(settings.xtreme_release_repo, expected);
+        }
+    }
+
     #[test]
     fn task_preview_accepts_only_own_audio_or_video_payload() {
         let directory = tempfile::tempdir().unwrap();
@@ -17206,10 +17689,10 @@ mod tests {
     }
 
     #[test]
-    fn aria2_status_outage_releases_the_task_only_after_a_sustained_failure() {
-        assert!(!aria2_status_outage_exceeded(Duration::from_secs(5)));
-        assert!(!aria2_status_outage_exceeded(Duration::from_secs(29)));
-        assert!(aria2_status_outage_exceeded(Duration::from_secs(30)));
+    fn xtreme_status_outage_releases_the_task_only_after_a_sustained_failure() {
+        assert!(!xtreme_status_outage_exceeded(Duration::from_secs(5)));
+        assert!(!xtreme_status_outage_exceeded(Duration::from_secs(29)));
+        assert!(xtreme_status_outage_exceeded(Duration::from_secs(30)));
     }
 
     #[test]

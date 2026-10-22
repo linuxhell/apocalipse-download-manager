@@ -1,0 +1,54 @@
+name: Linux distribution compatibility
+on:
+  pull_request:
+    paths: ['**/*.rs', '**/Cargo.toml', '**/Cargo.lock', '.github/workflows/linux-compatibility.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: linux-compatibility-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  linux-compatibility:
+    name: Linux compatibility · ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debian 12
+            image: debian:bookworm
+          - name: Fedora
+            image: fedora:latest
+          - name: Arch Linux
+            image: archlinux:latest
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Debian dependencies
+        if: matrix.name == 'Debian 12'
+        shell: bash
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential curl pkg-config libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libpam0g-dev libssl-dev
+      - name: Install Fedora dependencies
+        if: matrix.name == 'Fedora'
+        shell: bash
+        run: |
+          dnf install -y gcc gcc-c++ make curl pkgconf-pkg-config webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel pam-devel openssl-devel
+      - name: Install Arch dependencies
+        if: matrix.name == 'Arch Linux'
+        shell: bash
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed base-devel curl pkgconf webkit2gtk-4.1 libappindicator-gtk3 librsvg pam openssl
+      - name: Install Rust
+        shell: bash
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "${CARGO_HOME:-$HOME/.cargo}/bin" >> "$GITHUB_PATH"
+      - name: Check desktop on distro
+        shell: bash
+        run: |
+          . "$HOME/.cargo/env"
+          cargo check --locked -p apocalipse-desktop

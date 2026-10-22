@@ -30,7 +30,7 @@ const catalogs = {
     aiStatusProposed: "Awaiting approval", aiStatusTesting: "Testing", aiStatusSaved: "Saved", aiStatusConfirmed: "Confirmed", aiStatusRejected: "Did not work",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
-    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "mpv / media player",
+    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", xtremeBackend: "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", mediaPlayer: "mpv / media player",
     about: "About", aboutDescription: "About the creator.", aboutCreator: "Creator: Juliano - Brazil", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume", facebookRecordingFallback: "The Facebook extractor failed to read this Reel. Update yt-dlp or try capturing its link again. Recording is available as an alternative.",
     addDownload: "Add download",
     downloadSpeed: "DOWNLOAD SPEED",
@@ -151,25 +151,30 @@ const catalogs = {
     dnsProvider: "Provider",
     dnsCustom: "Custom",
     dnsServers: "DNS servers",
-    dnsScopeHint: "Applied to the native HTTP engine. aria2 uses the system resolver; SOCKS5H continues resolving through the proxy.",
-    aria2RpcTitle: "aria2 RPC",
-    aria2RpcEnabled: "Use aria2 RPC",
-    aria2RpcEnabledHint: "Control accelerated HTTP/HTTPS and FTP transfers through the local aria2 engine.",
-    aria2RpcAutoStart: "Start aria2 automatically when needed",
-    aria2RpcAutoStartHint: "Keeps one local aria2 backend for the current Apocalipse session.",
-    aria2RpcPort: "RPC port",
-    aria2RpcPortHint: "Automatic",
-    aria2RpcStatus: "RPC status",
-    aria2RpcConnected: "Connected",
-    aria2RpcDisconnected: "Disconnected",
-    aria2RpcTesting: "Testing…",
-    aria2RpcTest: "Test RPC connection",
-    aria2RpcRegenerateToken: "Regenerate RPC token",
-    aria2RpcTokenRegenerated: "RPC token regenerated",
+    dnsScopeHint: "Applied to the native HTTP engine. xtreme uses the system resolver; SOCKS5H continues resolving through the proxy.",
+    xtremeRpcTitle: "Nibiru Xtreme RPC",
+    xtremeRpcEnabled: "Use Nibiru Xtreme RPC",
+    xtremeRpcEnabledHint: "Control accelerated HTTP/HTTPS and FTP transfers through the local Nibiru Xtreme engine.",
+    xtremeRpcAutoStart: "Start Nibiru Xtreme automatically when needed",
+    xtremeRpcAutoStartHint: "Keeps one local Nibiru Xtreme backend for the current Apocalipse session.",
+    xtremeRpcPort: "RPC port",
+    xtremeRpcPortHint: "Automatic",
+    xtremeRpcStatus: "RPC status",
+    xtremeRpcConnected: "Connected",
+    xtremeRpcDisconnected: "Disconnected",
+    xtremeRpcTesting: "Testing…",
+    xtremeRpcTest: "Test RPC connection",
+    xtremeRpcRegenerateToken: "Regenerate RPC token",
+    xtremeRpcTokenRegenerated: "RPC token regenerated",
     maxTasks: "Maximum simultaneous tasks",
     connections: "Connections per download",
     automatic: "Automatic",
     taskConnections: "Threads for this download",
+    rememberSiteThreads: "Remember the thread count for this site",
+    rememberSiteThreadsHint: "Saved for the site of this link. Untick and start the download to forget it.",
+    rememberSiteThreadsFor: "Saved for {host}. Untick and start the download to forget it.",
+    rememberSiteThreadsOffer: "Tick to use this thread count for {host} next time.",
+    siteThreadsForced: "{host} only works with 1 thread, so this is fixed.",
     bandwidthPrompt: "Speed limit in MB/s (0 = unlimited)", verifying: "Verifying",
     taskConnectionsHint: "Only changes this task. Use 1 on sites that reject segmented downloads.",
     downloadBandwidthLimit: "This download limit", megabytesPerSecond: "MB/s", unlimited: "Unlimited", smartAutomation: "Smart automation", bandwidthAction: "Speed limit", bandwidthPanel: "Bandwidth", adaptiveEfficiency: "Adaptive efficiency", adaptiveEfficiencyHint: "Optimizes queue order and connection use for the current workload.", scheduler: "Download schedule", schedulerHint: "Automatically pauses outside the permitted local time window.", scheduleStart: "Start", scheduleEnd: "End", bandwidthPanelHint: "Set limits without changing the window size.", currentBandwidth: "Current usage", globalBandwidthLimit: "Global download limit",
@@ -241,7 +246,7 @@ const catalogs = {
     aiStatusProposed: "Aguardando aprovação", aiStatusTesting: "Em teste", aiStatusSaved: "Guardada", aiStatusConfirmed: "Confirmada", aiStatusRejected: "Não funcionou",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
-    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", aria2Backend: "aria2 (HTTP/HTTPS, FTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "mpv / reprodutor de mídia",
+    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", xtremeBackend: "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", mediaPlayer: "mpv / reprodutor de mídia",
     about: "Sobre", aboutDescription: "Sobre o criador.", aboutCreator: "Criador: Juliano - Brasil", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume", facebookRecordingFallback: "O extrator do Facebook falhou ao ler este Reel. Atualize o yt-dlp ou tente capturar o link novamente. Gravar está disponível como alternativa.",
     addDownload: "Adicionar download",
     downloadSpeed: "VELOCIDADE DE DOWNLOAD",
@@ -362,25 +367,30 @@ const catalogs = {
     dnsProvider: "Provedor",
     dnsCustom: "Personalizado",
     dnsServers: "Servidores DNS",
-    dnsScopeHint: "Aplicado ao motor HTTP nativo. O aria2 usa a resolução do sistema; o SOCKS5H continua resolvendo pelo proxy.",
-    aria2RpcTitle: "aria2 RPC",
-    aria2RpcEnabled: "Usar aria2 RPC",
-    aria2RpcEnabledHint: "Controla HTTP/HTTPS acelerado e FTP pelo motor aria2 local.",
-    aria2RpcAutoStart: "Iniciar o aria2 automaticamente quando necessário",
-    aria2RpcAutoStartHint: "Mantém um único backend aria2 local durante a sessão atual do Apocalipse.",
-    aria2RpcPort: "Porta RPC",
-    aria2RpcPortHint: "Automática",
-    aria2RpcStatus: "Status RPC",
-    aria2RpcConnected: "Conectado",
-    aria2RpcDisconnected: "Desconectado",
-    aria2RpcTesting: "Testando…",
-    aria2RpcTest: "Testar conexão RPC",
-    aria2RpcRegenerateToken: "Regenerar token RPC",
-    aria2RpcTokenRegenerated: "Token RPC regenerado",
+    dnsScopeHint: "Aplicado ao motor HTTP nativo. O xtreme usa a resolução do sistema; o SOCKS5H continua resolvendo pelo proxy.",
+    xtremeRpcTitle: "Nibiru Xtreme RPC",
+    xtremeRpcEnabled: "Usar Nibiru Xtreme RPC",
+    xtremeRpcEnabledHint: "Controla HTTP/HTTPS acelerado e FTP pelo motor Nibiru Xtreme local.",
+    xtremeRpcAutoStart: "Iniciar o Nibiru Xtreme automaticamente quando necessário",
+    xtremeRpcAutoStartHint: "Mantém um único backend Nibiru Xtreme local durante a sessão atual do Apocalipse.",
+    xtremeRpcPort: "Porta RPC",
+    xtremeRpcPortHint: "Automática",
+    xtremeRpcStatus: "Status RPC",
+    xtremeRpcConnected: "Conectado",
+    xtremeRpcDisconnected: "Desconectado",
+    xtremeRpcTesting: "Testando…",
+    xtremeRpcTest: "Testar conexão RPC",
+    xtremeRpcRegenerateToken: "Regenerar token RPC",
+    xtremeRpcTokenRegenerated: "Token RPC regenerado",
     maxTasks: "Máximo de tarefas simultâneas",
     connections: "Conexões por download",
     automatic: "Automático",
     taskConnections: "Threads para este download",
+    rememberSiteThreads: "Memorizar a quantidade de threads para este site",
+    rememberSiteThreadsHint: "Fica salva para o site deste link. Desmarque e inicie o download para esquecer.",
+    rememberSiteThreadsFor: "Salva para {host}. Desmarque e inicie o download para esquecer.",
+    rememberSiteThreadsOffer: "Marque para usar esta quantidade de threads em {host} da próxima vez.",
+    siteThreadsForced: "{host} só funciona com 1 thread, então este valor é fixo.",
     bandwidthPrompt: "Limite de velocidade em MB/s (0 = ilimitado)", verifying: "Verificando",
     taskConnectionsHint: "Altera somente esta tarefa. Use 1 em sites que não aceitam downloads segmentados.",
     downloadBandwidthLimit: "Limite deste download", megabytesPerSecond: "MB/s", unlimited: "Ilimitado", smartAutomation: "Automação inteligente", bandwidthAction: "Limitar velocidade", bandwidthPanel: "Banda", adaptiveEfficiency: "Eficiência adaptativa", adaptiveEfficiencyHint: "Otimiza a ordem da fila e o uso de conexões para a carga atual.", scheduler: "Agendamento de downloads", schedulerHint: "Pausa automaticamente fora do horário local permitido.", scheduleStart: "Início", scheduleEnd: "Fim", bandwidthPanelHint: "Defina limites sem alterar o tamanho da janela.", currentBandwidth: "Uso atual", globalBandwidthLimit: "Limite global de download",
@@ -452,7 +462,7 @@ const catalogs = {
     aiStatusProposed: "等待批准", aiStatusTesting: "测试中", aiStatusSaved: "已保存", aiStatusConfirmed: "已确认", aiStatusRejected: "未解决",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
-    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", aria2Backend: "aria2（HTTP/HTTPS、FTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "mpv / 媒体播放器",
+    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", xtremeBackend: "Nibiru Xtreme（HTTP/HTTPS、FTP/SFTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", mediaPlayer: "mpv / 媒体播放器",
     about: "关于", aboutDescription: "关于创作者。", aboutCreator: "创作者：Juliano - 巴西", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量", facebookRecordingFallback: "Facebook 提取器无法读取此 Reel。请更新 yt-dlp 或重新捕获链接。也可以选择录制。",
     addDownload: "添加下载",
     downloadSpeed: "下载速度",
@@ -573,25 +583,30 @@ const catalogs = {
     dnsProvider: "提供商",
     dnsCustom: "自定义",
     dnsServers: "DNS 服务器",
-    dnsScopeHint: "应用于原生 HTTP 引擎。aria2 使用系统解析器；SOCKS5H 仍通过代理解析。",
-    aria2RpcTitle: "aria2 RPC",
-    aria2RpcEnabled: "使用 aria2 RPC",
-    aria2RpcEnabledHint: "通过本地 aria2 引擎控制加速 HTTP/HTTPS 和 FTP 传输。",
-    aria2RpcAutoStart: "需要时自动启动 aria2",
-    aria2RpcAutoStartHint: "当前 Apocalipse 会话只保留一个本地 aria2 后端。",
-    aria2RpcPort: "RPC 端口",
-    aria2RpcPortHint: "自动",
-    aria2RpcStatus: "RPC 状态",
-    aria2RpcConnected: "已连接",
-    aria2RpcDisconnected: "未连接",
-    aria2RpcTesting: "测试中…",
-    aria2RpcTest: "测试 RPC 连接",
-    aria2RpcRegenerateToken: "重新生成 RPC 令牌",
-    aria2RpcTokenRegenerated: "RPC 令牌已重新生成",
+    dnsScopeHint: "应用于原生 HTTP 引擎。xtreme 使用系统解析器；SOCKS5H 仍通过代理解析。",
+    xtremeRpcTitle: "Nibiru Xtreme RPC",
+    xtremeRpcEnabled: "使用 Nibiru Xtreme RPC",
+    xtremeRpcEnabledHint: "通过本地 Nibiru Xtreme 引擎控制加速 HTTP/HTTPS 和 FTP 传输。",
+    xtremeRpcAutoStart: "需要时自动启动 Nibiru Xtreme",
+    xtremeRpcAutoStartHint: "当前 Apocalipse 会话只保留一个本地 Nibiru Xtreme 后端。",
+    xtremeRpcPort: "RPC 端口",
+    xtremeRpcPortHint: "自动",
+    xtremeRpcStatus: "RPC 状态",
+    xtremeRpcConnected: "已连接",
+    xtremeRpcDisconnected: "未连接",
+    xtremeRpcTesting: "测试中…",
+    xtremeRpcTest: "测试 RPC 连接",
+    xtremeRpcRegenerateToken: "重新生成 RPC 令牌",
+    xtremeRpcTokenRegenerated: "RPC 令牌已重新生成",
     maxTasks: "最大同时任务数",
     connections: "每个下载的连接数",
     automatic: "自动",
     taskConnections: "此下载的线程数",
+    rememberSiteThreads: "记住此网站的线程数",
+    rememberSiteThreadsHint: "保存给此链接所在的网站。取消勾选并开始下载即可忘记。",
+    rememberSiteThreadsFor: "已为 {host} 保存。取消勾选并开始下载即可忘记。",
+    rememberSiteThreadsOffer: "勾选后，下次从 {host} 下载将使用此线程数。",
+    siteThreadsForced: "{host} 只能使用 1 个线程，因此此值固定。",
     bandwidthPrompt: "限速（MB/秒，0 = 不限速）", verifying: "校验中",
     taskConnectionsHint: "仅更改此任务。对于不允许分段下载的网站，请使用 1。",
     downloadBandwidthLimit: "此下载的限制", megabytesPerSecond: "MB/秒", unlimited: "不限速", smartAutomation: "智能自动化", bandwidthAction: "限速", bandwidthPanel: "带宽", adaptiveEfficiency: "自适应效率", adaptiveEfficiencyHint: "根据当前负载优化队列顺序和连接使用。", scheduler: "下载计划", schedulerHint: "在允许的本地时间之外自动暂停。", scheduleStart: "开始", scheduleEnd: "结束", bandwidthPanelHint: "无需改变窗口大小即可设置限制。", currentBandwidth: "当前使用量", globalBandwidthLimit: "全局下载限制",
@@ -648,6 +663,7 @@ Object.assign(catalogs["zh-CN"], {"windowMinimize": "最小化", "windowMaximize
 Object.assign(catalogs.en, {darkMode: "Dark mode", darkModeHint: "Near-black surfaces with light text. Progress colours stay the same.", donate: "Donate", settingsGeneral: "General", settingsNetwork: "Network and proxy", settingsExtension: "Browser extension", settingsLink: "Apocalipse Link"});
 Object.assign(catalogs["pt-BR"], {darkMode: "Modo escuro", darkModeHint: "Superfícies quase pretas com texto claro. As cores do progresso continuam iguais.", donate: "Doação", settingsGeneral: "Geral", settingsNetwork: "Rede e proxy", settingsExtension: "Extensão do navegador", settingsLink: "Apocalipse Link"});
 Object.assign(catalogs["zh-CN"], {darkMode: "深色模式", darkModeHint: "近黑色背景与浅色文字，进度条颜色不变。", donate: "捐赠", settingsGeneral: "常规", settingsNetwork: "网络与代理", settingsExtension: "浏览器扩展", settingsLink: "Apocalipse Link"});
+for (const catalog of Object.values(catalogs)) catalog.ed2kKad = "Apocalipse ED2K/Kad";
 let locale = localStorage.getItem("apocalipse.language") || "en";
 let pendingDiagnosticTrace = null;
 let pendingReferer = null;
@@ -805,7 +821,7 @@ function updateSpeeds(tasks) {
     const changed = !previous || task.received !== previous.bytes;
     const changedAt = changed ? now : previous.changedAt;
     // When the backend has an engine-reported byte/s value, display that
-    // value directly. Do not apply a second UI EWMA: aria2, yt-dlp and
+    // value directly. Do not apply a second UI EWMA: xtreme, yt-dlp and
     // N_m3u8DL-RE already report their own live throughput. Byte-delta EWMA
     // remains only as a fallback for engines that cannot provide byte/s.
     const hasEngineSpeed = active
@@ -1030,6 +1046,7 @@ function renderDownloads(force = false) {
       textContent: "⇩",
     });
     const requestedThumbnail = task.thumbnail || youtubeThumbnailFallback(task.source);
+    row.classList.toggle("has-thumbnail", Boolean(requestedThumbnail));
     if (requestedThumbnail) {
       resolveThumbnailChain(task.thumbnail, youtubeThumbnailFallback(task.source)).then((resolved) => {
         if (!resolved || !row.isConnected) return;
@@ -1084,12 +1101,22 @@ function renderDownloads(force = false) {
     const webSeedStats = task.torrent_web_seeds ? ` · +${task.torrent_web_seeds} ${t("webMirror")}` : "";
     const torrentStats = task.torrent_seeders !== null && task.torrent_seeders !== undefined
       ? ` · S:${task.torrent_seeders} L:${task.torrent_leechers || 0}${task.torrent_eta ? ` · ETA ${task.torrent_eta}` : ""}${webSeedStats}` : "";
-    details.textContent =
-      speed && task.state === "downloading"
-        ? `${progressText} · ↓ ${formatBytes(speed)}/s · ↑ ${formatBytes(uploadSpeed)}/s${torrentStats}`
-        : `${progressText}${torrentStats}`;
+    details.textContent = `${progressText}${torrentStats}`;
+    details.title = details.textContent;
+    const rates = document.createElement("span");
+    rates.className = "task-transfer-rates";
+    if (task.state === "downloading") {
+      const down = document.createElement("span");
+      down.textContent = `↓ ${formatBytes(speed)}/s`;
+      rates.append(down);
+      if (isTorrent(task) || uploadSpeed > 0) {
+        const up = document.createElement("span");
+        up.textContent = `↑ ${formatBytes(uploadSpeed)}/s`;
+        rates.append(up);
+      }
+    }
     progress.append(bar);
-    info.append(progress, details);
+    info.append(progress, details, rates);
     const resumeCapability = document.createElement("strong");
     resumeCapability.className = "resume-capability";
     const resumeValue = task.resume_supported === true
@@ -1346,6 +1373,7 @@ function translate() {
   if (!taskConnectionsManuallyChanged) {
     document.querySelector("#task-connections-value").value = t("automatic");
   }
+  setSiteThreadsNote();
   const activeNavigation = document.querySelector(`nav [data-page="${activePage}"]`);
   if (activeNavigation) document.querySelector("main > header h1").textContent = activeNavigation.querySelector("b")?.textContent || t("downloads");
   document.querySelector("#page-description").textContent = t(descriptions[activePage] || "downloadsDescription");
@@ -1498,7 +1526,7 @@ async function showSettingsTab(tab) {
   document.querySelector(".settings-footer").hidden = !["general", "network", "extension"].includes(tab);
   try {
     if (tab === "tools") await refreshToolStatuses();
-    if (tab === "logs") await refreshLogEvents();
+
   } catch (error) { reportUiError("main", "settings-tab", error); }
 }
 function showPage(page) {
@@ -1514,6 +1542,14 @@ function showPage(page) {
   document.querySelector("#moq-capture-panel").hidden = page !== "recordings";
   document.querySelector("#settings-panel").hidden = page !== "settings";
   document.querySelector("#about-panel").hidden = page !== "about";
+  document.querySelector("#logs-page-panel").hidden = page !== "logs";
+  if (page === "logs") {
+    refreshLogEvents().catch(error => reportUiError("main", "open-logs", error));
+    invoke("get_log_editor").then(editor => {
+      document.querySelector("#log-editor").value = editor;
+      updateLogEditorControls();
+    }).catch(error => reportUiError("main", "log-editor", error));
+  }
   document.querySelector("#add").hidden = !list;
   document.querySelector("#torrent-store-controls").hidden = page !== "torrents";
   document.querySelector("#clear-torrent-store").hidden = page !== "torrents";
@@ -1599,6 +1635,9 @@ invoke("get_dark_mode").then((saved) => applyColorMode(Boolean(saved))).catch((e
 document.querySelector("#open-link-window").onclick = () => {
   invoke("open_link_window").catch((error) => window.alert(String(error)));
   invoke("record_ui_diagnostic", { level: "INFO", event: "link_window_requested", detail: "source=navigation" }).catch(() => {});
+};
+document.querySelector("#open-ed2k-window").onclick = () => {
+  invoke("open_ed2k_window").catch((error) => reportUiError("main", "ed2k-window-open", error));
 };
 function updateLogEditorControls() {
   const configured = Boolean(document.querySelector("#log-editor").value.trim());
@@ -1771,10 +1810,62 @@ async function showTorrentInspection(source, generation = analysisGeneration) {
   document.querySelector("#torrent-inspection").hidden = false;
   return true;
 }
+// What the "remember for this site" box was when the dialog loaded the site's saved value.
+let siteThreads = { host: "", remembered: false, forced: null };
+let siteThreadsRequest = 0;
+function setSiteThreadsNote() {
+  const note = document.querySelector("#remember-site-threads-note");
+  const box = document.querySelector("#remember-site-threads");
+  if (siteThreads.forced) note.textContent = t("siteThreadsForced").replace("{host}", siteThreads.host);
+  else if (siteThreads.host && box.checked) note.textContent = t("rememberSiteThreadsFor").replace("{host}", siteThreads.host);
+  else if (siteThreads.host) note.textContent = t("rememberSiteThreadsOffer").replace("{host}", siteThreads.host);
+  else note.textContent = t("rememberSiteThreadsHint");
+  box.disabled = Boolean(siteThreads.forced);
+  document.querySelector("#task-connections").disabled = Boolean(siteThreads.forced);
+}
+// Saves or forgets the site's thread count as the box says, when the download starts.
+async function applySiteThreadsChoice(source) {
+  if (siteThreads.forced || !/^(?:https?|ftp):\/\//i.test(source)) return;
+  const box = document.querySelector("#remember-site-threads");
+  const threads = Number(document.querySelector("#task-connections").value) || 8;
+  try {
+    if (box.checked) await invoke("set_site_threads", { url: source, threads });
+    else if (siteThreads.remembered) await invoke("set_site_threads", { url: source, threads: null });
+  } catch (error) {
+    reportUiError("main", "siteThreads", error);
+  }
+}
 function resetTaskConnections() {
   taskConnectionsManuallyChanged = false;
-  document.querySelector("#task-connections").value = "16";
+  siteThreadsRequest += 1;
+  siteThreads = { host: "", remembered: false, forced: null };
+  document.querySelector("#task-connections").value = "8";
   document.querySelector("#task-connections-value").value = t("automatic");
+  document.querySelector("#remember-site-threads").checked = false;
+  setSiteThreadsNote();
+}
+// Shows the count saved for this link's site (slider and box), or a fixed 1 for sites that need it.
+async function refreshSiteThreads() {
+  const source = document.querySelector("#url").value.trim();
+  const request = ++siteThreadsRequest;
+  if (!/^(?:https?|ftp):\/\//i.test(source)) return;
+  let found;
+  try {
+    found = await invoke("get_site_threads", { url: source });
+  } catch {
+    return;
+  }
+  if (request !== siteThreadsRequest || source !== document.querySelector("#url").value.trim()) return;
+  siteThreads = { host: found.host, remembered: Boolean(found.remembered), forced: found.forced || null };
+  const slider = document.querySelector("#task-connections");
+  const value = found.forced || found.threads;
+  if (value) {
+    slider.value = String(value);
+    document.querySelector("#task-connections-value").value = String(value);
+    taskConnectionsManuallyChanged = true;
+  }
+  document.querySelector("#remember-site-threads").checked = siteThreads.remembered;
+  setSiteThreadsNote();
 }
 document.querySelectorAll("#add").forEach(
   (button) =>
@@ -2010,17 +2101,17 @@ document.querySelector("#save-host-rule").onclick = async (event) => {
   }
 };
 
-function renderAria2RpcStatus(status = {}) {
-  const target = document.querySelector("#aria2-rpc-status");
+function renderXtremeRpcStatus(status = {}) {
+  const target = document.querySelector("#xtreme-rpc-status");
   if (!target) return;
   if (!status.connected) {
-    target.textContent = t("aria2RpcDisconnected");
+    target.textContent = t("xtremeRpcDisconnected");
     return;
   }
   const details = [
-    t("aria2RpcConnected"),
+    t("xtremeRpcConnected"),
     status.activePort ? `127.0.0.1:${status.activePort}` : "",
-    status.version ? `aria2 ${status.version}` : "",
+    status.version ? `nibiru-xtreme ${status.version}` : "",
   ].filter(Boolean);
   target.textContent = details.join(" · ");
 }
@@ -2037,7 +2128,7 @@ const openSettings = async (target = "general") => {
       invoke("get_log_editor"),
       invoke("get_proxy_setting"),
       invoke("get_dns_setting"),
-      invoke("get_aria2_rpc_settings"),
+      invoke("get_xtreme_rpc_settings"),
       invoke("get_associations"),
       invoke("list_host_rules"),
     ]);
@@ -2078,10 +2169,10 @@ const openSettings = async (target = "general") => {
       ? dnsValue
       : "custom";
     updateDnsControls();
-    document.querySelector("#aria2-rpc-enabled").checked = rpc.enabled;
-    document.querySelector("#aria2-rpc-auto-start").checked = rpc.autoStart;
-    document.querySelector("#aria2-rpc-port").value = rpc.configuredPort || "";
-    renderAria2RpcStatus(rpc);
+    document.querySelector("#xtreme-rpc-enabled").checked = rpc.enabled;
+    document.querySelector("#xtreme-rpc-auto-start").checked = rpc.autoStart;
+    document.querySelector("#xtreme-rpc-port").value = rpc.configuredPort || "";
+    renderXtremeRpcStatus(rpc);
     renderHostRules(hostRules);
     updateLogEditorControls();
     settingsDialog.showModal();
@@ -2092,39 +2183,39 @@ const openSettings = async (target = "general") => {
     targetElement?.focus?.();
     invoke("record_ui_diagnostic", { level: "INFO", event: "settings_section_opened", detail: `section=${target} found=${Boolean(targetElement)}` }).catch(() => {});
   } catch (error) {
-    reportUiError("main", "renderAria2RpcStatus", error);
+    reportUiError("main", "renderXtremeRpcStatus", error);
   }
 };
 document
   .querySelectorAll("[data-settings-close]")
   .forEach((button) => (button.onclick = () => settingsDialog.close()));
-document.querySelector("#aria2-rpc-test").onclick = async () => {
-  const status = document.querySelector("#aria2-rpc-status");
-  const button = document.querySelector("#aria2-rpc-test");
+document.querySelector("#xtreme-rpc-test").onclick = async () => {
+  const status = document.querySelector("#xtreme-rpc-status");
+  const button = document.querySelector("#xtreme-rpc-test");
   button.disabled = true;
-  status.textContent = t("aria2RpcTesting");
+  status.textContent = t("xtremeRpcTesting");
   try {
-    const rpcPortValue = Number(document.querySelector("#aria2-rpc-port").value) || 0;
-    await invoke("set_aria2_rpc_settings", {
-      enabled: document.querySelector("#aria2-rpc-enabled").checked,
-      autoStart: document.querySelector("#aria2-rpc-auto-start").checked,
+    const rpcPortValue = Number(document.querySelector("#xtreme-rpc-port").value) || 0;
+    await invoke("set_xtreme_rpc_settings", {
+      enabled: document.querySelector("#xtreme-rpc-enabled").checked,
+      autoStart: document.querySelector("#xtreme-rpc-auto-start").checked,
       port: rpcPortValue > 0 ? rpcPortValue : null,
     });
-    renderAria2RpcStatus(await invoke("test_aria2_rpc"));
+    renderXtremeRpcStatus(await invoke("test_xtreme_rpc"));
   } catch (error) {
-    status.textContent = `${t("aria2RpcDisconnected")} · ${error}`;
+    status.textContent = `${t("xtremeRpcDisconnected")} · ${error}`;
   } finally {
     button.disabled = false;
   }
 };
-document.querySelector("#aria2-rpc-regenerate-token").onclick = async () => {
-  const button = document.querySelector("#aria2-rpc-regenerate-token");
+document.querySelector("#xtreme-rpc-regenerate-token").onclick = async () => {
+  const button = document.querySelector("#xtreme-rpc-regenerate-token");
   button.disabled = true;
   try {
-    await invoke("regenerate_aria2_rpc_token");
-    document.querySelector("#aria2-rpc-status").textContent = t("aria2RpcTokenRegenerated");
+    await invoke("regenerate_xtreme_rpc_token");
+    document.querySelector("#xtreme-rpc-status").textContent = t("xtremeRpcTokenRegenerated");
   } catch (error) {
-    reportUiError("main", "aria2-rpc-regenerate-token", error);
+    reportUiError("main", "xtreme-rpc-regenerate-token", error);
     window.alert(String(error));
   } finally {
     button.disabled = false;
@@ -2177,10 +2268,10 @@ document.querySelector("#save-settings").onclick = async () => {
         .map((server) => server.trim())
         .filter(Boolean),
     });
-    const rpcPortValue = Number(document.querySelector("#aria2-rpc-port").value) || 0;
-    await invoke("set_aria2_rpc_settings", {
-      enabled: document.querySelector("#aria2-rpc-enabled").checked,
-      autoStart: document.querySelector("#aria2-rpc-auto-start").checked,
+    const rpcPortValue = Number(document.querySelector("#xtreme-rpc-port").value) || 0;
+    await invoke("set_xtreme_rpc_settings", {
+      enabled: document.querySelector("#xtreme-rpc-enabled").checked,
+      autoStart: document.querySelector("#xtreme-rpc-auto-start").checked,
       port: rpcPortValue > 0 ? rpcPortValue : null,
     });
     for (const input of document.querySelectorAll("[data-association]")) {
@@ -2225,7 +2316,7 @@ document.querySelector("#save-tools").onclick = async (event) => {
       ytDlp: document.querySelector("#tool-yt-dlp").value,
       qjs: document.querySelector("#tool-qjs").value,
       nM3u8dlRe: document.querySelector("#tool-n-m3u8dl-re").value,
-      aria2: document.querySelector("#tool-aria2").value,
+      xtreme: document.querySelector("#tool-xtreme").value,
       extractor: document.querySelector("#tool-extractor").value,
     });
     await invoke("set_media_player", { path: document.querySelector("#tool-player").value });
@@ -2264,7 +2355,14 @@ document.querySelectorAll("[data-tool-update]").forEach((button) => {
       await refreshToolStatuses();
       const updated = message.match(/^(.+) updated: (.+) → (.+)$/);
       const current = message.match(/^(.+) already current \((.+)\)$/);
-      if (updated) alert(`${updated[1]} · ${t("toolUpdated")}: ${updated[2]} → ${updated[3]}`);
+      const installed = message.match(/^(\S+) installed: (.+)$/s);
+      if (installed) {
+        // No engine was at the path: the latest one was downloaded into the tools folder.
+        // Fill the field so the only thing left is Save.
+        const field = document.querySelector(`#tool-${button.dataset.toolUpdate}`);
+        if (field) field.value = installed[2];
+        alert(`${installed[1]} · ${t("toolDownloaded")}: ${installed[2]}`);
+      } else if (updated) alert(`${updated[1]} · ${t("toolUpdated")}: ${updated[2]} → ${updated[3]}`);
       else if (current) alert(`${current[1]} · ${t("toolCurrent")} (${current[2]})`);
       else alert(message);
     } catch (error) {
@@ -2362,7 +2460,7 @@ document.querySelector("#max-tasks").oninput = updateLimitLabels;
 document.querySelector("#connections").oninput = updateLimitLabels;
 document.querySelector("#default-limits").onclick = () => {
   document.querySelector("#max-tasks").value = 3;
-  document.querySelector("#connections").value = 16;
+  document.querySelector("#connections").value = 8;
   updateLimitLabels();
 };
 document.querySelector("#copy-pairing").onclick = () => invoke("copy_bridge_token").catch(error => reportUiError("main", "copy-pairing", error));
@@ -2501,11 +2599,15 @@ document.querySelector("#hls-convert-audio").onchange = updateHlsAudioConversion
 document.querySelector("#hls-audio-format").onchange = updateHlsAudioConversion;
 document.querySelector("#task-connections").oninput = (event) => {
   taskConnectionsManuallyChanged = true;
+  setSiteThreadsNote();
   document.querySelector("#task-connections-value").value = event.target.value;
 };
+document.querySelector("#url").addEventListener("change", refreshSiteThreads);
+document.querySelector("#remember-site-threads").addEventListener("change", setSiteThreadsNote);
 document.querySelector("#analyze").onclick = async () => {
   const url = document.querySelector("#url");
   if (!url.reportValidity()) return;
+  refreshSiteThreads();
   const analyzeButton = document.querySelector("#analyze");
   if (analyzeButton.disabled) return;
   const generation = ++analysisGeneration;
@@ -2564,7 +2666,7 @@ document.querySelector("#analyze").onclick = async () => {
       const shown = await showTorrentInspection(url.value, generation);
       stopMetadataTimer();
       if (!shown || !current()) return;
-      box.textContent = `${plan.primary} · ${plan.reason}`;
+      box.textContent = "nibiru-xtreme";
     } else if (plan.reason === "hls_manifest") {
       const select = document.querySelector("#media-format");
       select.replaceChildren();
@@ -2602,7 +2704,7 @@ document.querySelector("#analyze").onclick = async () => {
     const message = String(error);
     box.textContent = /connections=0:seeders=0/.test(message)
       ? t("torrentMetadataNoPeers")
-      : /aria2_metadata_timeout:connections=[1-9][0-9]*/.test(message) ? t("torrentMetadataPeersStalled")
+      : /xtreme_metadata_timeout:connections=[1-9][0-9]*/.test(message) ? t("torrentMetadataPeersStalled")
       : /timed? ?out|timeout/i.test(message) ? t("torrentMetadataTimeout") : message;
   } finally {
     stopMetadataTimer();
@@ -2734,6 +2836,7 @@ document.querySelector("#enqueue").onclick = async () => {
       chosenFileName = await resolveFileConflict(document.querySelector("#destination").value, chosenFileName, pendingExpectedSize);
       if (chosenFileName === null) return;
     }
+    await applySiteThreadsChoice(url.value);
     const acceptedTask = pendingBrowserAssistedPath
       ? await invoke("import_browser_assisted_download", {
           localPath: pendingBrowserAssistedPath,
@@ -2751,8 +2854,8 @@ document.querySelector("#enqueue").onclick = async () => {
         mirrors: document.querySelector("#mirrors").value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
         priority: Number(document.querySelector("#priority").value),
         bandwidthLimit: Math.round((Number(document.querySelector("#download-bandwidth-limit").value) || 0) * 1024 * 1024) || null,
-        connectionsOverride: taskConnectionsManuallyChanged
-          ? Number(document.querySelector("#task-connections").value) || 16
+        connectionsOverride: taskConnectionsManuallyChanged || document.querySelector("#remember-site-threads").checked
+          ? Number(document.querySelector("#task-connections").value) || 8
           : null,
         autoExtract,
         context: {
@@ -2889,6 +2992,7 @@ async function consumeBrowserAssistedDownload() {
     pendingRequestContentType = null;
     resetTaskConnections();
     document.querySelector("#url").value = request.url;
+    refreshSiteThreads();
     const sourceName = String(request.fileName || "").split(/[\\/]/).pop() || "download.zip";
     document.querySelector("#file-name").value = sourceName;
     knownArchiveName = isArchiveFileName(sourceName) ? sourceName : "";
@@ -2935,6 +3039,7 @@ async function consumeBridgeDownload() {
     pendingRequestContentType = request.requestContentType || null;
     resetTaskConnections();
     document.querySelector("#url").value = request.url;
+    refreshSiteThreads();
     const requestedName = request.fileName || "";
     const genericMediaName = /^(?:watch|reel|video|audio|track|download)(?:\.[a-z0-9]{1,10})?$/i.test(requestedName.trim());
     const titleName = String(pendingTitle || "")

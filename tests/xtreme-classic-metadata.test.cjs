@@ -4,13 +4,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
-const aria2 = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/aria2.rs"), "utf8");
+const xtreme = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/xtreme.rs"), "utf8");
 const main = fs.readFileSync(path.join(root, "apps/desktop/src-tauri/src/main.rs"), "utf8");
-const start = aria2.indexOf("pub async fn save_magnet_metadata");
-const end = aria2.indexOf("pub async fn set_download_limit", start);
-const metadata = aria2.slice(start, end);
+const start = xtreme.indexOf("pub async fn save_magnet_metadata");
+const end = xtreme.indexOf("pub async fn set_download_limit", start);
+const metadata = xtreme.slice(start, end);
 
-test("classic aria2 saves Magnet metadata as a real torrent file", () => {
+test("classic xtreme saves Magnet metadata as a real torrent file", () => {
   assert.ok(start >= 0 && end > start);
   assert.match(metadata, /"bt-metadata-only"\.into\(\),\s*Value::String\("true"\.into\(\)\)/s);
   assert.match(metadata, /"bt-save-metadata"\.into\(\),\s*Value::String\("true"\.into\(\)\)/s);
@@ -18,7 +18,7 @@ test("classic aria2 saves Magnet metadata as a real torrent file", () => {
   assert.match(metadata, /\.torrent/);
   assert.match(metadata, /for _ in 0\.\.30/);
   assert.match(metadata, /Duration::from_millis\(100\)/);
-  assert.doesNotMatch(metadata, /pause-metadata|followedBy|aria2\.getFiles/);
+  assert.doesNotMatch(metadata, /pause-metadata|followedBy|xtreme\.getFiles/);
 });
 
 test("ADM stores and parses torrent files from data/torrents before payload", () => {
@@ -35,8 +35,8 @@ test("retired followedBy metadata preview code is absent", () => {
     "MetadataProbe",
     "pause-metadata",
     "followedBy",
-    "aria2-metadata-inspection",
+    "xtreme-metadata-inspection",
   ]) {
-    assert.equal(aria2.includes(retired) || main.includes(retired), false, retired);
+    assert.equal(xtreme.includes(retired) || main.includes(retired), false, retired);
   }
 });

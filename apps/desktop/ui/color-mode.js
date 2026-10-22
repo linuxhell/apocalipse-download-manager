@@ -2,9 +2,9 @@
 try { document.documentElement.dataset.mode = localStorage.getItem("apocalipse.mode") === "dark" ? "dark" : "light"; } catch { document.documentElement.dataset.mode = "light"; }
 // The main window is created invisible; show it once the first frame is painted
 // so there is no blank white flash (hidden autostart never shows it). The
-// Apocalipse Link window shares this file but must not trigger it.
+// Independent Link and ED2K/Kad windows must not trigger it.
 window.addEventListener("load", () => {
-  if (document.body.classList.contains("link-window")) return;
+  if (document.body.classList.contains("link-window") || document.body.classList.contains("ed2k-window")) return;
   requestAnimationFrame(() => requestAnimationFrame(() => {
     try { window.__TAURI__?.core?.invoke("main_window_ready").catch(() => {}); } catch {}
   }));

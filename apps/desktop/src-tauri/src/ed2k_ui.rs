@@ -1,0 +1,593 @@
+//! Native Nibiru ED2K integration. No aMule executable or daemon is used.
+pub mod downloads;
+pub mod events;
+pub mod network;
+pub mod preview;
+pub mod retry;
+pub mod shares;
+use nibiru_xtreme::ed2k::{
+    self,
+    metadata::{Node, Server},
+    ServerConnection,
+};
+use serde::{Deserialize, Serialize};
+use std::{
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
+};
+use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tokio::sync::{Mutex as AsyncMutex, RwLock};
+
+#[derive(Clone, Serialize, Deserialize)]
+struct Library {
+    servers: Vec<Server>,
+    nodes: Vec<Node>,
+}
+pub struct Ed2kState {
+    root: PathBuf,
+    downloads: downloads::Downloads,
+    shares: shares::Shares,
+    startup_error: Option<String>,
+    library: Mutex<Library>,
+    server: RwLock<Option<ServerConnection>>,
+    incoming: AsyncMutex<Option<ed2k::IncomingListener>>,
+    generation: AtomicU64,
+    net: network::Network,
+    events: events::Events,
+    user_hash: [u8; 16],
+}
+impl Ed2kState {
+    pub fn unavailable(root: PathBuf, error: String) -> Self {
+        Self {
+            downloads: downloads::Downloads::empty(root.join("downloads.json")),
+            shares: shares::Shares::new(&root),
+            root,
+            startup_error: Some(error),
+            library: Mutex::new(Library {
+                servers: Vec::new(),
+                nodes: Vec::new(),
+            }),
+            server: RwLock::new(None),
+            incoming: AsyncMutex::new(None),
+            generation: AtomicU64::new(0),
+            net: network::Network::new(&PathBuf::new()),
+            events: events::Events::default(),
+            user_hash: [0; 16],
+        }
+    }
+    async fn incoming_port(&self) -> Result<u16, String> {
+        let mut incoming = self.incoming.lock().await;
+        if incoming
+            .as_ref()
+            .is_none_or(|listener| !listener.status().running)
+        {
+            let listener = ed2k::IncomingListener::bind_with_uploads(
+                self.user_hash,
+                4662,
+                self.shares.registry.clone(),
+                self.shares.uploads.clone(),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            listener.set_obfuscation(self.net.prefs().obfuscation);
+            *incoming = Some(listener);
+        }
+        Ok(incoming
+            .as_ref()
+            .ok_or("ed2k_incoming_unavailable")?
+            .status()
+            .tcp_port)
+    }
+    fn ready(&self) -> Result<(), String> {
+        match &self.startup_error {
+            Some(error) => Err(error.clone()),
+            None => Ok(()),
+        }
+    }
+
+    pub fn new(root: PathBuf) -> Result<Self, String> {
+        std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+        let mut library: Library =
+            serde_json::from_str(include_str!("../../../../assets/ed2k-seeds.json"))
+                .map_err(|e| e.to_string())?;
+        if let Ok(bytes) = read_metadata(&root.join("server.met")) {
+            if let Ok(servers) = ed2k::metadata::parse_servers(&bytes) {
+                library.servers = servers;
+            }
+        }
+        if let Ok(bytes) = read_metadata(&root.join("nodes.dat")) {
+            if let Ok(nodes) = ed2k::metadata::parse_nodes(&bytes) {
+                library.nodes = nodes;
+            }
+        }
+        let root_for_network = root.clone();
+        let identity = root.join("identity.bin");
+        let user_hash = match std::fs::read(&identity) {
+            Ok(bytes) => bytes
+                .try_into()
+                .map_err(|_| "invalid_ed2k_identity".to_owned())?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let hash = *uuid::Uuid::new_v4().as_bytes();
+                save_file(&identity, &hash)?;
+                hash
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        Ok(Self {
+            downloads: downloads::Downloads::load(root.join("downloads.json"))?,
+            shares: shares::Shares::new(&root),
+            root,
+            startup_error: None,
+            library: Mutex::new(library),
+            server: RwLock::new(None),
+            incoming: AsyncMutex::new(None),
+            generation: AtomicU64::new(0),
+            net: network::Network::new(&root_for_network),
+            events: events::Events::default(),
+            user_hash,
+        })
+    }
+}
+fn read_metadata(path: &Path) -> Result<Vec<u8>, std::io::Error> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take((ed2k::metadata::MAX_METADATA + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+fn save_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let mut temp = tempfile::NamedTempFile::new_in(path.parent().ok_or("invalid_config_path")?)
+        .map_err(|e| e.to_string())?;
+    temp.write_all(bytes)
+        .and_then(|_| temp.as_file().sync_all())
+        .map_err(|e| e.to_string())?;
+    temp.persist(path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+#[tauri::command]
+pub async fn open_ed2k_window(app: tauri::AppHandle) -> Result<(), String> {
+    let theme = if super::get_dark_mode(app.state())? {
+        tauri::Theme::Dark
+    } else {
+        tauri::Theme::Light
+    };
+    if let Some(window) = app.get_webview_window("apocalipse-ed2k-kad") {
+        window.set_theme(Some(theme)).map_err(|e| e.to_string())?;
+        window.show().map_err(|e| e.to_string())?;
+        let _ = window.unminimize();
+        window.maximize().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(
+        &app,
+        "apocalipse-ed2k-kad",
+        WebviewUrl::App("ed2k.html".into()),
+    )
+    .title("Apocalipse ED2K/Kad")
+    .theme(Some(theme))
+    .inner_size(1280.0, 820.0)
+    .min_inner_size(960.0, 640.0)
+    .resizable(true)
+    .maximized(true)
+    .decorations(true)
+    .build()
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+#[tauri::command]
+pub async fn ed2k_overview(
+    app: tauri::AppHandle,
+    state: State<'_, Ed2kState>,
+) -> Result<serde_json::Value, String> {
+    state.ready()?;
+    shares::ensure_loaded(&app, &state);
+    let incoming = state
+        .incoming
+        .lock()
+        .await
+        .as_ref()
+        .map(|listener| listener.status());
+    let server = state.server.read().await;
+    let active = server.as_ref().filter(|c| c.is_connected());
+    let network = network::overview(&state).await;
+    let library = state.library.lock().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "servers":library.servers,"node_count":library.nodes.len(),"downloads":state.downloads.list()?,"incoming":incoming,
+        "server":active.map(|c|&c.server),"client_id":active.map(|c|c.client_id),"low_id":active.is_some_and(|c|c.is_low_id()),
+        "network":network,"server_list_url":ed2k::SERVER_LIST_URL,"node_list_url":ed2k::NODE_LIST_URL,
+        "capabilities":{"server_login":true,"server_search":true,"server_sources":true,"kad_session":true,"kad_routing":true,"kad_keyword_search":false,"upnp":true,"obfuscation":true,"peer_download":true,"peer_download_scope":"verified_parts_direct_and_server_callback","server_callback":true,"sharing":true,"messages":false},
+        "shares":shares::overview(&state)
+    }))
+}
+fn install(state: &Ed2kState, kind: &str, bytes: &[u8]) -> Result<usize, String> {
+    match kind {
+        "servers" => {
+            let servers = ed2k::metadata::parse_servers(bytes).map_err(|e| e.to_string())?;
+            if servers.is_empty() {
+                return Err("empty_server_list".into());
+            }
+            let count = servers.len();
+            save_file(&state.root.join("server.met"), bytes)?;
+            state.library.lock().map_err(|e| e.to_string())?.servers = servers;
+            Ok(count)
+        }
+        "nodes" => {
+            let nodes = ed2k::metadata::parse_nodes(bytes).map_err(|e| e.to_string())?;
+            if nodes.is_empty() {
+                return Err("empty_node_list".into());
+            }
+            let count = nodes.len();
+            let mut library = state.library.lock().map_err(|e| e.to_string())?;
+            save_file(&state.root.join("nodes.dat"), bytes)?;
+            library.nodes = nodes;
+            Ok(count)
+        }
+        _ => Err("invalid_list_kind".into()),
+    }
+}
+#[tauri::command]
+pub async fn ed2k_update_list(
+    state: State<'_, Ed2kState>,
+    kind: String,
+    url: String,
+) -> Result<usize, String> {
+    state.ready()?;
+    if kind != "servers" && kind != "nodes" {
+        return Err("invalid_list_kind".into());
+    }
+    let bytes = ed2k::fetch_metadata(&url)
+        .await
+        .map_err(|e| e.to_string())?;
+    install(&state, &kind, &bytes)
+}
+#[tauri::command]
+pub async fn ed2k_import_list(
+    state: State<'_, Ed2kState>,
+    kind: String,
+) -> Result<Option<usize>, String> {
+    state.ready()?;
+    let extension = match kind.as_str() {
+        "servers" => "met",
+        "nodes" => "dat",
+        _ => return Err("invalid_list_kind".into()),
+    };
+    let bytes = tauri::async_runtime::spawn_blocking(move || -> Result<Option<Vec<u8>>, String> {
+        use std::io::Read;
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter(extension, &[extension])
+            .pick_file()
+        else {
+            return Ok(None);
+        };
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)
+            .map_err(|e| e.to_string())?
+            .take((ed2k::metadata::MAX_METADATA + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        Ok(Some(bytes))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    bytes
+        .map(|bytes| install(&state, &kind, &bytes))
+        .transpose()
+}
+#[tauri::command]
+pub async fn ed2k_connect(
+    app: tauri::AppHandle,
+    state: State<'_, Ed2kState>,
+    server: Option<Server>,
+) -> Result<(), String> {
+    state.ready()?;
+    let revision = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
+    if let Some(connection) = state.server.write().await.take() {
+        connection.disconnect();
+    }
+    let candidates = match server {
+        Some(s) => vec![s],
+        None => state
+            .library
+            .lock()
+            .map_err(|e| e.to_string())?
+            .servers
+            .iter()
+            .take(4)
+            .cloned()
+            .collect(),
+    };
+    state.events.info(
+        "server",
+        "connecting",
+        serde_json::json!({
+            "candidates": candidates.iter().map(|s| format!("{}:{}", s.host, s.port)).collect::<Vec<_>>(),
+        }),
+    );
+    // The server tests our TCP port during login: have the router forward it first.
+    network::forward_before_login(&state).await;
+    if state.generation.load(Ordering::Acquire) != revision {
+        return Err("connection_cancelled".into());
+    }
+    let mut last = "empty_server_list".to_owned();
+    for server in candidates {
+        if state.generation.load(Ordering::Acquire) != revision {
+            return Err("connection_cancelled".into());
+        }
+        let server_address = (server.host.clone(), server.port);
+        match ServerConnection::connect_with(
+            server,
+            state.user_hash,
+            "Apocalipse Nibiru",
+            state.incoming_port().await?,
+            state.net.prefs().obfuscation,
+        )
+        .await
+        {
+            Ok(connection) => {
+                let mut active = state.server.write().await;
+                if state.generation.load(Ordering::Acquire) != revision {
+                    connection.disconnect();
+                    return Err("connection_cancelled".into());
+                }
+                if let Some(listener) = state.incoming.lock().await.as_ref() {
+                    listener.set_client_id(connection.client_id);
+                }
+                let (name, client_id, low_id) = (
+                    connection.server.name.clone(),
+                    connection.client_id,
+                    connection.is_low_id(),
+                );
+                let address = format!("{}:{}", connection.server.host, connection.server.port);
+                *active = Some(connection);
+                drop(active);
+                let upnp = state.net.upnp.status();
+                state.events.push(
+                    if low_id { "warn" } else { "info" },
+                    "server",
+                    if low_id {
+                        "connected_low_id"
+                    } else {
+                        "connected_high_id"
+                    },
+                    serde_json::json!({
+                        "name": name, "address": address, "client_id": client_id,
+                        "upnp": upnp.state, "upnp_error": upnp.error,
+                        "tcp": state.incoming.lock().await.as_ref().map(|l| l.status().tcp_port),
+                    }),
+                );
+                network::spawn_sync_upnp(app.clone());
+                state.downloads.wake();
+                publish_shares(&state).await;
+                return Ok(());
+            }
+            Err(error) => {
+                last = error.to_string();
+                state.events.warn(
+                    "server",
+                    "server_failed",
+                    serde_json::json!({
+                        "address": format!("{}:{}", server_address.0, server_address.1),
+                        "error": last,
+                    }),
+                );
+            }
+        }
+    }
+    state.events.error(
+        "server",
+        "all_servers_failed",
+        serde_json::json!({"error": last}),
+    );
+    Err(last)
+}
+/// Offers the shared files to the connected server (ED2K has no withdraw packet: removed files
+/// disappear from the server's index when the connection is renewed).
+pub async fn publish_shares(state: &Ed2kState) {
+    let connection = state
+        .server
+        .read()
+        .await
+        .as_ref()
+        .filter(|connection| connection.is_connected())
+        .cloned();
+    let Some(connection) = connection else {
+        return;
+    };
+    let files = state.shares.registry.offered();
+    if files.is_empty() {
+        shares::set_published(state, 0, None);
+        return;
+    }
+    match connection.offer_files(&files).await {
+        Ok(count) => {
+            state
+                .events
+                .info("share", "published", serde_json::json!({"count": count}));
+            shares::set_published(state, count, None)
+        }
+        Err(error) => {
+            state.events.warn(
+                "share",
+                "publish_failed",
+                serde_json::json!({"error": error.to_string()}),
+            );
+            shares::set_published(state, 0, Some(error.to_string()))
+        }
+    }
+}
+#[tauri::command]
+pub async fn ed2k_disconnect(
+    app: tauri::AppHandle,
+    state: State<'_, Ed2kState>,
+) -> Result<(), String> {
+    state.ready()?;
+    state.generation.fetch_add(1, Ordering::AcqRel);
+    if let Some(connection) = state.server.write().await.take() {
+        connection.disconnect();
+        state.events.info(
+            "server",
+            "disconnected",
+            serde_json::json!({"name": connection.server.name}),
+        );
+    }
+    if let Some(listener) = state.incoming.lock().await.as_ref() {
+        listener.set_client_id(0);
+    }
+    network::spawn_sync_upnp(app);
+    Ok(())
+}
+#[tauri::command]
+pub async fn ed2k_search(
+    state: State<'_, Ed2kState>,
+    query: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    state.ready()?;
+    let connection = state
+        .server
+        .read()
+        .await
+        .as_ref()
+        .cloned()
+        .ok_or("ed2k_not_connected")?;
+    let found = match connection.search(&query).await {
+        Ok(found) => found,
+        Err(error) => {
+            state.events.warn(
+                "server",
+                "search_failed",
+                serde_json::json!({"query": query, "error": error.to_string()}),
+            );
+            return Err(error.to_string());
+        }
+    };
+    // Servers list what other clients offered; a result that is one of our own shared files is
+    // marked, and the log says when files we share match the words but did not come back.
+    let offered = state.shares.registry.offered();
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    let own_matching = offered
+        .iter()
+        .filter(|file| {
+            let name = file.name.to_lowercase();
+            !words.is_empty() && words.iter().all(|word| name.contains(word.as_str()))
+        })
+        .count();
+    let own_hashes: std::collections::HashSet<String> = offered
+        .iter()
+        .map(|file| file.hash.iter().map(|byte| format!("{byte:02x}")).collect())
+        .collect();
+    let results: Vec<serde_json::Value> = found
+        .iter()
+        .map(|result| {
+            let mut value = serde_json::to_value(result).unwrap_or_default();
+            value["shared"] = own_hashes.contains(&result.hash.to_lowercase()).into();
+            value
+        })
+        .collect();
+    let own_returned = results
+        .iter()
+        .filter(|value| value["shared"].as_bool() == Some(true))
+        .count();
+    let fields = serde_json::json!({
+        "query": query, "results": results.len(), "own_returned": own_returned,
+        "own_matching": own_matching, "own_total": offered.len(),
+        "server": connection.server.name,
+    });
+    state.events.info("server", "search", fields.clone());
+    if own_matching > 0 && own_returned == 0 {
+        state.events.warn("server", "search_own_missing", fields);
+    }
+    Ok(results)
+}
+#[tauri::command]
+pub async fn ed2k_find_sources(
+    state: State<'_, Ed2kState>,
+    hash: String,
+    size: Option<u64>,
+) -> Result<Vec<ed2k::FileSource>, String> {
+    state.ready()?;
+    let server = state.server.read().await.as_ref().cloned();
+    let kad = state.net.kad_session().await;
+    if server.is_none() && kad.is_none() {
+        return Err("ed2k_not_connected".into());
+    }
+    let mut found = match &server {
+        Some(connection) => connection.sources(&hash).await.map_err(|e| e.to_string())?,
+        None => Vec::new(),
+    };
+    if let (Some(kad), Some(id)) = (kad, shares::parse_hash(&hash)) {
+        if let Ok(Ok(list)) = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            kad.sources(id, size.unwrap_or(0)),
+        )
+        .await
+        {
+            for source in list {
+                if !found
+                    .iter()
+                    .any(|known| known.host == source.host && known.port == source.port)
+                {
+                    found.push(source);
+                }
+            }
+        }
+    }
+    Ok(found)
+}
+#[tauri::command]
+pub fn ed2k_copy_link(app: tauri::AppHandle, link: String) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    if !link.starts_with("ed2k://|file|") || link.len() > 4096 || link.chars().any(char::is_control)
+    {
+        return Err("invalid_ed2k_link".into());
+    }
+    app.clipboard().write_text(link).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn the_port_is_forwarded_before_connecting_to_a_server() {
+        // The server tests our TCP port while we log in; forwarding it afterwards gave a Low ID
+        // until the user disconnected and reconnected.
+        let source = include_str!("ed2k_ui.rs");
+        let connect = &source[source.find("pub async fn ed2k_connect").unwrap()..];
+        let forward = connect.find("network::forward_before_login").unwrap();
+        let login = connect.find("ServerConnection::connect_with").unwrap();
+        assert!(forward < login);
+    }
+    #[test]
+    fn initial_lists_and_identity_are_available_without_fetching() {
+        let root = tempfile::tempdir().unwrap();
+        let first = Ed2kState::new(root.path().to_owned()).unwrap();
+        assert!(!first.library.lock().unwrap().servers.is_empty());
+        assert!(!first.library.lock().unwrap().nodes.is_empty());
+        let second = Ed2kState::new(root.path().to_owned()).unwrap();
+        assert_eq!(first.user_hash, second.user_hash);
+    }
+    #[test]
+    fn invalid_metadata_preserves_the_last_good_list() {
+        let root = tempfile::tempdir().unwrap();
+        let state = Ed2kState::new(root.path().to_owned()).unwrap();
+        let mut met = vec![0xe0];
+        met.extend(1u32.to_le_bytes());
+        met.extend([192, 0, 2, 1]);
+        met.extend(4661u16.to_le_bytes());
+        met.extend(0u32.to_le_bytes());
+        assert_eq!(install(&state, "servers", &met).unwrap(), 1);
+        assert!(install(&state, "servers", b"not server.met").is_err());
+        assert_eq!(std::fs::read(root.path().join("server.met")).unwrap(), met);
+        assert_eq!(state.library.lock().unwrap().servers.len(), 1);
+    }
+    #[test]
+    fn feature_startup_failure_does_not_require_the_main_app_to_exit() {
+        let state = Ed2kState::unavailable(PathBuf::new(), "invalid_ed2k_identity".into());
+        assert_eq!(state.ready().unwrap_err(), "invalid_ed2k_identity");
+    }
+}

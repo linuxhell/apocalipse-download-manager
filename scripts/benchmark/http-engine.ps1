@@ -4,7 +4,7 @@ param(
   [int[]]$Connections = @(1, 2, 4, 8, 16),
   [int]$Repeats = 3,
   [string]$Hydra = "hydra",
-  [string]$Aria2 = "aria2c"
+  [string]$Xtreme = "nibiru-xtreme"
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,7 +23,7 @@ foreach ($n in $Connections) {
   foreach ($repeat in 1..$Repeats) {
     $runs = @(
       @{ Name = "apocalipse"; Command = $apocalipse; Args = @("benchmark", $Url, (Join-Path $OutDir "apocalipse-$n-$repeat.bin"), "$n") },
-      @{ Name = "aria2c"; Command = $Aria2; Args = @("-q", "-x$n", "-s$n", "--file-allocation=none", "--allow-overwrite=true", "-d", $OutDir, "-o", "aria2c-$n-$repeat.bin", $Url) },
+      @{ Name = "nibiru-xtreme"; Command = $Xtreme; Args = @("download", $Url, "--out", (Join-Path $OutDir "xtreme-$n-$repeat.bin")) },
       @{ Name = "hydra"; Command = $Hydra; Args = @("-q", "-x", "$n", "-O", (Join-Path $OutDir "hydra-$n-$repeat.bin"), $Url) }
     )
 

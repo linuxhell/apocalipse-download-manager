@@ -1,13 +1,13 @@
 # HTTP engine benchmark
 
-This benchmark compares **Apocalipse Native HTTP**, **aria2c**, and **Hydra** with the same requested connection counts.
+This benchmark compares **Apocalipse Native HTTP**, **nibiru-xtreme**, and **Hydra** with the same requested connection counts.
 
 ## Windows
 
 Prerequisites:
 
 - Rust toolchain / `cargo`
-- `aria2c` available on PATH (or pass `-Aria2`)
+- `nibiru-xtreme` available on PATH (or pass `-Xtreme`)
 - Hydra available on PATH (or pass `-Hydra`)
 
 Example:
@@ -31,4 +31,4 @@ The script writes raw files plus `http-engine-benchmark.csv` under `benchmark-ou
 6. Verify hashes separately when benchmarking a public origin.
 7. Compare both throughput and completion time; do not infer universal superiority from one origin.
 
-The Apocalipse CLI benchmark command enables the native engine's adaptive admission. The requested connection count is a ceiling: it starts conservatively and admits additional workers only when measured marginal goodput is useful. Torrent and magnet downloads are not part of this benchmark and continue to use aria2c.
+The Apocalipse CLI benchmark command enables the native engine's adaptive admission. The requested connection count is a ceiling: it starts conservatively and admits additional workers only when measured marginal goodput is useful. Torrent and magnet downloads are not part of this benchmark and continue to use nibiru-xtreme.
