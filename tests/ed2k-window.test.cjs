@@ -32,6 +32,7 @@ async function windowFixture({language='pt-BR',serverName='Fixture',connected=fa
     throw Error('Unexpected selector '+selector);
   }};
   const overview={servers:[{host:'192.0.2.1',port:4661,name:serverName,description:'Test fixture'}],node_count:20,downloads:[],server:connected?{name:serverName}:null,kad_bootstrap:null,
+    network:{obfuscation:'prefer',upnp_enabled:true,kad:null,upnp:{state:'idle',gateway:null,external_ip:null,mappings:[],error:null}},
     shares:{folders:[{path:'/media/videos',recursive:true}],files:[{path:'/media/videos/a.mkv',name:'<b>a.mkv</b>',size:2048,hash:'b'.repeat(32),link:'ed2k://|file|a.mkv|2048|'+'b'.repeat(32)+'|/',priority:2,explicit:false,requests:3,accepted:1,uploaded:1024}],upload_kib:0,slots:3,uploads:{active:[{name:'peer',address:'203.0.113.9',file:'b'.repeat(32),uploaded:512,rank:null,seconds:4}],waiting:[{name:'late',address:'203.0.113.10',file:'b'.repeat(32),uploaded:0,rank:2,seconds:9}],total_uploaded:1024,files:[]},work:null,published:{files:1,error:null},error:null}};
   const calls=[]; let languageListener, modeListener; const listeners={};
   const window={addEventListener:(name,fn)=>{listeners[name]=fn;},__TAURI__:{core:{invoke:async(command,args)=>{
@@ -47,6 +48,9 @@ async function windowFixture({language='pt-BR',serverName='Fixture',connected=fa
       case 'ed2k_add_download':overview.downloads.push({id:'test-id',file:{name:'fixture.bin',size:1024},directory:'C:/Downloads',status:'paused',verified:0,peer:null,queue_rank:null});return 'test-id';
       case 'ed2k_download_action':if(args.action==='resume')overview.downloads[0].status='queued';else if(args.action==='pause')overview.downloads[0].status='paused';else overview.downloads=[];return null;
       case 'ed2k_import_list':return null;
+      case 'ed2k_kad_connect':overview.network.kad={running:true,tcp_port:4662,udp_port:4672,contacts:12,verified_contacts:5};overview.network.upnp={state:'mapped',gateway:'192.168.0.1',external_ip:'203.0.113.7',mappings:[],error:null};return null;
+      case 'ed2k_kad_disconnect':overview.network.kad=null;return null;
+      case 'ed2k_set_prefs':overview.network.obfuscation=args.obfuscation;overview.network.upnp_enabled=args.upnp;return null;
       case 'ed2k_share_add_folder':return '/media/new';
       case 'ed2k_share_add_files':return 2;
       case 'ed2k_share_remove_folder':case 'ed2k_share_remove_file':case 'ed2k_share_set_priority':case 'ed2k_share_rescan':case 'ed2k_share_set_limits':return null;
@@ -90,12 +94,36 @@ test('ED2K server and result names are plain text and search uses the native com
   assert.equal(f.ids.get('ed2k-results').children[0].children[0].textContent,'<script>untrusted</script>.txt');
   assert.equal(f.calls.find(c=>c.command==='ed2k_search').args.query,'example');
 });
-test('Kad bootstrap is identified as a probe rather than a connected routing session',async()=>{
-  const f=await windowFixture();
-  assert.match(f.context.testCatalogs.en.kadHint,/does not yet keep a Kad session/);
-  assert.match(f.context.testCatalogs['pt-BR'].scopeHint,/roteamento Kad contínuo ainda está em desenvolvimento/);
-  f.ids.get('ed2k-bootstrap').onclick();await new Promise(resolve=>setImmediate(resolve));
-  assert.ok(f.calls.some(c=>c.command==='ed2k_bootstrap'));
+test('Kad runs as a real session that the user can start and stop',async()=>{
+  const f=await windowFixture({language:'pt-BR'});
+  assert.match(f.context.testCatalogs.en.kadHint,/real session/);
+  assert.match(f.context.testCatalogs['pt-BR'].scopeHint,/Créditos, AICH, mensagens/);
+  assert.equal(f.ids.get('ed2k-kad-toggle').textContent,'Conectar Kad');
+  assert.equal(f.ids.get('kad-status').textContent,'Kad: inativo');
+  f.ids.get('ed2k-kad-toggle').onclick();await new Promise(resolve=>setImmediate(resolve));
+  assert.ok(f.calls.some(c=>c.command==='ed2k_kad_connect'));
+  assert.equal(f.ids.get('ed2k-kad-toggle').textContent,'Desconectar Kad');
+  assert.equal(f.ids.get('kad-status').textContent,'Kad: conectado · 5/12 contatos');
+  assert.match(f.ids.get('kad-summary').textContent,/UDP 4672: 12 contatos, 5 verificados/);
+  assert.match(f.ids.get('upnp-status').textContent,/portas encaminhadas · IP externo 203\.0\.113\.7/);
+  f.ids.get('ed2k-kad-toggle').onclick();await new Promise(resolve=>setImmediate(resolve));
+  assert.ok(f.calls.some(c=>c.command==='ed2k_kad_disconnect'));
+  assert.equal(f.ids.get('kad-status').textContent,'Kad: inativo');
+});
+
+test('obfuscation and UPnP preferences are saved and shown in every language',async()=>{
+  const f=await windowFixture({language:'en'});
+  const args=command=>JSON.parse(JSON.stringify(f.calls.find(c=>c.command===command).args));
+  assert.equal(f.ids.get('ed2k-obfuscation').value,'prefer');
+  assert.equal(f.ids.get('ed2k-upnp').checked,true);
+  f.ids.get('ed2k-obfuscation').value='require';
+  f.ids.get('ed2k-obfuscation').onchange();await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(args('ed2k_set_prefs'),{obfuscation:'require',upnp:true});
+  f.ids.get('ed2k-upnp').checked=false;
+  f.ids.get('ed2k-upnp').onchange();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.ids.get('upnp-status').textContent,'UPnP: off');
+  f.language('zh-CN');assert.equal(f.ids.get('upnp-status').textContent,'UPnP：已关闭');
+  f.language('pt-BR');assert.equal(f.ids.get('upnp-status').textContent,'UPnP: desligado');
 });
 
 test('opening an independent ED2K window does not show or resize the main window',()=>{

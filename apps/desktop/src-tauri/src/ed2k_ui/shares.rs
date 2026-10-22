@@ -78,7 +78,7 @@ fn upload_config(config: &ShareConfig) -> UploadConfig {
     }
 }
 
-fn parse_hash(hex: &str) -> Option<[u8; 16]> {
+pub(super) fn parse_hash(hex: &str) -> Option<[u8; 16]> {
     if hex.len() != 32 || !hex.is_ascii() {
         return None;
     }

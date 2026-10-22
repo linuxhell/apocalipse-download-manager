@@ -1,10 +1,11 @@
 //! Native Nibiru ED2K integration. No aMule executable or daemon is used.
 pub mod downloads;
+pub mod network;
 pub mod shares;
 use nibiru_xtreme::ed2k::{
     self,
     metadata::{Node, Server},
-    BootstrapResult, ServerConnection,
+    ServerConnection,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -31,7 +32,7 @@ pub struct Ed2kState {
     server: RwLock<Option<ServerConnection>>,
     incoming: AsyncMutex<Option<ed2k::IncomingListener>>,
     generation: AtomicU64,
-    kad: RwLock<Option<BootstrapResult>>,
+    net: network::Network,
     user_hash: [u8; 16],
 }
 impl Ed2kState {
@@ -48,7 +49,7 @@ impl Ed2kState {
             server: RwLock::new(None),
             incoming: AsyncMutex::new(None),
             generation: AtomicU64::new(0),
-            kad: RwLock::new(None),
+            net: network::Network::new(&PathBuf::new()),
             user_hash: [0; 16],
         }
     }
@@ -58,16 +59,16 @@ impl Ed2kState {
             .as_ref()
             .is_none_or(|listener| !listener.status().running)
         {
-            *incoming = Some(
-                ed2k::IncomingListener::bind_with_uploads(
-                    self.user_hash,
-                    4662,
-                    self.shares.registry.clone(),
-                    self.shares.uploads.clone(),
-                )
-                .await
-                .map_err(|e| e.to_string())?,
-            );
+            let listener = ed2k::IncomingListener::bind_with_uploads(
+                self.user_hash,
+                4662,
+                self.shares.registry.clone(),
+                self.shares.uploads.clone(),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            listener.set_obfuscation(self.net.prefs().obfuscation);
+            *incoming = Some(listener);
         }
         Ok(incoming
             .as_ref()
@@ -97,6 +98,7 @@ impl Ed2kState {
                 library.nodes = nodes;
             }
         }
+        let root_for_network = root.clone();
         let identity = root.join("identity.bin");
         let user_hash = match std::fs::read(&identity) {
             Ok(bytes) => bytes
@@ -118,7 +120,7 @@ impl Ed2kState {
             server: RwLock::new(None),
             incoming: AsyncMutex::new(None),
             generation: AtomicU64::new(0),
-            kad: RwLock::new(None),
+            net: network::Network::new(&root_for_network),
             user_hash,
         })
     }
@@ -187,13 +189,13 @@ pub async fn ed2k_overview(
         .map(|listener| listener.status());
     let server = state.server.read().await;
     let active = server.as_ref().filter(|c| c.is_connected());
-    let kad = state.kad.read().await;
+    let network = network::overview(&state).await;
     let library = state.library.lock().map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
         "servers":library.servers,"node_count":library.nodes.len(),"downloads":state.downloads.list()?,"incoming":incoming,
         "server":active.map(|c|&c.server),"client_id":active.map(|c|c.client_id),"low_id":active.is_some_and(|c|c.is_low_id()),
-        "kad_bootstrap":*kad,"server_list_url":ed2k::SERVER_LIST_URL,"node_list_url":ed2k::NODE_LIST_URL,
-        "capabilities":{"server_login":true,"server_search":true,"server_sources":true,"kad_bootstrap":true,"kad_routing":false,"peer_download":true,"peer_download_scope":"verified_parts_direct_and_server_callback","server_callback":true,"sharing":true,"messages":false},
+        "network":network,"server_list_url":ed2k::SERVER_LIST_URL,"node_list_url":ed2k::NODE_LIST_URL,
+        "capabilities":{"server_login":true,"server_search":true,"server_sources":true,"kad_session":true,"kad_routing":true,"kad_keyword_search":false,"upnp":true,"obfuscation":true,"peer_download":true,"peer_download_scope":"verified_parts_direct_and_server_callback","server_callback":true,"sharing":true,"messages":false},
         "shares":shares::overview(&state)
     }))
 }
@@ -273,6 +275,7 @@ pub async fn ed2k_import_list(
 }
 #[tauri::command]
 pub async fn ed2k_connect(
+    app: tauri::AppHandle,
     state: State<'_, Ed2kState>,
     server: Option<Server>,
 ) -> Result<(), String> {
@@ -298,11 +301,12 @@ pub async fn ed2k_connect(
         if state.generation.load(Ordering::Acquire) != revision {
             return Err("connection_cancelled".into());
         }
-        match ServerConnection::connect(
+        match ServerConnection::connect_with(
             server,
             state.user_hash,
             "Apocalipse Nibiru",
             state.incoming_port().await?,
+            state.net.prefs().obfuscation,
         )
         .await
         {
@@ -317,6 +321,7 @@ pub async fn ed2k_connect(
                 }
                 *active = Some(connection);
                 drop(active);
+                network::spawn_sync_upnp(app.clone());
                 publish_shares(&state).await;
                 return Ok(());
             }
@@ -349,7 +354,10 @@ pub async fn publish_shares(state: &Ed2kState) {
     }
 }
 #[tauri::command]
-pub async fn ed2k_disconnect(state: State<'_, Ed2kState>) -> Result<(), String> {
+pub async fn ed2k_disconnect(
+    app: tauri::AppHandle,
+    state: State<'_, Ed2kState>,
+) -> Result<(), String> {
     state.ready()?;
     state.generation.fetch_add(1, Ordering::AcqRel);
     if let Some(connection) = state.server.write().await.take() {
@@ -358,6 +366,7 @@ pub async fn ed2k_disconnect(state: State<'_, Ed2kState>) -> Result<(), String> 
     if let Some(listener) = state.incoming.lock().await.as_ref() {
         listener.set_client_id(0);
     }
+    network::spawn_sync_upnp(app);
     Ok(())
 }
 #[tauri::command]
@@ -379,41 +388,37 @@ pub async fn ed2k_search(
 pub async fn ed2k_find_sources(
     state: State<'_, Ed2kState>,
     hash: String,
+    size: Option<u64>,
 ) -> Result<Vec<ed2k::FileSource>, String> {
     state.ready()?;
-    let connection = state
-        .server
-        .read()
+    let server = state.server.read().await.as_ref().cloned();
+    let kad = state.net.kad_session().await;
+    if server.is_none() && kad.is_none() {
+        return Err("ed2k_not_connected".into());
+    }
+    let mut found = match &server {
+        Some(connection) => connection.sources(&hash).await.map_err(|e| e.to_string())?,
+        None => Vec::new(),
+    };
+    if let (Some(kad), Some(id)) = (kad, shares::parse_hash(&hash)) {
+        if let Ok(Ok(list)) = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            kad.sources(id, size.unwrap_or(0)),
+        )
         .await
-        .as_ref()
-        .cloned()
-        .ok_or("ed2k_not_connected")?;
-    connection.sources(&hash).await.map_err(|e| e.to_string())
-}
-#[tauri::command]
-pub async fn ed2k_bootstrap(state: State<'_, Ed2kState>) -> Result<BootstrapResult, String> {
-    state.ready()?;
-    let nodes = state
-        .library
-        .lock()
-        .map_err(|e| e.to_string())?
-        .nodes
-        .clone();
-    // Rotate candidates between installations rather than all probing the first node.
-    let offset = usize::from(state.user_hash[0]) % nodes.len().max(1);
-    let mut last = "empty_node_list".to_owned();
-    for node in nodes.iter().cycle().skip(offset).take(nodes.len().min(6)) {
-        match ed2k::bootstrap(node).await {
-            Ok(result) => {
-                *state.kad.write().await = Some(result.clone());
-                return Ok(result);
+        {
+            for source in list {
+                if !found
+                    .iter()
+                    .any(|known| known.host == source.host && known.port == source.port)
+                {
+                    found.push(source);
+                }
             }
-            Err(error) => last = error.to_string(),
         }
     }
-    Err(last)
+    Ok(found)
 }
-
 #[tauri::command]
 pub fn ed2k_copy_link(app: tauri::AppHandle, link: String) -> Result<(), String> {
     use tauri_plugin_clipboard_manager::ClipboardExt;

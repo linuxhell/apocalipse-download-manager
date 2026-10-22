@@ -22,12 +22,18 @@
   };
   Object.assign(catalogs.en, {
       shares: "Shared files", sharesHint: "Nothing is shared until you add it here. Files you add are offered to other ED2K users while you are connected to a server. Hidden files and ADM's own data are never shared. As in aMule, choose a folder (with or without its subfolders) or single files.", shareAddFolder: "Add folder…", shareAddFiles: "Add files…", shareRescan: "Rescan", shareSubfolders: "Include subfolders", shareFolders: "Shared folders", shareFolder: "Folder", shareScope: "Scope", shareWithSub: "With subfolders", shareOnlyThis: "This folder only", shareFiles: "Shared files", sharePriority: "Priority", shareRequests: "Requests", shareUploaded: "Uploaded", shareStop: "Stop sharing", shareNoFolders: "No shared folders.", shareNoFiles: "Nothing is being shared.", prioVeryLow: "Very low", prioLow: "Low", prioNormal: "Normal", prioHigh: "High", prioRelease: "Release", shareHashing: "Preparing {done}/{total}: {name}", sharePublished: "{count} files offered to the server", shareNotConnected: "Connect to an ED2K server to offer these files. They are only served while this window is connected.", sharePublishFailed: "Could not offer the files to the server", shareLimits: "Upload limits", shareLimitKib: "Upload limit (KiB/s, 0 = unlimited)", shareSlots: "Upload slots", shareApply: "Apply", shareUploads: "Uploads: {active} active, {waiting} waiting · {total} sent", shareClient: "Client", shareActive: "Uploading", shareWaiting: "Queue position {rank}", shareFolderAdded: "Folder added: {path}", shareFilesAdded: "{count} files added", shareLimitsApplied: "Limits applied", shareTooBroad: "Choose a more specific folder: drive roots and folders that contain ADM's data are not allowed.", shareFailedFiles: "Some files could not be read: {error}",
+      kadConnect: "Connect Kad", kadDisconnect: "Disconnect Kad", kadStatusConnecting: "Kad: connecting…", kadStatusConnected: "Kad: connected · {verified}/{contacts} contacts", kadSummaryRunning: "Kad session on UDP {udp}: {contacts} contacts, {verified} verified. Used to find sources for downloads.", kadHint: "Kad runs as a real session: it keeps a routing table and looks up sources for downloads. Keyword search and publishing are not available yet.", scopeHint: "Native server search, source discovery through the server and Kad, verified downloads, and sharing of the files you choose. Credits, AICH, messaging and Kad keyword search or publishing are not available yet.",
+      upnpOff: "UPnP: off", upnpIdle: "UPnP: idle", upnpSearching: "UPnP: looking for a router…", upnpMapped: "UPnP: ports forwarded", upnpMappedIp: "UPnP: ports forwarded · external IP {ip}", upnpPartial: "UPnP: some ports could not be forwarded", upnpFailed: "UPnP: no router found", networkPrefs: "Network", obfuscationLabel: "Protocol obfuscation", obfOff: "Off", obfPrefer: "Preferred", obfRequire: "Required (refuses plain peers)", upnpLabel: "Ask the router (UPnP) to forward the incoming ports", upnpHint: "Only while connected; the forwarding is removed when you disconnect or close ADM. It does not work behind CGNAT or when the router has UPnP turned off.", kadStarted: "Kad connected", kadStopped: "Kad disconnected", prefsSaved: "Preferences saved",
   });
   Object.assign(catalogs["pt-BR"], {
       shares: "Compartilhados", sharesHint: "Nada é compartilhado até você adicionar aqui. Os arquivos adicionados são oferecidos a outros usuários ED2K enquanto você estiver conectado a um servidor. Arquivos ocultos e os dados do próprio ADM nunca são compartilhados. Como no aMule, escolha uma pasta (com ou sem subpastas) ou arquivos avulsos.", shareAddFolder: "Adicionar pasta…", shareAddFiles: "Adicionar arquivos…", shareRescan: "Reanalisar", shareSubfolders: "Incluir subpastas", shareFolders: "Pastas compartilhadas", shareFolder: "Pasta", shareScope: "Alcance", shareWithSub: "Com subpastas", shareOnlyThis: "Somente esta pasta", shareFiles: "Arquivos compartilhados", sharePriority: "Prioridade", shareRequests: "Pedidos", shareUploaded: "Enviado", shareStop: "Parar de compartilhar", shareNoFolders: "Nenhuma pasta compartilhada.", shareNoFiles: "Nada está sendo compartilhado.", prioVeryLow: "Muito baixa", prioLow: "Baixa", prioNormal: "Normal", prioHigh: "Alta", prioRelease: "Lançamento", shareHashing: "Preparando {done}/{total}: {name}", sharePublished: "{count} arquivos oferecidos ao servidor", shareNotConnected: "Conecte-se a um servidor ED2K para oferecer estes arquivos. Eles só são servidos enquanto esta janela estiver conectada.", sharePublishFailed: "Não foi possível oferecer os arquivos ao servidor", shareLimits: "Limites de upload", shareLimitKib: "Limite de upload (KiB/s, 0 = sem limite)", shareSlots: "Vagas de upload", shareApply: "Aplicar", shareUploads: "Uploads: {active} ativos, {waiting} na fila · {total} enviados", shareClient: "Cliente", shareActive: "Enviando", shareWaiting: "Posição na fila {rank}", shareFolderAdded: "Pasta adicionada: {path}", shareFilesAdded: "{count} arquivos adicionados", shareLimitsApplied: "Limites aplicados", shareTooBroad: "Escolha uma pasta mais específica: raízes de disco e pastas que contêm os dados do ADM não são permitidas.", shareFailedFiles: "Alguns arquivos não puderam ser lidos: {error}",
+      kadConnect: "Conectar Kad", kadDisconnect: "Desconectar Kad", kadStatusConnecting: "Kad: conectando…", kadStatusConnected: "Kad: conectado · {verified}/{contacts} contatos", kadSummaryRunning: "Sessão Kad no UDP {udp}: {contacts} contatos, {verified} verificados. Usada para achar fontes dos downloads.", kadHint: "O Kad roda como sessão de verdade: mantém uma tabela de roteamento e procura fontes para os downloads. Busca por palavra-chave e publicação ainda não estão disponíveis.", scopeHint: "Pesquisa no servidor nativo, busca de fontes pelo servidor e pelo Kad, downloads verificados e compartilhamento dos arquivos que você escolher. Créditos, AICH, mensagens e busca ou publicação por palavra-chave no Kad ainda não estão disponíveis.",
+      upnpOff: "UPnP: desligado", upnpIdle: "UPnP: em espera", upnpSearching: "UPnP: procurando o roteador…", upnpMapped: "UPnP: portas encaminhadas", upnpMappedIp: "UPnP: portas encaminhadas · IP externo {ip}", upnpPartial: "UPnP: algumas portas não puderam ser encaminhadas", upnpFailed: "UPnP: roteador não encontrado", networkPrefs: "Rede", obfuscationLabel: "Ofuscação do protocolo", obfOff: "Desligada", obfPrefer: "Preferida", obfRequire: "Obrigatória (recusa peers sem ofuscação)", upnpLabel: "Pedir ao roteador (UPnP) que encaminhe as portas de entrada", upnpHint: "Só enquanto estiver conectado; o encaminhamento é removido ao desconectar ou fechar o ADM. Não funciona atrás de CGNAT nem com o UPnP desligado no roteador.", kadStarted: "Kad conectado", kadStopped: "Kad desconectado", prefsSaved: "Preferências salvas",
   });
   Object.assign(catalogs["zh-CN"], {
       shares: "共享文件", sharesHint: "只有在此处添加后才会共享。连接到服务器期间，您添加的文件会提供给其他 ED2K 用户。隐藏文件和 ADM 自身的数据永远不会被共享。与 aMule 一样，可选择文件夹（含或不含子文件夹）或单个文件。", shareAddFolder: "添加文件夹…", shareAddFiles: "添加文件…", shareRescan: "重新扫描", shareSubfolders: "包含子文件夹", shareFolders: "共享文件夹", shareFolder: "文件夹", shareScope: "范围", shareWithSub: "包含子文件夹", shareOnlyThis: "仅此文件夹", shareFiles: "共享的文件", sharePriority: "优先级", shareRequests: "请求", shareUploaded: "已上传", shareStop: "停止共享", shareNoFolders: "没有共享文件夹。", shareNoFiles: "当前没有共享任何内容。", prioVeryLow: "很低", prioLow: "低", prioNormal: "普通", prioHigh: "高", prioRelease: "发布", shareHashing: "正在准备 {done}/{total}：{name}", sharePublished: "已向服务器提供 {count} 个文件", shareNotConnected: "请连接 ED2K 服务器以提供这些文件。仅在此窗口保持连接时才会提供。", sharePublishFailed: "无法向服务器提供文件", shareLimits: "上传限制", shareLimitKib: "上传限制（KiB/秒，0 = 不限）", shareSlots: "上传位", shareApply: "应用", shareUploads: "上传：{active} 个进行中，{waiting} 个排队 · 已发送 {total}", shareClient: "客户端", shareActive: "上传中", shareWaiting: "排队位置 {rank}", shareFolderAdded: "已添加文件夹：{path}", shareFilesAdded: "已添加 {count} 个文件", shareLimitsApplied: "限制已应用", shareTooBroad: "请选择更具体的文件夹：不允许磁盘根目录和包含 ADM 数据的文件夹。", shareFailedFiles: "部分文件无法读取：{error}",
+      kadConnect: "连接 Kad", kadDisconnect: "断开 Kad", kadStatusConnecting: "Kad：正在连接…", kadStatusConnected: "Kad：已连接 · {verified}/{contacts} 个联系人", kadSummaryRunning: "Kad 会话运行于 UDP {udp}：{contacts} 个联系人，{verified} 个已验证。用于查找下载来源。", kadHint: "Kad 作为真实会话运行：维护路由表并为下载查找来源。关键词搜索和发布暂不可用。", scopeHint: "支持原生服务器搜索、通过服务器和 Kad 查找来源、验证下载，以及共享您选择的文件。积分、AICH、消息，以及 Kad 关键词搜索或发布暂不可用。",
+      upnpOff: "UPnP：已关闭", upnpIdle: "UPnP：空闲", upnpSearching: "UPnP：正在查找路由器…", upnpMapped: "UPnP：端口已转发", upnpMappedIp: "UPnP：端口已转发 · 外部 IP {ip}", upnpPartial: "UPnP：部分端口无法转发", upnpFailed: "UPnP：未找到路由器", networkPrefs: "网络", obfuscationLabel: "协议混淆", obfOff: "关闭", obfPrefer: "优先", obfRequire: "必须（拒绝未混淆的节点）", upnpLabel: "请求路由器（UPnP）转发入站端口", upnpHint: "仅在连接期间有效；断开连接或关闭 ADM 时会移除转发。在 CGNAT 后或路由器关闭 UPnP 时不起作用。", kadStarted: "Kad 已连接", kadStopped: "Kad 已断开", prefsSaved: "首选项已保存",
   });
   let locale = "en";
   try { const cached = localStorage.getItem("apocalipse.language"); if (catalogs[cached]) locale = cached; } catch {}
@@ -43,14 +49,25 @@
     const connected = Boolean(overview?.server);
     $("#ed2k-connect").disabled = busy || !overview?.servers?.length;
     $("#ed2k-disconnect").disabled = !connected && !busy;
-    $("#ed2k-bootstrap").disabled = busy || !overview?.node_count;
+    const kadRunning = Boolean(overview?.network?.kad);
+    $("#ed2k-kad-toggle").disabled = busy || (!kadRunning && !overview?.node_count);
     $("#ed2k-search-submit").disabled = busy || !connected;
     $("#ed2k-add-submit").disabled = busy;
-    for (const button of document.querySelectorAll("#ed2k-downloads button")) button.disabled = busy || button.dataset.pausing === "true" || (button.dataset.connection === "true" && !connected);
+    for (const button of document.querySelectorAll("#ed2k-downloads button")) button.disabled = busy || button.dataset.pausing === "true" || (button.dataset.connection === "true" && !connected && !kadRunning);
     for (const button of document.querySelectorAll(".ed2k-setting button, #ed2k-servers button")) button.disabled = busy;
     for (const button of document.querySelectorAll("#ed2k-results button")) button.disabled = busy || (button.dataset.sources === "true" && !connected);
     for (const id of ["#ed2k-share-folder", "#ed2k-share-files", "#ed2k-share-rescan", "#ed2k-share-limits"]) $(id).disabled = busy;
     for (const button of document.querySelectorAll("#ed2k-share-folders button, #ed2k-share-list button")) button.disabled = busy;
+  }
+  function upnpText(net) {
+    if (!net) return t("upnpIdle");
+    if (!net.upnp_enabled) return t("upnpOff");
+    const upnp = net.upnp || {};
+    if (upnp.state === "searching") return t("upnpSearching");
+    if (upnp.state === "mapped") return upnp.external_ip ? t("upnpMappedIp", {ip: upnp.external_ip}) : t("upnpMapped");
+    if (upnp.state === "partial") return t("upnpPartial");
+    if (upnp.state === "failed") return t("upnpFailed");
+    return t("upnpIdle");
   }
   function size(bytes) { const units=["B","KiB","MiB","GiB","TiB"]; const index=bytes>0 ? Math.min(4,Math.floor(Math.log(bytes)/Math.log(1024))) : 0; return `${new Intl.NumberFormat(locale,{maximumFractionDigits:2}).format(bytes/1024**index)} ${units[index]}`; }
   function renderResults() {
@@ -65,7 +82,7 @@
       const td = document.createElement("td"), copy = document.createElement("button"); copy.type = "button"; copy.textContent = t("copy");
       copy.onclick = () => run("ed2k_copy_link", {link:result.link}, () => message("copied")); td.append(copy);
       const find = document.createElement("button"); find.type="button"; find.dataset.sources="true"; find.textContent=t("findSources");
-      find.onclick = () => run("ed2k_find_sources", {hash:result.hash}, sources => { sourceView={name:result.name,sources}; renderSources(); message("sourceCount", {count:sources.length}); });
+      find.onclick = () => run("ed2k_find_sources", {hash:result.hash, size:result.size}, sources => { sourceView={name:result.name,sources}; renderSources(); message("sourceCount", {count:sources.length}); });
       td.append(find);
       const download = document.createElement("button"); download.type="button"; download.textContent=t("download");
       download.onclick = () => addDownload(result.link); td.append(download);
@@ -170,8 +187,13 @@
     $("#ed2k-status").textContent = `ED2K: ${overview?.server ? t("online") : t("offline")}${overview?.low_id ? ` · ${t("lowId")}` : ""}`;
     $("#ed2k-status").dataset.online = String(Boolean(overview?.server));
     $("#incoming-status").textContent = overview?.incoming?.running ? t("incomingPort", {port:overview.incoming.tcp_port,count:overview.incoming.completed_handshakes}) : t("incomingInactive");
-    $("#kad-status").textContent = t(overview?.kad_bootstrap ? "kadReady" : "kadInactive");
-    $("#kad-summary").textContent = overview?.kad_bootstrap ? t("kadContacts", {count:overview.kad_bootstrap.contacts.length, host:overview.kad_bootstrap.responder.host}) : t("nodeCount", {count:overview?.node_count || 0});
+    const net = overview?.network, kad = net?.kad;
+    $("#kad-status").textContent = kad ? t(kad.verified_contacts > 0 ? "kadStatusConnected" : "kadStatusConnecting", {contacts:kad.contacts, verified:kad.verified_contacts}) : t("kadInactive");
+    $("#kad-summary").textContent = kad ? t("kadSummaryRunning", {udp:kad.udp_port, contacts:kad.contacts, verified:kad.verified_contacts}) : t("nodeCount", {count:overview?.node_count || 0});
+    $("#ed2k-kad-toggle").textContent = t(kad ? "kadDisconnect" : "kadConnect");
+    $("#upnp-status").textContent = upnpText(net);
+    if (document.activeElement !== $("#ed2k-obfuscation")) $("#ed2k-obfuscation").value = net?.obfuscation || "prefer";
+    $("#ed2k-upnp").checked = net ? Boolean(net.upnp_enabled) : true;
     $("#server-count").textContent = t("serverCount", {count:overview?.servers?.length || 0});
     const body = $("#ed2k-servers"); body.replaceChildren();
     for (const server of overview?.servers || []) {
@@ -195,7 +217,12 @@
   }
   $("#ed2k-connect").onclick = () => run("ed2k_connect", {server:null});
   $("#ed2k-disconnect").onclick = async () => { try { await invoke?.("ed2k_disconnect"); await refresh(); message("connectionClosed"); } catch(error) { message("failed", {}, true); log(String(error)); } };
-  $("#ed2k-bootstrap").onclick = () => run("ed2k_bootstrap");
+  $("#ed2k-kad-toggle").onclick = () => overview?.network?.kad
+    ? run("ed2k_kad_disconnect", {}, () => message("kadStopped"))
+    : run("ed2k_kad_connect", {}, () => message("kadStarted"));
+  const savePrefs = () => run("ed2k_set_prefs", { obfuscation: $("#ed2k-obfuscation").value, upnp: Boolean($("#ed2k-upnp").checked) }, () => message("prefsSaved"));
+  $("#ed2k-obfuscation").onchange = savePrefs;
+  $("#ed2k-upnp").onchange = savePrefs;
   for (const kind of ["servers", "nodes"]) {
     $("#ed2k-update-"+kind).onclick = () => {
       const url = $(kind === "servers" ? "#ed2k-server-url" : "#ed2k-node-url").value.trim();

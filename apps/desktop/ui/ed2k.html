@@ -10,8 +10,8 @@
   <header class="ed2k-header"><div><h1>Apocalipse ED2K/Kad</h1></div><span class="ed2k-preview" data-i18n="preview"></span></header>
   <section class="ed2k-toolbar" aria-labelledby="tab-networks">
     <button id="ed2k-connect" class="primary" data-i18n="connect"></button><button id="ed2k-disconnect" data-i18n="disconnect" disabled></button>
-    <span class="ed2k-toolbar-divider"></span><button id="ed2k-bootstrap" data-i18n="bootstrap"></button>
-    <div class="ed2k-indicators"><span id="ed2k-status"></span><span id="kad-status"></span><span id="incoming-status"></span></div>
+    <span class="ed2k-toolbar-divider"></span><button id="ed2k-kad-toggle" data-i18n="kadConnect"></button>
+    <div class="ed2k-indicators"><span id="ed2k-status"></span><span id="kad-status"></span><span id="upnp-status"></span><span id="incoming-status"></span></div>
   </section>
   <nav class="ed2k-tabs" role="tablist">
     <button role="tab" aria-selected="true" aria-controls="panel-networks" id="tab-networks" data-tab="networks" data-i18n="networks"></button>
@@ -66,6 +66,11 @@
       <div class="ed2k-section-heading"><div><h2 data-i18n="preferences"></h2><p data-i18n="preferencesHint"></p></div></div>
       <article class="ed2k-setting"><h3>server.met</h3><label><span data-i18n="listUrl"></span><input id="ed2k-server-url" type="url" value="https://upd.emule-security.org/server.met"></label><div><button id="ed2k-update-servers" data-i18n="updateServers"></button><button id="ed2k-import-servers" data-i18n="importServers"></button></div></article>
       <article class="ed2k-setting"><h3>nodes.dat</h3><label><span data-i18n="listUrl"></span><input id="ed2k-node-url" type="url" value="https://upd.emule-security.org/nodes.dat"></label><div><button id="ed2k-update-nodes" data-i18n="updateNodes"></button><button id="ed2k-import-nodes" data-i18n="importNodes"></button></div></article>
+      <article class="ed2k-setting"><h3 data-i18n="networkPrefs"></h3>
+        <label><span data-i18n="obfuscationLabel"></span><select id="ed2k-obfuscation"><option value="disabled" data-i18n="obfOff"></option><option value="prefer" data-i18n="obfPrefer"></option><option value="require" data-i18n="obfRequire"></option></select></label>
+        <label class="ed2k-inline"><input id="ed2k-upnp" type="checkbox" checked><span data-i18n="upnpLabel"></span></label>
+        <p data-i18n="upnpHint"></p>
+      </article>
       <p data-i18n="listSafety"></p>
     </section>
     <section id="panel-log" role="tabpanel" aria-labelledby="tab-log" hidden><div class="ed2k-section-heading"><h2 data-i18n="log"></h2><button id="ed2k-clear-log" data-i18n="clear"></button></div><pre id="ed2k-log" role="log"></pre></section>

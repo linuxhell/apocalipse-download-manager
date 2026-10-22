@@ -133,27 +133,56 @@ impl Downloads {
                 };
                 if cancel.load(Ordering::Acquire){return Err("cancelled".into());}
                 let state=app.state::<Ed2kState>();
-                let connection=state.server.read().await.as_ref().cloned().ok_or("ed2k_not_connected")?;
+                // Sources come from the connected server and from Kad, so a download also works
+                // when only one of them is available.
+                let server=state.server.read().await.as_ref().cloned();
+                let kad=state.net.kad_session().await;
+                if server.is_none()&&kad.is_none(){return Err("ed2k_not_connected".into());}
                 queue.update(&id,|task|task.status="connecting".into())?;
                 let hash=task.file.hash_hex();
-                let mut sources=None;
+                let mut sources:Vec<ed2k::FileSource>=Vec::new();
                 let mut error="ed2k_no_sources".to_owned();
-                for attempt in 0..3 {
-                    if cancel.load(Ordering::Acquire){return Err("cancelled".into());}
+                let mut answered=false;
+                if let Some(connection)=&server{
+                    for attempt in 0..3 {
+                        if cancel.load(Ordering::Acquire){return Err("cancelled".into());}
+                        let found = tokio::select! {
+                            result=connection.sources(&hash)=>result,
+                            _=async{while !cancel.load(Ordering::Acquire){tokio::time::sleep(std::time::Duration::from_millis(50)).await;}}=>return Err("cancelled".into()),
+                        };
+                        match found {
+                            Ok(found)=>{sources=found;answered=true;break;},
+                            Err(reason)=>error=reason.to_string(),
+                        }
+                        if attempt<2 {tokio::time::sleep(std::time::Duration::from_secs(1)).await;}
+                    }
+                }
+                if let Some(kad)=&kad{
                     let found = tokio::select! {
-                        result=connection.sources(&hash)=>result,
+                        result=tokio::time::timeout(std::time::Duration::from_secs(25),kad.sources(task.file.hash,task.file.size))=>result,
                         _=async{while !cancel.load(Ordering::Acquire){tokio::time::sleep(std::time::Duration::from_millis(50)).await;}}=>return Err("cancelled".into()),
                     };
-                    match found {
-                        Ok(found)=>{sources=Some(found);break;},
-                        Err(reason)=>error=reason.to_string(),
+                    if let Ok(Ok(list))=found{
+                        answered=true;
+                        for source in list{
+                            if !sources.iter().any(|known|known.host==source.host&&known.port==source.port){sources.push(source);}
+                        }
                     }
-                    if attempt<2 {tokio::time::sleep(std::time::Duration::from_secs(1)).await;}
                 }
-                let sources=sources.ok_or(error)?;
+                if !answered {return Err(error);}
                 tokio::fs::create_dir_all(&task.directory).await.map_err(|e|e.to_string())?;
-                let callbacks=if connection.is_low_id(){None}else{state.incoming.lock().await.as_ref().map(|listener|ed2k::CallbackClient::new(connection.clone(),listener.callbacks()))};
-                let options=ed2k::TransferOptions{identity:state.user_hash,client_id:connection.client_id,callbacks,obfuscation:Default::default()};
+                // A Low-ID source is reached through a server that gave us a High ID, through Kad, or both.
+                let listener=state.incoming.lock().await.as_ref().map(|listener|(listener.callbacks(),listener.status().tcp_port));
+                let callbacks=listener.and_then(|(registry,port)|{
+                    let by_server=server.as_ref().filter(|connection|!connection.is_low_id()).map(|connection|ed2k::CallbackClient::new(connection.clone(),registry.clone()));
+                    match(by_server,kad.clone()){
+                        (Some(client),Some(kad))=>Some(client.with_kad(kad,port)),
+                        (Some(client),None)=>Some(client),
+                        (None,Some(kad))=>Some(ed2k::CallbackClient::kad_only(registry,kad,port)),
+                        (None,None)=>None,
+                    }
+                });
+                let options=ed2k::TransferOptions{identity:state.user_hash,client_id:server.as_ref().map_or(0,|connection|connection.client_id),callbacks,obfuscation:state.net.prefs().obfuscation};
                 ed2k::download_with_options(&task.file,&task.directory,&sources,options,cancel.clone(),|progress|{
                     let _=queue.update(&id,|task|{
                         task.status=match progress.stage{TransferStage::Connecting=>"connecting",TransferStage::Queued=>"waiting_peer",TransferStage::Checking=>"checking",TransferStage::Downloading=>"downloading",TransferStage::Completed=>"completed"}.into();

@@ -28,10 +28,10 @@ replacement; performance/memory claims require measurements of the final build.
   4662, falls back to an available port on collision). Login advertises that
   actual port. The server's assigned ID remains authoritative: a listener does
   not prove firewall/NAT reachability. The UI shows the port and handshake count.
-- Kad currently implements a UDP bootstrap probe that validates a responding
-  node and returns contacts. It **does not** keep a routing table/session active,
-  perform Kad lookup/publishing or download through Kad. The UI labels this as
-  bootstrap rather than a connected Kad session.
+- Kad runs as a real session ("Connect Kad"): the Nibiru module keeps a routing table, verifies
+  contacts, and looks up sources for a file hash. The window shows UDP port, contacts and verified
+  contacts. Kad keyword search and publishing are **not** implemented, and reachability from the
+  public network is not verified.
 - Direct high-ID peer downloads have a persistent transfer queue, pause/resume,
   root-checked ED2K hashsets, verified parts, 32/64-bit offsets and compressed
   block support. Unfinished tasks reopen paused. Resume rehashes saved data.
@@ -144,8 +144,8 @@ The **Shared files** tab works like aMule's: nothing is shared until the user ad
   and after each change the list is offered to the server (`OP_OFFERFILES`). ED2K has no withdraw
   packet: removed files leave the server's index on the next connection.
 - **Limits:** upload slots (1-20, default 3) and an upload limit in KiB/s.
-- **Dependency:** `nibiru-xtreme` is now pinned to `692b98a` (0.2.0-alpha.3), which contains the
-  uploader, the share registry and the upload queue.
+- **Dependency:** `nibiru-xtreme` is pinned to `f8f65b2` (0.2.0-alpha.4), which contains the uploader,
+  the share registry, the upload queue, the Kad session and the UPnP module.
 
 Validation: Rust tests cover choosing folders and files, subfolders, hidden/empty/excluded files,
 removal, priority restore, persistence and the cache; one test serves a chosen 300 KB file to a real
@@ -154,3 +154,25 @@ the tab in en, pt-BR and zh-CN, plain-text rendering of names and the command ro
 rendered in Chromium in all three languages. **Not** verified: serving on the public ED2K network,
 reachability through a NAT/firewall (a Low-ID client cannot be reached by others), compatibility
 with eMule/aMule clients as downloaders, or the Tauri window itself (native folder and file pickers).
+
+## Network: Kad session, UPnP and obfuscation
+
+- **Kad session:** "Connect Kad" starts the Nibiru Kad session on the listener's real TCP port and a UDP
+  port (4672 when free), seeded from `nodes.dat`; contacts are kept in `kad-contacts.json`. Sources for a
+  download come from the connected server **and** Kad, a download can run with only one of them
+  connected, and Low-ID sources are reached by a server callback, a Kad buddy callback, or both.
+  "Find sources" in the search tab also adds the Kad sources.
+- **UPnP:** on by default (Preferences → Network). While a server or Kad is connected it asks the router
+  to forward the incoming TCP port and, with Kad, the Kad UDP port; it renews the lease, and removes the
+  forwarding when you disconnect, turn the option off or close ADM. The toolbar shows the state (looking
+  for a router, forwarded with the external IP, partly failed, no router found).
+- **Obfuscation:** off / preferred (default) / required, applied to server connections, peer
+  connections, the listener and Kad UDP. "Required" refuses peers that do not obfuscate.
+- **Stored in** `prefs.json` next to the ED2K identity; a damaged file falls back to the defaults.
+
+Validation: the UPnP module is tested in Nibiru against an in-process router that speaks SSDP, device
+and service XML and SOAP (map, remove, renew, release, permanent-lease router, no router, untrusted
+location). ADM tests cover which ports are forwarded and when, preference persistence, Kad starting on
+the listener's port and stopping, and the window behaviour in en, pt-BR and zh-CN. **Not** verified: any
+real router (models differ a lot; CGNAT cannot be fixed by UPnP), Kad on the public network, and the
+Tauri window.

@@ -15845,7 +15845,9 @@ fn main() {
             ed2k_ui::ed2k_find_sources,
             ed2k_ui::downloads::ed2k_add_download,
             ed2k_ui::downloads::ed2k_download_action,
-            ed2k_ui::ed2k_bootstrap,
+            ed2k_ui::network::ed2k_kad_connect,
+            ed2k_ui::network::ed2k_kad_disconnect,
+            ed2k_ui::network::ed2k_set_prefs,
             ed2k_ui::ed2k_copy_link,
             ed2k_ui::shares::ed2k_share_add_folder,
             ed2k_ui::shares::ed2k_share_add_files,
@@ -15904,6 +15906,10 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("failed to build Apocalipse Download Manager")
         .run(|_app, _event| {
+            if let tauri::RunEvent::Exit = _event {
+                // Take the forwarded ports off the router again.
+                ed2k_ui::network::release_on_exit(_app);
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = _event {
                 for url in urls {
