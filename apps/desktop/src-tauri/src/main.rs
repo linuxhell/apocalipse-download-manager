@@ -336,6 +336,8 @@ async fn discover_official_mirrors(url: &str) -> Vec<String> {
     mirrors
 }
 
+/// Resolves the per-download thread count. An explicit choice (the slider, or the value remembered
+/// for the site) always wins; hosts with special handling only change what happens without one.
 fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize> {
     let host = host_from_url(url);
     if host
@@ -352,12 +354,15 @@ fn site_connection_override(url: &str, requested: Option<usize>) -> Option<usize
             || value == "software.download.prss.microsoft.com"
             || value.ends_with(".download.prss.microsoft.com")
     }) {
-        // Microsoft's ISO CDN supports byte ranges. Start wide enough to avoid
-        // the slow single-stream ramp while keeping the setting below the
-        // application's global safety ceiling.
-        Some(requested.unwrap_or(16).max(16).clamp(1, 32))
+        // Microsoft's ISO CDN supports byte ranges. Without an explicit choice start wide enough
+        // to avoid the slow single-stream ramp; a chosen or remembered count is respected.
+        Some(
+            requested
+                .unwrap_or(MAX_DOWNLOAD_CONNECTIONS)
+                .clamp(1, MAX_DOWNLOAD_CONNECTIONS),
+        )
     } else {
-        requested.map(|value| value.clamp(1, 32))
+        requested.map(|value| value.clamp(1, MAX_DOWNLOAD_CONNECTIONS))
     }
 }
 
@@ -473,8 +478,10 @@ fn tray_labels(language: &str) -> (&'static str, &'static str) {
 const fn default_max_active() -> usize {
     3
 }
+/// The Xtreme engine runs at most this many connections per download.
+const MAX_DOWNLOAD_CONNECTIONS: usize = 16;
 const fn default_connections() -> usize {
-    16
+    8
 }
 const fn default_true() -> bool {
     true
@@ -485,8 +492,53 @@ fn default_aria2_rpc_secret() -> String {
 fn default_bridge_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
+/// Release repository of the engine that fills the former aria2 slot.
+const XTREME_RELEASE_REPO: &str = "linuxhell/nibiru-xtreme";
+/// Previous default of the slot; settings still carrying it follow the new default.
+const LEGACY_ARIA2_RELEASE_REPO: &str = "linuxhell/aria2-ultra";
+
+/// The slot holds Nibiru Xtreme unless the user pointed it at another release repository
+/// (an aria2 fork keeps the `aria2c-<suffix>` asset naming and `aria2c` executable).
+fn engine_is_xtreme(repository: &str) -> bool {
+    repository.to_ascii_lowercase().contains("nibiru-xtreme")
+}
+
+fn engine_asset_prefix(repository: &str) -> &'static str {
+    if engine_is_xtreme(repository) {
+        "nibiru-xtreme-"
+    } else {
+        "aria2c-"
+    }
+}
+
+fn engine_executable_name(repository: &str) -> &'static str {
+    match (engine_is_xtreme(repository), cfg!(windows)) {
+        (true, true) => "nibiru-xtreme.exe",
+        (true, false) => "nibiru-xtreme",
+        (false, true) => "aria2c.exe",
+        (false, false) => "aria2c",
+    }
+}
+
+/// Folder under `tools` that holds only this engine.
+fn engine_directory_name(repository: &str) -> &'static str {
+    if engine_is_xtreme(repository) {
+        "nibiru-xtreme"
+    } else {
+        "aria2"
+    }
+}
+
+fn engine_label(repository: &str) -> &'static str {
+    if engine_is_xtreme(repository) {
+        "nibiru-xtreme"
+    } else {
+        "aria2-ultra"
+    }
+}
+
 fn default_aria2_release_repo() -> String {
-    "FerroDownload/aria2-static-builds".to_owned()
+    XTREME_RELEASE_REPO.to_owned()
 }
 fn default_link_password() -> String {
     uuid::Uuid::new_v4().simple().to_string()
@@ -3357,11 +3409,7 @@ fn configured_tool(path: &Option<PathBuf>, fallback: &str) -> PathBuf {
 fn configured_aria2(settings: &UserSettings) -> PathBuf {
     configured_tool(
         &settings.aria2_path,
-        if cfg!(windows) {
-            "aria2c.exe"
-        } else {
-            "aria2c"
-        },
+        engine_executable_name(&settings.aria2_release_repo),
     )
 }
 
@@ -4151,12 +4199,18 @@ async fn aria2_endpoint(state: &AppState, force_start: bool) -> Result<aria2::En
             .version()
             .await
             .unwrap_or_else(|_| "unknown".to_owned());
+        let binary = executable
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("engine")
+            .to_owned();
+        let backend = engine_label(&settings.aria2_release_repo);
         diagnostic_log(
             state,
             "INFO",
             "aria2.runtime_spawned",
             &format!(
-                "pid={pid} parent_pid={} port={port} binary=aria2c backend=aria2-ultra version={version} listen_port=6881-6999 dht_listen_port=6881-6999 stop_with_parent=true",
+                "pid={pid} parent_pid={} port={port} binary={binary} backend={backend} version={version} listen_port=6881-6999 dht_listen_port=6881-6999 stop_with_parent=true",
                 std::process::id()
             ),
         );
@@ -5733,8 +5787,11 @@ fn save_queue_in_background(state: &AppState, queue: &[DownloadTask]) {
 }
 
 fn migrate_aria2_release_repo(settings: &mut UserSettings) {
-    // The former default repository was deleted. Keep explicit custom sources.
-    if settings.aria2_release_repo == "linuxhell/aria2-ultra" {
+    // The former default repository was deleted and FerroDownload's builds are no longer the
+    // default: both move to the Xtreme releases. An explicit custom source is kept.
+    if settings.aria2_release_repo == "FerroDownload/aria2-static-builds"
+        || settings.aria2_release_repo == LEGACY_ARIA2_RELEASE_REPO
+    {
         settings.aria2_release_repo = default_aria2_release_repo();
     }
 }
@@ -7487,7 +7544,9 @@ async fn run_external_download(
                     },
                 ),
                 configured_aria2(&settings),
-                settings.connections_per_download.clamp(1, 32),
+                settings
+                    .connections_per_download
+                    .clamp(1, MAX_DOWNLOAD_CONNECTIONS),
                 settings
                     .proxy_enabled
                     .then(|| settings.proxy_url.clone())
@@ -7528,7 +7587,7 @@ async fn run_external_download(
         .connections_override
         .or_else(|| host_rule.as_ref().and_then(|rule| rule.connections))
         .unwrap_or(tools.4)
-        .clamp(1, 32);
+        .clamp(1, MAX_DOWNLOAD_CONNECTIONS);
     diagnostic_log(
         &app.state::<AppState>(),
         "INFO",
@@ -10294,22 +10353,80 @@ where
         .ok_or_else(|| "compatible_release_asset_not_found".to_owned())
 }
 
+/// GitHub's `/releases/latest` skips drafts and prereleases. A repository that so far publishes only
+/// prereleases (Nibiru Xtreme's alpha builds) answers 404 there, so fall back to the newest
+/// published, non-draft release.
 async fn github_latest_release(
     client: &reqwest::Client,
     repository: &str,
 ) -> Result<serde_json::Value, String> {
-    client
+    let latest = client
         .get(format!(
             "https://api.github.com/repos/{repository}/releases/latest"
         ))
         .send()
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    if latest.status() == reqwest::StatusCode::NOT_FOUND {
+        let releases: Vec<serde_json::Value> = client
+            .get(format!(
+                "https://api.github.com/repos/{repository}/releases?per_page=10"
+            ))
+            .send()
+            .await
+            .map_err(|error| error.to_string())?
+            .error_for_status()
+            .map_err(|error| error.to_string())?
+            .json()
+            .await
+            .map_err(|error| error.to_string())?;
+        return releases
+            .into_iter()
+            .find(|release| {
+                !release
+                    .get("draft")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            })
+            .ok_or_else(|| format!("no_published_release:{repository}"));
+    }
+    latest
         .error_for_status()
         .map_err(|error| error.to_string())?
         .json()
         .await
         .map_err(|error| error.to_string())
+}
+
+/// True when the installed tool's `--version` line names exactly the release `tag`
+/// (`v0.2.0` does not match `0.2.0-alpha.2`). Tags that are not versions never match.
+fn installed_version_matches_tag(installed: &str, tag: &str) -> bool {
+    let wanted = tag
+        .trim()
+        .trim_start_matches(['v', 'V'])
+        .to_ascii_lowercase();
+    if wanted.is_empty() || !wanted.starts_with(|character: char| character.is_ascii_digit()) {
+        return false;
+    }
+    let installed = installed.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(offset) = installed[from..].find(&wanted) {
+        let start = from + offset;
+        let end = start + wanted.len();
+        let before_ok = installed[..start]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '.' || c == '-'));
+        let after_ok = installed[end..]
+            .chars()
+            .next()
+            .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '.' || c == '-'));
+        if before_ok && after_ok {
+            return true;
+        }
+        from = start + 1;
+    }
+    false
 }
 
 /// Public keys allowed to sign `tools-manifest.json`. While this list is empty
@@ -10474,8 +10591,15 @@ fn clean_directory(directory: &Path) -> Result<(), String> {
 async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String, String> {
     let (platform, architecture) = release_platform_architecture()?;
     let tools_root = portable_tools_directory()?;
+    let engine_repository = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .aria2_release_repo
+        .clone();
     let tool_dir = tools_root.join(match id.as_str() {
         "n-m3u8dl-re" => "n-m3u8dl-re",
+        "aria2" => engine_directory_name(&engine_repository),
         value => value,
     });
     fs::create_dir_all(&tool_dir).map_err(|error| error.to_string())?;
@@ -10526,16 +10650,11 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             target
         }
         "aria2" => {
-            let aria2_release_repo = state
-                .settings
-                .lock()
-                .map_err(|error| error.to_string())?
-                .aria2_release_repo
-                .clone();
-            let release = github_latest_release(&client, &aria2_release_repo).await?;
+            let release = github_latest_release(&client, &engine_repository).await?;
             let suffix = aria2_asset_suffix()?;
+            let prefix = engine_asset_prefix(&engine_repository);
             let (asset_name, url) = release_asset(&release, |name| {
-                name.starts_with("aria2c-") && name.ends_with(suffix) && !name.ends_with(".sha256")
+                name.starts_with(prefix) && name.ends_with(suffix) && !name.ends_with(".sha256")
             })?;
             let checksum_name = format!("{asset_name}.sha256");
             let (_, checksum_url) = release_asset(&release, |name| name == checksum_name)?;
@@ -10544,11 +10663,9 @@ async fn download_tool(state: State<'_, AppState>, id: String) -> Result<String,
             let checksum_text =
                 String::from_utf8(checksum_bytes).map_err(|error| error.to_string())?;
             verify_release_sha256(&checksum_text, &asset_name, &bytes)?;
-            let target = tool_dir.join(if cfg!(windows) {
-                "aria2c.exe"
-            } else {
-                "aria2c"
-            });
+            let target = tool_dir.join(engine_executable_name(&engine_repository));
+            // The running engine holds its executable open on Windows.
+            stop_aria2_runtime(&state);
             install_validated_executable(&bytes, &target, &["--version"])?;
             target
         }
@@ -10834,6 +10951,36 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
         return Err("tool_target_must_be_a_file".to_owned());
     }
 
+    // Nothing usable at the configured path: install the latest release into the tools folder and
+    // hand the new path back so the user only has to save. Other engines in the folder are untouched.
+    // A slot still holding an aria2 binary is not "updated" in place into a different engine either:
+    // Nibiru Xtreme is installed beside it and the old file is left alone.
+    let engine_repository = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .aria2_release_repo
+        .clone();
+    let version_probe: &[&str] = if id == "ffmpeg" {
+        &["-version"]
+    } else {
+        &["--version"]
+    };
+    // A bare name is resolved through PATH, so it counts as present when it runs.
+    let present = executable.is_file()
+        || (executable.components().count() == 1
+            && version_line(&executable, version_probe).is_some());
+    let foreign_engine = id == "aria2"
+        && engine_is_xtreme(&engine_repository)
+        && !executable
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .is_some_and(|stem| stem.eq_ignore_ascii_case("nibiru-xtreme"));
+    if !present || foreign_engine {
+        let installed = download_tool(state.clone(), id.clone()).await?;
+        return Ok(format!("{id} installed: {installed}"));
+    }
+
     // `yt-dlp --update-to nightly` verifies against yt-dlp's own checksums, not ours. With signed
     // manifests enabled, update through the verified download path instead.
     if id == "yt-dlp" && !TRUSTED_TOOL_UPDATE_KEYS.is_empty() {
@@ -10888,12 +11035,8 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                 &["--version"],
             ),
             "aria2" => (
-                aria2_release_repo.into(),
-                if cfg!(windows) {
-                    "aria2c.exe"
-                } else {
-                    "aria2c"
-                },
+                aria2_release_repo.clone().into(),
+                engine_executable_name(&aria2_release_repo),
                 std::slice::from_ref(&aria2_suffix),
                 &["--version"],
             ),
@@ -10930,23 +11073,23 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             .user_agent("Apocalipse-Download-Manager")
             .build()
             .map_err(|error| error.to_string())?;
-        // GitHub's /latest endpoint excludes drafts and prereleases.
-        let release: serde_json::Value = client
-            .get(format!(
-                "https://api.github.com/repos/{repository}/releases/latest"
-            ))
-            .send()
-            .await
-            .map_err(|error| error.to_string())?
-            .error_for_status()
-            .map_err(|error| error.to_string())?
-            .json()
-            .await
-            .map_err(|error| error.to_string())?;
+        let release = github_latest_release(&client, &repository).await?;
         let tag = release
             .get("tag_name")
             .and_then(|value| value.as_str())
             .unwrap_or("latest");
+        // Look before downloading: when the release names the version already installed there is
+        // nothing to fetch. Releases whose tag is not a version (rolling "latest" builds) fall
+        // through and are compared after download.
+        if installed_version_matches_tag(&before, tag) {
+            diagnostic_log(
+                &state,
+                "INFO",
+                "tool.already_current",
+                &format!("tool={id} version={before} tag={tag}"),
+            );
+            return Ok(format!("{id} already current ({before})"));
+        }
         let assets = release
             .get("assets")
             .and_then(|value| value.as_array())
@@ -10992,7 +11135,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
                         _ => false,
                     },
                     "aria2" => {
-                        name.starts_with("aria2c-")
+                        name.starts_with(engine_asset_prefix(&aria2_release_repo))
                             && name.ends_with(aria2_suffix)
                             && !name.ends_with(".sha256")
                     }
@@ -11442,7 +11585,12 @@ fn enqueue_download_impl(
     let pixeldrain_single_connection = host_from_url(&url)
         .as_deref()
         .is_some_and(|value| value == "pixeldrain.com" || value.ends_with(".pixeldrain.com"));
-    task.connections_override = site_connection_override(&url, connections_override);
+    let remembered_connections =
+        state.settings.lock().ok().and_then(|settings| {
+            host_rule_for_url(&settings, &url).and_then(|rule| rule.connections)
+        });
+    task.connections_override =
+        site_connection_override(&url, connections_override.or(remembered_connections));
     task.auto_extract = auto_extract.unwrap_or(false) && is_archive_file_name(&file_name);
     task.expected_size = expected_size.filter(|value| *value > 0);
     if let Some(context) = context {
@@ -12696,7 +12844,7 @@ fn save_host_rule(
                     .chars()
                     .any(|character| matches!(character, '\r' | '\n'))
             })
-        || connections.is_some_and(|value| !(1..=32).contains(&value))
+        || connections.is_some_and(|value| !(1..=MAX_DOWNLOAD_CONNECTIONS).contains(&value))
     {
         return Err("invalid_host_rule".to_owned());
     }
@@ -12763,14 +12911,7 @@ fn save_host_rule(
             bandwidth_limit,
         });
     }
-    settings.host_rules.sort_by(|left, right| {
-        let left_exact = !left.pattern.starts_with("*.");
-        let right_exact = !right.pattern.starts_with("*.");
-        right_exact
-            .cmp(&left_exact)
-            .then_with(|| right.pattern.len().cmp(&left.pattern.len()))
-            .then_with(|| left.pattern.cmp(&right.pattern))
-    });
+    sort_host_rules(&mut settings.host_rules);
     save_settings(&state, &settings)?;
     diagnostic_log(
         &state,
@@ -12787,6 +12928,124 @@ fn save_host_rule(
         ),
     );
     Ok(host_rule_summaries(&settings))
+}
+
+fn sort_host_rules(rules: &mut [HostRule]) {
+    rules.sort_by(|left, right| {
+        let left_exact = !left.pattern.starts_with("*.");
+        let right_exact = !right.pattern.starts_with("*.");
+        right_exact
+            .cmp(&left_exact)
+            .then_with(|| right.pattern.len().cmp(&left.pattern.len()))
+            .then_with(|| left.pattern.cmp(&right.pattern))
+    });
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SiteThreads {
+    host: String,
+    /// The count a download from this site would use, from the best matching rule.
+    threads: Option<usize>,
+    /// True only when a rule for exactly this host stores the count (what the checkbox edits).
+    remembered: bool,
+    /// Sites that must stay on one connection regardless of any preference.
+    forced: Option<usize>,
+}
+
+fn url_host_key(url: &str) -> Result<String, String> {
+    let parsed = url::Url::parse(url).map_err(|_| "invalid_site_url".to_owned())?;
+    if !matches!(parsed.scheme(), "http" | "https" | "ftp") {
+        return Err("invalid_site_url".to_owned());
+    }
+    parsed
+        .host_str()
+        .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
+        .filter(|host| !host.is_empty())
+        .ok_or_else(|| "invalid_site_url".to_owned())
+}
+
+#[tauri::command]
+fn get_site_threads(state: State<'_, AppState>, url: String) -> Result<SiteThreads, String> {
+    let host = url_host_key(&url)?;
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    let forced = (host == "pixeldrain.com" || host.ends_with(".pixeldrain.com")).then_some(1);
+    Ok(SiteThreads {
+        threads: host_rule_for_url(&settings, &url)
+            .and_then(|rule| rule.connections)
+            .map(|value| value.clamp(1, MAX_DOWNLOAD_CONNECTIONS)),
+        remembered: settings
+            .host_rules
+            .iter()
+            .any(|rule| rule.pattern == host && rule.connections.is_some()),
+        host,
+        forced,
+    })
+}
+
+/// Stores or clears the thread count in the rule for exactly `pattern`. A rule that holds nothing
+/// else is dropped when its count is cleared, and none is created when there is nothing to store.
+fn apply_site_threads(rules: &mut Vec<HostRule>, pattern: &str, threads: Option<usize>) {
+    match rules.iter().position(|rule| rule.pattern == pattern) {
+        Some(index) => {
+            rules[index].connections = threads;
+            let rule = &rules[index];
+            if rule.connections.is_none()
+                && rule.username.is_none()
+                && rule.password.is_empty()
+                && rule.user_agent.is_none()
+                && rule.bandwidth_limit.is_none()
+            {
+                rules.remove(index);
+            }
+        }
+        None => {
+            if threads.is_some() {
+                rules.push(HostRule {
+                    pattern: pattern.to_owned(),
+                    username: None,
+                    password: String::new(),
+                    user_agent: None,
+                    connections: threads,
+                    bandwidth_limit: None,
+                });
+            }
+        }
+    }
+    sort_host_rules(rules);
+}
+
+/// Remembers (`Some`) or forgets (`None`) the thread count for exactly this site, leaving the
+/// rule's credentials, speed limit and User-Agent untouched.
+#[tauri::command]
+fn set_site_threads(
+    state: State<'_, AppState>,
+    url: String,
+    threads: Option<usize>,
+) -> Result<SiteThreads, String> {
+    let host = url_host_key(&url)?;
+    if threads.is_some_and(|value| !(1..=MAX_DOWNLOAD_CONNECTIONS).contains(&value)) {
+        return Err("invalid_site_threads".to_owned());
+    }
+    let pattern = normalize_host_rule_pattern(&host)?;
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    apply_site_threads(&mut settings.host_rules, &pattern, threads);
+    save_settings(&state, &settings)?;
+    diagnostic_log(
+        &state,
+        "INFO",
+        "host_rule.threads",
+        &format!(
+            "pattern={pattern} threads={}",
+            threads.map_or_else(|| "forgotten".to_owned(), |value| value.to_string())
+        ),
+    );
+    Ok(SiteThreads {
+        threads,
+        remembered: threads.is_some(),
+        forced: None,
+        host,
+    })
 }
 
 #[tauri::command]
@@ -15596,6 +15855,8 @@ fn main() {
             let mut initial_settings =
                 load_settings(&settings_path).map_err(std::io::Error::other)?;
             if initial_settings.aria2_path.is_none() {
+                // Packages still bundle aria2c under tools/aria2; "Update" on the Tools tab moves
+                // the slot to Nibiru Xtreme once the user asks for it.
                 let aria2_dir = app_data.join("tools").join("aria2");
                 fs::create_dir_all(&aria2_dir)?;
                 initial_settings.aria2_path = Some(aria2_dir.join(if cfg!(windows) {
@@ -15891,6 +16152,8 @@ fn main() {
             list_host_rules,
             save_host_rule,
             remove_host_rule,
+            get_site_threads,
+            set_site_threads,
             get_dns_setting,
             set_dns_setting,
             get_bridge_pairing,
@@ -15925,18 +16188,151 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    fn rule(pattern: &str, connections: Option<usize>) -> HostRule {
+        HostRule {
+            pattern: pattern.to_owned(),
+            username: None,
+            password: String::new(),
+            user_agent: None,
+            connections,
+            bandwidth_limit: None,
+        }
+    }
+
+    #[test]
+    fn remembering_threads_creates_updates_and_forgets_a_site_rule() {
+        let mut rules = Vec::new();
+        apply_site_threads(&mut rules, "files.example.com", Some(1));
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].connections, Some(1));
+        apply_site_threads(&mut rules, "files.example.com", Some(4));
+        assert_eq!((rules.len(), rules[0].connections), (1, Some(4)));
+        apply_site_threads(&mut rules, "files.example.com", None);
+        assert!(
+            rules.is_empty(),
+            "a rule holding only the count disappears with it"
+        );
+        apply_site_threads(&mut rules, "files.example.com", None);
+        assert!(
+            rules.is_empty(),
+            "forgetting an unknown site creates nothing"
+        );
+    }
+
+    #[test]
+    fn forgetting_threads_keeps_the_rest_of_the_site_rule() {
+        let mut limited = rule("files.example.com", Some(4));
+        limited.bandwidth_limit = Some(1024);
+        let mut agent = rule("agent.example.com", Some(2));
+        agent.user_agent = Some("Custom".to_owned());
+        let mut login = rule("login.example.com", Some(8));
+        login.username = Some("user".to_owned());
+        login.password = "secret".to_owned();
+        let mut rules = vec![limited, agent, login, rule("*.example.com", Some(6))];
+        for site in [
+            "files.example.com",
+            "agent.example.com",
+            "login.example.com",
+        ] {
+            apply_site_threads(&mut rules, site, None);
+        }
+        assert!(rules
+            .iter()
+            .all(|r| r.pattern == "*.example.com" || r.connections.is_none()));
+        assert_eq!(rules.len(), 4, "speed, User-Agent and credentials survive");
+        assert_eq!(
+            rules
+                .iter()
+                .find(|r| r.pattern == "*.example.com")
+                .unwrap()
+                .connections,
+            Some(6),
+            "another rule is never touched"
+        );
+        assert!(
+            rules
+                .iter()
+                .find(|r| r.pattern == "login.example.com")
+                .unwrap()
+                .password
+                == "secret"
+        );
+    }
+
+    #[test]
+    fn a_chosen_thread_count_wins_even_on_hosts_with_special_handling() {
+        let microsoft = "https://software.download.prss.microsoft.com/dbazure/Win.iso?t=1";
+        assert_eq!(
+            site_connection_override(microsoft, None),
+            Some(16),
+            "default stays wide"
+        );
+        assert_eq!(site_connection_override(microsoft, Some(8)), Some(8));
+        assert_eq!(site_connection_override(microsoft, Some(1)), Some(1));
+        assert_eq!(
+            site_connection_override(microsoft, Some(32)),
+            Some(16),
+            "never above the engine's 16"
+        );
+        assert_eq!(
+            site_connection_override("https://example.com/f", Some(24)),
+            Some(16)
+        );
+        assert_eq!(
+            site_connection_override("https://example.com/f", None),
+            None
+        );
+        assert_eq!(
+            site_connection_override("https://pixeldrain.com/u/x", Some(16)),
+            Some(1),
+            "pixeldrain stays on one connection"
+        );
+    }
+
+    #[test]
+    fn installed_version_is_matched_against_release_tags_exactly() {
+        use super::installed_version_matches_tag as matches;
+        assert!(matches("nibiru-xtreme 0.2.0-alpha.2", "v0.2.0-alpha.2"));
+        assert!(matches("nibiru-xtreme 0.2.0-alpha.2", "0.2.0-alpha.2"));
+        assert!(!matches("nibiru-xtreme 0.2.0-alpha.2", "v0.2.0"));
+        assert!(!matches("nibiru-xtreme 0.2.0-alpha.2", "v0.2.0-alpha.3"));
+        assert!(!matches("nibiru-xtreme 0.2.0-alpha.10", "v0.2.0-alpha.1"));
+        assert!(!matches("nibiru-xtreme 10.2.0", "v0.2.0"));
+        assert!(matches("N_m3u8DL-RE 0.5.1-beta", "v0.5.1-beta"));
+        assert!(!matches("anything", "latest"));
+        assert!(!matches("anything", ""));
+    }
+
+    #[test]
+    fn engine_slot_names_follow_the_release_repository() {
+        use super::{engine_asset_prefix, engine_directory_name, engine_executable_name};
+        assert_eq!(
+            engine_asset_prefix("linuxhell/nibiru-xtreme"),
+            "nibiru-xtreme-"
+        );
+        assert_eq!(
+            engine_directory_name("linuxhell/nibiru-xtreme"),
+            "nibiru-xtreme"
+        );
+        assert!(engine_executable_name("linuxhell/nibiru-xtreme").starts_with("nibiru-xtreme"));
+        assert_eq!(engine_asset_prefix("someone/aria2-fork"), "aria2c-");
+        assert_eq!(engine_directory_name("someone/aria2-fork"), "aria2");
+        assert!(engine_executable_name("someone/aria2-fork").starts_with("aria2c"));
+    }
+
     #[test]
     fn aria2_release_source_migrates_deleted_default_and_preserves_custom_sources() {
         assert_eq!(
             super::default_aria2_release_repo(),
-            "FerroDownload/aria2-static-builds"
+            "linuxhell/nibiru-xtreme"
         );
         for (saved, expected) in [
-            ("linuxhell/aria2-ultra", "FerroDownload/aria2-static-builds"),
+            ("linuxhell/aria2-ultra", "linuxhell/nibiru-xtreme"),
             (
                 "FerroDownload/aria2-static-builds",
-                "FerroDownload/aria2-static-builds",
+                "linuxhell/nibiru-xtreme",
             ),
+            ("linuxhell/nibiru-xtreme", "linuxhell/nibiru-xtreme"),
             ("custom-owner/custom-builds", "custom-owner/custom-builds"),
         ] {
             let mut settings = super::UserSettings::default();

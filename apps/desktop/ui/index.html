@@ -79,8 +79,8 @@
 <input id="max-tasks" max="20" min="1" type="range" value="3"/>
 </label>
 <label>
-<span><b data-i18n="connections">Connections per download</b><output id="connections-value">16</output></span>
-<input id="connections" max="32" min="1" type="range" value="16"/>
+<span><b data-i18n="connections">Connections per download</b><output id="connections-value">8</output></span>
+<input id="connections" max="16" min="1" type="range" value="8"/>
 </label>
 <button data-i18n="defaults" id="default-limits" type="button">Default</button>
 </div></div><div class="pane" data-pane="language" hidden><section class="appearance-card">
@@ -135,7 +135,7 @@
 <label><span data-i18n="proxyUsername">Username</span><input autocomplete="off" id="host-rule-username" maxlength="512" type="text"/></label>
 <label><span data-i18n="proxyPassword">Password</span><input autocomplete="new-password" data-i18n-placeholder="hostRulePasswordHint" id="host-rule-password" maxlength="2048" placeholder="Leave blank to keep saved password" type="password"/></label>
 <label><span data-i18n="userAgent">User-Agent</span><input autocomplete="off" id="host-rule-user-agent" maxlength="1024" type="text"/></label>
-<label><span data-i18n="connections">Connections per download</span><input id="host-rule-connections" max="32" min="1" step="1" type="number"/></label>
+<label><span data-i18n="connections">Connections per download</span><input id="host-rule-connections" max="16" min="1" step="1" type="number"/></label>
 <label><span data-i18n="hostRuleBandwidth">Speed limit (MB/s)</span><input data-i18n-placeholder="hostRuleUnlimitedHint" id="host-rule-bandwidth" min="0" placeholder="0 or empty = unlimited" step="0.1" type="number"/></label>
 <label class="setting-toggle compact-toggle">
 <input id="host-rule-clear-password" type="checkbox"/>
@@ -352,8 +352,9 @@
 <div class="bandwidth-input"><input id="download-bandwidth-limit" max="10240" min="0" step="0.1" type="number" value="0"/><span data-i18n="megabytesPerSecond">MB/s</span><small data-i18n="unlimited">Unlimited</small></div>
 <section class="task-connections">
 <label for="task-connections"><span><b data-i18n="taskConnections">Threads for this download</b><small data-i18n="taskConnectionsHint">Only changes this task. Use 1 on sites that reject segmented downloads.</small></span><output id="task-connections-value">Automatic</output></label>
-<input id="task-connections" max="32" min="1" type="range" value="16"/>
-<div class="range-scale"><span>1</span><span>8</span><span>16</span><span>32</span></div>
+<input id="task-connections" max="16" min="1" type="range" value="8"/>
+<div class="range-scale"><span>1</span><span>4</span><span>8</span><span>16</span></div>
+<label class="remember-site-threads" for="remember-site-threads"><input id="remember-site-threads" type="checkbox"/><span><b data-i18n="rememberSiteThreads">Remember the thread count for this site</b><small id="remember-site-threads-note" data-i18n="rememberSiteThreadsHint">Saved for the site of this link. Untick and start the download to forget it.</small></span></label>
 </section>
 </details>
 
