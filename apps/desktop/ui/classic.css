@@ -362,7 +362,6 @@ dialog .close:focus-visible { outline: 2px solid var(--line-strong); outline-off
 .add-dialog-grid { grid-template-columns: 1fr; gap: 18px 0; }
 .add-dialog-analysis, .add-dialog-destination { display: flex; flex-direction: column; gap: 10px; }
 .add-dialog-grid .step { display: flex; align-items: center; gap: 10px; }
-.step-num { width: 24px; height: 24px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--strong); color: var(--on-strong); font-size: 12px; font-weight: 700; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .add-dialog-grid label { margin: 0 0 6px; font-weight: 600; }
 .add-dialog-grid input[type="text"], .add-dialog-grid select { height: 38px; border-radius: 9px; padding: 0 12px; }

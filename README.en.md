@@ -13,7 +13,7 @@ Free, portable download manager for Windows, Linux and macOS x64.
 | macOS x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-macos-x64-portable.zip) |
 | Chrome | [0.3.207 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.207.zip) |
 | Edge | [0.3.207 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.207.zip) |
-| Firefox | [0.3.206 XPI](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.206.xpi) |
+| Firefox | [0.3.207 XPI](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.207.xpi) |
 
 ![Downloads](assets/screenshots/downloads.png)
 
@@ -33,13 +33,15 @@ The thread slider is visible in the new-download dialog and takes priority over 
 - Apocalipse Link for authenticated TLS transfers between computers.
 - Per-site credentials in the operating system vault; Portuguese, English and Simplified Chinese interfaces.
 
-## Version 0.8.0
+## Version 0.8.1
+
+The download dialog no longer numbers its sections and shows up to **12 recent folders**, with the default location first. The release includes the **Mozilla-signed Firefox 0.3.207 extension**, alongside Chrome/Edge 0.3.207.
 
 **Convert file** is available from the download toolbar, the Add download window and completed download actions. Choose a local file or use a completed download. FFprobe detects the actual content and streams, even with a misleading extension. Embedded covers do not count as video. Audio-only MP4 offers audio formats; silent video offers video formats only. When audio and video are present, every frame is checked before classifying all-black video as audio; analysis can take time for long files.
 
 Outputs: PNG, lossless WebP, JPEG, TIFF and BMP; FLAC, WAV, MP3, M4A, Opus and Ogg; MP4, MKV, lossless MKV and WebM. Available formats depend on the installed FFmpeg encoders. Audio-track selection, progress and cancellation are supported. Conversion preserves the source and writes a separate file without overwriting existing files. Lossless encoding cannot recover detail already lost; JPEG and lossy formats use high quality. Recognized animated images are handled as video to preserve their frames.
 
-Install **FFmpeg with FFprobe** under **Settings → Tools**. The download dialog fills the available main-window area, with advanced options always visible and two columns where space allows. Extension thumbnails are retained, and invalid images try the YouTube fallback. Chrome/Edge: **0.3.207**; Firefox retains the signed **0.3.206** XPI.
+Install **FFmpeg with FFprobe** under **Settings → Tools**. The download dialog fills the available main-window area, with advanced options always visible and two columns where space allows. Extension thumbnails are retained, and invalid images try the YouTube fallback. Chrome/Edge: **0.3.207**; Firefox retains the signed **0.3.207** XPI.
 
 The window expands when **Add download** opens, giving the form, thread controls and advanced options more room. Closing the dialog restores the previous window size and position; scrolling remains available on smaller screens.
 
@@ -47,7 +49,7 @@ ED2K **Preview** becomes available after the first MD4-verified part: up to **9,
 
 Automatic retries preserve the current process's verified preview map while rechecking. The fresh result can invalidate parts; restarting the app or resuming manually requires verification again. If no peer has the remaining parts, the download stays incomplete, retains partial data and retries.
 
-This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.0**, Xtreme **0.2.1**, extension **0.3.206**.
+This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.1**, Xtreme **0.2.1**, extension **0.3.207**.
 
 ## Build and contribute
 

@@ -1680,10 +1680,10 @@ async function refreshDestinationHistory() {
     const destinations = await invoke("list_download_directories");
     const root = document.querySelector("#destination-list");
     root.replaceChildren();
-    // Only the six most recent folders are shown (the default folder first),
+    // Up to twelve folders are shown (the default folder first),
     // as cards: folder name on top, full path underneath.
     const current = document.querySelector("#destination").value;
-    for (const item of destinations.slice(0, 6)) {
+    for (const item of destinations.slice(0, 12)) {
       const row = document.createElement("div");
       row.className = "destination-card";
       row.classList.toggle("unavailable", !item.available);
