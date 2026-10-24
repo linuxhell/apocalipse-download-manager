@@ -424,3 +424,20 @@ dialog .close:focus-visible { outline: 2px solid var(--line-strong); outline-off
 #torrent-files > label > small { white-space: nowrap; }
 
 .logs-page { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 20px 16px; }
+
+/* Download and conversion forms use the main window's available area. */
+#add-dialog, #conversion-dialog { width: calc(100vw - 24px); max-width: none; height: calc(100vh - 56px); max-height: none; margin: 44px auto 12px; box-sizing: border-box; }
+#add-dialog form { width: 100%; max-width: none; height: 100%; max-height: none; min-width: 0; }
+#add-dialog .advanced-download { padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+#add-dialog .advanced-download h3 { margin: 0 0 10px; font-size: 14px; }
+#add-dialog .dialog-actions { flex-shrink: 0; flex-wrap: wrap; }
+.conversion-content { padding: 16px 20px; height: 100%; overflow-y: auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; }
+.conversion-content p { margin: 0; overflow-wrap: anywhere; }
+.conversion-content label { display: flex; flex-direction: column; gap: 6px; }
+#conversion-report { display: flex; flex-direction: column; gap: 12px; }
+#conversion-report[hidden] { display: none; }
+#conversion-tracks { white-space: pre-wrap; }
+#conversion-progress { width: 100%; flex-shrink: 0; }
+#conversion-status { user-select: text; }
+#conversion-dialog .dialog-actions { margin-top: auto; flex-wrap: wrap; }
+@media (min-width: 850px) { #add-dialog .add-dialog-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; } }

@@ -1,4 +1,10 @@
-# Apocalipse Download Manager — Extensão 0.3.206
+# Apocalipse Download Manager — Chrome/Edge 0.3.207 · Firefox 0.3.206
+
+## 0.8.0 — 2026-10-24
+
+- Conversão inteligente de arquivos locais e downloads concluídos: imagem, áudio e vídeo, três idiomas, detecção de trilhas e tela preta, progresso e cancelamento; preserva o original.
+- Janela de download ampliada, opções avançadas sempre visíveis.
+- Corrige preservação e alternativas de miniaturas do YouTube; extensão Chrome/Edge 0.3.207.
 
 ## 0.7.1 — 2026-10-22
 

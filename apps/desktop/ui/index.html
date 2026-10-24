@@ -28,6 +28,7 @@
 <button hidden="" id="clear-torrent-store" type="button">
 <span data-i18n="clearTorrentStore">Clear .torrents in data/torrents</span>
 </button>
+<button data-i18n="convertFile" id="open-converter" type="button">Convert file</button>
 <button class="primary" id="add">
 <span>＋</span><b data-i18n="addDownload">Add download</b>
 </button>
@@ -349,8 +350,8 @@
 <div id="destination-list"></div>
 </section>
 
-<details class="advanced-download">
-<summary data-i18n="advancedOptions">Advanced options</summary>
+<section class="advanced-download">
+<h3 data-i18n="advancedOptions">Advanced options</h3>
 <label data-i18n="mirrorUrls" for="mirrors">Mirror URLs (one per line)</label>
 <textarea id="mirrors" placeholder="https://mirror.example/file" rows="3"></textarea>
 <label data-i18n="priority" for="priority">Priority</label>
@@ -358,13 +359,14 @@
 <label data-i18n="downloadBandwidthLimit" for="download-bandwidth-limit">This download limit</label>
 <div class="bandwidth-input"><input id="download-bandwidth-limit" max="10240" min="0" step="0.1" type="number" value="0"/><span data-i18n="megabytesPerSecond">MB/s</span><small data-i18n="unlimited">Unlimited</small></div>
 
-</details>
+</section>
 
 </section>
 </div>
 </div>
 </div>
 <div class="dialog-actions">
+<button data-i18n="convertFile" id="download-open-converter" type="button">Convert file</button>
 <button data-dialog-close="" data-i18n="cancel" type="button">
             Cancel</button><button class="primary" data-i18n="analyze" id="analyze" type="button">
             Analyze</button><button class="primary" data-i18n="addDownload" hidden="" id="enqueue" type="button">
@@ -475,6 +477,25 @@
 <script src="task-list-state.js"></script>
 <script src="audio-format-policy.js"></script>
 
+<dialog id="conversion-dialog">
+<div class="conversion-content">
+<div class="dialog-head"><h2 data-i18n="convertFile">Convert file</h2><button class="close" id="conversion-close" data-i18n-aria="windowClose" type="button">×</button></div>
+<p data-i18n="conversionOriginal"></p>
+<label for="conversion-source" data-i18n="conversionSource">Source file</label>
+<div class="path-picker"><input id="conversion-source" type="text"/><button id="conversion-pick" data-i18n="conversionChoose" type="button">Choose file…</button><button id="conversion-analyze" data-i18n="conversionAnalyze" type="button">Analyze file</button></div>
+<section id="conversion-report" hidden>
+<h3 id="conversion-kind"></h3><b data-i18n="conversionTracks">Detected tracks</b><p id="conversion-tracks"></p>
+<p id="conversion-black" data-i18n="conversionBlack" hidden></p>
+<label for="conversion-format" data-i18n="conversionFormat">Convert to</label><select id="conversion-format"></select>
+<label id="conversion-track-row"><span data-i18n="conversionTrack">Audio track</span><select id="conversion-track"></select></label>
+<p id="conversion-quality"></p>
+</section>
+<label for="conversion-directory" data-i18n="saveTo">Save to</label><div class="path-picker"><input id="conversion-directory" type="text"/><button id="conversion-directory-pick" data-i18n="browse" type="button">Browse…</button></div>
+<progress id="conversion-progress" max="100" value="0"></progress><p id="conversion-status" role="status" aria-live="polite"></p>
+<div class="dialog-actions"><button id="conversion-result" data-i18n="openFolder" type="button" hidden>Open folder</button><button id="conversion-stop" data-i18n="conversionStop" type="button" hidden>Cancel operation</button><button class="primary" id="conversion-start" data-i18n="conversionStart" type="button" disabled>Convert</button></div>
+</div>
+</dialog>
+<script src="file-converter.js"></script>
 <script src="app.js"></script>
 <script src="diagnostics-panel.js"></script>
 </body>

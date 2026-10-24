@@ -19,10 +19,10 @@ function fixture(initial = {}, hook) {
   const settle=()=>vm.runInContext('siteThreadsSave',context);
   return {elements,rules,writes,errors,context,settle,refresh:()=>context.refreshSiteThreads(), change(n){const slider=elements['task-connections'];slider.value=String(n);slider.oninput({target:slider});slider.change();}, check(value){elements['remember-site-threads'].checked=value;elements['remember-site-threads'].change();}};
 }
-test('slider and memory box are visible outside collapsed advanced options',()=>{
-  const advanced=html.match(/<details class="advanced-download">[\s\S]*?<\/details>/)[0];
+test('slider and memory box are visible alongside always-visible advanced options',()=>{
+  const advanced=html.match(/<section class="advanced-download">[\s\S]*?<\/section>/)[0];
   assert.ok(!advanced.includes('task-connections'));
-  assert.ok(html.indexOf('id="task-connections"')<html.indexOf('<details class="advanced-download">'));
+  assert.ok(html.indexOf('id="task-connections"')<html.indexOf('<section class="advanced-download">'));
   assert.match(html,/id="task-connections" max="16" min="1" type="range" value="8"/);
   assert.ok(html.indexOf('id="remember-site-threads"')>html.indexOf('id="task-connections"'));
 });

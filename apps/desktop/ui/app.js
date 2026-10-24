@@ -695,6 +695,7 @@ const SPEED_EWMA_SECONDS = 2.0;
 const schedulerPaused = new Set();
 let selectionPointerActive = false;
 let historyQuery = "";
+for (const [language, entries] of Object.entries(window.AdmConversionCatalogs || {})) Object.assign(catalogs[language], entries);
 const t = (key) => catalogs[locale]?.[key] || catalogs.en[key] || key;
 const tf = (key, values) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), t(key));
 Object.assign(catalogs.en, {"stepLink": "Link", "stepFound": "Media found", "stepSave": "Save", "conflictInUse": "Some files are in use by another program: {files}. Close the program that is using them, or choose Rename.", "conflictProtected": "This location contains the running Apocalipse. Replacing or deleting it would break the app, so only Rename is offered.", "conflictFileEyebrow": "Existing file", "conflictFileTitle": "This file already exists", "conflictFileCopy": "A file with this name is already in {folder}. What do you want to do?", "conflictOnDisk": "In the folder", "conflictNew": "New download", "conflictExtractEyebrow": "Extraction", "conflictExtractTitle": "Files already exist at the destination", "conflictExtractCopy": "Extracting {archive} into {folder}: {count} files already exist.", "conflictMore": "+ {n} more files", "conflictRename": "Rename", "conflictReplace": "Replace", "conflictSkip": "Skip", "conflictRenameFileHint": "Keep both. The new file is saved as “{name}”", "conflictRenameExtractHint": "Extract into a new folder and keep the existing one", "conflictReplaceFileHint": "Delete the existing file and download the new one in its place", "conflictReplaceExtractHint": "Extract into the existing folder, overwriting only the files in conflict", "conflictSkipHint": "Do not download this file", "conflictDelete": "Delete the old folder and extract", "conflictDeleteHint": "Erase the current contents of the destination before extracting", "conflictRemember": "Use this choice for the next conflicts too", "conflictContinue": "Continue", "conflictConfirmDelete": "Confirm deletion", "conflictOriginalUntouched": "The original archive is not changed"});
@@ -914,34 +915,34 @@ function youtubeThumbnailFallback(source) {
   return id && /^[\w-]{6,20}$/.test(id) ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
 }
 
-async function resolveThumbnailChain(...urls) {
-  for (const url of urls) {
-    if (!url) continue;
-    const resolved = await resolveCachedThumbnail(url);
-    if (resolved) return resolved;
-  }
-  return null;
-}
-
 function loadPreviewThumbnail(image, url, fallbackUrl = null) {
-  image.dataset.thumbnailSource = url || fallbackUrl || "";
+  const sourceKey = `${Date.now()}:${Math.random()}`;
+  image.dataset.thumbnailSource = sourceKey;
   image.hidden = true;
+  image.onload = null;
+  image.onerror = null;
   image.removeAttribute("src");
-  if (!url && !fallbackUrl) return;
-  const sourceKey = image.dataset.thumbnailSource;
-  resolveThumbnailChain(url, fallbackUrl).then((resolved) => {
-    if (!resolved || image.dataset.thumbnailSource !== sourceKey) return;
-    url = sourceKey;
-    image.src = resolved;
-    image.hidden = false;
-    image.onerror = () => {
-      if (image.dataset.thumbnailSource !== url) return;
-      image.hidden = true;
-      image.removeAttribute("src");
-      thumbnailDataCache.delete(url);
-      thumbnailRetryAfter.set(url, Date.now() + 60_000);
-    };
-  });
+  const candidates = [...new Set([url, fallbackUrl].filter(Boolean))];
+  const next = async () => {
+    while (candidates.length && image.dataset.thumbnailSource === sourceKey) {
+      const candidate = candidates.shift();
+      const resolved = await resolveCachedThumbnail(candidate);
+      if (image.dataset.thumbnailSource !== sourceKey) return;
+      if (!resolved) continue;
+      image.onload = () => { if (image.dataset.thumbnailSource === sourceKey) image.hidden = false; };
+      image.onerror = () => {
+        if (image.dataset.thumbnailSource !== sourceKey) return;
+        image.hidden = true;
+        thumbnailDataCache.delete(candidate);
+        thumbnailRetryAfter.set(candidate, Date.now() + 60_000);
+        image.removeAttribute("src");
+        void next();
+      };
+      image.src = resolved;
+      return;
+    }
+  };
+  void next();
 }
 
 let lastDownloadRenderSignature = "";
@@ -1045,21 +1046,12 @@ function renderDownloads(force = false) {
     const requestedThumbnail = task.thumbnail || youtubeThumbnailFallback(task.source);
     row.classList.toggle("has-thumbnail", Boolean(requestedThumbnail));
     if (requestedThumbnail) {
-      resolveThumbnailChain(task.thumbnail, youtubeThumbnailFallback(task.source)).then((resolved) => {
-        if (!resolved || !row.isConnected) return;
-        const thumbnail = document.createElement("img");
-        thumbnail.className = "download-thumbnail";
-        thumbnail.alt = "";
-        thumbnail.src = resolved;
-        thumbnail.onerror = () => {
-          thumbnailDataCache.delete(requestedThumbnail);
-          thumbnailRetryAfter.set(requestedThumbnail, Date.now() + 60_000);
-          icon.replaceChildren(document.createTextNode("⇩"));
-          icon.classList.remove("has-thumbnail");
-        };
-        icon.replaceChildren(thumbnail);
-        icon.classList.add("has-thumbnail");
-      });
+      const thumbnail = document.createElement("img");
+      thumbnail.className = "download-thumbnail";
+      thumbnail.alt = "";
+      icon.replaceChildren(thumbnail);
+      icon.classList.add("has-thumbnail");
+      loadPreviewThumbnail(thumbnail, task.thumbnail, youtubeThumbnailFallback(task.source) || youtubeThumbnailFallback(task.referer));
     }
     const info = Object.assign(document.createElement("div"), {
       className: "download-info",
@@ -1230,6 +1222,13 @@ function renderDownloads(force = false) {
         exportDialog.showModal();
       };
       actions.append(exportButton);
+    }
+    if (key === "completed" && !isTorrent(task)) {
+      const convert = document.createElement("button");
+      convert.className = "task-action";
+      convert.textContent = t("convertFile");
+      convert.onclick = () => fileConverter.open(task.destination).catch(error => reportUiError("main", "conversion-open", error));
+      actions.append(convert);
     }
     if (key === "completed") {
       const verify = document.createElement("button");
@@ -1792,7 +1791,7 @@ function showCapturedPreview({ title, thumbnail, kind, duration, size, showForma
     Number.isFinite(duration) && duration > 0 ? `${t("duration")}: ${secondsLabel(duration)}` : "",
   ].filter(Boolean).join(" · ");
   document.querySelector("#media-format-control").hidden = !showFormats;
-  loadPreviewThumbnail(image, thumbnail);
+  loadPreviewThumbnail(image, thumbnail, youtubeThumbnailFallback(document.querySelector("#url").value) || youtubeThumbnailFallback(pendingReferer));
   panel.hidden = false;
 }
 
@@ -2574,13 +2573,13 @@ async function showMediaInspection(url, generation = analysisGeneration) {
     if (!analysisIsCurrent(generation)) return false;
     pendingTitle = media.title || pendingTitle;
     const ytFallback = youtubeThumbnailFallback(url);
-    pendingThumbnail = media.thumbnail || pendingThumbnail || ytFallback;
+    pendingThumbnail = pendingThumbnail || media.thumbnail || ytFallback;
     pendingDuration = Number.isFinite(media.duration) ? media.duration : pendingDuration;
     pendingIsLive = media.isLive === true;
     document.querySelector("#media-title").textContent = media.title;
     document.querySelector("#media-duration").textContent = media.duration ? `${t("duration")}: ${secondsLabel(media.duration)}` : "";
     const thumbnail = document.querySelector("#media-thumbnail");
-    loadPreviewThumbnail(thumbnail, media.thumbnail, ytFallback);
+    loadPreviewThumbnail(thumbnail, pendingThumbnail, ytFallback);
     for (const format of media.formats) option(select, format.selection, format.label);
     document.querySelector("#file-name").value = media.suggestedFileName;
     refreshAutoExtractOption();
@@ -2594,7 +2593,7 @@ async function showMediaInspection(url, generation = analysisGeneration) {
     // CAPTCHA or transient anti-bot response.
     showCapturedPreview({
       title: pendingTitle || t("mediaUnavailable"),
-      thumbnail: pendingThumbnail,
+      thumbnail: (pendingThumbnail ||= youtubeThumbnailFallback(url)),
       kind: pendingMediaKind || "video",
       duration: pendingDuration,
       size: pendingExpectedSize,
@@ -2971,7 +2970,7 @@ setInterval(async () => {
     // Never replace a link already being reviewed in the save dialog. This is
     // especially important on SPA feeds such as TikTok, where the clipboard may
     // still contain a previously copied reel while the extension sends a new one.
-    if (dialog.open) return;
+    if (dialog.open || document.querySelector("#conversion-dialog").open) return;
     pendingDiagnosticTrace = null;
     pendingReferer = null;
     pendingDuration = null;
@@ -3006,7 +3005,7 @@ setInterval(async () => {
 }, 750);
 let consumingBrowserAssistedDownload = false;
 async function consumeBrowserAssistedDownload() {
-  if (consumingBrowserAssistedDownload || dialog.open) return;
+  if (consumingBrowserAssistedDownload || dialog.open || document.querySelector("#conversion-dialog").open) return;
   consumingBrowserAssistedDownload = true;
   try {
     const request = await invoke("take_browser_assisted_download");
@@ -3051,7 +3050,7 @@ window.__TAURI__?.event?.listen?.("browser-assisted-ready", consumeBrowserAssist
 
 let consumingBridgeDownload = false;
 async function consumeBridgeDownload() {
-  if (consumingBridgeDownload) return;
+  if (consumingBridgeDownload || document.querySelector("#conversion-dialog").open) return;
   consumingBridgeDownload = true;
   try {
     const currentUrl = dialog.open ? document.querySelector("#url").value : null;
@@ -3064,7 +3063,7 @@ async function consumeBridgeDownload() {
     pendingDuration = Number.isFinite(request.duration) ? request.duration : null;
     pendingIsLive = false;
     pendingTitle = request.title || null;
-    pendingThumbnail = request.thumbnail || null;
+    pendingThumbnail = request.thumbnail || youtubeThumbnailFallback(request.url) || youtubeThumbnailFallback(request.pageUrl);
     pendingAudioUrl = request.audioUrl || null;
     pendingMediaKind = request.mediaKind || null;
     pendingExpectedSize = Number.isFinite(request.expectedSize) ? request.expectedSize : null;
@@ -3212,3 +3211,9 @@ document.querySelector("#download-list").addEventListener("scroll", () => {
   clearTimeout(listScrollTimer);
   listScrollTimer = setTimeout(() => list.classList.remove("is-scrolling"), 900);
 }, { passive: true });
+
+const fileConverter = window.createAdmFileConverter({ invoke, t, resize: resizeDownloadWindow, report: reportUiError });
+for (const id of ["open-converter", "download-open-converter"]) document.getElementById(id).onclick = () => {
+  if (dialog.open) dialog.close();
+  fileConverter.open().catch(error => reportUiError("main", "conversion-open", error));
+};

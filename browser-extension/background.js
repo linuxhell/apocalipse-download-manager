@@ -43,7 +43,7 @@ const portableThumbnail = async (value) => {
   try {
     const portable = await fetchThumbnailDataUrl(value);
     // A thumbnail is optional and must never prevent the media handoff.
-    return portable.length <= 180 * 1024 ? portable : null;
+    return portable.length <= 180 * 1024 ? portable : /^https?:/i.test(String(value)) ? String(value) : null;
   } catch {
     const original = String(value);
     if (/^https?:/i.test(original)) return original;

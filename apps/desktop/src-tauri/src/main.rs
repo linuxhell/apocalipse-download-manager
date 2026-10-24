@@ -2,6 +2,7 @@
 
 mod advanced_transports;
 mod audio_conversion;
+mod file_conversion;
 
 mod diagnostics;
 mod ed2k_ui;
@@ -16116,6 +16117,11 @@ fn main() {
             pick_url_list,
             activate_main_window,
             set_download_dialog_expanded,
+            file_conversion::inspect_conversion_file,
+            file_conversion::convert_local_file,
+            file_conversion::cancel_file_conversion,
+            file_conversion::pick_conversion_file,
+            file_conversion::reveal_converted_file,
             open_apocalipse_releases,
             open_paypal_donation,
             get_tool_statuses,

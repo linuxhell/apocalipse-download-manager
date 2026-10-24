@@ -83,6 +83,7 @@ jobs:
       - name: Verify prepared media with FFmpeg and FFprobe
         if: runner.os == 'Linux'
         run: |
+          cargo test -p apocalipse-core --locked smart_file_conversion_detects_streams_and_preserves_sources -- --ignored
           cargo test -p apocalipse-desktop --locked paired_preview_uses_real_mux_and_probe -- --ignored
           cargo test -p apocalipse-desktop --locked direct_audio_conversion_produces_requested_format_and_preserves_existing_files -- --ignored
       - name: Build desktop

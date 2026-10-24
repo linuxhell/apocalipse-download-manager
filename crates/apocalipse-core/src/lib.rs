@@ -1,6 +1,7 @@
 pub mod classifier;
 pub mod credentials;
 pub mod download;
+pub mod file_conversion;
 pub mod i18n;
 pub mod media;
 pub mod metalink;
