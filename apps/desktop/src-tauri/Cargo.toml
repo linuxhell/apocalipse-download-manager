@@ -39,4 +39,5 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 tempfile = "3"
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 igd-next = { version = "0.18", default-features = false, features = ["aio_tokio"] }

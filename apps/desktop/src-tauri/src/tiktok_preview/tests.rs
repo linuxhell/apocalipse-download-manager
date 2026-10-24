@@ -494,21 +494,28 @@ async fn successful_launcher_handoff_keeps_stream_alive_and_expires() {
     .await;
     let relay = Relay::bind(request(&origin.url), Client::builder().no_proxy()).unwrap();
     let target = relay.target.clone();
+    // Build the HTTP client before starting expiry: system trust-store loading
+    // on macOS can exceed a short wall-clock idle deadline.
+    let browser = client();
     let (sender, receiver) = oneshot::channel();
     let reporter: Reporter = Arc::new(|_, _| {});
     let server = tokio::spawn(relay.run(
         receiver,
         reporter,
-        Duration::from_millis(500),
-        Duration::from_secs(5),
+        Duration::from_secs(30),
+        Duration::from_secs(120),
     ));
     // Simulate a successful launcher exit before the existing player requests data.
     let keeper = tokio::spawn(retain_handoff_session(sender));
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    let answer = client().get(&target).send().await.unwrap();
+    tokio::task::yield_now().await;
+    assert!(!keeper.is_finished());
+    let answer = browser.get(&target).send().await.unwrap();
     assert_eq!(answer.status(), StatusCode::OK);
     assert_eq!(answer.text().await.unwrap(), "movie");
-    tokio::time::timeout(Duration::from_secs(6), server)
+    // Use real time for socket I/O, then virtual time for expiration. This
+    // verifies cleanup without racing CI load or sleeping for 30 seconds.
+    tokio::time::pause();
+    tokio::time::timeout(Duration::from_secs(121), server)
         .await
         .unwrap()
         .unwrap();
@@ -516,7 +523,8 @@ async fn successful_launcher_handoff_keeps_stream_alive_and_expires() {
         .await
         .unwrap()
         .unwrap();
-    assert!(client().get(&target).send().await.is_err());
+    tokio::time::resume();
+    assert!(browser.get(&target).send().await.is_err());
 }
 
 #[tokio::test]
