@@ -1,5 +1,9 @@
 # Apocalipse Download Manager — Chrome/Edge 0.3.207 · Firefox 0.3.207
 
+## 0.8.2 — 2026-10-24
+
+- Corrige título e controles sobrepostos na página Torrents; cabeçalho se adapta à janela compacta nos três idiomas.
+
 ## 0.8.1 — 2026-10-24
 
 - Remove os números das etapas da janela de download e mostra até 12 pastas recentes.

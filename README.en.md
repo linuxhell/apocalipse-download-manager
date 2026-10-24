@@ -33,7 +33,9 @@ The thread slider is visible in the new-download dialog and takes priority over 
 - Apocalipse Link for authenticated TLS transfers between computers.
 - Per-site credentials in the operating system vault; Portuguese, English and Simplified Chinese interfaces.
 
-## Version 0.8.1
+## Version 0.8.2
+
+Fixes the title overlapping torrent controls in the compact window. Header actions wrap onto another line when needed in all three languages.
 
 The download dialog no longer numbers its sections and shows up to **12 recent folders**, with the default location first. The release includes the **Mozilla-signed Firefox 0.3.207 extension**, alongside Chrome/Edge 0.3.207.
 
@@ -49,7 +51,7 @@ ED2K **Preview** becomes available after the first MD4-verified part: up to **9,
 
 Automatic retries preserve the current process's verified preview map while rechecking. The fresh result can invalidate parts; restarting the app or resuming manually requires verification again. If no peer has the remaining parts, the download stays incomplete, retains partial data and retries.
 
-This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.1**, Xtreme **0.2.1**, extension **0.3.207**.
+This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.2**, Xtreme **0.2.1**, extension **0.3.207**.
 
 ## Build and contribute
 

@@ -33,7 +33,9 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.8.1
+## Versão 0.8.2
+
+Corrige a sobreposição do título com os controles de torrents na janela compacta. Os botões passam para a linha seguinte quando necessário, nos três idiomas.
 
 A janela de download não usa mais números nas etapas e mostra até **12 pastas recentes**, com o caminho padrão primeiro. O release inclui a extensão Firefox **0.3.207 assinada pela Mozilla**, além de Chrome/Edge 0.3.207.
 
@@ -49,7 +51,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.1**, Xtreme **0.2.1**, extensão **0.3.207**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.2**, Xtreme **0.2.1**, extensão **0.3.207**.
 
 ## Compilar e contribuir
 
