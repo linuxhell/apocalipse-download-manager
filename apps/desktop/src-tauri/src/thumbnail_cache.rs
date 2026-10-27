@@ -399,6 +399,11 @@ fn sniff_image(bytes: &[u8]) -> Option<ImageKind> {
     None
 }
 
+// Windows replacement can transiently mark an open destination delete-pending.
+// Close the staging handle before publication and serialize in-process replaces;
+// readers still observe only complete files. No mutex is held across an await.
+static CACHE_PUBLICATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 async fn write_cache_atomic(cache_dir: &Path, target: &Path, bytes: &[u8]) -> Result<(), String> {
     let directory = cache_dir.to_path_buf();
     let target = target.to_path_buf();
@@ -409,6 +414,8 @@ async fn write_cache_atomic(cache_dir: &Path, target: &Path, bytes: &[u8]) -> Re
             .tempfile_in(directory)
             .map_err(|e| e.to_string())?;
         std::io::Write::write_all(staged.as_file_mut(), &bytes).map_err(|e| e.to_string())?;
+        let staged = staged.into_temp_path();
+        let _publication = CACHE_PUBLICATION.lock().map_err(|e| e.to_string())?;
         staged.persist(target).map_err(|e| e.error.to_string())?;
         Ok(())
     })

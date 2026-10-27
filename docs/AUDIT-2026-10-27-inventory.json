@@ -24,7 +24,7 @@
     {
       "path": "apps/desktop/src-tauri/Cargo.toml",
       "lines": 43,
-      "sha256": "120a86f790ae55c4bed7803cbf084352c4f656f7647025bbebdf5606aad04a3a"
+      "sha256": "6d5ed82eb3e174e72b754bce4395c0deeedc1e90bb8d4ebfa69bebaa276572f7"
     },
     {
       "path": "apps/desktop/src-tauri/build.rs",
@@ -123,8 +123,8 @@
     },
     {
       "path": "apps/desktop/src-tauri/src/thumbnail_cache.rs",
-      "lines": 606,
-      "sha256": "63b329cf4a057e629c5577d7a6730ae938f2811920fddd2597bb3c0d3b1530b8"
+      "lines": 613,
+      "sha256": "684782988485229ade2b3464f1337118ac6ad9d32119ca3cc18a7e471c9f0503"
     },
     {
       "path": "apps/desktop/src-tauri/src/tiktok_preview.rs",
