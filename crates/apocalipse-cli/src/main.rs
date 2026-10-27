@@ -120,11 +120,10 @@ async fn main() -> Result<()> {
     let elapsed = started.elapsed();
     if benchmark {
         let elapsed_ms = elapsed.as_millis() as u64;
-        let average_bytes_per_second = if elapsed_ms > 0 {
-            completed_bytes.saturating_mul(1000) / elapsed_ms
-        } else {
-            completed_bytes
-        };
+        let average_bytes_per_second = completed_bytes
+            .saturating_mul(1000)
+            .checked_div(elapsed_ms)
+            .unwrap_or(completed_bytes);
         println!(
             "{}",
             serde_json::to_string_pretty(&json!({

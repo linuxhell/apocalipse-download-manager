@@ -33,7 +33,9 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.8.2
+## Versão 0.8.3
+
+Corrige nomes de filmes com espaços ou pontos finais no nome-base e mantém temporários de mídia em uma pasta própria, identificada por tarefa. A finalização seleciona somente a mídia produzida e preserva arquivos existentes. O número de conexões escolhido também vale para fragmentos do YouTube. Inclui correções de concorrência no cache de thumbnails e validação de torrents pelo Xtreme 0.2.2. Veja a [auditoria e seus limites](docs/AUDIT-2026-10-27.md).
 
 Corrige a sobreposição do título com os controles de torrents na janela compacta. Os botões passam para a linha seguinte quando necessário, nos três idiomas.
 
@@ -51,7 +53,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.2**, Xtreme **0.2.1**, extensão **0.3.207**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.3**, Xtreme **0.2.2**, extensão **0.3.207**.
 
 ## Compilar e contribuir
 

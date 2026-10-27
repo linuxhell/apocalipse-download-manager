@@ -1,5 +1,13 @@
 # Apocalipse Download Manager — Chrome/Edge 0.3.207 · Firefox 0.3.207
 
+## 0.8.3 — 2026-10-27
+
+- Normaliza nomes portáveis, inclusive espaços/pontos no nome-base, limites Unicode e nomes reservados do Windows.
+- Isola temporários de mídia por tarefa; finaliza sem sobrescrever arquivos e não remove pastas por semelhança de nome.
+- Respeita conexões escolhidas no YouTube, corrige gravações simultâneas de thumbnails e valida extrações antes da publicação.
+- Reutiliza o parser de torrents do Xtreme 0.2.2, com suporte v2/híbrido, e remove o parser duplicado.
+- Mantém Firefox 0.3.207 assinado e os recursos da versão anterior. Auditoria: docs/AUDIT-2026-10-27.md.
+
 ## 0.8.2 — 2026-10-24
 
 - Corrige título e controles sobrepostos na página Torrents; cabeçalho se adapta à janela compacta nos três idiomas.

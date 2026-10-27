@@ -2758,146 +2758,35 @@ async fn upload_remote_link_file(
     .map_err(|error| error.to_string())?
 }
 
-enum BValue {
-    Int(i64),
-    Bytes(Vec<u8>),
-    List(Vec<BValue>),
-    Dict(HashMap<Vec<u8>, BValue>),
-}
-
-fn parse_bencode(data: &[u8], position: &mut usize) -> Result<BValue, String> {
-    parse_bencode_at(data, position, 0)
-}
-
-fn parse_bencode_at(data: &[u8], position: &mut usize, depth: usize) -> Result<BValue, String> {
-    if depth > 64 {
-        return Err("invalid_torrent".to_owned());
-    }
-    let byte = *data
-        .get(*position)
-        .ok_or_else(|| "invalid_torrent".to_owned())?;
-    match byte {
-        b'i' => {
-            *position += 1;
-            let end = data[*position..]
-                .iter()
-                .position(|value| *value == b'e')
-                .ok_or_else(|| "invalid_torrent".to_owned())?
-                + *position;
-            let value = std::str::from_utf8(&data[*position..end])
-                .map_err(|_| "invalid_torrent")?
-                .parse()
-                .map_err(|_| "invalid_torrent")?;
-            *position = end + 1;
-            Ok(BValue::Int(value))
-        }
-        b'l' => {
-            *position += 1;
-            let mut values = Vec::new();
-            while data.get(*position) != Some(&b'e') {
-                values.push(parse_bencode_at(data, position, depth + 1)?);
-            }
-            *position += 1;
-            Ok(BValue::List(values))
-        }
-        b'd' => {
-            *position += 1;
-            let mut values = HashMap::new();
-            while data.get(*position) != Some(&b'e') {
-                let BValue::Bytes(key) = parse_bencode_at(data, position, depth + 1)? else {
-                    return Err("invalid_torrent".to_owned());
-                };
-                values.insert(key, parse_bencode_at(data, position, depth + 1)?);
-            }
-            *position += 1;
-            Ok(BValue::Dict(values))
-        }
-        b'0'..=b'9' => {
-            let colon = data[*position..]
-                .iter()
-                .position(|value| *value == b':')
-                .ok_or_else(|| "invalid_torrent".to_owned())?
-                + *position;
-            let length: usize = std::str::from_utf8(&data[*position..colon])
-                .map_err(|_| "invalid_torrent")?
-                .parse()
-                .map_err(|_| "invalid_torrent")?;
-            let start = colon + 1;
-            let end = start
-                .checked_add(length)
-                .filter(|end| *end <= data.len())
-                .ok_or_else(|| "invalid_torrent".to_owned())?;
-            *position = end;
-            Ok(BValue::Bytes(data[start..end].to_vec()))
-        }
-        _ => Err("invalid_torrent".to_owned()),
-    }
-}
-
-fn btext(value: Option<&BValue>) -> String {
-    match value {
-        Some(BValue::Bytes(bytes)) => String::from_utf8_lossy(bytes).into_owned(),
-        _ => String::new(),
-    }
-}
-
 fn inspect_torrent_file(path: &Path) -> Result<TorrentInspection, String> {
-    let data = fs::read(path).map_err(|error| error.to_string())?;
-    inspect_torrent_bytes(&data)
+    let mut bytes = Vec::new();
+    fs::File::open(path)
+        .map_err(|error| error.to_string())?
+        .take(nibiru_xtreme::bittorrent::metainfo::MAX_TORRENT_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    inspect_torrent_bytes(&bytes)
 }
 
 fn inspect_torrent_bytes(data: &[u8]) -> Result<TorrentInspection, String> {
-    let mut position = 0;
-    let BValue::Dict(root) = parse_bencode(data, &mut position)? else {
-        return Err("invalid_torrent".to_owned());
-    };
-    let Some(BValue::Dict(info)) = root.get(b"info".as_slice()) else {
-        return Err("invalid_torrent".to_owned());
-    };
-    let name = btext(
-        info.get(b"name.utf-8".as_slice())
-            .or_else(|| info.get(b"name".as_slice())),
-    );
-    let mut files = Vec::new();
-    if let Some(BValue::List(entries)) = info.get(b"files".as_slice()) {
-        for (offset, entry) in entries.iter().enumerate() {
-            let BValue::Dict(file) = entry else {
-                continue;
-            };
-            let size = match file.get(b"length".as_slice()) {
-                Some(BValue::Int(value)) if *value >= 0 => *value as u64,
-                _ => 0,
-            };
-            let parts = match file
-                .get(b"path.utf-8".as_slice())
-                .or_else(|| file.get(b"path".as_slice()))
-            {
-                Some(BValue::List(parts)) => parts
-                    .iter()
-                    .map(|part| btext(Some(part)))
-                    .filter(|part| !part.is_empty())
-                    .collect::<Vec<_>>(),
-                _ => Vec::new(),
-            };
-            files.push(TorrentFileInfo {
-                index: offset + 1,
-                path: parts.join("/"),
-                size,
-            });
-        }
-    } else if let Some(BValue::Int(length)) = info.get(b"length".as_slice()) {
-        files.push(TorrentFileInfo {
-            index: 1,
-            path: name.clone(),
-            size: (*length).max(0) as u64,
-        });
-    }
-    if files.is_empty() {
-        return Err("torrent_has_no_files".to_owned());
-    }
+    // The UI and the transfer engine must validate and map the same metadata.
+    // This also supports v2/hybrid file trees instead of a second v1-only parser.
+    let torrent = nibiru_xtreme::bittorrent::metainfo::Torrent::from_torrent_file(data)
+        .map_err(|error| error.to_string())?;
+    let files = torrent
+        .files
+        .iter()
+        .enumerate()
+        .filter(|(_, file)| !file.pad)
+        .map(|(index, file)| TorrentFileInfo {
+            index: index + 1,
+            path: file.path.join("/"),
+            size: file.length,
+        })
+        .collect();
     Ok(TorrentInspection {
-        total_size: files.iter().map(|file| file.size).sum(),
-        name,
+        total_size: torrent.total_length,
+        name: torrent.name,
         files,
         torrent_path: None,
     })
@@ -2916,6 +2805,9 @@ fn persist_torrent_bytes(state: &AppState, bytes: &[u8]) -> Result<PathBuf, Stri
     let directory = torrent_store_directory(state)?;
     let digest = format!("{:x}", Sha256::digest(bytes));
     let title = validate_file_name(&sanitize_title_for_filename(&inspection.name))?;
+    // Keep the full digest: truncating the complete name could remove identity.
+    // 40 Unicode scalars + suffix fit both UTF-8 and UTF-16 component limits.
+    let title = title.chars().take(40).collect::<String>();
     let path = directory.join(format!("{title}--{digest}.torrent"));
     if !path.is_file() {
         fs::write(&path, bytes).map_err(|error| error.to_string())?;
@@ -3487,17 +3379,7 @@ fn extraction_args(kind: ExtractorKind, archive: &Path, destination: &Path) -> V
 }
 
 fn archive_member_is_safe(name: &str) -> bool {
-    let normalized = name.replace('\\', "/");
-    if normalized.trim().is_empty() || normalized.starts_with('/') {
-        return false;
-    }
-    let path = Path::new(&normalized);
-    path.components().all(|component| {
-        matches!(
-            component,
-            std::path::Component::Normal(_) | std::path::Component::CurDir
-        )
-    })
+    apocalipse_core::file_names::portable_relative_path(name)
 }
 
 fn collect_lsar_names(value: &serde_json::Value, output: &mut Vec<String>) {
@@ -3576,11 +3458,7 @@ fn list_archive_members(
                 if !inside_members {
                     continue;
                 }
-                if let Some(name) = line
-                    .strip_prefix("Path = ")
-                    .map(str::trim)
-                    .filter(|name| !name.is_empty())
-                {
+                if let Some(name) = line.strip_prefix("Path = ").filter(|name| !name.is_empty()) {
                     members.push(name.to_owned());
                 }
             }
@@ -3612,6 +3490,15 @@ fn list_archive_members(
 }
 
 fn move_tree(source: &Path, destination: &Path) -> Result<(), String> {
+    if fs::symlink_metadata(source)
+        .map_err(|e| e.to_string())?
+        .file_type()
+        .is_symlink()
+        || fs::symlink_metadata(destination).is_ok_and(|m| m.file_type().is_symlink())
+    {
+        return Err("archive_contains_unsafe_path".to_owned());
+    }
+
     if source.is_dir() {
         fs::create_dir_all(destination).map_err(|error| error.to_string())?;
         for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
@@ -3798,11 +3685,11 @@ fn extract_archive_safely(
     }
     let _members = list_archive_members(&executable, kind, archive)?;
     let parent = archive.parent().unwrap_or_else(|| Path::new("."));
-    let staging = parent.join(format!(
-        ".apocalipse-extract-{}",
-        uuid::Uuid::new_v4().simple()
-    ));
-    fs::create_dir_all(&staging).map_err(|error| error.to_string())?;
+    let staging_guard = tempfile::Builder::new()
+        .prefix(".apocalipse-extract-")
+        .tempdir_in(parent)
+        .map_err(|error| error.to_string())?;
+    let staging = staging_guard.path().to_path_buf();
     let mut command = Command::new(&executable);
     command.args(extraction_args(kind, archive, &staging));
     #[cfg(target_os = "windows")]
@@ -3826,6 +3713,8 @@ fn extract_archive_safely(
             format!("archive_extraction_failed:{detail}")
         });
     }
+    apocalipse_core::file_names::validate_extracted_tree(&staging)
+        .map_err(|error| error.to_string())?;
     let entries = fs::read_dir(&staging)
         .map_err(|error| error.to_string())?
         .filter_map(Result::ok)
@@ -6671,44 +6560,20 @@ async fn download_with_mirrors(
     engine.download_from_sources(request, sources, events).await
 }
 
-fn finalize_media_page_download(
+async fn finalize_media_page_download(
     app: &tauri::AppHandle,
     id: DownloadId,
     requested_destination: &Path,
     work_directory: &Path,
 ) -> Result<(), String> {
-    let mut candidates = fs::read_dir(work_directory)
-        .map_err(|error| error.to_string())?
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            let metadata = entry.metadata().ok()?;
-            let name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
-            (metadata.is_file()
-                && metadata.len() > 0
-                && !name.contains(".part")
-                && !name.ends_with(".ytdl"))
-            .then_some((path, metadata.len()))
-        })
-        .collect::<Vec<_>>();
-    candidates.sort_by_key(|(_, size)| std::cmp::Reverse(*size));
-    let (source, size) = candidates
-        .into_iter()
-        .next()
-        .ok_or_else(|| "yt_dlp_final_file_missing".to_owned())?;
-    let source_extension = source.extension().and_then(|value| value.to_str());
-    let destination = if requested_destination.extension().is_none() {
-        source_extension
-            .map(|extension| requested_destination.with_extension(extension))
-            .unwrap_or_else(|| requested_destination.to_path_buf())
-    } else {
-        requested_destination.to_path_buf()
-    };
-    if destination.exists() {
-        return Err("yt_dlp_destination_already_exists".to_owned());
-    }
-    fs::copy(&source, &destination).map_err(|error| error.to_string())?;
-    let _ = fs::remove_dir_all(work_directory);
+    let workspace = work_directory.to_path_buf();
+    let requested = requested_destination.to_path_buf();
+    let (destination, size) = tokio::task::spawn_blocking(move || {
+        apocalipse_core::external_output::commit(&workspace, &requested)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())?;
     update_task(app, id, true, |item| {
         item.destination = destination.clone();
         item.received = size;
@@ -6717,10 +6582,9 @@ fn finalize_media_page_download(
     diagnostic_log(
         &app.state::<AppState>(),
         "INFO",
-        "yt_dlp.output_committed",
+        "external.output_committed",
         &format!(
-            "task={id} bytes={size} extension={} destination={}",
-            source_extension.unwrap_or("none"),
+            "task={id} bytes={size} destination={}",
             destination.display()
         ),
     );
@@ -7489,7 +7353,9 @@ async fn run_external_download(
         });
     });
     let directory = task.destination.parent().unwrap_or_else(|| Path::new("."));
-    let media_work_directory = (kind == DownloadKind::MediaPage).then(|| {
+    let managed_hls = kind == DownloadKind::Hls
+        && audio_conversion::format(task.format_selection.as_deref()).is_none();
+    let media_work_directory = (kind == DownloadKind::MediaPage || managed_hls).then(|| {
         app.state::<AppState>()
             .queue_path
             .parent()
@@ -7653,15 +7519,9 @@ async fn run_external_download(
             if bandwidth_limit > 0 {
                 command.arg("--limit-rate").arg(bandwidth_limit.to_string());
             }
-            let media_connections =
-                if task.source.contains("youtube.com/") || task.source.contains("youtu.be/") {
-                    task_connections.max(16)
-                } else {
-                    task_connections
-                };
             command
                 .arg("--concurrent-fragments")
-                .arg(media_connections.to_string());
+                .arg(task_connections.to_string());
             if task.is_live {
                 command.args(["--live-from-start", "--hls-use-mpegts"]);
             }
@@ -7833,28 +7693,22 @@ async fn run_external_download(
                 command
             } else {
                 let mut command = tokio::process::Command::new(&tools.2);
-                // N_m3u8DL-RE creates its segment workspace relative to the
-                // process directory unless an explicit temporary directory is
-                // supplied. A GUI application launched on Windows can inherit
-                // C:\Windows\System32, where regular users cannot write.
-                command.current_dir(directory);
+                let workspace = media_work_directory
+                    .as_deref()
+                    .expect("managed HLS workspace");
+                command.current_dir(workspace);
                 if let Some(proxy_url) = proxy_url.as_deref() {
                     command.arg("--custom-proxy").arg(proxy_url);
                 }
-                let stem = task
-                    .destination
-                    .file_stem()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("download");
                 command
                     .arg(&task.source)
                     .arg("--save-dir")
-                    .arg(directory)
+                    .arg(workspace)
                     .arg("--tmp-dir")
-                    .arg(directory)
+                    .arg(workspace)
                     .args([
                         "--save-name",
-                        stem,
+                        apocalipse_core::external_output::OUTPUT_STEM,
                         "--auto-select",
                         "--concurrent-download",
                         "--download-retry-count",
@@ -7966,6 +7820,13 @@ async fn run_external_download(
                     biased;
                     _ = &mut cancellation => {
                         terminate_process_tree(&mut child).await;
+                        let _ = output.await;
+                        let _ = errors.await;
+                        if let Some(workspace) = media_work_directory.as_deref() {
+                            for name in ["browser-cookies.txt", "yt-dlp-credentials.txt"] {
+                                let _ = fs::remove_file(workspace.join(name));
+                            }
+                        }
                         return;
                     }
                     status = child.wait() => status,
@@ -8063,10 +7924,14 @@ async fn run_external_download(
     };
     if result.is_ok() {
         if let Some(work_directory) = media_work_directory.as_deref() {
-            result = finalize_media_page_download(&app, id, &task.destination, work_directory);
+            result =
+                finalize_media_page_download(&app, id, &task.destination, work_directory).await;
         }
-    } else if let Some(work_directory) = media_work_directory.as_deref() {
-        let _ = fs::remove_dir_all(work_directory);
+    }
+    if let Some(work_directory) = media_work_directory.as_deref() {
+        for name in ["browser-cookies.txt", "yt-dlp-credentials.txt"] {
+            let _ = fs::remove_file(work_directory.join(name));
+        }
     }
     match result {
         Ok(()) => {
@@ -9337,87 +9202,8 @@ fn hls_signed_url_expired(url: &str) -> bool {
     })
 }
 
-/// Windows treats these device names as reserved regardless of case or
-/// extension (`CON.txt`, `com1.tar.gz`, ...); matching is against the
-/// component before the first `.`, as Windows itself does.
-fn windows_reserved_file_stem(name: &str) -> bool {
-    let base = name.split('.').next().unwrap_or(name);
-    matches!(
-        base.to_ascii_uppercase().as_str(),
-        "CON"
-            | "PRN"
-            | "AUX"
-            | "NUL"
-            | "COM1"
-            | "COM2"
-            | "COM3"
-            | "COM4"
-            | "COM5"
-            | "COM6"
-            | "COM7"
-            | "COM8"
-            | "COM9"
-            | "LPT1"
-            | "LPT2"
-            | "LPT3"
-            | "LPT4"
-            | "LPT5"
-            | "LPT6"
-            | "LPT7"
-            | "LPT8"
-            | "LPT9"
-    )
-}
-
 fn validate_file_name(name: &str) -> Result<String, String> {
-    let name = name.trim();
-    if name.is_empty()
-        || name == "."
-        || name == ".."
-        || name
-            .chars()
-            .any(|character| "<>:\"/\\|?*".contains(character))
-    {
-        return Err("invalid_file_name".to_owned());
-    }
-    let name = if windows_reserved_file_stem(name) {
-        format!("_{name}")
-    } else {
-        name.to_owned()
-    };
-    let name = name.as_str();
-    // Keep enough headroom for yt-dlp's temporary format suffixes and for the
-    // Windows legacy MAX_PATH limit. Preserve the extension while shortening
-    // unusually long titles from social networks.
-    const MAX_FILE_NAME_UTF16: usize = 120;
-    if name.encode_utf16().count() <= MAX_FILE_NAME_UTF16 {
-        return Ok(name.to_owned());
-    }
-    let path = Path::new(name);
-    let extension = path.extension().and_then(|value| value.to_str());
-    let extension_chars = extension.map_or(0, |value| value.encode_utf16().count() + 1);
-    let stem_limit = MAX_FILE_NAME_UTF16.saturating_sub(extension_chars).max(1);
-    let mut used = 0;
-    let stem = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("download")
-        .chars()
-        .take_while(|character| {
-            let width = character.len_utf16();
-            if used + width > stem_limit {
-                false
-            } else {
-                used += width;
-                true
-            }
-        })
-        .collect::<String>()
-        .trim_end_matches([' ', '.'])
-        .to_owned();
-    Ok(extension
-        .map(|extension| format!("{stem}.{extension}"))
-        .unwrap_or(stem))
+    apocalipse_core::file_names::portable_file_name(name).map_err(str::to_owned)
 }
 
 fn append_source_extension(file_name: String, source: &str, kind: DownloadKind) -> String {
@@ -15610,23 +15396,6 @@ async fn remove_downloads(
                 ) && path == task.destination;
                 remove_path_with_retry(&path, torrent_root).await?;
             }
-            for path in derived_output_candidates(task) {
-                let Ok(metadata) = fs::metadata(&path) else {
-                    continue;
-                };
-                if !produced_after_task_creation(&metadata, task.created_at) {
-                    state.diagnostics.record(
-                        "task.removal_preserved_unrelated",
-                        "INFO",
-                        Some(&removal_trace),
-                        Some(&task.id.to_string()),
-                        serde_json::json!({"directory": metadata.is_dir()}),
-                    );
-                    continue;
-                }
-                let hls_workspace = hls_workspace_path(task).as_ref() == Some(&path);
-                remove_path_with_retry(&path, hls_workspace).await?;
-            }
             if delete_torrent_metadata {
                 if let Some(path) = task.torrent_metadata_path.as_deref() {
                     if is_managed_torrent_metadata_path(&state, path) {
@@ -15651,7 +15420,10 @@ async fn remove_downloads(
                     }
                 }
             }
-            if matches!(classify_url(&task.source), Some(DownloadKind::MediaPage)) {
+            if matches!(
+                classify_url(&task.source),
+                Some(DownloadKind::MediaPage | DownloadKind::Hls)
+            ) {
                 if let Some(parent) = state.queue_path.parent() {
                     let workspace = parent.join("media-work").join(task.id.to_string());
                     remove_path_with_retry(&workspace, true).await?;
@@ -15774,74 +15546,6 @@ fn download_paths(task: &DownloadTask) -> Vec<PathBuf> {
         paths.push(recording_source);
     }
     paths
-}
-
-/// Paths an external engine *may* have produced next to the destination
-/// under a different extension (N_m3u8DL-RE/yt-dlp pick the container) plus
-/// the HLS segment workspace. These are guesses by name, so they are only
-/// considered for the kinds that produce them, and the caller only deletes
-/// one that `produced_after_task_creation` confirms is not an older file.
-///
-/// Previously every task - a plain HTTP `song.flac` or a torrent named
-/// `Movie` included - swept `<stem>.mp4/.mkv/.mp3/...` in the same folder,
-/// so "remove from disk" also deleted the user's own unrelated files that
-/// merely shared the name.
-fn derived_output_candidates(task: &DownloadTask) -> Vec<PathBuf> {
-    let kind = classify_url(&task.source);
-    if !matches!(kind, Some(DownloadKind::Hls | DownloadKind::MediaPage)) {
-        return Vec::new();
-    }
-    let mut candidates = Vec::new();
-    let stem = task
-        .destination
-        .file_stem()
-        .and_then(|value| value.to_str());
-    if let (Some(parent), Some(stem)) = (task.destination.parent(), stem) {
-        for extension in [
-            "mp4", "mkv", "ts", "webm", "m4a", "mp3", "wav", "flac", "opus", "aac",
-        ] {
-            let candidate = parent.join(format!("{stem}.{extension}"));
-            if candidate != task.destination && !candidates.contains(&candidate) {
-                candidates.push(candidate);
-            }
-        }
-    }
-    if kind == Some(DownloadKind::Hls) {
-        if let Some(workspace) = hls_workspace_path(task) {
-            if !candidates.contains(&workspace) {
-                candidates.push(workspace);
-            }
-        }
-    }
-    candidates
-}
-
-/// True unless the path demonstrably predates the task (older than its
-/// creation, with a little slack for clock granularity). Files use their
-/// modification time; directories their creation time where the platform
-/// reports it, since adding entries updates a directory's mtime.
-fn produced_after_task_creation(metadata: &std::fs::Metadata, created_at: u64) -> bool {
-    let timestamp = if metadata.is_dir() {
-        metadata.created().ok()
-    } else {
-        metadata.modified().ok()
-    };
-    let Some(seconds) = timestamp
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_secs())
-    else {
-        return true;
-    };
-    created_at == 0 || seconds.saturating_add(5) >= created_at
-}
-
-fn hls_workspace_path(task: &DownloadTask) -> Option<PathBuf> {
-    let parent = task.destination.parent()?;
-    let stem = task.destination.file_stem()?;
-    if stem.is_empty() {
-        return None;
-    }
-    Some(parent.join(stem))
 }
 
 async fn remove_path_with_retry(path: &Path, allow_directory: bool) -> Result<(), String> {
@@ -17475,20 +17179,14 @@ mod tests {
     }
 
     #[test]
-    fn download_paths_include_hls_output_and_partial_file() {
+    fn download_paths_are_exact_even_for_external_media() {
         let task = DownloadTask::new(
-            "https://edge-hls.growcdnssedge.com/hls/157651625/master/157651625.m3u8",
-            PathBuf::from("C:/Downloads/157651625.mp4"),
+            "https://example.test/film.m3u8",
+            PathBuf::from("C:/Downloads/Film.mp4"),
         );
-        let paths = download_paths(&task);
-        assert!(paths.contains(&PathBuf::from("C:/Downloads/157651625.mp4")));
-        assert!(paths.contains(&partial_path(&task.destination)));
-        let derived = derived_output_candidates(&task);
-        assert!(derived.contains(&PathBuf::from("C:/Downloads/157651625")));
-        assert!(derived.contains(&PathBuf::from("C:/Downloads/157651625.mkv")));
         assert_eq!(
-            hls_workspace_path(&task),
-            Some(PathBuf::from("C:/Downloads/157651625"))
+            download_paths(&task),
+            vec![task.destination.clone(), partial_path(&task.destination)]
         );
     }
 
@@ -17507,45 +17205,6 @@ mod tests {
             root.join("fresh")
         );
         fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn removing_a_plain_download_never_sweeps_same_named_user_files() {
-        let http = DownloadTask::new(
-            "https://example.com/music/song.flac",
-            PathBuf::from("C:/Music/song.flac"),
-        );
-        assert!(derived_output_candidates(&http).is_empty());
-        assert!(!download_paths(&http).contains(&PathBuf::from("C:/Music/song.mp3")));
-        let torrent = DownloadTask::new(
-            "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567",
-            PathBuf::from("C:/Videos/Movie"),
-        );
-        assert!(derived_output_candidates(&torrent).is_empty());
-    }
-
-    #[test]
-    fn derived_outputs_older_than_the_task_are_preserved() {
-        let root = std::env::temp_dir().join(format!("adm-derived-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&root).unwrap();
-        let file = root.join("clip.mkv");
-        fs::write(&file, b"x").unwrap();
-        let metadata = fs::metadata(&file).unwrap();
-        let now = epoch_seconds();
-        // Written now, task created now: produced by the task.
-        assert!(produced_after_task_creation(&metadata, now));
-        // Task created an hour after the file was last written: unrelated.
-        assert!(!produced_after_task_creation(&metadata, now + 3600));
-        // Legacy queue entries without a creation time keep the old behavior.
-        assert!(produced_after_task_creation(&metadata, 0));
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[tokio::test]
-    async fn removing_a_missing_file_is_already_successful() {
-        let path =
-            std::env::temp_dir().join(format!("apocalipse-missing-{}.mp4", uuid::Uuid::new_v4()));
-        assert!(remove_path_with_retry(&path, false).await.is_ok());
     }
 
     #[test]

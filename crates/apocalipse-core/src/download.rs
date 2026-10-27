@@ -530,7 +530,7 @@ impl DownloadEngine {
                                 request.adaptive_connections,
                             );
                             let initial_connections = if request.adaptive_connections {
-                                useful_connections.min(ADMISSION_INITIAL_WORKERS).max(1)
+                                useful_connections.clamp(1, ADMISSION_INITIAL_WORKERS)
                             } else {
                                 useful_connections
                             };
@@ -1013,7 +1013,7 @@ impl DownloadEngine {
         let sources = Arc::new(sources);
         let worker_count = connections.min(chunk_count).max(1);
         let initial_active_workers = if request.adaptive_connections {
-            worker_count.min(ADMISSION_INITIAL_WORKERS).max(1)
+            worker_count.clamp(1, ADMISSION_INITIAL_WORKERS)
         } else {
             worker_count
         };
@@ -1889,11 +1889,7 @@ impl DownloadEngine {
                                 "responseLatencyMs": response_latency_ms,
                                 "firstByteWaitMs": first_byte_wait_ms,
                                 "transitionGapMs": transition_gap_ms,
-                                "bytesPerSecond": if elapsed_ms > 0 {
-                                    completed_bytes.saturating_mul(1000) / elapsed_ms
-                                } else {
-                                    completed_bytes
-                                },
+                                "bytesPerSecond": completed_bytes.saturating_mul(1000).checked_div(elapsed_ms).unwrap_or(completed_bytes),
                                 "transport": protocol
                             }),
                         });
@@ -2072,7 +2068,7 @@ fn segmented_target_chunks(connections: usize, adaptive_connections: bool) -> u6
         return max_workers.saturating_mul(TARGET_CHUNKS_PER_WORKER).max(1);
     }
 
-    let initial_workers = connections.min(ADMISSION_INITIAL_WORKERS).max(1) as u64;
+    let initial_workers = connections.clamp(1, ADMISSION_INITIAL_WORKERS) as u64;
     max_workers.max(
         initial_workers
             .saturating_mul(TARGET_CHUNKS_PER_WORKER)

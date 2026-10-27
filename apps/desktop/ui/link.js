@@ -584,11 +584,6 @@ async function loadLinkIdentity() {
   await openLocalLink();
 }
 
-function linkAuthenticationMessage(error) {
-  const value = String(error);
-  if (value.includes("system_auth_failed:1326")) return t("linkAuthenticationInvalidCredentials");
-  return `${t("linkAuthenticationFailed")}: ${value}`;
-}
 
 document.querySelector("#link-share-file").onclick = async () => {
   try {

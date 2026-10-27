@@ -144,7 +144,11 @@ test("LAN and Internet Link use TLS with TOFU pinning and system-account authent
   assert.match(rust, /TcpListener::bind\(\("0\.0\.0\.0", LINK_PORT\)\)/);
   assert.match(rust, /ServerConnection::new/);
   assert.match(rust, /ClientConnection::new/);
-  assert.doesNotMatch(rust, /fn read_link_http_response[\s\S]*?read_to_end/);
+  const readerStart = rust.indexOf("fn read_link_http_response(");
+  const readerTail = rust.slice(readerStart);
+  const readerEnd = readerTail.slice(3).search(/\n(?:async )?fn /);
+  const reader = readerEnd < 0 ? readerTail : readerTail.slice(0, readerEnd + 3);
+  assert.doesNotMatch(reader, /read_to_end/);
   assert.match(rust, /fn read_link_http_response[\s\S]*?bridge_content_length/);
   assert.match(rust, /link_trusted_certificates/);
   assert.match(rust, /link_tls_certificate_changed/);
@@ -302,7 +306,7 @@ test("Windows Link retries Microsoft and Azure account forms after ERROR_LOGON_F
   assert.match(rust, /Some\("MicrosoftAccount"\.to_owned\(\)\)/);
   assert.match(rust, /Some\("AzureAD"\.to_owned\(\)\)/);
   assert.match(rust, /for logon_type in \[3_u32, 2_u32\]/);
-  assert.match(linkJs, /system_auth_failed:1326/);
+  assert.match(linkJs, /remote_system_auth_failed/);
   assert.match(linkJs, /Windows Hello PIN/);
 });
 

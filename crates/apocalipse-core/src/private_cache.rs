@@ -140,8 +140,12 @@ async fn collect_entries(
             Err(error) => return Err(error.into()),
         };
         while let Some(entry) = reader.next_entry().await? {
+            let kind = entry.file_type().await?;
+            if kind.is_symlink() {
+                continue;
+            }
             let metadata = entry.metadata().await?;
-            if metadata.is_dir() {
+            if kind.is_dir() {
                 directories.push(entry.path());
             } else if entry
                 .path()

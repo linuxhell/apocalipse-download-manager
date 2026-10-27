@@ -52,32 +52,30 @@ pub fn classify_url(input: &str) -> Option<DownloadKind> {
         .is_some_and(|host| host == "reddit.com" || host.ends_with(".reddit.com"))
         && path
             .split('/')
-            .collect::<Vec<_>>()
-            .windows(2)
-            .any(|parts| parts[0] == "comments" && !parts[1].is_empty())
-    {
-        Some(DownloadKind::MediaPage)
-    } else if matches!(
-        url.domain(),
-        Some(
-            "youtube.com"
-                | "www.youtube.com"
-                | "youtu.be"
-                | "facebook.com"
-                | "www.facebook.com"
-                | "m.facebook.com"
-                | "fb.watch"
-                | "tiktok.com"
-                | "www.tiktok.com"
-                | "vm.tiktok.com"
-                | "vt.tiktok.com"
-                | "instagram.com"
-                | "www.instagram.com"
-                | "soundcloud.com"
-                | "www.soundcloud.com"
-                | "m.soundcloud.com"
+            .zip(path.split('/').skip(1))
+            .any(|(part, next)| part == "comments" && !next.is_empty())
+        || matches!(
+            url.domain(),
+            Some(
+                "youtube.com"
+                    | "www.youtube.com"
+                    | "youtu.be"
+                    | "facebook.com"
+                    | "www.facebook.com"
+                    | "m.facebook.com"
+                    | "fb.watch"
+                    | "tiktok.com"
+                    | "www.tiktok.com"
+                    | "vm.tiktok.com"
+                    | "vt.tiktok.com"
+                    | "instagram.com"
+                    | "www.instagram.com"
+                    | "soundcloud.com"
+                    | "www.soundcloud.com"
+                    | "m.soundcloud.com"
+            )
         )
-    ) {
+    {
         Some(DownloadKind::MediaPage)
     } else {
         Some(DownloadKind::Http)

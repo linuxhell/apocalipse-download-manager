@@ -1,0 +1,745 @@
+{
+  "scope": "Tracked and new source, tests and configuration; generated/build/vendor files excluded.",
+  "files": [
+    {
+      "path": ".cargo/config.toml",
+      "lines": 5,
+      "sha256": "d05e1b69cbaeea3769d7bd4b1e8a3b1fe96f30f0e9277da50ff01de67aa6faf6"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "lines": 318,
+      "sha256": "102cf31e969df6747b60481e9c8b3d965db40909f381aa253409bb381fa42f4c"
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "lines": 200,
+      "sha256": "1014e813ffd007cb2d434924a44a90548636f1c61faf7290fe634a61ce9c0f73"
+    },
+    {
+      "path": "Cargo.toml",
+      "lines": 31,
+      "sha256": "ff2a78eb11909347554f74e1c55b6793ae2939efc5a3e381e6b3747f80ccc801"
+    },
+    {
+      "path": "apps/desktop/src-tauri/Cargo.toml",
+      "lines": 43,
+      "sha256": "120a86f790ae55c4bed7803cbf084352c4f656f7647025bbebdf5606aad04a3a"
+    },
+    {
+      "path": "apps/desktop/src-tauri/build.rs",
+      "lines": 14,
+      "sha256": "186bf7c0328a3839294790b16f8db52fe390ea8cb5eafd5e3efde004e1f1f38b"
+    },
+    {
+      "path": "apps/desktop/src-tauri/capabilities/default.json",
+      "lines": 12,
+      "sha256": "dfc8a5b007f3efe47526bb04f7d6fb04ae3d4b9551d831774f6eaef936f4b5ca"
+    },
+    {
+      "path": "apps/desktop/src-tauri/legacy-engine-fields.json",
+      "lines": 26,
+      "sha256": "9d4cdcd3003f5b8e6eba63cfe2fbcc6f3211787ee82c21aa8c42258e344aa3b0"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/advanced_transports.rs",
+      "lines": 357,
+      "sha256": "62af9895313eb224f970ea790c06d87664d276e1a25d30d245d37130d957a447"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/audio_conversion.rs",
+      "lines": 169,
+      "sha256": "10a08c50e01ae767bad944bf250c39955fc989980ddbef9d2ab248a494fb1063"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/diagnostics.rs",
+      "lines": 1245,
+      "sha256": "a6261b4e22a461ac3e06c1883402a414718d8c744b00adf32d4598908c5535d4"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/ed2k_ui.rs",
+      "lines": 593,
+      "sha256": "0d9fd198339b196884027663217e3cf3052a7ef7ace765d127100958ba21e640"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/ed2k_ui/downloads.rs",
+      "lines": 900,
+      "sha256": "4c6b9a0f1a8125bf0f48b5eaf28d58c515d96ba8b561b775c357043225a8fc6a"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/ed2k_ui/events.rs",
+      "lines": 140,
+      "sha256": "3af4e4429cf3232a830a9eb7afe06cdaca46535b23cacbe9d871b5eb1b2dcbe8"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/ed2k_ui/network.rs",
+      "lines": 725,
+      "sha256": "6d764587e2b57ca064314d184a1d52e63d49a6825ba481976f2065ecbe8ee832"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/ed2k_ui/preview.rs",
+      "lines": 297,
+      "sha256": "5dcf148a24853ce0d2fabb9a8460f02817ab87b6e3781bddc6f391d5336c50d0"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/ed2k_ui/retry.rs",
+      "lines": 322,
+      "sha256": "b8ce8b01912bb528214d46d49bdcb497b73364b60141ca276b4e8eae75d37af6"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/ed2k_ui/shares.rs",
+      "lines": 785,
+      "sha256": "adfc986933ffdd0ba7796ea8662445661c2219d1c246a64a5f8447150d104eb6"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/file_conversion.rs",
+      "lines": 168,
+      "sha256": "5d3772d4fb92f894de386a5379a645f2b8759263a30df6d54c3b93adf87df2cc"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/legacy_engine.rs",
+      "lines": 115,
+      "sha256": "239e34be6990525b612831d6d158d756091818338819da6be078557b160a0c9c"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/main.rs",
+      "lines": 17516,
+      "sha256": "4e118c89f17253a6a1e6a2a7d2bb0977edd05c4e5048a758a9f2264304238458"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/nibiru_artifacts.rs",
+      "lines": 172,
+      "sha256": "07abdf80129687969aef6e58d25b4aa8a3d02f0bd71a9cdd1a13fc36d910189a"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/prepared_preview.rs",
+      "lines": 651,
+      "sha256": "70a0c19520fd49b5ae62b5486948c63d96bdd1e85c1ef94df31374a4c80264ca"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/runtime_health.rs",
+      "lines": 185,
+      "sha256": "e6d9fe91bdb8c674c4d6878372fd5acf020c605b6122cd987281c0413c9eea54"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/thumbnail_cache.rs",
+      "lines": 606,
+      "sha256": "63b329cf4a057e629c5577d7a6730ae938f2811920fddd2597bb3c0d3b1530b8"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/tiktok_preview.rs",
+      "lines": 836,
+      "sha256": "c8b36eb55de3124ecd2e0d1f78fb45cc78199376eb9979de79f110f04affe4ea"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/tiktok_preview/tests.rs",
+      "lines": 597,
+      "sha256": "7bf7d6db4e29fa7ad5557066506c0242f8a92e5c3e743e7890854c0acd5fb4ae"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/transfer_speed.rs",
+      "lines": 68,
+      "sha256": "d8d705478d292bee379a23855dbfa7aa6cb08bacd8a2afd46ad1446fa53843ae"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/xtreme.rs",
+      "lines": 702,
+      "sha256": "0318467f8181c2c6b1d37c21042e4e1fd616ad49e9a3f17f42b701b5560beab7"
+    },
+    {
+      "path": "apps/desktop/src-tauri/tauri.conf.json",
+      "lines": 39,
+      "sha256": "a4fe31b4878cfb0bed4b7d47a7641d788295330ff03be1e4f1534c6b74635f13"
+    },
+    {
+      "path": "apps/desktop/ui/app.js",
+      "lines": 3219,
+      "sha256": "7027ad823615fc026f3eacdfeb19b5417a02e5ee0236d597f9c03d671c5cb995"
+    },
+    {
+      "path": "apps/desktop/ui/audio-format-policy.js",
+      "lines": 11,
+      "sha256": "21d5f92550d97b19949503f637f90102fb4136910698f112d14ce13d0861eceb"
+    },
+    {
+      "path": "apps/desktop/ui/button-feedback.js",
+      "lines": 18,
+      "sha256": "c61cc8ce2668d0c0bc185aa175f3d31778973e5547bf56e30b6811456e43d4d0"
+    },
+    {
+      "path": "apps/desktop/ui/color-mode.js",
+      "lines": 11,
+      "sha256": "da168afae4b6276024a67831ed1174155b03ff0aa944ae5e497a514e693fed24"
+    },
+    {
+      "path": "apps/desktop/ui/diagnostics-panel.js",
+      "lines": 56,
+      "sha256": "d9b6800901ff3f906d647206f1ed90015411ce867061974a7333045de732a170"
+    },
+    {
+      "path": "apps/desktop/ui/ed2k.js",
+      "lines": 366,
+      "sha256": "eb7812dbdf00bb7287d8a5d0782750b474f229206bbf83e634e1ecbc82a87294"
+    },
+    {
+      "path": "apps/desktop/ui/file-converter.js",
+      "lines": 113,
+      "sha256": "58e03c79e617df50ac94f64a8b4742badf08502963382a4b198835604afaa955"
+    },
+    {
+      "path": "apps/desktop/ui/link.js",
+      "lines": 803,
+      "sha256": "c3dc58cc3713b44d9693a47e4c84b875881be6f237172fbb9badbfbafc9822fd"
+    },
+    {
+      "path": "apps/desktop/ui/task-list-state.js",
+      "lines": 38,
+      "sha256": "98927f4864a88b876258f8641ed844c5d0b6c2c1867849b7e9165fe2505b1769"
+    },
+    {
+      "path": "assets/ed2k-seeds.json",
+      "lines": 4710,
+      "sha256": "1e8f93fc4e78689666e3285ba706f000d363905e919cfc3c1f0c3c6d61c373a6"
+    },
+    {
+      "path": "browser-extension/_locales/en/messages.json",
+      "lines": 1,
+      "sha256": "78fb4cbcc1acc7a7a171b15801b49984775963e49e6f92b0bd7f970bd55e1b6c"
+    },
+    {
+      "path": "browser-extension/_locales/pt_BR/messages.json",
+      "lines": 1,
+      "sha256": "ce80694064b6cd29a7a16651669467c1bd4ba621865f7220fcd40c2f32af4e03"
+    },
+    {
+      "path": "browser-extension/_locales/zh_CN/messages.json",
+      "lines": 1,
+      "sha256": "85ea4d3fec76802d16b11e820497515027f19f6128f4be1b8257fa6b365b6b86"
+    },
+    {
+      "path": "browser-extension/background.js",
+      "lines": 1768,
+      "sha256": "3b3bb48625f1e50f49bff1c8aa4554cbbd9b3bd0317e4e94263e9562845a40ca"
+    },
+    {
+      "path": "browser-extension/content.js",
+      "lines": 2272,
+      "sha256": "c30e665923d627f6c85b6125644622e044c5c06d2485c8d66b2744b12d2438f0"
+    },
+    {
+      "path": "browser-extension/diagnostics-core.js",
+      "lines": 70,
+      "sha256": "9e64af85599cba8948c9153482d2d7dc67ec6779dfe34743693e6c5ad67c9c47"
+    },
+    {
+      "path": "browser-extension/diagnostics-media-replay.js",
+      "lines": 164,
+      "sha256": "b265f0f19cfbf91d368a215d85d06962cab776473d1284446039273ac1e1a9a0"
+    },
+    {
+      "path": "browser-extension/diagnostics-popup.js",
+      "lines": 60,
+      "sha256": "4a1d48fe1be56f9f9ccaa576ea864e1ac5ef9526949cdb9a0be4260fbaa58a8a"
+    },
+    {
+      "path": "browser-extension/diagnostics-worker.js",
+      "lines": 235,
+      "sha256": "df3e32af305e29a181d1d783d6adb3a7f8828cf881517838c9f65a9eaff61982"
+    },
+    {
+      "path": "browser-extension/diagnostics.js",
+      "lines": 189,
+      "sha256": "fb307dd97be8516c167f9cf9a43cd1cd89027fc75511dba225e01a5b5de01983"
+    },
+    {
+      "path": "browser-extension/facebook-menu-v4.js",
+      "lines": 54,
+      "sha256": "a837524199fa0fc32264d5cfc81ea753398787fc99d73f00c7dff4f56631b248"
+    },
+    {
+      "path": "browser-extension/instagram-media-fix.js",
+      "lines": 120,
+      "sha256": "a42e61dffbd4d087b5b68a009e73c8ddc177ef5de2e2fa37bc113923a0730069"
+    },
+    {
+      "path": "browser-extension/manifest.json",
+      "lines": 150,
+      "sha256": "34860da962f7f390a1d0ce46dd447e7e41a5dfa691c3121af3ea899434bced7d"
+    },
+    {
+      "path": "browser-extension/page-hook.js",
+      "lines": 233,
+      "sha256": "5b3c4bf22b401bdf5f06daf4baa4622c41d00978c5115bb9bd71f4971a57ff0b"
+    },
+    {
+      "path": "browser-extension/popup-media-guard.js",
+      "lines": 172,
+      "sha256": "8ad5fa3224e8efc0f57c3d86487fa00b561289e42ae0a743f008a9969864a802"
+    },
+    {
+      "path": "browser-extension/popup-social-player-resolution.js",
+      "lines": 319,
+      "sha256": "5a97080b5908b6111712bc797fdc6927c7a75759f97916f953d89a38bc1b7b56"
+    },
+    {
+      "path": "browser-extension/popup-tiktok.js",
+      "lines": 139,
+      "sha256": "46fb132dfeeb6af1b4f0ffe31dffe42402e884fce48e695889c4e909f2ab0bcd"
+    },
+    {
+      "path": "browser-extension/popup.js",
+      "lines": 660,
+      "sha256": "ddc962765c83dee57cd82915b062077ecaae48e8d55738c9b88e6c3826f307c3"
+    },
+    {
+      "path": "browser-extension/social-home-feed-resolution-v3.js",
+      "lines": 9,
+      "sha256": "17fa66e27191b87e035bc8fcadf78fadf851a6bcd0f382c0833ae9aaeeee3b8f"
+    },
+    {
+      "path": "browser-extension/social-home-feed-v3-core.js",
+      "lines": 16,
+      "sha256": "f9fe61ba24a979d2600b987e1270f7e8751f719aa27aba0dce70fcf1abd05ac3"
+    },
+    {
+      "path": "browser-extension/social-home-feed-v3-facebook.js",
+      "lines": 9,
+      "sha256": "7827c2e0282d04e020cc5896de7a059bda4cff60e4b3559b2c27db18aa55d750"
+    },
+    {
+      "path": "browser-extension/social-home-feed-v3-tiktok.js",
+      "lines": 11,
+      "sha256": "52819f4973ef087e2f84978e9829b94ff12bd060cf2a5a87537a65c06bc02abe"
+    },
+    {
+      "path": "browser-extension/social-player-resolution-v2.js",
+      "lines": 202,
+      "sha256": "981781492223e1814e7972ccf2ffc3f0461ff6baf439067d826cd53e501806f5"
+    },
+    {
+      "path": "browser-extension/social-player-resolution.js",
+      "lines": 268,
+      "sha256": "50a85dfe3faf98f429a198bd22b822897cabc974038a813e6b9644ae07d2dd2f"
+    },
+    {
+      "path": "browser-extension/tiktok-identity.js",
+      "lines": 439,
+      "sha256": "1019bb3a47f6ec2210badd8e5d6bf17802a3fd4a7352cf76b2e3a18d52486e28"
+    },
+    {
+      "path": "browser-extension/tiktok-main-identity.js",
+      "lines": 439,
+      "sha256": "1019bb3a47f6ec2210badd8e5d6bf17802a3fd4a7352cf76b2e3a18d52486e28"
+    },
+    {
+      "path": "browser-extension/tiktok-media-fix.js",
+      "lines": 207,
+      "sha256": "e9d691c6d83ae7dfe6c478683e20bcc8921cdcab8eb674c3b4be62b030acaf4e"
+    },
+    {
+      "path": "browser-extension/tiktok-page-identity.js",
+      "lines": 20,
+      "sha256": "c1e6f34210fcfdfc8f948610dedc918070bad17889272ac3db5c656e3492a256"
+    },
+    {
+      "path": "browser-extension/tiktok-share-menu-v4.js",
+      "lines": 264,
+      "sha256": "2988d665bea155b119af82afcb3a82455f0ec2fb6f3ca0e8c1cb5291210ee8cf"
+    },
+    {
+      "path": "browser-extension/uupdump-post-fix.js",
+      "lines": 68,
+      "sha256": "ca3ef1ad7dedb6d0610333436490d47313430cf9404fff7574106d9af859e302"
+    },
+    {
+      "path": "crates/apocalipse-cli/Cargo.toml",
+      "lines": 12,
+      "sha256": "90f906f13d21bf4ed3e864cf12591260e9209aea45d03deaf2c9299fcd0a9e82"
+    },
+    {
+      "path": "crates/apocalipse-cli/src/main.rs",
+      "lines": 148,
+      "sha256": "88a3a5601ef8f81c735d7caf153e62d74d84a96e3b0b23624ef3a10a869a8997"
+    },
+    {
+      "path": "crates/apocalipse-core/Cargo.toml",
+      "lines": 26,
+      "sha256": "c8993720d31a6c6aab90954814e19fdd9b208b10650a28ef62219920ba1de46e"
+    },
+    {
+      "path": "crates/apocalipse-core/examples/tools_manifest.rs",
+      "lines": 61,
+      "sha256": "4387aadfabcf172ae509b3c0c6c01bf79d9c33b997afdbef1920bb567f87d904"
+    },
+    {
+      "path": "crates/apocalipse-core/src/classifier.rs",
+      "lines": 175,
+      "sha256": "4bffc8e0c7759b4ebe24610b15f5d676cc819df6c3d9f79ee5cbb8b530fd9ba6"
+    },
+    {
+      "path": "crates/apocalipse-core/src/credentials.rs",
+      "lines": 106,
+      "sha256": "277337ecc19e660919970a97b4a7be640c04abf3534ee2a120e37653c3a7d6cd"
+    },
+    {
+      "path": "crates/apocalipse-core/src/download.rs",
+      "lines": 3140,
+      "sha256": "a70935314402acd33b38ee6166c69ff39d9ec40fc44c838883e94989343bd3de"
+    },
+    {
+      "path": "crates/apocalipse-core/src/external_output.rs",
+      "lines": 125,
+      "sha256": "4be03f1f88635e713c8ce865d49b3aa1e515c2620294b7f83fe0af2bf0ab9e8f"
+    },
+    {
+      "path": "crates/apocalipse-core/src/file_conversion.rs",
+      "lines": 748,
+      "sha256": "3578085fdb7055b07d46efe812ddcd6783396c4c31fc6301d9d9615ac403b996"
+    },
+    {
+      "path": "crates/apocalipse-core/src/file_names.rs",
+      "lines": 230,
+      "sha256": "2aac32321e87e0e8601710ef49fcbade80b1a93405f770c4723e562e77e33887"
+    },
+    {
+      "path": "crates/apocalipse-core/src/i18n.rs",
+      "lines": 113,
+      "sha256": "732745beec12e236f2cd4dc03f76aa0e08d6a2a38b9e1ba61039e6ac0bb1baf2"
+    },
+    {
+      "path": "crates/apocalipse-core/src/lib.rs",
+      "lines": 35,
+      "sha256": "11d24824442f828e7b092d53b6d5ad1ab3b1ddd8575b0be913d4aa8709ed463c"
+    },
+    {
+      "path": "crates/apocalipse-core/src/media.rs",
+      "lines": 153,
+      "sha256": "b26c2be183ca43bc1d1ce8435ce0f9f39c71f138ff8e91284727609187f35c4d"
+    },
+    {
+      "path": "crates/apocalipse-core/src/metalink.rs",
+      "lines": 199,
+      "sha256": "0bd452ebd647cc76b3e94598ce24df7f4bf33f0c74e701ec196c23d007bd7276"
+    },
+    {
+      "path": "crates/apocalipse-core/src/model.rs",
+      "lines": 141,
+      "sha256": "4b069ceaf9ad06c49476f666fc96f2c787dcc5d67e36fcddfc47933b0a81198e"
+    },
+    {
+      "path": "crates/apocalipse-core/src/preview.rs",
+      "lines": 126,
+      "sha256": "070bf7923d664fc97302952251b3805dd17f8a807f2ff1ff21aec37a1ce9f030"
+    },
+    {
+      "path": "crates/apocalipse-core/src/private_cache.rs",
+      "lines": 241,
+      "sha256": "4ab3be3ba013a20be63229f49a164a28654b65eb45d6c8c90c637806ad3e42ed"
+    },
+    {
+      "path": "crates/apocalipse-core/src/signed_update.rs",
+      "lines": 275,
+      "sha256": "560c9c7c0592631d90bbedadcfe81b2f60b64f75c1f0efdc0c4dc03a61854a68"
+    },
+    {
+      "path": "crates/apocalipse-core/src/strategy.rs",
+      "lines": 330,
+      "sha256": "9c6c28ab0c2c15ab844c2e38eedb186033ec61cd056182502b86595a6778dd39"
+    },
+    {
+      "path": "crates/apocalipse-core/src/tools.rs",
+      "lines": 24,
+      "sha256": "ead59a475ac16782315b2339115ff0abf2cc70a76405d5a33b840faac153e81b"
+    },
+    {
+      "path": "crates/apocalipse-core/src/validation.rs",
+      "lines": 77,
+      "sha256": "61ca5f3b75c8f8c75ef1f4e09cce30a539d8a5243be38a88ba6b70d2a17585ea"
+    },
+    {
+      "path": "crates/apocalipse-core/tests/facebook_page_strategy.rs",
+      "lines": 35,
+      "sha256": "ab108cc232760a8e503454640ab24f17816c5b5cc5a631d2e59fefe56547eca4"
+    },
+    {
+      "path": "experiments/transport-lab/Cargo.toml",
+      "lines": 31,
+      "sha256": "3c4db4e3054da9d6d25cbf71c024180788e4ea9048de1981e49e56a6c494789d"
+    },
+    {
+      "path": "experiments/transport-lab/src/dictionary.rs",
+      "lines": 220,
+      "sha256": "06e0871dbaac2595b0f2d64c8ac2ac4656252cdc0daeb175812702e68a4f596a"
+    },
+    {
+      "path": "experiments/transport-lab/src/lib.rs",
+      "lines": 13,
+      "sha256": "0bb2f2a1b4d2e4f80b0c3d5d7cda1eb98aa02e2af3ffb7a510e9cc9fa02b6ba1"
+    },
+    {
+      "path": "experiments/transport-lab/src/main.rs",
+      "lines": 87,
+      "sha256": "abf274bf4ce54580184f3ab60a30b2b5da996e2667aeeac97525049f3cf8b8e7"
+    },
+    {
+      "path": "experiments/transport-lab/src/moqt.rs",
+      "lines": 181,
+      "sha256": "e1811a920b6cd07cb2a833f91980e2683b38d6708e98deb5e60a8a1ce8639f1f"
+    },
+    {
+      "path": "experiments/transport-lab/src/multipath.rs",
+      "lines": 325,
+      "sha256": "fa3a5edff6732b411d8e6c7edf7a8f1da92b941872f9ffdbcbc32c2e5f977458"
+    },
+    {
+      "path": "experiments/transport-lab/tests/multipath.rs",
+      "lines": 145,
+      "sha256": "1dbdce461bbec627baee92cd191fbef119ab6f3e2006d580c99c0c928ca50e1d"
+    },
+    {
+      "path": "rust-toolchain.toml",
+      "lines": 4,
+      "sha256": "ace3c79c83f29843ef6e7ca3fb9057f61bca516dc6d985044a51c4f42de1fa71"
+    },
+    {
+      "path": "tests/bridge-connection-resilience.test.cjs",
+      "lines": 19,
+      "sha256": "7287e1dd24aebb15785f169c35b431bbe6c9973ede6938adeb5e5a2cd6fe908a"
+    },
+    {
+      "path": "tests/chatgpt-library-shortcuts.test.cjs",
+      "lines": 61,
+      "sha256": "cb3538d7c20d5aee134769f25e61a605defd5ff7263766d47b0c5dbda182a1f7"
+    },
+    {
+      "path": "tests/click-outcome-diagnostics.test.cjs",
+      "lines": 30,
+      "sha256": "605540e86c05077c5b370190c771d6323ec69ba29027c6f3a5ac7e5ea17f6592"
+    },
+    {
+      "path": "tests/desktop-youtube-thumbnail.test.cjs",
+      "lines": 31,
+      "sha256": "8ca10842d1d2267f2d99e3da688b768cb332f6cafeec3c7e29be998e0384ae83"
+    },
+    {
+      "path": "tests/diagnostics-media-replay.test.cjs",
+      "lines": 99,
+      "sha256": "3a41b62d17980310a14eb278bd41a08b62eb840ef9016a9b0efdf611dd46d072"
+    },
+    {
+      "path": "tests/diagnostics-v3.test.cjs",
+      "lines": 163,
+      "sha256": "681af52642d2853df40025c3564d1afaf96ffa6cc4a8a1f1edc1a614f4e99467"
+    },
+    {
+      "path": "tests/direct-audio-conversion.test.cjs",
+      "lines": 54,
+      "sha256": "7adb4cf4edda35976751449130b21a40d0faf2143029f38a5fd2cf17d720a9bf"
+    },
+    {
+      "path": "tests/download-filename-resolution.test.cjs",
+      "lines": 159,
+      "sha256": "e04f1cc1b3bef88712d5a84d60df9823ecbac8264969686715a3812f7ac4aa93"
+    },
+    {
+      "path": "tests/download-speed-display.test.cjs",
+      "lines": 1,
+      "sha256": "2b78f036b0c10be1af0f3a82dd613763c5d925f788c35995837bba5237eb4555"
+    },
+    {
+      "path": "tests/ed2k-window.test.cjs",
+      "lines": 358,
+      "sha256": "9a4a1f846266e2d0ac33aed093f4f600b28b9471745e311ec05f567d06cd4fee"
+    },
+    {
+      "path": "tests/extension-authenticated-batch.test.cjs",
+      "lines": 15,
+      "sha256": "a60d25d7359fbb8931497119c67171aeb583c658510cf1fa5f9a19b2a9164c7b"
+    },
+    {
+      "path": "tests/extension-capture-self-heal.test.cjs",
+      "lines": 55,
+      "sha256": "7c65afc80a79583a03863c5091e1e21a742ffd4009b3d43ba757101fc6b8c869"
+    },
+    {
+      "path": "tests/extension-fixed-id.test.cjs",
+      "lines": 17,
+      "sha256": "2773dd36b45756331a8846a782984c1f720dda105eba8081bb7cdac582519fba"
+    },
+    {
+      "path": "tests/extension-handoff.test.cjs",
+      "lines": 95,
+      "sha256": "4d8ac17492a1d3ba1f29117495891894632ddc9f3ebb1031cc06ccfd5ca3d747"
+    },
+    {
+      "path": "tests/extension-preview.test.cjs",
+      "lines": 212,
+      "sha256": "e5979bbaf0412df78c4c947b0fe7d0ab9b36fd2f2552421606ae83a489f8f274"
+    },
+    {
+      "path": "tests/extension-reconnect.test.cjs",
+      "lines": 32,
+      "sha256": "cd0fe75b80d84672b299d4908f244f568c621fe63ab2c3d502fb6cae4ae1982e"
+    },
+    {
+      "path": "tests/facebook-home-overlay-recycling.test.cjs",
+      "lines": 82,
+      "sha256": "3f3c32e5fd4b559727a98e00e1d9e7bd38ba96ccc096e01aebe3c4ad039d8e29"
+    },
+    {
+      "path": "tests/facebook-menu-v4.test.cjs",
+      "lines": 17,
+      "sha256": "b16c01b09f54d55c04b43f5acf3a8205f4aef7ccf35dac13c20041f31ab4e8d5"
+    },
+    {
+      "path": "tests/facebook-reel-overlay.test.cjs",
+      "lines": 400,
+      "sha256": "5fdf3a761eefbdfa28c5c1e344374a0a4d361ce272ac153c3bc9b6f530002106"
+    },
+    {
+      "path": "tests/file-converter.test.cjs",
+      "lines": 53,
+      "sha256": "7f41ac858ef0c3698e9c1d800323bf535ed965735055bef152992a884f235015"
+    },
+    {
+      "path": "tests/generic-media-catalog.test.cjs",
+      "lines": 153,
+      "sha256": "06270e6ed34f473af790a6a570a642d7d17fc7a1f93a32476679a4b6cd3208e2"
+    },
+    {
+      "path": "tests/helpers/thumbnail-page.cjs",
+      "lines": 69,
+      "sha256": "3ea8db863f6d572ce22a2fc8038fda8d5cedae657430cf678cdeffa0078dc67e"
+    },
+    {
+      "path": "tests/hls-current-video-selection.test.cjs",
+      "lines": 44,
+      "sha256": "00f4fd7bf41dc3cb8726d6cebcb4d6561ede7144744e2c1554ba48a26fb22619"
+    },
+    {
+      "path": "tests/link-folder-settings.test.cjs",
+      "lines": 322,
+      "sha256": "4aa475623fb23e48c82ddb2a7ba03572d38b50239b101f3f4599fcf4b960c163"
+    },
+    {
+      "path": "tests/media-filename-recovery.test.cjs",
+      "lines": 57,
+      "sha256": "ff9362213eeda9784f949028426251c2360d7b8e864c03efe4bc9da40197dc54"
+    },
+    {
+      "path": "tests/mp4-track-inspection.test.cjs",
+      "lines": 44,
+      "sha256": "355cec2e0237410fb749f21da1660fec238d92796a2c715dc352af55dc914cd6"
+    },
+    {
+      "path": "tests/obsolete-engine-residue.test.cjs",
+      "lines": 9,
+      "sha256": "10a518e5229944deb5a22b22250af3394f57ee7febb2c589955d6326e0a5fe4d"
+    },
+    {
+      "path": "tests/overlay-scheduler-regression.test.cjs",
+      "lines": 12,
+      "sha256": "ac45fb90b08df7540c00e628f062b01bdabd379393f2bcc82376c3d25d99b03b"
+    },
+    {
+      "path": "tests/popup-media-guard.test.cjs",
+      "lines": 93,
+      "sha256": "50abcec5fbe12052af1aeafe11e2ac03d7b38e66a706d8dea892a0c045f268db"
+    },
+    {
+      "path": "tests/popup-preview-selection.test.cjs",
+      "lines": 44,
+      "sha256": "92569deef39ed2d6d3e8d172616e69a35528e829bf995c6090b40500c13bae33"
+    },
+    {
+      "path": "tests/site-threads-memory.test.cjs",
+      "lines": 60,
+      "sha256": "fe08163f6f1ddc8362524c255df8fbce819ff6e9e1ab5a15ef1d60db912ccfdc"
+    },
+    {
+      "path": "tests/social-preview-routing-0.3.132.test.cjs",
+      "lines": 136,
+      "sha256": "3697c16ed78da4063103d39d7ed935d35bd07d4ce9e67e784948badf27af0e32"
+    },
+    {
+      "path": "tests/social-routing-regression.test.cjs",
+      "lines": 411,
+      "sha256": "597527b37b4e69ccdba078068be1fd2c3b177c3ee226b7a174fc75655b9fb555"
+    },
+    {
+      "path": "tests/social-visible-player-resolution.test.cjs",
+      "lines": 14,
+      "sha256": "fe20924068f906a888115083d99a15df104e14528a70d1907c86bb7d23c32f55"
+    },
+    {
+      "path": "tests/task-list-state.test.cjs",
+      "lines": 40,
+      "sha256": "a8baeec65469849897350a06a8d95eea354240bfc9de56d1ca9155bed9a3eac4"
+    },
+    {
+      "path": "tests/thumbnail-capture-safety.test.cjs",
+      "lines": 73,
+      "sha256": "795d6d7c20bf8ea1a056207051d244f52796ee1271163c5b7257a9ad07b60d99"
+    },
+    {
+      "path": "tests/thumbnail-empty-source-regression.test.cjs",
+      "lines": 118,
+      "sha256": "57feca7e888b693e4f5d48d0f9ae260ee5f334afbd0041d1585a450eafe88fef"
+    },
+    {
+      "path": "tests/tiktok-frame-routing.test.cjs",
+      "lines": 104,
+      "sha256": "0c5c24ad621eebda5f58c6e9b5217e998300ffa8d9582a7ba8eaea54089b2f49"
+    },
+    {
+      "path": "tests/tiktok-identity.test.cjs",
+      "lines": 197,
+      "sha256": "e6ee07ccca945ffe596ccfb4b649380952ffd782f658297b7fdf3965ee07aa1b"
+    },
+    {
+      "path": "tests/tiktok-share-menu-v4.test.cjs",
+      "lines": 45,
+      "sha256": "cd651a997e6deb2e5d2093afecbb3434a9d8de74b6e77209b81aef577d622302"
+    },
+    {
+      "path": "tests/tools-auto-download.test.cjs",
+      "lines": 53,
+      "sha256": "bf4343e321a02f98c48b2c038c326469d7c70e2fcb115fcb23ecf3f3443f1ab9"
+    },
+    {
+      "path": "tests/torrent-metadata-store.test.cjs",
+      "lines": 44,
+      "sha256": "4de6d3da82b7f60925fad071ff5958a543ae6c6499d2d56f556df403c2132f33"
+    },
+    {
+      "path": "tests/ui-error-reporting.test.cjs",
+      "lines": 34,
+      "sha256": "8499a8d3d5559792917ddbc101f134061cd199005cfdb2cb2d9ee7281d1c1210"
+    },
+    {
+      "path": "tests/xtreme-classic-metadata.test.cjs",
+      "lines": 42,
+      "sha256": "3b15c768ad8e73579063a30b0ee7799b72349ff507c98bd80d4dca29b903445f"
+    },
+    {
+      "path": "tests/xtreme-native-contract.test.cjs",
+      "lines": 38,
+      "sha256": "40a07b494696e0e7261f7d7f6bae0e708f01dad65762a5313ed9f60f4260461e"
+    },
+    {
+      "path": "tests/xtreme-release-source.test.cjs",
+      "lines": 16,
+      "sha256": "acf1ccee5ef6b29cb63fec3f7caa7b0ca74685418a0a1386aa3dd0fb2ac0667f"
+    },
+    {
+      "path": "tests/xtreme-runtime-singleton.test.cjs",
+      "lines": 19,
+      "sha256": "1f10753786ce107897d3720c65c988c82c978b4c59da1e6e8822a01fa0ac7a26"
+    },
+    {
+      "path": "tests/youtube-popup-regression.test.cjs",
+      "lines": 34,
+      "sha256": "277a276b929ab2c2b425227a8bd636e43f380f8a5c60e0f6771700a667bbfe93"
+    }
+  ]
+}

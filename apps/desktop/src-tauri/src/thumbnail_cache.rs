@@ -77,20 +77,7 @@ pub(super) async fn resolve(
     let content_path = cache_dir.join(format!("{content_hash}.{}", kind.extension));
 
     if fs::metadata(&content_path).await.is_err() {
-        let staged = cache_dir.join(format!(".{content_hash}.{}.tmp", kind.extension));
-        fs::write(&staged, &bytes)
-            .await
-            .map_err(|error| error.to_string())?;
-        match fs::rename(&staged, &content_path).await {
-            Ok(()) => {}
-            Err(_) if fs::metadata(&content_path).await.is_ok() => {
-                let _ = fs::remove_file(&staged).await;
-            }
-            Err(error) => {
-                let _ = fs::remove_file(&staged).await;
-                return Err(error.to_string());
-            }
-        }
+        write_cache_atomic(&cache_dir, &content_path, &bytes).await?;
     }
 
     let metadata = ThumbnailMetadata {
@@ -412,23 +399,35 @@ fn sniff_image(bytes: &[u8]) -> Option<ImageKind> {
     None
 }
 
+async fn write_cache_atomic(cache_dir: &Path, target: &Path, bytes: &[u8]) -> Result<(), String> {
+    let directory = cache_dir.to_path_buf();
+    let target = target.to_path_buf();
+    let bytes = bytes.to_vec();
+    tokio::task::spawn_blocking(move || {
+        let mut staged = tempfile::Builder::new()
+            .prefix(".adm-thumbnail-")
+            .tempfile_in(directory)
+            .map_err(|e| e.to_string())?;
+        std::io::Write::write_all(staged.as_file_mut(), &bytes).map_err(|e| e.to_string())?;
+        staged.persist(target).map_err(|e| e.error.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 async fn write_metadata_atomic(
     cache_dir: &Path,
     url_key: &str,
     metadata: &ThumbnailMetadata,
 ) -> Result<(), String> {
-    let final_path = cache_dir.join(format!("{url_key}.json"));
-    let staged = cache_dir.join(format!(".{url_key}.json.tmp"));
     let payload = serde_json::to_vec(metadata).map_err(|error| error.to_string())?;
-    fs::write(&staged, payload)
-        .await
-        .map_err(|error| error.to_string())?;
-    if fs::metadata(&final_path).await.is_ok() {
-        let _ = fs::remove_file(&final_path).await;
-    }
-    fs::rename(&staged, &final_path)
-        .await
-        .map_err(|error| error.to_string())
+    write_cache_atomic(
+        cache_dir,
+        &cache_dir.join(format!("{url_key}.json")),
+        &payload,
+    )
+    .await
 }
 
 async fn prune_cache(cache_dir: &Path) {
@@ -439,7 +438,14 @@ async fn prune_cache(cache_dir: &Path) {
     let mut total = 0_u64;
     while let Ok(Some(entry)) = entries.next_entry().await {
         let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()) == Some("json") {
+        if !path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(valid_extension)
+        {
+            continue;
+        }
+        if entry.file_type().await.is_ok_and(|kind| kind.is_symlink()) {
             continue;
         }
         let Ok(metadata) = entry.metadata().await else {
@@ -571,5 +577,30 @@ mod tests {
             data_uri("image/jpeg", b"abc"),
             "data:image/jpeg;base64,YWJj"
         );
+    }
+}
+
+#[cfg(test)]
+mod concurrency_tests {
+    use super::*;
+    #[tokio::test]
+    async fn thumbnail_writers_do_not_share_staging_paths_or_remove_each_others_result() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("same.json");
+        let mut jobs = Vec::new();
+        for n in 0..32 {
+            let directory = root.path().to_path_buf();
+            let target = target.clone();
+            jobs.push(tokio::spawn(async move {
+                let bytes = format!("{{\"writer\":{n},\"payload\":\"{}\"}}", "x".repeat(1000));
+                write_cache_atomic(&directory, &target, bytes.as_bytes()).await
+            }));
+        }
+        for job in jobs {
+            job.await.unwrap().unwrap();
+        }
+        let result = std::fs::read(&target).unwrap();
+        assert!(serde_json::from_slice::<serde_json::Value>(&result).is_ok());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
     }
 }
