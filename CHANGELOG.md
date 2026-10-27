@@ -1,5 +1,12 @@
 # Apocalipse Download Manager — Chrome/Edge 0.3.207 · Firefox 0.3.207
 
+## 0.8.4 — 2026-10-27
+
+- Corrige atualização de FFmpeg/FFprobe com restauração do conjunto se qualquer substituição falhar.
+- Usa temporários e backups exclusivos; uma falha de limpeza de backup não sinaliza falha após validar os novos binários.
+- Repete brevemente renomeações bloqueadas no Windows e informa nos três idiomas quando a ferramenta continua em uso, preservando a versão anterior.
+- Adiciona testes de rollback do par e teste Windows com handle bloqueando o FFprobe, incluindo nova tentativa após desbloquear.
+
 ## 0.8.3 — 2026-10-27
 
 - Normaliza nomes portáveis, inclusive espaços/pontos no nome-base, limites Unicode e nomes reservados do Windows.

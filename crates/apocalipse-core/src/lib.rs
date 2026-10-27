@@ -33,3 +33,5 @@ pub use signed_update::{
 };
 pub use strategy::{contextual_media_page, plan_download, Capabilities, Engine, StrategyPlan};
 pub use validation::{validate_payload, PayloadExpectation};
+
+pub mod tool_install;

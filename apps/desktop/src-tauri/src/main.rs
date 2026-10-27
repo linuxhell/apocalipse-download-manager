@@ -11029,16 +11029,18 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             .parent()
             .ok_or_else(|| "tool_target_has_no_directory".to_owned())?;
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        let staged = parent.join(format!(".apocalipse-new-{executable_name}"));
-        let backup = parent.join(format!(".{executable_name}.apocalipse-backup"));
+        let staging = tempfile::Builder::new()
+            .prefix(".adm-tool-update-")
+            .tempdir_in(parent)
+            .map_err(|error| error.to_string())?;
+        let staged = staging.path().join(executable_name);
         let ffprobe_name = if cfg!(windows) {
             "ffprobe.exe"
         } else {
             "ffprobe"
         };
         let ffprobe = parent.join(ffprobe_name);
-        let ffprobe_staged = parent.join(format!(".apocalipse-new-{ffprobe_name}"));
-        let ffprobe_backup = parent.join(format!(".{ffprobe_name}.apocalipse-backup"));
+        let ffprobe_staged = staging.path().join(ffprobe_name);
         fs::write(&staged, &replacement).map_err(|error| error.to_string())?;
         #[cfg(unix)]
         {
@@ -11081,61 +11083,15 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             return Ok(format!("{id} already current ({before})"));
         }
 
-        if backup.exists() {
-            fs::remove_file(&backup).map_err(|error| error.to_string())?;
-        }
-        if ffprobe_backup.exists() {
-            fs::remove_file(&ffprobe_backup).map_err(|error| error.to_string())?;
-        }
-        if executable.exists() {
-            fs::rename(&executable, &backup).map_err(|error| error.to_string())?;
-        }
-        if id == "ffmpeg" && ffprobe.exists() {
-            fs::rename(&ffprobe, &ffprobe_backup).map_err(|error| error.to_string())?;
-        }
-        if let Err(error) = fs::rename(&staged, &executable) {
-            if backup.exists() {
-                let _ = fs::rename(&backup, &executable);
-            }
-            if ffprobe_backup.exists() {
-                let _ = fs::rename(&ffprobe_backup, &ffprobe);
-            }
-            return Err(error.to_string());
-        }
+        let mut files = vec![(staged.as_path(), executable.as_path())];
         if id == "ffmpeg" {
-            if let Err(error) = fs::rename(&ffprobe_staged, &ffprobe) {
-                let _ = fs::remove_file(&executable);
-                if backup.exists() {
-                    let _ = fs::rename(&backup, &executable);
-                }
-                if ffprobe_backup.exists() {
-                    let _ = fs::rename(&ffprobe_backup, &ffprobe);
-                }
-                return Err(error.to_string());
-            }
+            files.push((ffprobe_staged.as_path(), ffprobe.as_path()));
         }
-        let after = version_line(&executable, version_args);
-
-        let ffprobe_valid = id != "ffmpeg" || version_line(&ffprobe, &["-version"]).is_some();
-        if after.is_none() || !ffprobe_valid {
-            let _ = fs::remove_file(&executable);
-            if id == "ffmpeg" {
-                let _ = fs::remove_file(&ffprobe);
-            }
-            if backup.exists() {
-                let _ = fs::rename(&backup, &executable);
-            }
-            if ffprobe_backup.exists() {
-                let _ = fs::rename(&ffprobe_backup, &ffprobe);
-            }
-            return Err("updated_tool_validation_failed_original_restored".to_owned());
-        }
-        if backup.exists() {
-            fs::remove_file(&backup).map_err(|error| error.to_string())?;
-        }
-        if ffprobe_backup.exists() {
-            fs::remove_file(&ffprobe_backup).map_err(|error| error.to_string())?;
-        }
+        let mut after = None;
+        apocalipse_core::tool_install::publish(&files, || {
+            after = version_line(&executable, version_args);
+            after.is_some() && (id != "ffmpeg" || version_line(&ffprobe, &["-version"]).is_some())
+        })?;
         let after = after.unwrap_or_else(|| tag.to_owned());
 
         diagnostic_log(&state, "INFO", "tool.updated", &format!("tool={id} repository={repository} tag={tag} asset={asset_name} sha256={sha256} before={before} after={after} target={}", executable.display()));

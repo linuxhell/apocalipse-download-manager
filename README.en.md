@@ -33,7 +33,9 @@ The thread slider is visible in the new-download dialog and takes priority over 
 - Apocalipse Link for authenticated TLS transfers between computers.
 - Per-site credentials in the operating system vault; Portuguese, English and Simplified Chinese interfaces.
 
-## Version 0.8.3
+## Version 0.8.4
+
+Fixes FFmpeg/FFprobe updates on Windows: the pair is restored on failure, staging paths are unique, and backup cleanup cannot turn a successful update into an error. If another process blocks replacement, ADM preserves the previous files and asks you to stop the operation using the tool.
 
 Fixes movie names with trailing spaces or dots in their base name and keeps media temporary files in a dedicated per-task directory. Finalization selects only generated media and preserves existing files. The selected connection count also applies to YouTube fragments. Includes thumbnail cache concurrency fixes and torrent validation through Xtreme 0.2.2. See the [audit and its limits](docs/AUDIT-2026-10-27.md).
 
@@ -53,7 +55,7 @@ ED2K **Preview** becomes available after the first MD4-verified part: up to **9,
 
 Automatic retries preserve the current process's verified preview map while rechecking. The fresh result can invalidate parts; restarting the app or resuming manually requires verification again. If no peer has the remaining parts, the download stays incomplete, retains partial data and retries.
 
-This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.3**, Xtreme **0.2.2**, extension **0.3.207**.
+This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.4**, Xtreme **0.2.2**, extension **0.3.207**.
 
 ## Build and contribute
 
