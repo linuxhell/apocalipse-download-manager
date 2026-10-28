@@ -9667,6 +9667,56 @@ async fn get_tool_statuses(state: State<'_, AppState>) -> Result<Vec<ToolStatus>
         // Downloaded mpv builds are validated during installation instead.
         version: None,
     });
+    let mut cleanup_directories = std::collections::BTreeMap::<PathBuf, Vec<String>>::new();
+    for status in statuses
+        .iter()
+        .filter(|status| status.found && status.version.is_some())
+    {
+        let path = Path::new(&status.path);
+        if !path.is_absolute() {
+            continue;
+        }
+        if let (Some(parent), Some(name)) = (
+            path.parent(),
+            path.file_name().and_then(|name| name.to_str()),
+        ) {
+            cleanup_directories
+                .entry(parent.to_path_buf())
+                .or_default()
+                .push(name.to_owned());
+            if status.id == "ffmpeg" {
+                let name = if cfg!(windows) {
+                    "ffprobe.exe"
+                } else {
+                    "ffprobe"
+                };
+                if version_line(&parent.join(name), &["-version"]).is_some() {
+                    cleanup_directories
+                        .entry(parent.to_path_buf())
+                        .or_default()
+                        .push(name.to_owned());
+                }
+            }
+        }
+    }
+    let removed = tokio::task::spawn_blocking(move || {
+        cleanup_directories
+            .into_iter()
+            .map(|(parent, names)| {
+                apocalipse_core::tool_staging::cleanup(&parent, &names, SystemTime::now())
+            })
+            .sum::<usize>()
+    })
+    .await
+    .unwrap_or_default();
+    if removed > 0 {
+        diagnostic_log(
+            &state,
+            "INFO",
+            "tool.staging_cleaned",
+            &format!("entries={removed}"),
+        );
+    }
     Ok(statuses)
 }
 
@@ -11029,9 +11079,7 @@ async fn update_tool(state: State<'_, AppState>, id: String) -> Result<String, S
             .parent()
             .ok_or_else(|| "tool_target_has_no_directory".to_owned())?;
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        let staging = tempfile::Builder::new()
-            .prefix(".adm-tool-update-")
-            .tempdir_in(parent)
+        let staging = apocalipse_core::tool_staging::Staging::new(parent)
             .map_err(|error| error.to_string())?;
         let staged = staging.path().join(executable_name);
         let ffprobe_name = if cfg!(windows) {

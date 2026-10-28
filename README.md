@@ -33,7 +33,9 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.8.4
+## Versão 0.8.5
+
+A atualização mantém os nomes e caminhos dos executáveis. Só conclui após validar o novo conjunto e remover os arquivos antigos; falhas nessa limpeza também restauram a versão anterior. Temporários abandonados de ferramentas são limpos após validar os executáveis instalados, com proteção para atualizações em andamento e backups de recuperação.
 
 Corrige a atualização do FFmpeg/FFprobe no Windows: substituição com restauração do par em caso de falha, temporários exclusivos e limpeza de backups sem transformar uma atualização concluída em erro. Se outro processo bloquear a troca, o ADM preserva os arquivos anteriores e orienta a fechar a operação em andamento.
 
@@ -55,7 +57,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.4**, Xtreme **0.2.2**, extensão **0.3.207**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.5**, Xtreme **0.2.2**, extensão **0.3.207**.
 
 ## Compilar e contribuir
 

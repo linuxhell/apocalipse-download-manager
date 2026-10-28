@@ -1,5 +1,9 @@
 //! Publish a validated tool set together, retaining originals on failure.
-use std::{fs, io, path::Path, sync::Mutex};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
 // Shared by callers in this process; staging/validation happens before this lock.
 static PUBLICATION: Mutex<()> = Mutex::new(());
@@ -8,10 +12,10 @@ fn locked(error: &io::Error) -> bool {
     cfg!(windows) && matches!(error.raw_os_error(), Some(5 | 32 | 33))
 }
 
-fn rename(from: &Path, to: &Path) -> io::Result<()> {
+pub(crate) fn retry_io<T>(mut action: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     // A just-exited version probe or a scanner can briefly retain a Windows handle.
     for attempt in 0..6 {
-        match fs::rename(from, to) {
+        match action() {
             Err(error) if locked(&error) && attempt < 5 => {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
@@ -21,10 +25,14 @@ fn rename(from: &Path, to: &Path) -> io::Result<()> {
     unreachable!()
 }
 
+fn rename(from: &Path, to: &Path) -> io::Result<()> {
+    retry_io(|| fs::rename(from, to))
+}
+
 /// Sources must already be validated and on the destination's filesystem.
 /// `validate` checks the installed set. It must not recursively call `publish`.
-/// A locked old backup is retained for later manual cleanup, never reported as
-/// an installation failure after the new executable set has passed validation.
+/// Originals remain recoverable through validation and old-file cleanup.
+/// A failed cleanup also rolls back the installed set.
 pub fn publish(files: &[(&Path, &Path)], validate: impl FnOnce() -> bool) -> Result<(), String> {
     let _publication = PUBLICATION.lock().map_err(|e| e.to_string())?;
     let parent = files
@@ -35,7 +43,7 @@ pub fn publish(files: &[(&Path, &Path)], validate: impl FnOnce() -> bool) -> Res
         .prefix(".adm-tool-backup-")
         .tempdir_in(parent)
         .map_err(|e| e.to_string())?;
-    let paths: Vec<_> = (0..files.len())
+    let mut paths: Vec<_> = (0..files.len())
         .map(|index| backups.path().join(index.to_string()))
         .collect();
     let mut saved = vec![false; files.len()];
@@ -61,13 +69,14 @@ pub fn publish(files: &[(&Path, &Path)], validate: impl FnOnce() -> bool) -> Res
         if !validate() {
             return Err("updated_tool_validation_failed_original_restored".into());
         }
+        discard_saved(&mut paths, &saved, backups.path())?;
         Ok(())
     })();
     if let Err(error) = outcome {
         let mut failures = Vec::new();
         for (index, (_, target)) in files.iter().enumerate().rev() {
             if installed[index] {
-                if let Err(failure) = fs::remove_file(target) {
+                if let Err(failure) = retry_io(|| fs::remove_file(target)) {
                     failures.push(format!("{}: {failure}", target.display()));
                     continue;
                 }
@@ -89,9 +98,63 @@ pub fn publish(files: &[(&Path, &Path)], validate: impl FnOnce() -> bool) -> Res
         }
         return Err(error);
     }
-    // Deleting a renamed, still-running Windows executable can fail. The new
-    // binaries have already been checked; leave the unique backup directory.
-    let _ = backups.close();
+    // Only an empty directory remains: all old executable files were removed.
+    let _ = retry_io(|| fs::remove_dir(backups.path()));
+    Ok(())
+}
+
+// Keep read handles until every old path is unlinked. If a later unlink fails,
+// already-unlinked originals can be copied back for rollback without a full
+// duplicate of FFmpeg on every successful update.
+fn discard_saved(paths: &mut [PathBuf], saved: &[bool], directory: &Path) -> Result<(), String> {
+    use std::io::Seek;
+    let mut originals = Vec::new();
+    for (index, path) in paths.iter().enumerate() {
+        if saved[index] {
+            let file = fs::File::open(path).map_err(operation_error)?;
+            let metadata = file.metadata().map_err(operation_error)?;
+            originals.push((index, file, metadata));
+        }
+    }
+    let mut deleted = Vec::new();
+    for slot in 0..originals.len() {
+        let index = originals[slot].0;
+        if let Err(error) = retry_io(|| fs::remove_file(&paths[index])) {
+            for (restore_index, file, metadata) in &mut originals {
+                if !deleted.contains(restore_index) {
+                    continue;
+                }
+                let restore_path = directory.join(format!("restore-{restore_index}"));
+                let restored = (|| -> io::Result<()> {
+                    let mut destination = fs::OpenOptions::new()
+                        .create_new(true)
+                        .write(true)
+                        .open(&restore_path)?;
+                    file.rewind()?;
+                    io::copy(file, &mut destination)?;
+                    destination.set_permissions(metadata.permissions())?;
+                    let mut times = fs::FileTimes::new();
+                    if let Ok(time) = metadata.accessed() {
+                        times = times.set_accessed(time);
+                    }
+                    if let Ok(time) = metadata.modified() {
+                        times = times.set_modified(time);
+                    }
+                    destination.set_times(times)?;
+                    destination.sync_all()
+                })();
+                if let Err(failure) = restored {
+                    return Err(format!(
+                        "tool_update_restore_failed: {failure}; recovery={}",
+                        directory.display()
+                    ));
+                }
+                paths[*restore_index] = restore_path;
+            }
+            return Err(operation_error(error));
+        }
+        deleted.push(index);
+    }
     Ok(())
 }
 
@@ -192,6 +255,53 @@ mod tests {
             .path();
         assert!(error.contains(&recovery.display().to_string()));
         assert_eq!(fs::read(recovery.join("0")).unwrap(), b"original");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_old_file_cleanup_restores_the_pair_even_after_one_old_path_was_deleted() {
+        let root = tempfile::tempdir().unwrap();
+        let targets = [
+            root.path().join("ffmpeg.exe"),
+            root.path().join("ffprobe.exe"),
+        ];
+        let sources = [
+            root.path().join("new-ffmpeg.exe"),
+            root.path().join("new-ffprobe.exe"),
+        ];
+        for target in &targets {
+            fs::write(target, b"old version").unwrap();
+        }
+        for source in &sources {
+            fs::write(source, b"new version").unwrap();
+        }
+        let files = [(&*sources[0], &*targets[0]), (&*sources[1], &*targets[1])];
+        let result = publish(&files, || {
+            let backup = fs::read_dir(root.path())
+                .unwrap()
+                .filter_map(Result::ok)
+                .find(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".adm-tool-backup-")
+                })
+                .unwrap()
+                .path()
+                .join("1");
+            let mut permissions = fs::metadata(&backup).unwrap().permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(backup, permissions).unwrap();
+            true
+        });
+        assert!(result.is_err());
+        for target in &targets {
+            assert_eq!(fs::read(target).unwrap(), b"old version");
+        }
+        // The test made the second old file read-only; release it for fixture cleanup.
+        let mut permissions = fs::metadata(&targets[1]).unwrap().permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(&targets[1], permissions).unwrap();
     }
 
     #[cfg(windows)]

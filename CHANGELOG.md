@@ -1,5 +1,12 @@
 # Apocalipse Download Manager — Chrome/Edge 0.3.207 · Firefox 0.3.207
 
+## 0.8.5 — 2026-10-28
+
+- Mantém nomes e caminhos dos executáveis ao atualizar; falha na remoção de arquivos antigos também restaura o conjunto anterior.
+- Fecha e limpa a área temporária com repetição breve de operações bloqueadas no Windows.
+- Remove candidatos abandonados `.apocalipse-new-*` e áreas `.adm-tool-update-*` conhecidas com mais de uma hora, após validar as ferramentas instaladas. Preserva backups de recuperação, conteúdo desconhecido, links simbólicos e atualizações com lock ativo.
+- Adiciona testes de limpeza, proteção de atualização ativa, preservação de arquivos e restauração após falha de limpeza no Windows.
+
 ## 0.8.4 — 2026-10-27
 
 - Corrige atualização de FFmpeg/FFprobe com restauração do conjunto se qualquer substituição falhar.
