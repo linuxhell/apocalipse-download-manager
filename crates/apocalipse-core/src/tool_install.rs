@@ -34,6 +34,18 @@ fn rename(from: &Path, to: &Path) -> io::Result<()> {
 /// Originals remain recoverable through validation and old-file cleanup.
 /// A failed cleanup also rolls back the installed set.
 pub fn publish(files: &[(&Path, &Path)], validate: impl FnOnce() -> bool) -> Result<(), String> {
+    publish_with_cleanup(files, validate, |paths, saved, directory| {
+        discard_saved(paths, saved, directory, |path| {
+            retry_io(|| fs::remove_file(path))
+        })
+    })
+}
+
+fn publish_with_cleanup(
+    files: &[(&Path, &Path)],
+    validate: impl FnOnce() -> bool,
+    cleanup: impl FnOnce(&mut [PathBuf], &[bool], &Path) -> Result<(), String>,
+) -> Result<(), String> {
     let _publication = PUBLICATION.lock().map_err(|e| e.to_string())?;
     let parent = files
         .first()
@@ -69,7 +81,7 @@ pub fn publish(files: &[(&Path, &Path)], validate: impl FnOnce() -> bool) -> Res
         if !validate() {
             return Err("updated_tool_validation_failed_original_restored".into());
         }
-        discard_saved(&mut paths, &saved, backups.path())?;
+        cleanup(&mut paths, &saved, backups.path())?;
         Ok(())
     })();
     if let Err(error) = outcome {
@@ -106,7 +118,12 @@ pub fn publish(files: &[(&Path, &Path)], validate: impl FnOnce() -> bool) -> Res
 // Keep read handles until every old path is unlinked. If a later unlink fails,
 // already-unlinked originals can be copied back for rollback without a full
 // duplicate of FFmpeg on every successful update.
-fn discard_saved(paths: &mut [PathBuf], saved: &[bool], directory: &Path) -> Result<(), String> {
+fn discard_saved(
+    paths: &mut [PathBuf],
+    saved: &[bool],
+    directory: &Path,
+    mut delete: impl FnMut(&Path) -> io::Result<()>,
+) -> Result<(), String> {
     use std::io::Seek;
     let mut originals = Vec::new();
     for (index, path) in paths.iter().enumerate() {
@@ -119,7 +136,7 @@ fn discard_saved(paths: &mut [PathBuf], saved: &[bool], directory: &Path) -> Res
     let mut deleted = Vec::new();
     for slot in 0..originals.len() {
         let index = originals[slot].0;
-        if let Err(error) = retry_io(|| fs::remove_file(&paths[index])) {
+        if let Err(error) = delete(&paths[index]) {
             for (restore_index, file, metadata) in &mut originals {
                 if !deleted.contains(restore_index) {
                     continue;
@@ -257,9 +274,60 @@ mod tests {
         assert_eq!(fs::read(recovery.join("0")).unwrap(), b"original");
     }
 
+    #[test]
+    fn cleanup_failure_after_deleting_one_original_restores_both_files() {
+        let root = tempfile::tempdir().unwrap();
+        let targets = [root.path().join("ffmpeg"), root.path().join("ffprobe")];
+        let sources = [
+            root.path().join("new-ffmpeg"),
+            root.path().join("new-ffprobe"),
+        ];
+        for target in &targets {
+            fs::write(target, b"old version").unwrap();
+        }
+        for source in &sources {
+            fs::write(source, b"new version").unwrap();
+        }
+        let modified = fs::metadata(&targets[0]).unwrap().modified().unwrap();
+        let files = [(&*sources[0], &*targets[0]), (&*sources[1], &*targets[1])];
+        let mut deleted = Vec::new();
+        let result = publish_with_cleanup(
+            &files,
+            || true,
+            |paths, saved, directory| {
+                discard_saved(paths, saved, directory, |path| {
+                    if path.file_name().unwrap() == "1" {
+                        return Err(io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            "forced cleanup failure",
+                        ));
+                    }
+                    fs::remove_file(path)?;
+                    deleted.push(path.to_path_buf());
+                    Ok(())
+                })
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            deleted.len(),
+            1,
+            "the first original must actually have been unlinked"
+        );
+        for target in &targets {
+            assert_eq!(fs::read(target).unwrap(), b"old version");
+        }
+        assert_eq!(
+            fs::metadata(&targets[0]).unwrap().modified().unwrap(),
+            modified
+        );
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
+    }
+
     #[cfg(windows)]
     #[test]
-    fn failed_old_file_cleanup_restores_the_pair_even_after_one_old_path_was_deleted() {
+    fn windows_sharing_violation_during_cleanup_restores_the_original_pair() {
+        use std::os::windows::fs::OpenOptionsExt;
         let root = tempfile::tempdir().unwrap();
         let targets = [
             root.path().join("ffmpeg.exe"),
@@ -276,32 +344,40 @@ mod tests {
             fs::write(source, b"new version").unwrap();
         }
         let files = [(&*sources[0], &*targets[0]), (&*sources[1], &*targets[1])];
-        let result = publish(&files, || {
-            let backup = fs::read_dir(root.path())
-                .unwrap()
-                .filter_map(Result::ok)
-                .find(|entry| {
-                    entry
-                        .file_name()
-                        .to_string_lossy()
-                        .starts_with(".adm-tool-backup-")
+        let mut first_deleted = false;
+        let result = publish_with_cleanup(
+            &files,
+            || true,
+            |paths, saved, directory| {
+                // Allow reading, deny delete/rename on the second backup. This
+                // induces a real sharing violation rather than assuming read-only
+                // attributes prohibit std::fs::remove_file on modern Windows.
+                let mut blocker = Some(
+                    fs::OpenOptions::new()
+                        .read(true)
+                        .share_mode(3)
+                        .open(&paths[1])
+                        .unwrap(),
+                );
+                discard_saved(paths, saved, directory, |path| {
+                    let result = retry_io(|| fs::remove_file(path));
+                    if path.file_name().unwrap() == "1" {
+                        assert!(result.is_err(), "the native handle must deny deletion");
+                        // The external owner releases its handle before rollback.
+                        drop(blocker.take());
+                    } else {
+                        first_deleted = result.is_ok();
+                    }
+                    result
                 })
-                .unwrap()
-                .path()
-                .join("1");
-            let mut permissions = fs::metadata(&backup).unwrap().permissions();
-            permissions.set_readonly(true);
-            fs::set_permissions(backup, permissions).unwrap();
-            true
-        });
-        assert!(result.is_err());
+            },
+        );
+        assert_eq!(result.unwrap_err(), "tool_update_in_use");
+        assert!(first_deleted);
         for target in &targets {
             assert_eq!(fs::read(target).unwrap(), b"old version");
         }
-        // The test made the second old file read-only; release it for fixture cleanup.
-        let mut permissions = fs::metadata(&targets[1]).unwrap().permissions();
-        permissions.set_readonly(false);
-        fs::set_permissions(&targets[1], permissions).unwrap();
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
     }
 
     #[cfg(windows)]
