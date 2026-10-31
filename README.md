@@ -33,7 +33,9 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.8.5
+## Versão 0.8.6
+
+Corrige a pasta duplicada nos torrents: o destino reservado pelo ADM é enviado ao Xtreme como pasta-base e nome final separados. Torrents de um único arquivo também usam o caminho final correto. Requer Xtreme 0.2.3 ou superior; atualize-o em Configurações → Ferramentas se estiver usando um executável configurado à parte. Pastas de downloads anteriores não são movidas automaticamente.
 
 A atualização mantém os nomes e caminhos dos executáveis. Só conclui após validar o novo conjunto e remover os arquivos antigos; falhas nessa limpeza também restauram a versão anterior. Temporários abandonados de ferramentas são limpos após validar os executáveis instalados, com proteção para atualizações em andamento e backups de recuperação.
 
@@ -57,7 +59,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.5**, Xtreme **0.2.2**, extensão **0.3.207**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.6**, Xtreme **0.2.3**, extensão **0.3.207**.
 
 ## Compilar e contribuir
 

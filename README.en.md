@@ -33,7 +33,9 @@ The thread slider is visible in the new-download dialog and takes priority over 
 - Apocalipse Link for authenticated TLS transfers between computers.
 - Per-site credentials in the operating system vault; Portuguese, English and Simplified Chinese interfaces.
 
-## Version 0.8.5
+## Version 0.8.6
+
+Fixes duplicated torrent folders: ADM sends the reserved destination as a separate parent directory and final basename. Single-file torrents also use the correct final path. Requires Xtreme 0.2.3 or newer; update it under Settings → Tools if using a separately configured executable. Existing downloaded folders are not moved automatically.
 
 Tool updates retain the executable names and paths. Completion requires validating the new set and removing the old files; failure during old-file cleanup also restores the previous version. Abandoned tool staging files are cleaned after validating the installed executables, with protection for active updates and recovery backups.
 
@@ -57,7 +59,7 @@ ED2K **Preview** becomes available after the first MD4-verified part: up to **9,
 
 Automatic retries preserve the current process's verified preview map while rechecking. The fresh result can invalidate parts; restarting the app or resuming manually requires verification again. If no peer has the remaining parts, the download stays incomplete, retains partial data and retries.
 
-This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.5**, Xtreme **0.2.2**, extension **0.3.207**.
+This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.6**, Xtreme **0.2.3**, extension **0.3.207**.
 
 ## Build and contribute
 

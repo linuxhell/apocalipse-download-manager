@@ -407,15 +407,35 @@ impl Endpoint {
     pub async fn add_bittorrent(
         &self,
         torrent_bytes: &[u8],
-        destination_dir: &Path,
+        destination: &Path,
         only_files: &[usize],
         download_limit: u64,
     ) -> Result<String, String> {
+        let name = destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| apocalipse_core::file_names::portable_component(name))
+            .ok_or_else(|| "invalid_torrent_destination".to_owned())?;
+        // `dir` is the parent; `out` is the reserved file/folder basename.
+        // Older backends ignored torrent `out`, so fail before any payload write.
+        let version = self.call("nibiru.getVersion", vec![]).await?;
+        if !version
+            .get("enabledFeatures")
+            .and_then(Value::as_array)
+            .is_some_and(|features| features.iter().any(|feature| feature == "BitTorrent-Out"))
+        {
+            return Err("xtreme_torrent_destination_update_required".into());
+        }
+        let directory = destination
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
         let mut options = Map::new();
         options.insert(
             "dir".into(),
-            Value::String(destination_dir.to_string_lossy().into_owned()),
+            Value::String(directory.to_string_lossy().into_owned()),
         );
+        options.insert("out".into(), Value::String(name.to_owned()));
         options.insert("continue".into(), Value::String("true".into()));
         options.insert("file-allocation".into(), Value::String("none".into()));
         options.insert(
@@ -698,5 +718,90 @@ impl Endpoint {
         self.call("nibiru.removeResult", vec![Value::String(gid.to_owned())])
             .await
             .map(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod torrent_destination_tests {
+    use super::*;
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+    async fn server(supported: bool) -> (Endpoint, tokio::task::JoinHandle<Vec<Value>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let task = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for _ in 0..if supported { 2 } else { 1 } {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut reader = BufReader::new(stream);
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).await.unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = value.trim().parse::<usize>().unwrap();
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).await.unwrap();
+                let request: Value = serde_json::from_slice(&body).unwrap();
+                let result = if request["method"] == "nibiru.getVersion" {
+                    json!({"version":"0.2.3", "enabledFeatures":if supported { vec!["BitTorrent-Out"] } else {vec![]} })
+                } else {
+                    json!("0123456789abcdef")
+                };
+                let response =
+                    json!({"jsonrpc":"2.0", "id":request["id"], "result":result}).to_string();
+                let http = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    response.len(),
+                    response
+                );
+                reader.get_mut().write_all(http.as_bytes()).await.unwrap();
+                requests.push(request);
+            }
+            requests
+        });
+        (
+            Endpoint {
+                base_url: format!("http://127.0.0.1:{port}/jsonrpc"),
+                secret: "test".into(),
+                client: Client::new(),
+            },
+            task,
+        )
+    }
+
+    #[tokio::test]
+    async fn torrent_rpc_uses_parent_and_the_exact_reserved_basename() {
+        let (endpoint, requests) = server(true).await;
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("O Resgate (1)");
+        endpoint
+            .add_bittorrent(b"metadata", &destination, &[2, 3], 123)
+            .await
+            .unwrap();
+        let requests = requests.await.unwrap();
+        let options = &requests[1]["params"][3];
+        assert_eq!(options["dir"], root.path().to_string_lossy().as_ref());
+        assert_eq!(options["out"], "O Resgate (1)");
+        assert_eq!(options["select-file"], "2,3");
+        assert_eq!(options["max-download-limit"], "123");
+    }
+
+    #[tokio::test]
+    async fn unsupported_backend_cannot_silently_write_to_the_wrong_path() {
+        let (endpoint, requests) = server(false).await;
+        assert_eq!(
+            endpoint
+                .add_bittorrent(b"metadata", Path::new("Movie.mkv"), &[], 0)
+                .await
+                .unwrap_err(),
+            "xtreme_torrent_destination_update_required"
+        );
+        assert_eq!(requests.await.unwrap().len(), 1);
     }
 }

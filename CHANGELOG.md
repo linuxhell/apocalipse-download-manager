@@ -1,5 +1,11 @@
 # Apocalipse Download Manager — Chrome/Edge 0.3.207 · Firefox 0.3.207
 
+## 0.8.6 — 2026-10-31
+
+- Corrige raiz duplicada em torrents: separa `dir` e `out` no RPC, respeitando o nome reservado e torrents de arquivo único.
+- Usa Xtreme 0.2.3 e verifica a capacidade `BitTorrent-Out` antes de iniciar payload; orienta atualizar engines externos antigos nos três idiomas.
+- Preserva o conteúdo de pastas de torrents anteriores, sem movimentação ou exclusão automática.
+
 ## 0.8.5 — 2026-10-28
 
 - Mantém nomes e caminhos dos executáveis ao atualizar; falha na remoção de arquivos antigos também restaura o conjunto anterior.
