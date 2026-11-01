@@ -1685,7 +1685,7 @@ async function refreshDestinationHistory() {
     // Up to twelve folders are shown (the default folder first),
     // as cards: folder name on top, full path underneath.
     const current = document.querySelector("#destination").value;
-    for (const item of destinations.slice(0, 12)) {
+    for (const item of destinations.slice(0, 9)) {
       const row = document.createElement("div");
       row.className = "destination-card";
       row.classList.toggle("unavailable", !item.available);

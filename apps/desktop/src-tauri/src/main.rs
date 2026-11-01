@@ -5996,7 +5996,7 @@ fn remember_download_directory(state: &AppState, directory: &Path) -> Result<(),
     settings
         .recent_download_directories
         .insert(0, directory.to_path_buf());
-    settings.recent_download_directories.truncate(12);
+    settings.recent_download_directories.truncate(9);
     save_settings(state, &settings)
 }
 
@@ -9485,7 +9485,7 @@ fn list_download_directories(
     }
     Ok(paths
         .into_iter()
-        .take(12)
+        .take(9)
         .map(|path| DestinationChoice {
             is_default: path == default,
             available: path.is_dir(),

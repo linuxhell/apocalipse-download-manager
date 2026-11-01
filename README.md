@@ -33,7 +33,9 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.8.6
+## Versão 0.8.7
+
+Reduz de 12 para 9 os caminhos recentes na janela de download, mantendo o caminho padrão primeiro.
 
 Corrige a pasta duplicada nos torrents: o destino reservado pelo ADM é enviado ao Xtreme como pasta-base e nome final separados. Torrents de um único arquivo também usam o caminho final correto. Requer Xtreme 0.2.3 ou superior; atualize-o em Configurações → Ferramentas se estiver usando um executável configurado à parte. Pastas de downloads anteriores não são movidas automaticamente.
 
@@ -45,7 +47,7 @@ Corrige nomes de filmes com espaços ou pontos finais no nome-base e mantém tem
 
 Corrige a sobreposição do título com os controles de torrents na janela compacta. Os botões passam para a linha seguinte quando necessário, nos três idiomas.
 
-A janela de download não usa mais números nas etapas e mostra até **12 pastas recentes**, com o caminho padrão primeiro. O release inclui a extensão Firefox **0.3.207 assinada pela Mozilla**, além de Chrome/Edge 0.3.207.
+A janela de download não usa mais números nas etapas e mostra até **9 pastas recentes**, com o caminho padrão primeiro. O release inclui a extensão Firefox **0.3.207 assinada pela Mozilla**, além de Chrome/Edge 0.3.207.
 
 **Converter arquivo** está disponível na barra de downloads, na janela de adicionar download e nas ações dos downloads concluídos. Escolha um arquivo local ou use o arquivo já baixado. O FFprobe identifica o conteúdo e as trilhas reais, mesmo quando a extensão está errada. Capas embutidas não contam como vídeo. MP4 só com áudio oferece formatos de áudio; vídeo sem áudio oferece apenas formatos de vídeo. Quando há áudio e vídeo, todos os quadros são verificados antes de tratar um vídeo inteiramente preto como áudio; essa análise pode demorar em arquivos longos.
 
@@ -59,7 +61,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.6**, Xtreme **0.2.3**, extensão **0.3.207**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.7**, Xtreme **0.2.3**, extensão **0.3.207**.
 
 ## Compilar e contribuir
 

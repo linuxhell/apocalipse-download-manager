@@ -1,5 +1,9 @@
 # Apocalipse Download Manager — Chrome/Edge 0.3.207 · Firefox 0.3.207
 
+## 0.8.7 — 2026-11-01
+
+- Reduz os caminhos recentes de download de 12 para 9 no armazenamento e na janela, mantendo o padrão primeiro.
+
 ## 0.8.6 — 2026-10-31
 
 - Corrige raiz duplicada em torrents: separa `dir` e `out` no RPC, respeitando o nome reservado e torrents de arquivo único.
