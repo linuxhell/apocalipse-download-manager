@@ -33,7 +33,9 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.8.7
+## Versão 0.8.8
+
+Compacta a janela de adicionar download: altura ajustada ao conteúdo, opções avançadas à esquerda e nove caminhos recentes à direita. A expansão automática fica limitada a 700 pixels lógicos, respeitando a área útil da tela.
 
 Reduz de 12 para 9 os caminhos recentes na janela de download, mantendo o caminho padrão primeiro.
 
@@ -53,7 +55,7 @@ A janela de download não usa mais números nas etapas e mostra até **9 pastas 
 
 Formatos de saída: PNG, WebP sem perdas, JPEG, TIFF e BMP; FLAC, WAV, MP3, M4A, Opus e Ogg; MP4, MKV, MKV sem perdas e WebM. A lista depende dos codificadores disponíveis no FFmpeg instalado. Há seleção de trilha de áudio, progresso e cancelamento. A conversão preserva o original e salva outro arquivo sem sobrescrever arquivos existentes. Codificação sem perdas não recupera detalhes já perdidos; JPEG e os formatos com perdas usam alta qualidade. Imagens animadas reconhecidas são tratadas como vídeo para conservar os quadros.
 
-Instale **FFmpeg com FFprobe** em **Configurações → Ferramentas**. A janela de download ocupa a área disponível da janela principal, com opções avançadas sempre visíveis e duas colunas quando há espaço. Miniaturas recebidas da extensão são preservadas; imagens inválidas tentam a alternativa do YouTube. Chrome/Edge: **0.3.207**; Firefox mantém o XPI assinado **0.3.207**.
+Instale **FFmpeg com FFprobe** em **Configurações → Ferramentas**. A janela de download ajusta a altura ao conteúdo, com opções avançadas sempre visíveis e duas colunas quando há espaço. Miniaturas recebidas da extensão são preservadas; imagens inválidas tentam a alternativa do YouTube. Chrome/Edge: **0.3.207**; Firefox mantém o XPI assinado **0.3.207**.
 
 A janela se amplia ao abrir **Adicionar download**, dando mais espaço ao formulário, ao controle de threads e às opções avançadas. Ao fechar, ela recupera o tamanho e a posição anteriores; em telas pequenas, a rolagem continua disponível.
 
@@ -61,7 +63,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.7**, Xtreme **0.2.3**, extensão **0.3.207**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.8**, Xtreme **0.2.3**, extensão **0.3.207**.
 
 ## Compilar e contribuir
 

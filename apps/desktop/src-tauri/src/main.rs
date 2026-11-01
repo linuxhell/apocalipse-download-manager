@@ -13254,7 +13254,7 @@ fn set_download_dialog_expanded(app: tauri::AppHandle, expanded: bool) {
             .outer_size()
             .map(|outer| outer.height.saturating_sub(size.height))
             .unwrap_or((40.0 * scale).round() as u32);
-        let height = ((1000.0 * scale).round() as u32).min(
+        let height = ((700.0 * scale).round() as u32).min(
             work.size
                 .height
                 .saturating_sub(decorations)

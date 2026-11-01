@@ -350,16 +350,15 @@
 <div id="destination-list"></div>
 </section>
 
+</section>
 <section class="advanced-download">
 <h3 data-i18n="advancedOptions">Advanced options</h3>
-<label data-i18n="mirrorUrls" for="mirrors">Mirror URLs (one per line)</label>
-<textarea id="mirrors" placeholder="https://mirror.example/file" rows="3"></textarea>
-<label data-i18n="priority" for="priority">Priority</label>
-<select id="priority"><option data-i18n="priorityHigh" value="10">High</option><option data-i18n="priorityNormal" selected="" value="0">Normal</option><option data-i18n="priorityLow" value="-10">Low</option></select>
-<label data-i18n="downloadBandwidthLimit" for="download-bandwidth-limit">This download limit</label>
-<div class="bandwidth-input"><input id="download-bandwidth-limit" max="10240" min="0" step="0.1" type="number" value="0"/><span data-i18n="megabytesPerSecond">MB/s</span><small data-i18n="unlimited">Unlimited</small></div>
-
-</section>
+<div class="advanced-mirrors"><label data-i18n="mirrorUrls" for="mirrors">Mirror URLs (one per line)</label>
+<textarea id="mirrors" placeholder="https://mirror.example/file" rows="2"></textarea></div>
+<div class="advanced-priority"><label data-i18n="priority" for="priority">Priority</label>
+<select id="priority"><option data-i18n="priorityHigh" value="10">High</option><option data-i18n="priorityNormal" selected="" value="0">Normal</option><option data-i18n="priorityLow" value="-10">Low</option></select></div>
+<div class="advanced-bandwidth"><label data-i18n="downloadBandwidthLimit" for="download-bandwidth-limit">This download limit</label>
+<div class="bandwidth-input"><input id="download-bandwidth-limit" max="10240" min="0" step="0.1" type="number" value="0"/><span data-i18n="megabytesPerSecond">MB/s</span><small data-i18n="unlimited">Unlimited</small></div></div>
 
 </section>
 </div>

@@ -1,5 +1,10 @@
 # Apocalipse Download Manager — Chrome/Edge 0.3.207 · Firefox 0.3.207
 
+## 0.8.8 — 2026-11-01
+
+- Compacta a janela de download com altura pelo conteúdo e expansão automática de até 700 pixels lógicos.
+- Preserva metadados e seleção de arquivos de torrents à esquerda, com rolagem própria na lista. Opções avançadas usam o espaço livre à esquerda ou uma faixa inferior quando os metadados estão visíveis; nove caminhos recentes à direita.
+
 ## 0.8.7 — 2026-11-01
 
 - Reduz os caminhos recentes de download de 12 para 9 no armazenamento e na janela, mantendo o padrão primeiro.
