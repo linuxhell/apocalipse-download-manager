@@ -11,8 +11,8 @@ Gerenciador de downloads livre e portátil para Windows, Linux e macOS x64.
 | Windows x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-windows-x64-portable.zip) |
 | Linux x64 | [Portable tar.gz](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64-portable.tar.gz) · [AppImage](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64.AppImage) |
 | macOS x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-macos-x64-portable.zip) |
-| Chrome | [0.3.207 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.207.zip) |
-| Edge | [0.3.207 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.207.zip) |
+| Chrome | [0.3.208 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.208.zip) |
+| Edge | [0.3.208 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.208.zip) |
 | Firefox | [0.3.207 XPI](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.207.xpi) |
 
 ![Downloads](assets/screenshots/downloads.png)
@@ -33,9 +33,13 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.8.10
+## Versão 0.8.11
 
-Inclui Xtreme 0.2.4 para reduzir a espera inicial em downloads HTTP/HTTPS: uma thread começa pelo GET, e arquivos pequenos dispensam um teste de faixa desnecessário. Preserva a retomada e o limite escolhido no slider. A [comparação local](https://github.com/linuxhell/nibiru-xtreme/blob/main/benchmarks/http-startup-2026-11-06.md) mede tempo de início; não demonstra aumento da velocidade contínua da Internet. Se usa um motor configurado à parte, atualize-o em Configurações → Ferramentas.
+Corrige players que carregavam o MP4 depois de criar os botões: Chrome/Edge 0.3.208 passa a mostrar **Baixar** quando o endereço aparece e oculta a gravação quando há download direto. A fonte do player clicado também tem prioridade sobre playlists de anúncios e prévias, evitando baixar outro vídeo ou um endereço expirado com erro 410. A gravação mostra “Iniciando…”, bloqueia cliques repetidos e informa falha se a reprodução não iniciar. Firefox mantém o XPI assinado 0.3.207; essa correção da extensão está no pacote Chrome/Edge 0.3.208.
+
+Inclui Xtreme 0.2.5 para corrigir a seleção automática da porta de torrents: reserva UDP/uTP antes de abrir TCP no mesmo número e libera tentativas que falhem. Corrige a inicialização com erro 10013 observada no CI Windows, mantendo uTP e portas explícitas. Se usa um motor configurado à parte, atualize-o em Configurações → Ferramentas.
+
+Preserva a redução da espera inicial em downloads HTTP/HTTPS introduzida no Xtreme 0.2.4: uma thread começa pelo GET, e arquivos pequenos dispensam um teste de faixa desnecessário. Preserva a retomada e o limite escolhido no slider. A [comparação local](https://github.com/linuxhell/nibiru-xtreme/blob/main/benchmarks/http-startup-2026-11-06.md) mede tempo de início; não demonstra aumento da velocidade contínua da Internet.
 
 Corrige capturas do Vimeo que baixavam uma playlist HLS só de vídeo e geravam MP4 sem áudio. Com uma página de vídeo específica na captura, o ADM resolve a apresentação completa pelo player do Vimeo e usa o yt-dlp para selecionar e juntar vídeo e áudio. Preserva identificadores de vídeos não listados; links diretos sem contexto de página continuam diretos.
 
@@ -53,13 +57,13 @@ Corrige nomes de filmes com espaços ou pontos finais no nome-base e mantém tem
 
 Corrige a sobreposição do título com os controles de torrents na janela compacta. Os botões passam para a linha seguinte quando necessário, nos três idiomas.
 
-A janela de download não usa mais números nas etapas e mostra até **9 pastas recentes**, com o caminho padrão primeiro. O release inclui a extensão Firefox **0.3.207 assinada pela Mozilla**, além de Chrome/Edge 0.3.207.
+A janela de download não usa mais números nas etapas e mostra até **9 pastas recentes**, com o caminho padrão primeiro. O release inclui a extensão Firefox **0.3.207 assinada pela Mozilla**, além de Chrome/Edge 0.3.208.
 
 **Converter arquivo** está disponível na barra de downloads, na janela de adicionar download e nas ações dos downloads concluídos. Escolha um arquivo local ou use o arquivo já baixado. O FFprobe identifica o conteúdo e as trilhas reais, mesmo quando a extensão está errada. Capas embutidas não contam como vídeo. MP4 só com áudio oferece formatos de áudio; vídeo sem áudio oferece apenas formatos de vídeo. Quando há áudio e vídeo, todos os quadros são verificados antes de tratar um vídeo inteiramente preto como áudio; essa análise pode demorar em arquivos longos.
 
 Formatos de saída: PNG, WebP sem perdas, JPEG, TIFF e BMP; FLAC, WAV, MP3, M4A, Opus e Ogg; MP4, MKV, MKV sem perdas e WebM. A lista depende dos codificadores disponíveis no FFmpeg instalado. Há seleção de trilha de áudio, progresso e cancelamento. A conversão preserva o original e salva outro arquivo sem sobrescrever arquivos existentes. Codificação sem perdas não recupera detalhes já perdidos; JPEG e os formatos com perdas usam alta qualidade. Imagens animadas reconhecidas são tratadas como vídeo para conservar os quadros.
 
-Instale **FFmpeg com FFprobe** em **Configurações → Ferramentas**. A janela de download ajusta a altura ao conteúdo, com opções avançadas sempre visíveis e duas colunas quando há espaço. Miniaturas recebidas da extensão são preservadas; imagens inválidas tentam a alternativa do YouTube. Chrome/Edge: **0.3.207**; Firefox mantém o XPI assinado **0.3.207**.
+Instale **FFmpeg com FFprobe** em **Configurações → Ferramentas**. A janela de download ajusta a altura ao conteúdo, com opções avançadas sempre visíveis e duas colunas quando há espaço. Miniaturas recebidas da extensão são preservadas; imagens inválidas tentam a alternativa do YouTube. Chrome/Edge: **0.3.208**; Firefox mantém o XPI assinado **0.3.207**.
 
 A janela se amplia ao abrir **Adicionar download**, dando mais espaço ao formulário, ao controle de threads e às opções avançadas. Ao fechar, ela recupera o tamanho e a posição anteriores; em telas pequenas, a rolagem continua disponível.
 
@@ -67,7 +71,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.10**, Xtreme **0.2.4**, extensão **0.3.207**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.11**, Xtreme **0.2.5**, Chrome/Edge **0.3.208**, Firefox **0.3.207**.
 
 ## Compilar e contribuir
 

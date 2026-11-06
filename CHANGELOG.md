@@ -1,4 +1,15 @@
-# Apocalipse Download Manager — Chrome/Edge 0.3.207 · Firefox 0.3.207
+# Apocalipse Download Manager — Chrome/Edge 0.3.208 · Firefox 0.3.207
+
+## 0.8.11 — 2026-11-06
+
+- Prioriza a fonte do player clicado sobre playlists de anúncios/prévias: um MP4 direto não é substituído por HLS de outro vídeo. Players vazios não herdam playlists, e HLS direto analisa apenas seu próprio manifesto.
+
+- Chrome/Edge 0.3.208 atualiza ações de players que recebem o MP4 depois de criar o overlay, revelando Baixar e ocultando Gravar quando há download direto.
+- Gravação com estado Iniciando nos três idiomas, proteção contra cliques simultâneos, timeout de reprodução, limpeza do stream e restauração do loop em caso de falha. Firefox mantém o XPI assinado 0.3.207.
+
+- Inclui Xtreme 0.2.5 com seleção conjunta de portas TCP e UDP/uTP, corrigindo a inicialização que falhou no CI Windows com erro 10013.
+- Mantém uTP e portas explícitas; tentativas automáticas têm limite e liberam reservas abandonadas.
+- Preserva as melhorias de início HTTP, Vimeo com áudio e Firefox 0.3.207 assinado.
 
 ## 0.8.10 — 2026-11-06
 

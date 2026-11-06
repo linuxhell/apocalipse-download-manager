@@ -11,8 +11,8 @@
 | Windows x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-windows-x64-portable.zip) |
 | Linux x64 | [Portable tar.gz](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64-portable.tar.gz) · [AppImage](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64.AppImage) |
 | macOS x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-macos-x64-portable.zip) |
-| Chrome | [0.3.207 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.207.zip) |
-| Edge | [0.3.207 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.207.zip) |
+| Chrome | [0.3.208 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.208.zip) |
+| Edge | [0.3.208 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.208.zip) |
 | Firefox | [0.3.207 XPI](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.207.xpi) |
 
 ![Downloads](assets/screenshots/downloads.png)
@@ -33,9 +33,13 @@
 - Apocalipse Link：计算机之间经过身份验证的 TLS 文件传输。
 - 网站凭据保存在系统安全凭据库中；界面支持葡萄牙语、英语和简体中文。
 
-## 0.8.10 版本
+## 0.8.11 版本
 
-集成 Xtreme 0.2.4，减少 HTTP/HTTPS 启动等待：单线程直接发送 GET，小文件跳过不会使用的 Range 测试。保留续传验证和滑块设置的连接数上限。[本地比较](https://github.com/linuxhell/nibiru-xtreme/blob/main/benchmarks/http-startup-2026-11-06.md)测量的是启动时间，不能证明互联网持续传输速度提高。如果另行配置了引擎，请在设置 → 工具中更新。
+修复播放器在按钮创建后才加载 MP4 地址时的状态：Chrome/Edge 0.3.208 会在地址出现后显示**下载**，支持直接下载时隐藏录制。优先使用所点击播放器的地址，避免选择广告或预览播放列表、下载其他视频或遇到过期地址的 410 错误。录制显示“正在启动…”，阻止重复点击，并在无法开始播放时显示失败。Firefox 继续提供已签名的 0.3.207 XPI；此扩展修复位于 Chrome/Edge 0.3.208 软件包中。
+
+集成 Xtreme 0.2.5，修复自动选择种子对等端口：先保留 UDP/uTP，再在同一端口绑定 TCP，并释放失败尝试。修复 Windows CI 中观察到的 10013 启动错误，保留 uTP 和指定端口。如果另行配置了引擎，请在设置 → 工具中更新。
+
+保留 Xtreme 0.2.4 引入的 HTTP/HTTPS 启动优化：单线程直接发送 GET，小文件跳过不会使用的 Range 测试。保留续传验证和滑块设置的连接数上限。[本地比较](https://github.com/linuxhell/nibiru-xtreme/blob/main/benchmarks/http-startup-2026-11-06.md)测量的是启动时间，不能证明互联网持续传输速度提高。
 
 修复 Vimeo 捕获单独的视频 HLS 播放列表而生成无声 MP4 的问题。捕获中包含具体视频页面时，ADM 通过 Vimeo 播放器解析完整内容，并用 yt-dlp 选择及合并视频和音频。保留非公开视频的标识；缺少页面上下文的直接链接保持原样。
 
@@ -53,13 +57,13 @@
 
 修复紧凑窗口中标题与种子控件重叠的问题。三种语言下，顶部操作按钮均可在空间不足时自动换行。
 
-下载对话框不再显示步骤编号，最多显示 **9 个最近使用的文件夹**，默认路径排在首位。发布包包含 **Mozilla 签名的 Firefox 0.3.207 扩展**，以及 Chrome/Edge 0.3.207。
+下载对话框不再显示步骤编号，最多显示 **9 个最近使用的文件夹**，默认路径排在首位。发布包包含 **Mozilla 签名的 Firefox 0.3.207 扩展**，以及 Chrome/Edge 0.3.208。
 
 下载工具栏、添加下载窗口及已完成下载的操作中提供**转换文件**。可选择本地文件或已下载的文件。FFprobe 按实际内容和轨道识别文件，即使扩展名不正确。内嵌封面不视为视频。仅有音轨的 MP4 只提供音频格式；无音轨的视频只提供视频格式。同时含有音视频时，会检查全部视频帧，确认全为黑屏后才按音频处理；长文件分析可能需要较长时间。
 
 输出格式：PNG、无损 WebP、JPEG、TIFF、BMP；FLAC、WAV、MP3、M4A、Opus、Ogg；MP4、MKV、无损 MKV、WebM。实际列表取决于已安装的 FFmpeg 编码器。支持音轨选择、进度和取消。保留原文件，另存新文件，不覆盖已有文件。无损编码无法恢复已损失的细节；JPEG 和有损格式采用高质量设置。识别到的动态图像按视频处理，以保留全部帧。
 
-请在**设置 → 工具**中安装 **FFmpeg 和 FFprobe**。下载对话框高度随内容调整，高级选项始终显示，空间足够时采用两列。保留扩展提供的缩略图，无法显示的图像尝试 YouTube 备用缩略图。Chrome/Edge：**0.3.207**；Firefox 继续提供已签名的 **0.3.207** XPI。
+请在**设置 → 工具**中安装 **FFmpeg 和 FFprobe**。下载对话框高度随内容调整，高级选项始终显示，空间足够时采用两列。保留扩展提供的缩略图，无法显示的图像尝试 YouTube 备用缩略图。Chrome/Edge：**0.3.208**；Firefox 继续提供已签名的 **0.3.207** XPI。
 
 打开**添加下载**时，窗口会自动增高，为表单、线程设置和高级选项提供更多空间。关闭对话框后恢复原来的窗口大小和位置；小屏幕上仍可滚动。
 
@@ -67,7 +71,7 @@ ED2K 的**预览**按钮在首个分块通过 MD4 校验后启用：最多 **9,7
 
 自动重试在重新检查期间保留当前进程已验证的预览映射。检查结果仍可撤销无效分块；重启程序或手动恢复需要重新验证。如果所有来源都缺少剩余分块，下载会保持未完成状态，保存已有数据并重试。
 
-此版本还修复了 HTTP 锁清理、删除普通下载时的续传标识清理、Xtreme 监听器关闭和加密缓存并发写入。ADM **0.8.10**、Xtreme **0.2.4**、扩展 **0.3.207**。
+此版本还修复了 HTTP 锁清理、删除普通下载时的续传标识清理、Xtreme 监听器关闭和加密缓存并发写入。ADM **0.8.11**、Xtreme **0.2.5**、Chrome/Edge **0.3.208**、Firefox **0.3.207**。
 
 ## 构建与贡献
 

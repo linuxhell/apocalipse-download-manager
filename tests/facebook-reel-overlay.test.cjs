@@ -30,6 +30,8 @@ test('Facebook extractor parse failures expose a localized recording fallback', 
 // APIs/DOM geometry are mocked; URL selection and the outgoing payload are real.
 function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false, shadow = false, clipping = false, theme = "void" } = {}) {
   const sent = [], fetched = [], appended = [], listeners = [];
+  const timers = new Map();
+  let nextTimer = 0;
   const location = new URL(url);
   const rect = { left: 20, top: 40, right: 500, bottom: 600, width: 480, height: 560 };
   const post = { parentElement: null, getBoundingClientRect: () => rect, querySelectorAll: () => [] };
@@ -64,7 +66,8 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
     innerHeight: 800, scrollX: 0, scrollY: 0,
     ...(clipping ? { getComputedStyle: () => ({ overflowX: "visible", overflowY: "auto" }) } : {}),
     addEventListener(type, handler) { if (type === "scroll") listeners.push({ scroll: handler }); }, removeEventListener() {}, postMessage() {},
-    setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {},
+    setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
+    clearTimeout(id) { timers.delete(id); }, setInterval: () => 1, clearInterval() {},
     MutationObserver: class { observe() {} },
     performance: { getEntriesByType: () => network.map(item => ({ name: item.url })), getEntriesByName: () => [] },
     fetch: async target => {
@@ -75,11 +78,13 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
     chrome: {
       storage: { local: { get(defaults, callback) { callback({ ...defaults, desktopTheme: theme }); } }, onChanged: { addListener() {} } },
       runtime: {
+        id: 'synthetic-extension-id',
         onMessage: { addListener(handler) { listeners.push(handler); } },
         sendMessage(message, callback) {
           sent.push(message);
           const result = message.type === 'APOCALIPSE_RECENT_TAB_MEDIA' ? { media: network }
             : message.type === 'APOCALIPSE_BLOB_BEGIN' ? { uploadId: 'synthetic-upload' }
+              : message.type === 'APOCALIPSE_SELECT_HLS' ? { url: message.urls[0], requestUrls: message.urls }
               : { ok: true, target: 'desktop' };
           if (callback) callback(result);
           return Promise.resolve(result);
@@ -89,12 +94,22 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
   });
   context.window = context; context.top = context;
   vm.runInContext(readFileSync(join(__dirname, '../browser-extension/tiktok-identity.js'), 'utf8'), context);
-  vm.runInContext(script.replace(/\}\)\(\);\s*$/, 'globalThis.testHooks = { installOverlays, collect, titleInfoFor };\n})();'), context);
+  vm.runInContext(script.replace(/\}\)\(\);\s*$/, 'globalThis.testHooks = { installOverlays, collect, titleInfoFor, waitForRecordingPlayback: typeof waitForRecordingPlayback === "function" ? waitForRecordingPlayback : null };\n})();'), context);
   context.testHooks.installOverlays();
   const button = appended.find(node => node.className === 'apocalipse-media-download');
   assert.ok(button, 'the actual overlay must be installed');
   return {
     sent, fetched, location, video, appended,
+    button,
+    recordButton: appended.find(node => node.className === 'apocalipse-media-download apocalipse-media-record'),
+    refresh: () => context.testHooks.installOverlays(),
+    waitForPlayback: ms => context.testHooks.waitForRecordingPlayback(video, ms),
+    fireTimeout: ms => {
+      const matching = [...timers].filter(([, timer]) => timer.delay === ms);
+      assert.ok(matching.length, `expected pending ${ms} ms timer`);
+      for (const [id, timer] of matching) { timers.delete(id); timer.fn(); }
+    },
+    hasTimeout: ms => [...timers.values()].some(timer => timer.delay === ms),
     zeroWrapper: () => { post.getBoundingClientRect = () => ({ left: 0, right: 0, top: 0, bottom: 0 }); for (const entry of listeners) entry.scroll?.(); },
     clipTo: top => { post.getBoundingClientRect = () => ({ left: 0, right: 800, top, bottom: top + 200 }); for (const entry of listeners) entry.scroll?.(); },
     scrollTo: top => { rect.top = top; rect.bottom = top + rect.height; for (const entry of listeners) entry.scroll?.(); },
@@ -277,11 +292,85 @@ test('recording keeps the source player alive and stops at its real end', () => 
   assert.match(script, /if \(playbackWatch\) clearInterval\(playbackWatch\)/);
 });
 
-test('late direct video sources reveal Download and recording waits for real tracks', () => {
-  assert.match(script, /const downloadReady = \(\) =>/);
-  assert.match(script, /const liveCanDownload = canDownload \|\| downloadReady\(\)/);
-  assert.match(script, /await element\.play\(\);\s*const stream = capture\(\)/);
-  assert.match(script, /capture_stream_has_no_tracks/);
+test('late HTTP sources replace Record-only state with a working direct Download', async () => {
+  const p = page({ url: 'https://media.example.test/watch/123', source: '', recordable: true });
+  assert.equal(p.button.hidden, true);
+  assert.equal(p.recordButton.hidden, false);
+  const direct = 'https://cdn.example.test/movie.mp4?signature=synthetic';
+  p.video.currentSrc = direct;
+  p.refresh();
+  assert.equal(p.button.hidden, false);
+  assert.equal(p.recordButton.hidden, true);
+  await p.click();
+  assert.equal(p.downloads().length, 1);
+  assert.equal(p.downloads()[0].item.url, direct);
+  assert.equal(p.sent.filter(m => m.type === 'APOCALIPSE_BLOB_BEGIN').length, 0);
+});
+
+test('source changes refresh both actions without duplicating the overlay', () => {
+  const p = page({ url: 'https://media.example.test/watch/123', recordable: true });
+  const original = p.appended.filter(node => String(node.className).includes('apocalipse-media-download'));
+  assert.equal(p.recordButton.hidden, true);
+  p.video.currentSrc = ''; p.video.src = '';
+  p.refresh();
+  assert.equal(p.button.hidden, true);
+  assert.equal(p.recordButton.hidden, false);
+  assert.deepEqual(p.appended.filter(node => String(node.className).includes('apocalipse-media-download')), original);
+});
+
+test('the exact HTTP player source outranks an unrelated expired HLS playlist', async () => {
+  const direct = 'https://media.example.test/get-video?id=123&token=synthetic';
+  const p = page({ url: 'https://media.example.test/watch/123', source: direct,
+    network: [{ url: 'https://ads.example.test/old-preview.m3u8', contentType: 'application/vnd.apple.mpegurl' }] });
+  await p.click();
+  assert.equal(p.downloads().length, 1);
+  assert.equal(p.downloads()[0].item.url, direct);
+  assert.equal(p.sent.filter(m => m.type === 'APOCALIPSE_SELECT_HLS').length, 0);
+});
+
+test('an empty player does not inherit another video manifest', () => {
+  const p = page({ url: 'https://media.example.test/watch/123', source: '', recordable: true,
+    network: [{ url: 'https://ads.example.test/preview.m3u8', contentType: 'application/vnd.apple.mpegurl' }] });
+  assert.equal(p.button.hidden, true);
+  assert.equal(p.recordButton.hidden, false);
+});
+
+test('a direct HLS player analyzes only its own manifest', async () => {
+  const direct = 'https://media.example.test/current.m3u8';
+  const p = page({ url: 'https://media.example.test/watch/123', source: direct,
+    network: [{ url: 'https://ads.example.test/other.m3u8', contentType: 'application/vnd.apple.mpegurl' }] });
+  await p.click();
+  const analysis = p.sent.find(m => m.type === 'APOCALIPSE_SELECT_HLS');
+  assert.deepEqual(Array.from(analysis.urls), [direct]);
+  assert.equal(p.downloads()[0].item.url, direct);
+});
+
+test('recording startup blocks repeated clicks and recovers from unresolved playback', async () => {
+  const p = page({ url: 'https://media.example.test/watch/123', source: 'blob:https://media.example.test/synthetic', recordable: true });
+  let playCalls = 0;
+  p.video.loop = true;
+  p.video.play = () => { playCalls++; return new Promise(() => {}); };
+  const event = { preventDefault() {}, stopPropagation() {} };
+  const starting = p.recordButton.click(event);
+  assert.equal(p.recordButton.disabled, true);
+  assert.match(p.recordButton.textContent, /Starting|Iniciando|正在启动/);
+  await p.recordButton.click(event);
+  assert.equal(playCalls, 1);
+  p.fireTimeout(8000);
+  await starting;
+  assert.equal(p.recordButton.disabled, false);
+  assert.equal(p.video.loop, true);
+  assert.equal(p.recordButton.textContent, '⚠');
+  await new Promise(setImmediate);
+  assert.ok(p.sent.some(m => m.eventName === 'recording_start_failed'));
+  assert.equal(p.sent.filter(m => m.type === 'APOCALIPSE_BLOB_BEGIN').length, 0);
+});
+
+test('successful playback clears its recording-start timeout', async () => {
+  const p = page();
+  p.video.play = async () => {};
+  await p.waitForPlayback(37);
+  assert.equal(p.hasTimeout(37), false);
 });
 
 test('recording seals each segment and resumes only after real media progress', () => {

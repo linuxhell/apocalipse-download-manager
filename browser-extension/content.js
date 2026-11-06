@@ -983,9 +983,22 @@
   };
   const recordingLabels = () => {
     const value = String(interfaceLanguage || "en").toLowerCase();
-    if (value.startsWith("zh")) return { record: "● 录制", stop: "■ 停止并保存", uploading: "正在发送…", done: "已保存", unavailable: "此视频无法由浏览器录制" };
-    if (value.startsWith("pt")) return { record: "● Gravar", stop: "■ Parar e salvar", uploading: "Enviando…", done: "Gravação salva", unavailable: "Este vídeo não permite gravação pelo navegador" };
-    return { record: "● Record", stop: "■ Stop and save", uploading: "Uploading…", done: "Recording saved", unavailable: "This video cannot be recorded by the browser" };
+    if (value.startsWith("zh")) return { record: "● 录制", starting: "正在启动…", stop: "■ 停止并保存", uploading: "正在发送…", done: "已保存", unavailable: "此视频无法由浏览器录制" };
+    if (value.startsWith("pt")) return { record: "● Gravar", starting: "Iniciando…", stop: "■ Parar e salvar", uploading: "Enviando…", done: "Gravação salva", unavailable: "Este vídeo não permite gravação pelo navegador" };
+    return { record: "● Record", starting: "Starting…", stop: "■ Stop and save", uploading: "Uploading…", done: "Recording saved", unavailable: "This video cannot be recorded by the browser" };
+  };
+  const waitForRecordingPlayback = async (element, timeoutMs = 8000) => {
+    let timer;
+    try {
+      await Promise.race([
+        element.play(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("recording_playback_timeout")), timeoutMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   };
   // Overlay buttons are always white with black text and a black outline.
   const overlayThemeColors = () => "#ffffff";
@@ -1286,7 +1299,9 @@
     }
     const direct = absolute(element.currentSrc || element.src);
     if (direct && /^https?:/.test(direct)) return direct;
-    if (element.tagName === "VIDEO") return hlsForPage().fallback;
+    // Only an MSE/blob player needs an underlying manifest discovered on the
+    // page. An empty placeholder must not inherit another player's playlist.
+    if (element.tagName === "VIDEO" && /^blob:/i.test(direct || "")) return hlsForPage().fallback;
     return null;
   };
   const resolveDownloadUrl = async (element) => {
@@ -1295,7 +1310,16 @@
     // YouTube has its own format-selection pipeline (video + audio merging).
     // Keep both regular videos and live streams out of the generic HLS route.
     if (youtubeExtractorUrl() || isRedditPage()) return immediate;
+    const playerSource = absolute(element.currentSrc || element.src);
+    const directHttpPlayer = !element.srcObject && /^https?:/i.test(playerSource || "");
+    // The URL actually feeding this player takes precedence over manifests
+    // requested by adverts, hidden previews or another video in the same frame.
+    if (directHttpPlayer && !/\.m3u8(?:$|[?#])/i.test(playerSource)) return immediate;
     const hls = hlsForPage();
+    if (directHttpPlayer) {
+      hls.candidates = [playerSource];
+      hls.fallback = playerSource;
+    }
     // Some sites (e.g. PornoXO) serve manifests from URLs without ".m3u8";
     // the background worker identifies those by Content-Type.
     if (!hls.candidates.length && !/^https?:/i.test(String(immediate || ""))) {
@@ -1514,6 +1538,9 @@
         delete element.dataset.apocalipseButton;
       }
       if (element.dataset.apocalipseButton) {
+        // A placeholder player can acquire its HTTP source after installation.
+        // Refresh its actions instead of keeping the initial Record-only state.
+        activeOverlays.get(element)?.refreshState?.();
         if (isSocialVideo) {
           socialSummary.eligible += 1; socialSummary.overlays += 1; socialSummary.kept += 1;
           emitSocialDecision(element, "keep", { reason: "overlay_already_active", sponsored: false });
@@ -1566,9 +1593,9 @@
       // audio is separate or the durable post identity is still unresolved.
       // Keep Record available there and let Download fall back to recording
       // when no complete Facebook resource can be proven.
-      const canRecord = !isYouTubeVideo && element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
-        && Boolean(element.captureStream || element.webkitCaptureStream)
-        && (!hasDirectHttpMedia || isFacebookVideo);
+      const supportsRecording = !isYouTubeVideo && element.tagName === "VIDEO" && Boolean(globalThis.MediaRecorder)
+        && Boolean(element.captureStream || element.webkitCaptureStream);
+      const canRecord = supportsRecording && (!hasDirectHttpMedia || isFacebookVideo);
       if (!canDownload && !canRecord) {
         if (isSocialVideo) {
           socialSummary.noAction += 1;
@@ -1599,6 +1626,7 @@
       button.title = "Apocalipse Download Manager";
       button.hidden = !canDownload || Boolean(isFacebookVideo && facebookSponsoredEvidence(element));
       let recordButton = null;
+      let recordPhase = "idle";
       let refreshRecordLabels = () => {};
       button.addEventListener("click", async (event) => {
         const actionId = globalThis.ADM_DIAG?.begin("overlay.click", { ...globalThis.ADM_DIAG.player(element), handler: "generic" }) || crypto.randomUUID();
@@ -1793,7 +1821,7 @@
           setTimeout(restoreDownloadLabel, 1500);
         });
       });
-      if (element.tagName === "VIDEO" && canRecord && !usesExtractorOnlyDownload) {
+      if (element.tagName === "VIDEO" && supportsRecording && !usesExtractorOnlyDownload) {
         const record = document.createElement("button");
         recordButton = record;
         try { button[Symbol.for("apocalipse.recordButton")] = record; } catch {}
@@ -1802,7 +1830,6 @@
         record.textContent = recordingLabels().record;
         record.title = recordingLabels().record;
         let recorder = null;
-        let recordPhase = "idle";
         let previousLoop = false;
         let startedAt = 0;
         let clockTimer = null;
@@ -1810,7 +1837,8 @@
         let playbackWatch = null;
         refreshRecordLabels = () => {
           const labels = recordingLabels();
-          if (recordPhase === "recording") record.textContent = `${labels.stop} · ${clockLabel((Date.now() - startedAt) / 1000)}`;
+          if (recordPhase === "starting") record.textContent = labels.starting;
+          else if (recordPhase === "recording") record.textContent = `${labels.stop} · ${clockLabel((Date.now() - startedAt) / 1000)}`;
           else if (recordPhase === "uploading") record.textContent = labels.uploading;
           else if (recordPhase === "done") record.textContent = `✓ ${labels.done}`;
           else if (recordPhase === "error") record.textContent = "⚠";
@@ -1820,6 +1848,7 @@
         record.addEventListener("click", async (event) => {
           event.preventDefault();
           event.stopPropagation();
+          if (recordPhase === "starting" || recordPhase === "uploading") return;
           if (recorder && recorder.state !== "inactive") {
             trace("recording_stop_clicked", "record", { elapsedMs: Date.now() - startedAt });
             recorder.stop();
@@ -1828,15 +1857,21 @@
             refreshRecordLabels();
             return;
           }
+          let startupStream = null;
+          previousLoop = element.loop;
+          recordPhase = "starting";
+          record.disabled = true;
+          refreshRecordLabels();
           try {
             trace("recording_start_clicked", "record", { captureStream: Boolean(element.captureStream || element.webkitCaptureStream), mediaRecorder: Boolean(globalThis.MediaRecorder) });
             const capture = element.captureStream?.bind(element) || element.webkitCaptureStream?.bind(element);
             if (!capture || !globalThis.MediaRecorder) throw new Error("capture_not_supported");
             if (Number.isFinite(element.duration)) element.currentTime = 0;
-            previousLoop = element.loop;
             element.loop = false;
-            await element.play();
+            await waitForRecordingPlayback(element);
+            trace("recording_playback_ready", "record");
             const stream = capture();
+            startupStream = stream;
             for (let attempt = 0; attempt < 20 && !stream.getTracks().length; attempt += 1) {
               await new Promise(resolve => setTimeout(resolve, 100));
             }
@@ -1918,6 +1953,7 @@
             recorder.start(1000);
             startedAt = Date.now();
             recordPhase = "recording";
+            record.disabled = false;
             refreshRecordLabels();
             clockTimer = setInterval(() => {
               if (recorder && recorder.state !== "inactive") refreshRecordLabels();
@@ -1939,6 +1975,9 @@
               if (status?.stop && recorder && recorder.state !== "inactive") recorder.stop();
             }, 1000);
           } catch (error) {
+            startupStream?.getTracks().forEach((track) => track.stop());
+            element.loop = previousLoop;
+            record.disabled = false;
             trace("recording_start_failed", "record", { error: String(error) });
             console.error("Apocalipse recorder", error);
             recordPhase = "error";
@@ -1990,7 +2029,7 @@
         const top = visibleTop + scrollY + 10;
         button.style.left = `${left}px`;
         button.style.top = `${Math.max(6, top)}px`;
-        const liveCanDownload = canDownload || downloadReady();
+        const liveCanDownload = (isFacebookVideo && canDownload) || downloadReady();
         const sponsoredHomeVideo = Boolean(isFacebookVideo && facebookSponsoredEvidence(element));
         button.hidden = sponsoredHomeVideo || !liveCanDownload || outsideVisibleArea;
         if (recordButton) {
@@ -1999,7 +2038,10 @@
             : left;
           recordButton.style.left = `${recordLeft}px`;
           recordButton.style.top = `${Math.max(6, top)}px`;
-          recordButton.hidden = sponsoredHomeVideo || outsideVisibleArea;
+          const liveHttpMedia = /^https?:/i.test(String(element.currentSrc || element.src || ""));
+          const recordingBusy = ["starting", "recording", "uploading"].includes(recordPhase);
+          recordButton.hidden = sponsoredHomeVideo || outsideVisibleArea
+            || (liveHttpMedia && !isFacebookVideo && !recordingBusy);
         }
       };
       document.documentElement.append(button);
@@ -2030,6 +2072,7 @@
         bindingId: isFacebookVideo ? playerIdentity(element) : null,
         cleanup: cleanupOverlay,
         refreshLabels: refreshOverlayLanguage,
+        refreshState: position,
       });
       refreshOverlayLanguage();
       const duplicateButtons = document.querySelectorAll(".apocalipse-media-download").length - activeOverlays.size * 2;
