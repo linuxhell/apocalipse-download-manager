@@ -1,5 +1,11 @@
 # Apocalipse Download Manager — Chrome/Edge 0.3.207 · Firefox 0.3.207
 
+## 0.8.10 — 2026-11-06
+
+- Inclui Xtreme 0.2.4: elimina consultas HTTP prévias quando o limite é uma conexão e testes de faixa que não seriam usados em arquivos pequenos ou abaixo do tamanho mínimo de divisão.
+- Mantém retomada validada e o limite de threads; as medições locais demonstram ganho de início, sem ganho contínuo comprovado em múltiplas conexões.
+- Alinha a versão dos metadados Tauri com a versão do aplicativo; mantém Firefox 0.3.207 assinado.
+
 ## 0.8.9 — 2026-11-06
 
 - Corrige MP4 sem áudio ao capturar uma playlist HLS de vídeo isolado no Vimeo: usa a página específica e o player para resolver e juntar vídeo e áudio pelo yt-dlp.
