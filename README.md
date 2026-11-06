@@ -33,7 +33,9 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.8.8
+## Versão 0.8.9
+
+Corrige capturas do Vimeo que baixavam uma playlist HLS só de vídeo e geravam MP4 sem áudio. Com uma página de vídeo específica na captura, o ADM resolve a apresentação completa pelo player do Vimeo e usa o yt-dlp para selecionar e juntar vídeo e áudio. Preserva identificadores de vídeos não listados; links diretos sem contexto de página continuam diretos.
 
 Compacta a janela de adicionar download: altura ajustada ao conteúdo, opções avançadas à esquerda e nove caminhos recentes à direita. A expansão automática fica limitada a 700 pixels lógicos, respeitando a área útil da tela.
 
@@ -63,7 +65,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.8**, Xtreme **0.2.3**, extensão **0.3.207**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.9**, Xtreme **0.2.3**, extensão **0.3.207**.
 
 ## Compilar e contribuir
 

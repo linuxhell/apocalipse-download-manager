@@ -5292,7 +5292,11 @@ async fn inspect_media_formats(
             "--socket-timeout",
             "30",
         ])
-        .arg(&url);
+        .arg(
+            apocalipse_core::classifier::vimeo_player_url(&url)
+                .as_deref()
+                .unwrap_or(&url),
+        );
     let cookie_jar = cookie_header
         .as_deref()
         .filter(|value| !value.is_empty())
@@ -5310,7 +5314,10 @@ async fn inspect_media_formats(
         command.arg("--cookies").arg(path);
     } else if let Some(cookie) = cookie_header.as_deref().filter(|value| !value.is_empty()) {
         command.arg("--add-headers").arg(format!("Cookie:{cookie}"));
-    } else if url.contains("youtube.com/") || url.contains("youtu.be/") {
+    } else if url.contains("youtube.com/")
+        || url.contains("youtu.be/")
+        || apocalipse_core::classifier::vimeo_player_url(&url).is_some()
+    {
         // Manual URLs do not carry an extension identity. Reuse the browser
         // session so inspection and the actual download see the same YouTube
         // authentication/challenge state.
@@ -7498,8 +7505,9 @@ async fn run_external_download(
     let mut command = match kind {
         DownloadKind::MediaPage => {
             let mut command = tokio::process::Command::new(&tools.1);
-            let media_source =
-                canonical_facebook_video_url(&task.source).unwrap_or_else(|| task.source.clone());
+            let media_source = canonical_facebook_video_url(&task.source)
+                .or_else(|| apocalipse_core::classifier::vimeo_player_url(&task.source))
+                .unwrap_or_else(|| task.source.clone());
             if let Some(proxy_url) = proxy_url.as_deref() {
                 command.arg("--proxy").arg(proxy_url);
             }
@@ -7548,7 +7556,9 @@ async fn run_external_download(
             } else {
                 command.args(["--js-runtimes", "quickjs"]);
             }
-            let browser_session_site = task.source.contains("instagram.com/")
+            let browser_session_site = apocalipse_core::classifier::vimeo_player_url(&task.source)
+                .is_some()
+                || task.source.contains("instagram.com/")
                 || task.source.contains("tiktok.com/")
                 || task.source.contains("facebook.com/")
                 || task.source.contains("twitch.tv/")

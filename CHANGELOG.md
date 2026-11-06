@@ -1,5 +1,11 @@
 # Apocalipse Download Manager — Chrome/Edge 0.3.207 · Firefox 0.3.207
 
+## 0.8.9 — 2026-11-06
+
+- Corrige MP4 sem áudio ao capturar uma playlist HLS de vídeo isolado no Vimeo: usa a página específica e o player para resolver e juntar vídeo e áudio pelo yt-dlp.
+- Reconhece páginas de vídeo e embeds do Vimeo, preservando o hash de vídeos não listados. Mantém links de CDN, coleções, sites diferentes e requisições de formulário fora dessa conversão.
+- Usa a sessão do navegador como alternativa para inspeção e download do Vimeo, como nos demais sites com suporte a sessão.
+
 ## 0.8.8 — 2026-11-01
 
 - Compacta a janela de download com altura pelo conteúdo e expansão automática de até 700 pixels lógicos.

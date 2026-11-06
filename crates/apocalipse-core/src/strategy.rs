@@ -27,7 +27,8 @@ pub struct StrategyPlan {
 
 /// Select a canonical media page when a browser hands off one isolated media
 /// track. This is deliberately local and deterministic: it does not probe the
-/// network, and it never rewrites ordinary files, manifests or non-GET forms.
+/// network. Manifests are rerouted only for explicitly supported page/CDN pairs;
+/// unrelated files and non-GET forms keep their original route.
 pub fn contextual_media_page<'a>(
     resource_url: &str,
     page_url: Option<&'a str>,
@@ -35,10 +36,19 @@ pub fn contextual_media_page<'a>(
     has_companion_audio: bool,
     request_method: Option<&str>,
 ) -> Option<&'a str> {
+    let resource = url::Url::parse(resource_url).ok()?;
+    let page = page_url.and_then(|value| url::Url::parse(value).ok())?;
+    let vimeo_capture = crate::classifier::is_vimeo_video_page(&page)
+        && resource
+            .host_str()
+            .is_some_and(|host| host == "vimeocdn.com" || host.ends_with(".vimeocdn.com"));
+    let media_capture = media_kind.is_some_and(|kind| {
+        kind.eq_ignore_ascii_case("video") || kind.eq_ignore_ascii_case("audio")
+    }) || (vimeo_capture
+        && classify_url(resource_url) == Some(DownloadKind::Hls)
+        && media_kind.is_none_or(|kind| kind.eq_ignore_ascii_case("hls")));
     if has_companion_audio
-        || !media_kind.is_some_and(|kind| {
-            kind.eq_ignore_ascii_case("video") || kind.eq_ignore_ascii_case("audio")
-        })
+        || !media_capture
         || request_method.is_some_and(|method| {
             !method.eq_ignore_ascii_case("GET") && !method.eq_ignore_ascii_case("HEAD")
         })
@@ -46,7 +56,6 @@ pub fn contextual_media_page<'a>(
         return None;
     }
     let resource_kind = classify_url(resource_url);
-    let page = page_url.and_then(|value| url::Url::parse(value).ok())?;
     if !matches!(page.scheme(), "http" | "https")
         || !page.username().is_empty()
         || page.password().is_some()
@@ -55,11 +64,9 @@ pub fn contextual_media_page<'a>(
     }
     let host = page.host_str()?.to_ascii_lowercase();
     let host_is = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
-    // SoundCloud's browser capture is a signed, short-lived HLS manifest, not a
-    // plain file URL, so it needs the Hls kind allowed through. Every other
-    // recognized host only ever hands over a direct CDN file (or, for a live
-    // broadcast, an .m3u8 we deliberately still leave alone).
-    let allowed_kinds: &[DownloadKind] = if host_is("soundcloud.com") {
+    // Vimeo can hand over one video-only HLS rendition; use the specific page
+    // to resolve the full presentation. Other sites' live manifests stay direct.
+    let allowed_kinds: &[DownloadKind] = if host_is("soundcloud.com") || vimeo_capture {
         &[DownloadKind::Http, DownloadKind::Hls]
     } else {
         &[DownloadKind::Http]
@@ -68,7 +75,9 @@ pub fn contextual_media_page<'a>(
         return None;
     }
     let path = page.path();
-    let specific = if host_is("youtube.com") {
+    let specific = if host_is("vimeo.com") {
+        vimeo_capture
+    } else if host_is("youtube.com") {
         path == "/watch" || path.starts_with("/shorts/") || path.starts_with("/live/")
     } else if host_is("youtu.be") {
         path.trim_matches('/')
@@ -199,6 +208,72 @@ pub fn plan_download(input: &str, capabilities: Capabilities) -> Option<Strategy
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vimeo_video_only_hls_uses_the_full_video_page_and_extractor() {
+        let leaf = "https://vod-adaptive-ak.vimeocdn.com/exp=123/v2/playlist/av/id/media.m3u8?pathsig=signature";
+        for page in [
+            "https://vimeo.com/492873660?utm_source=example",
+            "https://player.vimeo.com/video/492873660?h=privatehash",
+            "https://vimeo.com/492873660/privatehash",
+        ] {
+            for kind in [Some("video"), Some("hls"), None] {
+                let routed = contextual_media_page(leaf, Some(page), kind, false, Some("GET"));
+                assert_eq!(routed, Some(page));
+                assert_eq!(classify_url(routed.unwrap()), Some(DownloadKind::MediaPage));
+                assert_eq!(
+                    plan_download(
+                        page,
+                        Capabilities {
+                            yt_dlp: true,
+                            ..Default::default()
+                        }
+                    )
+                    .unwrap()
+                    .primary,
+                    Engine::YtDlp
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn vimeo_routing_preserves_unrelated_files_forms_and_paired_tracks() {
+        let leaf = "https://vod-adaptive-ak.vimeocdn.com/video/media.m3u8";
+        let page = "https://vimeo.com/492873660";
+        for bad_page in [
+            "https://vimeo.com/",
+            "https://vimeo.com/channels/123",
+            "https://vimeo.com.evil.test/492873660",
+            "https://user:pass@vimeo.com/492873660",
+        ] {
+            assert_eq!(
+                contextual_media_page(leaf, Some(bad_page), Some("video"), false, None),
+                None
+            );
+        }
+        for resource in [
+            "https://example.test/media.m3u8",
+            "https://vimeocdn.com.evil.test/media.m3u8",
+        ] {
+            assert_eq!(
+                contextual_media_page(resource, Some(page), Some("video"), false, None),
+                None
+            );
+        }
+        assert_eq!(
+            contextual_media_page(leaf, Some(page), Some("video"), false, Some("POST")),
+            None
+        );
+        assert_eq!(
+            contextual_media_page(leaf, Some(page), Some("video"), true, None),
+            None
+        );
+        assert_eq!(
+            contextual_media_page(leaf, None, Some("video"), false, None),
+            None
+        );
+    }
 
     #[test]
     fn direct_download_prefers_xtreme_and_keeps_native_as_fallback() {

@@ -33,7 +33,9 @@ The thread slider is visible in the new-download dialog and takes priority over 
 - Apocalipse Link for authenticated TLS transfers between computers.
 - Per-site credentials in the operating system vault; Portuguese, English and Simplified Chinese interfaces.
 
-## Version 0.8.8
+## Version 0.8.9
+
+Fixes Vimeo captures that downloaded a video-only HLS rendition and produced silent MP4 files. When a specific video page accompanies the capture, ADM resolves the full presentation through the Vimeo player and uses yt-dlp to select and merge video and audio. Unlisted video hashes are retained; direct links without page context remain direct.
 
 Compacts the Add download dialog: content-sized height, advanced options on the left and nine recent locations on the right. Automatic window expansion targets 700 logical pixels, bounded by the screen work area.
 
@@ -63,7 +65,7 @@ ED2K **Preview** becomes available after the first MD4-verified part: up to **9,
 
 Automatic retries preserve the current process's verified preview map while rechecking. The fresh result can invalidate parts; restarting the app or resuming manually requires verification again. If no peer has the remaining parts, the download stays incomplete, retains partial data and retries.
 
-This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.8**, Xtreme **0.2.3**, extension **0.3.207**.
+This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.9**, Xtreme **0.2.3**, extension **0.3.207**.
 
 ## Build and contribute
 
