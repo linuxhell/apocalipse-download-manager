@@ -28,7 +28,7 @@ test('Facebook extractor parse failures expose a localized recording fallback', 
 
 // Execute the real content script and its installed click handler. Only browser
 // APIs/DOM geometry are mocked; URL selection and the outgoing payload are real.
-function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false, shadow = false, clipping = false, theme = "void" } = {}) {
+function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false, shadow = false, clipping = false, theme = "void", extraVideos = [] } = {}) {
   const sent = [], fetched = [], appended = [], listeners = [];
   const timers = new Map();
   let nextTimer = 0;
@@ -43,7 +43,9 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
     ...(recordable ? { captureStream: () => ({ getTracks: () => [] }) } : {}),
     querySelector: selector => selector.includes('a[href') && permalink ? { href: permalink } : null,
     querySelectorAll: () => [], closest: selector => selector.includes('article') ? post : null,
+    addEventListener() {}, removeEventListener() {},
   };
+  const videos = [video, ...extraVideos.map(extra => ({ ...video, dataset: {}, ...extra }))];
   const redditPost = { getAttribute: name => name === 'permalink' ? permalink : name === 'post-title' ? 'Exact Reddit post title' : null };
   const player = { closest: selector => selector === 'shreddit-post' ? redditPost : null };
   player.shadowRoot = { host: player, querySelectorAll: selector => selector === 'video' || selector === 'video,audio' ? [video] : [] };
@@ -56,12 +58,17 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
     createElement: element, addEventListener() {}, elementFromPoint: () => video,
     querySelector: selector => selector === 'video' ? video : null,
     querySelectorAll: selector => selector === 'shreddit-player' && shadow ? [player]
-      : selector === 'video' || selector === 'video,audio' ? (shadow ? [] : [video])
+      : selector === 'video' || selector === 'video,audio' ? (shadow ? [] : videos)
       : selector === '.apocalipse-media-download' ? appended.filter(node => !node.removed && String(node.className).includes('apocalipse-media-download')) : [],
   };
   const context = vm.createContext({
     URL, Blob, Uint8Array, crypto: webcrypto, console, Date, document, location,
-    ...(recordable ? { MediaRecorder: class {} } : {}),
+    ...(recordable ? { MediaRecorder: class {
+      static isTypeSupported() { return true; }
+      constructor() { this.state = 'inactive'; }
+      start() { this.state = 'recording'; }
+      stop() { this.state = 'inactive'; void this.onstop?.(); }
+    } } : {}),
     navigator: { language: 'pt-BR', userAgent: 'Synthetic browser' },
     innerHeight: 800, scrollX: 0, scrollY: 0,
     ...(clipping ? { getComputedStyle: () => ({ overflowX: "visible", overflowY: "auto" }) } : {}),
@@ -94,12 +101,13 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
   });
   context.window = context; context.top = context;
   vm.runInContext(readFileSync(join(__dirname, '../browser-extension/tiktok-identity.js'), 'utf8'), context);
-  vm.runInContext(script.replace(/\}\)\(\);\s*$/, 'globalThis.testHooks = { installOverlays, collect, titleInfoFor, waitForRecordingPlayback: typeof waitForRecordingPlayback === "function" ? waitForRecordingPlayback : null };\n})();'), context);
+  vm.runInContext(script.replace(/\}\)\(\);\s*$/, 'globalThis.testHooks = { installOverlays, collect, titleInfoFor, activeOverlays, waitForRecordingPlayback: typeof waitForRecordingPlayback === "function" ? waitForRecordingPlayback : null };\n})();'), context);
   context.testHooks.installOverlays();
   const button = appended.find(node => node.className === 'apocalipse-media-download');
   assert.ok(button, 'the actual overlay must be installed');
   return {
     sent, fetched, location, video, appended,
+    activePlayers: () => Array.from(context.testHooks.activeOverlays.keys()),
     button,
     recordButton: appended.find(node => node.className === 'apocalipse-media-download apocalipse-media-record'),
     refresh: () => context.testHooks.installOverlays(),
@@ -373,6 +381,60 @@ test('successful playback clears its recording-start timeout', async () => {
   assert.equal(p.hasTimeout(37), false);
 });
 
+test('a playing video outranks a centered empty placeholder and paused previews', async () => {
+  const direct = 'https://cdn.example.test/actual-video.mp4';
+  const p = page({ url: 'https://media.example.test/watch/123', source: '', recordable: true,
+    extraVideos: [
+      { currentSrc: direct, src: direct, readyState: 4, paused: false, muted: false, volume: 1 },
+      { currentSrc: 'https://cdn.example.test/preview.mp4', src: '', readyState: 4, paused: true, muted: true },
+    ] });
+  assert.equal(p.activePlayers().length, 1);
+  assert.equal(p.activePlayers()[0].currentSrc, direct);
+  assert.equal(p.button.hidden, false);
+  assert.equal(p.recordButton.hidden, true);
+  await p.click();
+  assert.equal(p.downloads()[0].item.url, direct);
+});
+
+test('recording a playing stream does not rewind it or wait on a redundant play promise', async () => {
+  const p = page({ url: 'https://media.example.test/watch/123', source: 'blob:https://media.example.test/current', recordable: true });
+  let playCalls = 0;
+  let stopped = false;
+  p.video.play = () => { playCalls++; return new Promise(() => {}); };
+  p.video.currentTime = 32;
+  p.video.readyState = 4;
+  p.video.paused = false;
+  p.video.ended = false;
+  p.video.captureStream = () => ({ getTracks: () => [{ kind: 'video', stop() { stopped = true; }, addEventListener() {} }] });
+  const starting = p.recordButton.click({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(playCalls, 0);
+  assert.equal(p.video.currentTime, 32);
+  await starting;
+  assert.equal(p.recordButton.disabled, false);
+  assert.match(p.recordButton.textContent, /Stop and save|Parar e salvar|停止并保存/);
+  assert.equal(p.sent.filter(m => m.type === 'APOCALIPSE_BLOB_BEGIN').length, 1);
+  assert.equal(stopped, false);
+});
+
+test('page CSS cannot expose media controls marked hidden', () => {
+  assert.match(script, /\.apocalipse-media-download\[hidden\]\{display:none!important\}/);
+});
+
+test('a large paused main player outranks small autoplay previews and empty overlays', async () => {
+  const direct = 'https://cdn.example.test/main.mp4';
+  const p = page({ url: 'https://media.example.test/watch/123', source: '', recordable: true,
+    extraVideos: [
+      { currentSrc: direct, src: direct, readyState: 4, paused: true,
+        getBoundingClientRect: () => ({ left: 20, top: 100, right: 860, bottom: 580, width: 840, height: 480 }) },
+      { currentSrc: 'https://cdn.example.test/preview.mp4', src: '', readyState: 4, paused: false, muted: true,
+        getBoundingClientRect: () => ({ left: 20, top: 300, right: 140, bottom: 380, width: 120, height: 80 }) },
+    ] });
+  assert.equal(p.activePlayers().length, 1);
+  assert.equal(p.activePlayers()[0].currentSrc, direct);
+  await p.click();
+  assert.equal(p.downloads()[0].item.url, direct);
+});
+
 test('recording seals each segment and resumes only after real media progress', () => {
   assert.match(script, /recorder\.requestData\?\.\(\)/);
   assert.match(script, /pausedAtMediaTime = Number\(element\.currentTime\)/);
@@ -398,7 +460,7 @@ test('normal Facebook srcObject Reels resolve Download before any recording fall
   assert.ok(fallback > reveal, 'recording fallback must happen only after permalink resolution fails');
 });
 
-test('generic video-feed pages (3+ visible videos) only overlay the one nearest the viewport center', () => {
+test('generic video-feed pages (3+ visible videos) keep one selected player', () => {
   assert.match(script, /let activeGenericFeedVideo = null;/);
   assert.match(script, /socialPlatform\(\) === "generic" && !isFacebookReelsPage && !isInstagramReelsPage && !isTikTokPage/);
   assert.match(script, /if \(visibleVideos\.length >= 3\) \{/);

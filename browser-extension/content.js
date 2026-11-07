@@ -988,6 +988,9 @@
     return { record: "● Record", starting: "Starting…", stop: "■ Stop and save", uploading: "Uploading…", done: "Recording saved", unavailable: "This video cannot be recorded by the browser" };
   };
   const waitForRecordingPlayback = async (element, timeoutMs = 8000) => {
+    // Some players keep play() pending even while their native video advances.
+    // Recording the current playback must not seek or restart that player.
+    if (!element.paused && !element.ended && Number(element.readyState) >= 2) return;
     let timer;
     try {
       await Promise.race([
@@ -1487,21 +1490,35 @@
     }
     // Non-social pages can still be built as a swipeable video feed (a main
     // player plus several other full-size preview videos simultaneously in
-    // the DOM, e.g. "related videos" carousels). Three or more similarly
-    // visible videos at once is the same signature the named-platform reel
-    // feeds above have, so reuse their "one active player" rule generically
+    // the DOM, e.g. "related videos" carousels). Three or more visible videos use
+    // one active player too, but loaded dominant media must win over centered
+    // placeholders before playback and proximity break the remaining ties.
+    // Apply that rule generically
     // instead of a per-site allowlist. A page with one or two deliberately
     // embedded videos (an article, a gallery) is left untouched.
     let activeGenericFeedVideo = null;
     if (socialPlatform() === "generic" && !isFacebookReelsPage && !isInstagramReelsPage && !isTikTokPage) {
       const viewportCenter = innerHeight / 2;
       const visibleVideos = [...queryMediaElements("video")]
-        .map((video) => ({ video, rect: video.getBoundingClientRect() }))
+        .map((video) => {
+          const hasSource = Boolean(video.currentSrc || video.src || video.srcObject);
+          const ready = hasSource && Number(video.readyState) >= 2;
+          const playing = ready && !video.paused && !video.ended;
+          const rect = video.getBoundingClientRect();
+          const area = Math.max(0, Math.min(rect.right, Number(globalThis.innerWidth) || rect.right) - Math.max(0, rect.left))
+            * Math.max(0, Math.min(rect.bottom, innerHeight) - Math.max(0, rect.top));
+          return { video, rect, area, ready, playing,
+            audible: playing && !video.muted && Number(video.volume) > 0 };
+        })
         .filter(({ rect }) => rect.width >= 100 && rect.height >= 55 && rect.bottom > 0 && rect.top < innerHeight);
       if (visibleVideos.length >= 3) {
+        const largestReadyArea = visibleVideos.reduce((area, item) => item.ready ? Math.max(area, item.area) : area, 0);
         activeGenericFeedVideo = visibleVideos
-          .sort((left, right) =>
-            Math.abs((left.rect.top + left.rect.bottom) / 2 - viewportCenter)
+          .sort((left, right) => Number(right.ready) - Number(left.ready)
+            || Number(right.area >= largestReadyArea / 2) - Number(left.area >= largestReadyArea / 2)
+            || Number(right.playing) - Number(left.playing)
+            || Number(right.audible) - Number(left.audible)
+            || Math.abs((left.rect.top + left.rect.bottom) / 2 - viewportCenter)
             - Math.abs((right.rect.top + right.rect.bottom) / 2 - viewportCenter))[0]?.video || null;
         for (const overlay of [...activeOverlays.values()]) {
           if (overlay.element?.tagName === "VIDEO" && overlay.element !== activeGenericFeedVideo) overlay.cleanup();
@@ -1863,10 +1880,9 @@
           record.disabled = true;
           refreshRecordLabels();
           try {
-            trace("recording_start_clicked", "record", { captureStream: Boolean(element.captureStream || element.webkitCaptureStream), mediaRecorder: Boolean(globalThis.MediaRecorder) });
+            trace("recording_start_clicked", "record", { ...globalThis.ADM_DIAG?.player?.(element), captureStream: Boolean(element.captureStream || element.webkitCaptureStream), mediaRecorder: Boolean(globalThis.MediaRecorder) });
             const capture = element.captureStream?.bind(element) || element.webkitCaptureStream?.bind(element);
             if (!capture || !globalThis.MediaRecorder) throw new Error("capture_not_supported");
-            if (Number.isFinite(element.duration)) element.currentTime = 0;
             element.loop = false;
             await waitForRecordingPlayback(element);
             trace("recording_playback_ready", "record");
@@ -2143,7 +2159,7 @@
     document.addEventListener(event, scheduleOverlays, true);
   }
   const style = document.createElement("style");
-  style.textContent = ".apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:2px solid #111!important;border-radius:8px!important;padding:8px 11px!important;background:var(--apocalipse-accent,#ffffff)!important;color:var(--apocalipse-foreground,#111)!important;font:700 13px system-ui!important;box-shadow:0 3px 12px #0006!important;cursor:pointer!important;overflow:hidden!important;isolation:isolate!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download::after{content:\"\"!important;position:absolute!important;inset:50%!important;border-radius:999px!important;background:color-mix(in srgb,var(--apocalipse-accent,#ffffff) 42%,transparent)!important;opacity:0!important;pointer-events:none!important;transform:translate(-50%,-50%) scale(0)!important}.apocalipse-media-download.apocalipse-click-feedback{animation:apocalipse-overlay-press .34s cubic-bezier(.2,.8,.2,1)!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:apocalipse-overlay-wave .34s ease-out!important}@keyframes apocalipse-overlay-press{0%{transform:scale(1)}42%{transform:scale(.92);filter:brightness(1.3)}100%{transform:scale(1)}}@keyframes apocalipse-overlay-wave{0%{opacity:.85;transform:translate(-50%,-50%) scale(0)}100%{opacity:0;transform:translate(-50%,-50%) scale(5)}}.apocalipse-media-download:hover{background:var(--apocalipse-accent,#ffffff)!important;filter:brightness(1.08)!important;box-shadow:0 3px 14px #000a!important}.apocalipse-media-download:disabled{cursor:wait!important;opacity:.85!important}.apocalipse-media-record{color:var(--apocalipse-foreground,#111)!important;background:var(--apocalipse-accent,#ffffff)!important}@media (prefers-reduced-motion:reduce){.apocalipse-media-download.apocalipse-click-feedback{animation-duration:.12s!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:none!important}}";
+  style.textContent = ".apocalipse-media-download[hidden]{display:none!important}.apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:2px solid #111!important;border-radius:8px!important;padding:8px 11px!important;background:var(--apocalipse-accent,#ffffff)!important;color:var(--apocalipse-foreground,#111)!important;font:700 13px system-ui!important;box-shadow:0 3px 12px #0006!important;cursor:pointer!important;overflow:hidden!important;isolation:isolate!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download::after{content:\"\"!important;position:absolute!important;inset:50%!important;border-radius:999px!important;background:color-mix(in srgb,var(--apocalipse-accent,#ffffff) 42%,transparent)!important;opacity:0!important;pointer-events:none!important;transform:translate(-50%,-50%) scale(0)!important}.apocalipse-media-download.apocalipse-click-feedback{animation:apocalipse-overlay-press .34s cubic-bezier(.2,.8,.2,1)!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:apocalipse-overlay-wave .34s ease-out!important}@keyframes apocalipse-overlay-press{0%{transform:scale(1)}42%{transform:scale(.92);filter:brightness(1.3)}100%{transform:scale(1)}}@keyframes apocalipse-overlay-wave{0%{opacity:.85;transform:translate(-50%,-50%) scale(0)}100%{opacity:0;transform:translate(-50%,-50%) scale(5)}}.apocalipse-media-download:hover{background:var(--apocalipse-accent,#ffffff)!important;filter:brightness(1.08)!important;box-shadow:0 3px 14px #000a!important}.apocalipse-media-download:disabled{cursor:wait!important;opacity:.85!important}.apocalipse-media-record{color:var(--apocalipse-foreground,#111)!important;background:var(--apocalipse-accent,#ffffff)!important}@media (prefers-reduced-motion:reduce){.apocalipse-media-download.apocalipse-click-feedback{animation-duration:.12s!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:none!important}}";
   document.documentElement.append(style);
   const restartOverlayButtonFeedback = (button) => {
     if (!button || button.disabled) return;

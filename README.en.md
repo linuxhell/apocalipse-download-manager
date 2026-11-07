@@ -11,9 +11,9 @@ Free, portable download manager for Windows, Linux and macOS x64.
 | Windows x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-windows-x64-portable.zip) |
 | Linux x64 | [Portable tar.gz](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64-portable.tar.gz) · [AppImage](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64.AppImage) |
 | macOS x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-macos-x64-portable.zip) |
-| Chrome | [0.3.208 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.208.zip) |
-| Edge | [0.3.208 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.208.zip) |
-| Firefox | [0.3.207 XPI](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.207.xpi) |
+| Chrome | [0.3.209 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.209.zip) |
+| Edge | [0.3.209 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.209.zip) |
+| Firefox | [0.3.208 XPI](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.208.xpi) |
 
 ![Downloads](assets/screenshots/downloads.png)
 
@@ -33,9 +33,11 @@ The thread slider is visible in the new-download dialog and takes priority over 
 - Apocalipse Link for authenticated TLS transfers between computers.
 - Per-site credentials in the operating system vault; Portuguese, English and Simplified Chinese interfaces.
 
-## Version 0.8.11
+## Version 0.8.12
 
-Fixes players whose MP4 source loads after the overlay is created: Chrome/Edge 0.3.208 reveals **Download** when the URL appears and hides recording when direct downloading is available. The clicked player source also takes priority over advert or preview playlists, avoiding another video or an expired URL returning error 410. Recording shows “Starting…”, blocks repeated clicks and reports playback-start failures. Firefox retains signed XPI 0.3.207; this extension fix is in Chrome/Edge 0.3.208.
+Chrome/Edge 0.3.209 prioritizes players with loaded media, considering the main video area, playback and audio before viewport position. This avoids selecting empty or overlapping preview players. Record follows current playback without rewinding or waiting for another `play()` when already playing. Hidden controls remain hidden even if page CSS overrides their display.
+
+Includes the user-provided Mozilla-signed Firefox 0.3.208 XPI, with its signature and internal hashes checked. The 0.3.209 player and recording changes are in Chrome/Edge; Firefox retains signed 0.3.208.
 
 Bundles Xtreme 0.2.5 to fix automatic torrent peer-port selection: reserve UDP/uTP before binding TCP to the same port, and release failed attempts. Addresses the error 10013 startup failure observed in Windows CI while preserving uTP and explicit ports. Update separately configured engines under Settings → Tools.
 
@@ -57,13 +59,13 @@ Fixes movie names with trailing spaces or dots in their base name and keeps medi
 
 Fixes the title overlapping torrent controls in the compact window. Header actions wrap onto another line when needed in all three languages.
 
-The download dialog no longer numbers its sections and shows up to **9 recent folders**, with the default location first. The release includes the **Mozilla-signed Firefox 0.3.207 extension**, alongside Chrome/Edge 0.3.208.
+The download dialog no longer numbers its sections and shows up to **9 recent folders**, with the default location first. The release includes the **Mozilla-signed Firefox 0.3.208 extension**, alongside Chrome/Edge 0.3.209.
 
 **Convert file** is available from the download toolbar, the Add download window and completed download actions. Choose a local file or use a completed download. FFprobe detects the actual content and streams, even with a misleading extension. Embedded covers do not count as video. Audio-only MP4 offers audio formats; silent video offers video formats only. When audio and video are present, every frame is checked before classifying all-black video as audio; analysis can take time for long files.
 
 Outputs: PNG, lossless WebP, JPEG, TIFF and BMP; FLAC, WAV, MP3, M4A, Opus and Ogg; MP4, MKV, lossless MKV and WebM. Available formats depend on the installed FFmpeg encoders. Audio-track selection, progress and cancellation are supported. Conversion preserves the source and writes a separate file without overwriting existing files. Lossless encoding cannot recover detail already lost; JPEG and lossy formats use high quality. Recognized animated images are handled as video to preserve their frames.
 
-Install **FFmpeg with FFprobe** under **Settings → Tools**. The download dialog sizes its height to its content, with advanced options always visible and two columns where space allows. Extension thumbnails are retained, and invalid images try the YouTube fallback. Chrome/Edge: **0.3.208**; Firefox retains the signed **0.3.207** XPI.
+Install **FFmpeg with FFprobe** under **Settings → Tools**. The download dialog sizes its height to its content, with advanced options always visible and two columns where space allows. Extension thumbnails are retained, and invalid images try the YouTube fallback. Chrome/Edge: **0.3.209**; Firefox retains the signed **0.3.208** XPI.
 
 The window expands when **Add download** opens, giving the form, thread controls and advanced options more room. Closing the dialog restores the previous window size and position; scrolling remains available on smaller screens.
 
@@ -71,7 +73,7 @@ ED2K **Preview** becomes available after the first MD4-verified part: up to **9,
 
 Automatic retries preserve the current process's verified preview map while rechecking. The fresh result can invalidate parts; restarting the app or resuming manually requires verification again. If no peer has the remaining parts, the download stays incomplete, retains partial data and retries.
 
-This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.11**, Xtreme **0.2.5**, Chrome/Edge **0.3.208**, Firefox **0.3.207**.
+This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.12**, Xtreme **0.2.5**, Chrome/Edge **0.3.209**, Firefox **0.3.208**.
 
 ## Build and contribute
 

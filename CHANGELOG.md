@@ -1,4 +1,11 @@
-# Apocalipse Download Manager — Chrome/Edge 0.3.208 · Firefox 0.3.207
+# Apocalipse Download Manager — Chrome/Edge 0.3.209 · Firefox 0.3.208
+
+## 0.8.12 — 2026-11-06
+
+- Chrome/Edge 0.3.209 seleciona o player carregado e principal antes de um placeholder central ou prévias menores.
+- Grava a reprodução atual sem reiniciar o vídeo nem esperar outro play quando ele já está tocando; respeita botões ocultos mesmo sob CSS da página.
+- Inclui Firefox 0.3.208 assinado, conferido contra o código 0.3.208 e por assinatura e hashes internos. As mudanças 0.3.209 permanecem no Chrome/Edge.
+- Mantém Xtreme 0.2.5.
 
 ## 0.8.11 — 2026-11-06
 
