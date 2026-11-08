@@ -337,6 +337,12 @@ pub async fn ed2k_connect(
                 *active = Some(connection);
                 drop(active);
                 let upnp = state.net.upnp.status();
+                let incoming = state
+                    .incoming
+                    .lock()
+                    .await
+                    .as_ref()
+                    .map(|listener| listener.status());
                 state.events.push(
                     if low_id { "warn" } else { "info" },
                     "server",
@@ -348,7 +354,8 @@ pub async fn ed2k_connect(
                     serde_json::json!({
                         "name": name, "address": address, "client_id": client_id,
                         "upnp": upnp.state, "upnp_error": upnp.error,
-                        "tcp": state.incoming.lock().await.as_ref().map(|l| l.status().tcp_port),
+                        "tcp": incoming.as_ref().map(|listener| listener.tcp_port),
+                        "incoming": incoming,
                     }),
                 );
                 network::spawn_sync_upnp(app.clone());

@@ -1,5 +1,11 @@
 # Apocalipse Download Manager — Chrome/Edge 0.3.209 · Firefox 0.3.209
 
+## 0.8.14 — 2026-11-08
+
+- Inclui Xtreme 0.2.6, que anuncia a porta TCP real nas respostas ao handshake ED2K e reforça a descoberta UPnP com endereços IPv4 locais e reenvios SSDP dentro do prazo.
+- Separa conexões TCP recebidas de handshakes ED2K concluídos no cabeçalho e nos campos do log; descreve ID baixo como acesso ED2K não confirmado pelo servidor, sem atribuir automaticamente a causa a um bloqueio TCP.
+- Preserva a ordem UPnP/login e a repetição limitada de login da 0.8.13, além do Firefox 0.3.209 assinado sem alterações.
+
 ## 0.8.13 — 2026-11-08
 
 - ED2K aguarda a tentativa UPnP antes de cada servidor, incluindo a descoberta após uma falha anterior, eliminando o login concorrente com encaminhamento em segundo plano.

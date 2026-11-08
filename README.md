@@ -33,7 +33,9 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.8.13
+## Versão 0.8.14
+
+Inclui Xtreme 0.2.6: respostas ao handshake ED2K anunciam a porta TCP realmente aberta, em vez de zero. A descoberta UPnP tenta os endereços IPv4 locais e repete solicitações SSDP perdidas no mesmo prazo. O cabeçalho separa conexões TCP recebidas de negociações ED2K concluídas, e o log de login inclui esses contadores. Mantém a correção de ordem entre UPnP e login da 0.8.13. Um encaminhamento ou teste TCP bem-sucedido não garante ID alto; o servidor confirma o resultado do protocolo.
 
 Corrige a ordem entre UPnP e login ED2K: uma descoberta anterior sem resposta não libera o login enquanto outra busca tenta abrir as portas em segundo plano. Se o encaminhamento TCP só for confirmado após receber ID baixo, repete o login uma única vez para o servidor testar a porta novamente. Preserva o ID realmente retornado, o cancelamento e a conexão com outros servidores; UPnP confirmado sozinho não garante ID alto.
 
@@ -41,7 +43,7 @@ Chrome/Edge 0.3.209 prioriza o player com dados carregados, respeitando a área 
 
 Inclui o XPI Firefox 0.3.209 assinado pela Mozilla enviado pelo usuário, com assinatura criptográfica, hashes internos e correspondência com o código conferidos. As alterações de player e gravação da 0.3.209 estão no Chrome, Edge e Firefox.
 
-Inclui Xtreme 0.2.5 para corrigir a seleção automática da porta de torrents: reserva UDP/uTP antes de abrir TCP no mesmo número e libera tentativas que falhem. Corrige a inicialização com erro 10013 observada no CI Windows, mantendo uTP e portas explícitas. Se usa um motor configurado à parte, atualize-o em Configurações → Ferramentas.
+O Xtreme 0.2.6 preserva a correção da 0.2.5 para a seleção automática da porta de torrents: reserva UDP/uTP antes de abrir TCP no mesmo número e libera tentativas que falhem. Corrige a inicialização com erro 10013 observada no CI Windows, mantendo uTP e portas explícitas. Se usa um motor configurado à parte, atualize-o em Configurações → Ferramentas.
 
 Preserva a redução da espera inicial em downloads HTTP/HTTPS introduzida no Xtreme 0.2.4: uma thread começa pelo GET, e arquivos pequenos dispensam um teste de faixa desnecessário. Preserva a retomada e o limite escolhido no slider. A [comparação local](https://github.com/linuxhell/nibiru-xtreme/blob/main/benchmarks/http-startup-2026-11-06.md) mede tempo de início; não demonstra aumento da velocidade contínua da Internet.
 
@@ -75,7 +77,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.13**, Xtreme **0.2.5**, Chrome/Edge **0.3.209**, Firefox **0.3.209**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.14**, Xtreme **0.2.6**, Chrome/Edge **0.3.209**, Firefox **0.3.209**.
 
 ## Compilar e contribuir
 

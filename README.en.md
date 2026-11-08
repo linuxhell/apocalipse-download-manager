@@ -33,7 +33,9 @@ The thread slider is visible in the new-download dialog and takes priority over 
 - Apocalipse Link for authenticated TLS transfers between computers.
 - Per-site credentials in the operating system vault; Portuguese, English and Simplified Chinese interfaces.
 
-## Version 0.8.13
+## Version 0.8.14
+
+Bundles Xtreme 0.2.6: incoming ED2K handshake replies advertise the actual listening TCP port instead of zero. UPnP discovery tries local IPv4 addresses and retries lost SSDP requests within the same deadline. The header separates accepted TCP connections from completed ED2K handshakes, and login logs include these counters. Retains the UPnP/login ordering fix from 0.8.13. A successful TCP port check or mapping alone does not guarantee High ID; the server confirms the protocol result.
 
 Fixes UPnP/ED2K login ordering: an earlier unanswered discovery no longer lets login race a background forwarding attempt. If TCP forwarding is confirmed only after a Low-ID login, retries the login once so the server can test the port again. Preserves the actual returned ID, cancellation and server failover; confirmed UPnP alone does not guarantee High ID.
 
@@ -41,7 +43,7 @@ Chrome/Edge 0.3.209 prioritizes players with loaded media, considering the main 
 
 Includes the user-provided Mozilla-signed Firefox 0.3.209 XPI, with its cryptographic signature, internal hashes and source match checked. The 0.3.209 player and recording changes are included in Chrome, Edge and Firefox.
 
-Bundles Xtreme 0.2.5 to fix automatic torrent peer-port selection: reserve UDP/uTP before binding TCP to the same port, and release failed attempts. Addresses the error 10013 startup failure observed in Windows CI while preserving uTP and explicit ports. Update separately configured engines under Settings → Tools.
+Xtreme 0.2.6 retains the 0.2.5 fix for automatic torrent peer-port selection: reserve UDP/uTP before binding TCP to the same port, and release failed attempts. Addresses the error 10013 startup failure observed in Windows CI while preserving uTP and explicit ports. Update separately configured engines under Settings → Tools.
 
 Retains the HTTP/HTTPS startup improvements introduced in Xtreme 0.2.4: one thread starts with GET, and small files skip an unused range test. Resume validation and the slider connection cap are preserved. The [local comparison](https://github.com/linuxhell/nibiru-xtreme/blob/main/benchmarks/http-startup-2026-11-06.md) measures startup time; it does not establish higher sustained Internet throughput.
 
@@ -75,7 +77,7 @@ ED2K **Preview** becomes available after the first MD4-verified part: up to **9,
 
 Automatic retries preserve the current process's verified preview map while rechecking. The fresh result can invalidate parts; restarting the app or resuming manually requires verification again. If no peer has the remaining parts, the download stays incomplete, retains partial data and retries.
 
-This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.13**, Xtreme **0.2.5**, Chrome/Edge **0.3.209**, Firefox **0.3.209**.
+This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.14**, Xtreme **0.2.6**, Chrome/Edge **0.3.209**, Firefox **0.3.209**.
 
 ## Build and contribute
 
