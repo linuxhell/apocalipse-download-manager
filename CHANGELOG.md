@@ -1,4 +1,11 @@
-# Apocalipse Download Manager — Chrome/Edge 0.3.209 · Firefox 0.3.208
+# Apocalipse Download Manager — Chrome/Edge 0.3.209 · Firefox 0.3.209
+
+## 0.8.13 — 2026-11-08
+
+- ED2K aguarda a tentativa UPnP antes de cada servidor, incluindo a descoberta após uma falha anterior, eliminando o login concorrente com encaminhamento em segundo plano.
+- Quando a porta TCP só é confirmada depois de um login com ID baixo, permite uma única nova tentativa de login; mantém o ID retornado pelo servidor, o cancelamento e o limite de tentativas.
+- Mensagem de recuperação nos três idiomas e regressões com roteador SSDP/SOAP local e servidor ED2K de pacotes reais.
+- Mantém Xtreme 0.2.5 e Chrome/Edge/Firefox 0.3.209, incluindo o XPI Firefox assinado sem alterações.
 
 ## 0.8.12 — 2026-11-06
 

@@ -33,7 +33,9 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.8.12
+## Versão 0.8.13
+
+Corrige a ordem entre UPnP e login ED2K: uma descoberta anterior sem resposta não libera o login enquanto outra busca tenta abrir as portas em segundo plano. Se o encaminhamento TCP só for confirmado após receber ID baixo, repete o login uma única vez para o servidor testar a porta novamente. Preserva o ID realmente retornado, o cancelamento e a conexão com outros servidores; UPnP confirmado sozinho não garante ID alto.
 
 Chrome/Edge 0.3.209 prioriza o player com dados carregados, respeitando a área do vídeo principal, a reprodução e o áudio antes de usar apenas a posição na tela. Isso evita escolher um player vazio ou uma prévia sobreposta. Gravar acompanha a reprodução atual, sem voltar ao início nem esperar outro `play()` quando o vídeo já está tocando. Botões ocultos continuam ocultos mesmo quando o CSS da página tenta exibi-los.
 
@@ -73,7 +75,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.12**, Xtreme **0.2.5**, Chrome/Edge **0.3.209**, Firefox **0.3.209**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.13**, Xtreme **0.2.5**, Chrome/Edge **0.3.209**, Firefox **0.3.209**.
 
 ## Compilar e contribuir
 

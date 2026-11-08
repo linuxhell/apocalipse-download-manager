@@ -309,8 +309,6 @@ pub async fn ed2k_connect(
             "candidates": candidates.iter().map(|s| format!("{}:{}", s.host, s.port)).collect::<Vec<_>>(),
         }),
     );
-    // The server tests our TCP port during login: have the router forward it first.
-    network::forward_before_login(&state).await;
     if state.generation.load(Ordering::Acquire) != revision {
         return Err("connection_cancelled".into());
     }
@@ -320,15 +318,7 @@ pub async fn ed2k_connect(
             return Err("connection_cancelled".into());
         }
         let server_address = (server.host.clone(), server.port);
-        match ServerConnection::connect_with(
-            server,
-            state.user_hash,
-            "Apocalipse Nibiru",
-            state.incoming_port().await?,
-            state.net.prefs().obfuscation,
-        )
-        .await
-        {
+        match network::connect_server(&state, server, revision).await {
             Ok(connection) => {
                 let mut active = state.server.write().await;
                 if state.generation.load(Ordering::Acquire) != revision {
@@ -558,9 +548,13 @@ mod tests {
         // until the user disconnected and reconnected.
         let source = include_str!("ed2k_ui.rs");
         let connect = &source[source.find("pub async fn ed2k_connect").unwrap()..];
-        let forward = connect.find("network::forward_before_login").unwrap();
-        let login = connect.find("ServerConnection::connect_with").unwrap();
-        assert!(forward < login);
+        assert!(connect.contains("network::connect_server(&state, server, revision)"));
+        let network = include_str!("ed2k_ui/network.rs");
+        let helper = &network[network.find("pub async fn connect_server").unwrap()..];
+        assert!(
+            helper.find("forward_before_login(state).await").unwrap()
+                < helper.find("ServerConnection::connect_with").unwrap()
+        );
     }
     #[test]
     fn initial_lists_and_identity_are_available_without_fetching() {

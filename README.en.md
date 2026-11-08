@@ -33,7 +33,9 @@ The thread slider is visible in the new-download dialog and takes priority over 
 - Apocalipse Link for authenticated TLS transfers between computers.
 - Per-site credentials in the operating system vault; Portuguese, English and Simplified Chinese interfaces.
 
-## Version 0.8.12
+## Version 0.8.13
+
+Fixes UPnP/ED2K login ordering: an earlier unanswered discovery no longer lets login race a background forwarding attempt. If TCP forwarding is confirmed only after a Low-ID login, retries the login once so the server can test the port again. Preserves the actual returned ID, cancellation and server failover; confirmed UPnP alone does not guarantee High ID.
 
 Chrome/Edge 0.3.209 prioritizes players with loaded media, considering the main video area, playback and audio before viewport position. This avoids selecting empty or overlapping preview players. Record follows current playback without rewinding or waiting for another `play()` when already playing. Hidden controls remain hidden even if page CSS overrides their display.
 
@@ -73,7 +75,7 @@ ED2K **Preview** becomes available after the first MD4-verified part: up to **9,
 
 Automatic retries preserve the current process's verified preview map while rechecking. The fresh result can invalidate parts; restarting the app or resuming manually requires verification again. If no peer has the remaining parts, the download stays incomplete, retains partial data and retries.
 
-This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.12**, Xtreme **0.2.5**, Chrome/Edge **0.3.209**, Firefox **0.3.209**.
+This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.13**, Xtreme **0.2.5**, Chrome/Edge **0.3.209**, Firefox **0.3.209**.
 
 ## Build and contribute
 

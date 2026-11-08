@@ -1,5 +1,6 @@
 //! Network side of the ED2K window: protocol obfuscation, the Kad session and UPnP port mapping.
 use super::{save_file, Ed2kState};
+use nibiru_xtreme::ed2k::{metadata::Server, ServerConnection};
 use nibiru_xtreme::{
     ed2k::{kad_session::KadSession, obfuscation::Obfuscation},
     upnp::{Mapping, Proto, Upnp},
@@ -7,6 +8,7 @@ use nibiru_xtreme::{
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
+    sync::atomic::Ordering,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -140,8 +142,7 @@ pub async fn sync_upnp(state: &Ed2kState) {
 /// The server tests our TCP port while we log in and answers with a Low ID when it cannot connect
 /// back. Mapping the port only after the login (as a background task) meant the first connection was
 /// always Low ID until the user disconnected and reconnected. This waits for the router (up to
-/// `LOGIN_WAIT`), but not when a recent search already found no router, so a network without UPnP
-/// does not delay every login.
+/// `LOGIN_WAIT`). A previous discovery failure must not race a new background search against login.
 pub async fn forward_before_login(state: &Ed2kState) {
     const LOGIN_WAIT: Duration = Duration::from_secs(12);
     let prefs = state.net.prefs();
@@ -157,22 +158,6 @@ pub async fn forward_before_login(state: &Ed2kState) {
         .await
         .map(|session| session.status().udp_port);
     let wanted = wanted_mappings(&prefs, true, Some(tcp_port), kad_udp);
-    let status = state.net.upnp.status();
-    let no_router = status.state == "failed"
-        && status
-            .error
-            .as_deref()
-            .is_some_and(|error| error.starts_with("upnp_no_gateway"));
-    if no_router {
-        state.events.warn(
-            "upnp",
-            "upnp_skipped_login",
-            serde_json::json!({"error": status.error}),
-        );
-        let upnp = state.net.upnp.clone();
-        tauri::async_runtime::spawn(async move { upnp.apply(wanted).await });
-        return;
-    }
     state.events.info(
         "upnp",
         "upnp_before_login",
@@ -189,6 +174,62 @@ pub async fn forward_before_login(state: &Ed2kState) {
         );
     }
     log_upnp(state);
+}
+
+fn tcp_is_forwarded(state: &Ed2kState, port: u16) -> bool {
+    state.net.upnp.status().mappings.contains(&Mapping {
+        proto: Proto::Tcp,
+        port,
+    })
+}
+
+/// Negotiate a real server ID. If forwarding succeeds only after a Low-ID login,
+/// allow one new login so the server can test the now-forwarded port. Never infer a High ID
+/// from UPnP alone, retry an already-forwarded port, or reconnect in an unbounded loop.
+pub async fn connect_server(
+    state: &Ed2kState,
+    server: Server,
+    revision: u64,
+) -> Result<ServerConnection, String> {
+    forward_before_login(state).await;
+    if state.generation.load(Ordering::Acquire) != revision {
+        return Err("connection_cancelled".into());
+    }
+    let port = state.incoming_port().await?;
+    let forwarded_at_login = tcp_is_forwarded(state, port);
+    let connect = || {
+        ServerConnection::connect_with(
+            server.clone(),
+            state.user_hash,
+            "Apocalipse Nibiru",
+            port,
+            state.net.prefs().obfuscation,
+        )
+    };
+    let mut connection = connect().await.map_err(|error| error.to_string())?;
+    if state.generation.load(Ordering::Acquire) != revision {
+        connection.disconnect();
+        return Err("connection_cancelled".into());
+    }
+    if connection.is_low_id() && !forwarded_at_login && state.net.prefs().upnp {
+        forward_before_login(state).await;
+        if state.generation.load(Ordering::Acquire) != revision {
+            connection.disconnect();
+            return Err("connection_cancelled".into());
+        }
+        if tcp_is_forwarded(state, port) {
+            state
+                .events
+                .info("upnp", "upnp_retry_login", serde_json::json!({"tcp": port}));
+            connection.disconnect();
+            connection = connect().await.map_err(|error| error.to_string())?;
+        }
+    }
+    if state.generation.load(Ordering::Acquire) != revision {
+        connection.disconnect();
+        return Err("connection_cancelled".into());
+    }
+    Ok(connection)
 }
 
 /// Writes the router's state to the log when it changes, with the reason when it failed.
@@ -523,6 +564,9 @@ mod tests {
             body[start..end].to_owned()
         }
         pub async fn start() -> Router {
+            start_when(Arc::new(std::sync::atomic::AtomicBool::new(true))).await
+        }
+        pub async fn start_when(ready: Arc<std::sync::atomic::AtomicBool>) -> Router {
             let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
             let http_port = listener.local_addr().unwrap().port();
             let mappings: Arc<Mutex<Vec<(String, u16)>>> = Arc::default();
@@ -624,6 +668,9 @@ mod tests {
                     let Ok((_, from)) = socket.recv_from(&mut buffer).await else {
                         return;
                     };
+                    if !ready.load(std::sync::atomic::Ordering::Acquire) {
+                        continue;
+                    }
                     let reply = format!(
                         "HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=120\r\nLOCATION: http://127.0.0.1:{http_port}/root.xml\r\nST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\nUSN: uuid:fake::urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\r\n"
                     );
@@ -693,7 +740,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_option_off_forwards_nothing_and_a_missing_router_does_not_delay_every_login() {
+    async fn the_option_off_forwards_nothing_and_a_missing_router_finishes_with_a_failure() {
         let root = tempfile::tempdir().unwrap();
         let router = fake_router::start().await;
         let state = state_with_router_at(root.path(), router.ssdp);
@@ -707,7 +754,7 @@ mod tests {
         forward_before_login(&state).await;
         assert!(router.mappings.lock().unwrap().is_empty(), "UPnP is off");
 
-        // A router that never answers: the first login waits for the search, the next ones do not.
+        // Discovery has a deadline even when the router never answers.
         let silent = tokio::net::UdpSocket::bind(("127.0.0.1", 0)).await.unwrap();
         let state = state_with_router_at(root.path(), silent.local_addr().unwrap());
         state.net.save(Prefs::default()).unwrap();
@@ -715,11 +762,144 @@ mod tests {
         let status = state.net.upnp.status();
         assert_eq!(status.state, "failed");
         assert!(status.error.unwrap().starts_with("upnp_no_gateway"));
-        let started = std::time::Instant::now();
+    }
+    #[tokio::test]
+    async fn a_router_available_after_failed_discovery_is_forwarded_before_login() {
+        use std::sync::atomic::AtomicBool;
+        let root = tempfile::tempdir().unwrap();
+        let ready = Arc::new(AtomicBool::new(false));
+        let router = fake_router::start_when(ready.clone()).await;
+        let state = state_with_router_at(root.path(), router.ssdp);
         forward_before_login(&state).await;
-        assert!(
-            started.elapsed() < Duration::from_millis(400),
-            "a network without UPnP must not delay the login again"
+        assert_eq!(state.net.upnp.status().state, "failed");
+        ready.store(true, Ordering::Release);
+        forward_before_login(&state).await;
+        assert_eq!(state.net.upnp.status().state, "mapped");
+        assert_eq!(router.mappings.lock().unwrap().len(), 1);
+        state.net.upnp.release().await;
+    }
+
+    async fn id_server(
+        ready: Arc<std::sync::atomic::AtomicBool>,
+        mappings: Arc<Mutex<Vec<(String, u16)>>>,
+        ids: Vec<(u32, bool)>,
+    ) -> (Server, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server = Server {
+            host: "127.0.0.1".into(),
+            port: listener.local_addr().unwrap().port(),
+            name: "local ID test".into(),
+            description: String::new(),
+        };
+        let fixture = tokio::spawn(async move {
+            let mut sockets = Vec::new();
+            for (id, forwarded) in ids {
+                let (mut stream, _) =
+                    tokio::time::timeout(Duration::from_secs(10), listener.accept())
+                        .await
+                        .unwrap()
+                        .unwrap();
+                let mut header = [0u8; 5];
+                stream.read_exact(&mut header).await.unwrap();
+                assert_eq!(header[0], 0xe3);
+                let size = u32::from_le_bytes(header[1..].try_into().unwrap()) as usize;
+                assert!(size < 4096);
+                let mut body = vec![0u8; size];
+                stream.read_exact(&mut body).await.unwrap();
+                assert_eq!(body[0], 0x01);
+                let port = u16::from_le_bytes(body[21..23].try_into().unwrap());
+                assert_eq!(
+                    mappings.lock().unwrap().contains(&("TCP".to_owned(), port)),
+                    forwarded
+                );
+                // Simulate the router becoming discoverable only after the first login.
+                ready.store(true, Ordering::Release);
+                let mut response = vec![0xe3, 5, 0, 0, 0, 0x40];
+                response.extend(id.to_le_bytes());
+                stream.write_all(&response).await.unwrap();
+                sockets.push(stream);
+            }
+            assert!(
+                tokio::time::timeout(Duration::from_millis(150), listener.accept())
+                    .await
+                    .is_err(),
+                "must not reconnect repeatedly when the server still assigns Low ID"
+            );
+        });
+        (server, fixture)
+    }
+
+    #[tokio::test]
+    async fn late_forwarding_retries_the_real_server_login_once_and_uses_the_returned_id() {
+        use std::sync::atomic::AtomicBool;
+        let root = tempfile::tempdir().unwrap();
+        let ready = Arc::new(AtomicBool::new(false));
+        let router = fake_router::start_when(ready.clone()).await;
+        let state = state_with_router_at(root.path(), router.ssdp);
+        let high = 0x04030201;
+        let (server, fixture) = id_server(
+            ready,
+            router.mappings.clone(),
+            vec![(123, false), (high, true)],
+        )
+        .await;
+        let connection = connect_server(&state, server, 0).await.unwrap();
+        assert_eq!(connection.client_id, high);
+        assert!(!connection.is_low_id());
+        assert_eq!(
+            state
+                .events
+                .since(0)
+                .iter()
+                .filter(|e| e.code == "upnp_retry_login")
+                .count(),
+            1
         );
+        fixture.await.unwrap();
+        connection.disconnect();
+        state.net.upnp.release().await;
+    }
+
+    #[tokio::test]
+    async fn forwarding_does_not_fabricate_a_high_id_or_loop_when_the_server_still_returns_low_id()
+    {
+        use std::sync::atomic::AtomicBool;
+        let root = tempfile::tempdir().unwrap();
+        let ready = Arc::new(AtomicBool::new(false));
+        let router = fake_router::start_when(ready.clone()).await;
+        let state = state_with_router_at(root.path(), router.ssdp);
+        let (server, fixture) = id_server(
+            ready,
+            router.mappings.clone(),
+            vec![(123, false), (456, true)],
+        )
+        .await;
+        let connection = connect_server(&state, server, 0).await.unwrap();
+        assert_eq!(connection.client_id, 456);
+        assert!(connection.is_low_id());
+        fixture.await.unwrap();
+        connection.disconnect();
+        state.net.upnp.release().await;
+    }
+
+    #[tokio::test]
+    async fn an_already_forwarded_low_id_login_is_not_repeated() {
+        use std::sync::atomic::AtomicBool;
+        let root = tempfile::tempdir().unwrap();
+        let ready = Arc::new(AtomicBool::new(true));
+        let router = fake_router::start_when(ready.clone()).await;
+        let state = state_with_router_at(root.path(), router.ssdp);
+        let (server, fixture) = id_server(ready, router.mappings.clone(), vec![(123, true)]).await;
+        let connection = connect_server(&state, server, 0).await.unwrap();
+        assert!(connection.is_low_id());
+        assert!(!state
+            .events
+            .since(0)
+            .iter()
+            .any(|e| e.code == "upnp_retry_login"));
+        fixture.await.unwrap();
+        connection.disconnect();
+        state.net.upnp.release().await;
     }
 }
