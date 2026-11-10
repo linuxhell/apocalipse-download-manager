@@ -11,8 +11,8 @@ Gerenciador de downloads livre e portátil para Windows, Linux e macOS x64.
 | Windows x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-windows-x64-portable.zip) |
 | Linux x64 | [Portable tar.gz](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64-portable.tar.gz) · [AppImage](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64.AppImage) |
 | macOS x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-macos-x64-portable.zip) |
-| Chrome | [0.3.209 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.209.zip) |
-| Edge | [0.3.209 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.209.zip) |
+| Chrome | [0.3.210 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.210.zip) |
+| Edge | [0.3.210 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.210.zip) |
 | Firefox | [0.3.209 XPI](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.209.xpi) |
 
 ![Downloads](assets/screenshots/downloads.png)
@@ -33,13 +33,19 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.8.14
+## Versão 0.8.15
+
+Chrome/Edge 0.3.210 corrige o download de arquivos gerados por formulários POST, como os ZIPs do UUP Dump: transfere a resposta já recebida para o ADM e mantém a escolha do destino, sem descartar o arquivo nem repetir o pedido ao site. Se o ADM estiver indisponível antes do envio, o navegador pode assumir; falhas após o POST não o repetem automaticamente. Respostas HTTP comprimidas usam o tamanho real dos dados decodificados.
+
+Firefox mantém o XPI **0.3.209 assinado pela Mozilla**. Essa versão assinada ainda não contém a correção de POST da 0.3.210.
+
+### Correções preservadas
 
 Inclui Xtreme 0.2.6: respostas ao handshake ED2K anunciam a porta TCP realmente aberta, em vez de zero. A descoberta UPnP tenta os endereços IPv4 locais e repete solicitações SSDP perdidas no mesmo prazo. O cabeçalho separa conexões TCP recebidas de negociações ED2K concluídas, e o log de login inclui esses contadores. Mantém a correção de ordem entre UPnP e login da 0.8.13. Um encaminhamento ou teste TCP bem-sucedido não garante ID alto; o servidor confirma o resultado do protocolo.
 
 Corrige a ordem entre UPnP e login ED2K: uma descoberta anterior sem resposta não libera o login enquanto outra busca tenta abrir as portas em segundo plano. Se o encaminhamento TCP só for confirmado após receber ID baixo, repete o login uma única vez para o servidor testar a porta novamente. Preserva o ID realmente retornado, o cancelamento e a conexão com outros servidores; UPnP confirmado sozinho não garante ID alto.
 
-Chrome/Edge 0.3.209 prioriza o player com dados carregados, respeitando a área do vídeo principal, a reprodução e o áudio antes de usar apenas a posição na tela. Isso evita escolher um player vazio ou uma prévia sobreposta. Gravar acompanha a reprodução atual, sem voltar ao início nem esperar outro `play()` quando o vídeo já está tocando. Botões ocultos continuam ocultos mesmo quando o CSS da página tenta exibi-los.
+Chrome/Edge 0.3.210 prioriza o player com dados carregados, respeitando a área do vídeo principal, a reprodução e o áudio antes de usar apenas a posição na tela. Isso evita escolher um player vazio ou uma prévia sobreposta. Gravar acompanha a reprodução atual, sem voltar ao início nem esperar outro `play()` quando o vídeo já está tocando. Botões ocultos continuam ocultos mesmo quando o CSS da página tenta exibi-los.
 
 Inclui o XPI Firefox 0.3.209 assinado pela Mozilla enviado pelo usuário, com assinatura criptográfica, hashes internos e correspondência com o código conferidos. As alterações de player e gravação da 0.3.209 estão no Chrome, Edge e Firefox.
 
@@ -63,13 +69,13 @@ Corrige nomes de filmes com espaços ou pontos finais no nome-base e mantém tem
 
 Corrige a sobreposição do título com os controles de torrents na janela compacta. Os botões passam para a linha seguinte quando necessário, nos três idiomas.
 
-A janela de download não usa mais números nas etapas e mostra até **9 pastas recentes**, com o caminho padrão primeiro. O release inclui a extensão Firefox **0.3.209 assinada pela Mozilla**, além de Chrome/Edge 0.3.209.
+A janela de download não usa mais números nas etapas e mostra até **9 pastas recentes**, com o caminho padrão primeiro. O release inclui a extensão Firefox **0.3.209 assinada pela Mozilla**, além de Chrome/Edge 0.3.210.
 
 **Converter arquivo** está disponível na barra de downloads, na janela de adicionar download e nas ações dos downloads concluídos. Escolha um arquivo local ou use o arquivo já baixado. O FFprobe identifica o conteúdo e as trilhas reais, mesmo quando a extensão está errada. Capas embutidas não contam como vídeo. MP4 só com áudio oferece formatos de áudio; vídeo sem áudio oferece apenas formatos de vídeo. Quando há áudio e vídeo, todos os quadros são verificados antes de tratar um vídeo inteiramente preto como áudio; essa análise pode demorar em arquivos longos.
 
 Formatos de saída: PNG, WebP sem perdas, JPEG, TIFF e BMP; FLAC, WAV, MP3, M4A, Opus e Ogg; MP4, MKV, MKV sem perdas e WebM. A lista depende dos codificadores disponíveis no FFmpeg instalado. Há seleção de trilha de áudio, progresso e cancelamento. A conversão preserva o original e salva outro arquivo sem sobrescrever arquivos existentes. Codificação sem perdas não recupera detalhes já perdidos; JPEG e os formatos com perdas usam alta qualidade. Imagens animadas reconhecidas são tratadas como vídeo para conservar os quadros.
 
-Instale **FFmpeg com FFprobe** em **Configurações → Ferramentas**. A janela de download ajusta a altura ao conteúdo, com opções avançadas sempre visíveis e duas colunas quando há espaço. Miniaturas recebidas da extensão são preservadas; imagens inválidas tentam a alternativa do YouTube. Chrome/Edge: **0.3.209**; Firefox mantém o XPI assinado **0.3.209**.
+Instale **FFmpeg com FFprobe** em **Configurações → Ferramentas**. A janela de download ajusta a altura ao conteúdo, com opções avançadas sempre visíveis e duas colunas quando há espaço. Miniaturas recebidas da extensão são preservadas; imagens inválidas tentam a alternativa do YouTube. Chrome/Edge: **0.3.210**; Firefox mantém o XPI assinado **0.3.209**.
 
 A janela se amplia ao abrir **Adicionar download**, dando mais espaço ao formulário, ao controle de threads e às opções avançadas. Ao fechar, ela recupera o tamanho e a posição anteriores; em telas pequenas, a rolagem continua disponível.
 
@@ -77,7 +83,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.14**, Xtreme **0.2.6**, Chrome/Edge **0.3.209**, Firefox **0.3.209**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.15**, Xtreme **0.2.6**, Chrome/Edge **0.3.210**, Firefox **0.3.209**.
 
 ## Compilar e contribuir
 

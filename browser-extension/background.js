@@ -1562,11 +1562,19 @@ async function streamCapturedUrl(request) {
     startedAt: Date.now(),
     bytes: 0,
   };
+  const method = String(request.method || "GET").toUpperCase() === "POST" ? "POST" : "GET";
   let uploadId = null;
+  let postStarted = false;
+  let response = null;
+  let reader = null;
+  let completed = false;
   try {
     await diagnostic(`${kind}.prehook.accepted`, state, { detail: `source=${request.source || "main-world"}` });
-    const method = String(request.method || "GET").toUpperCase() === "POST" ? "POST" : "GET";
-    const response = await fetch(url, {
+    // Check the destination before consuming a possibly single-use POST. If
+    // ADM is offline, the page can still submit the original form once.
+    if (method === "POST") await bridgeRequest("/v1/health");
+    postStarted = method === "POST";
+    response = await fetch(url, {
       method,
       body: method === "POST" ? request.body || null : undefined,
       headers: method === "POST" && request.contentType ? { "Content-Type": request.contentType } : undefined,
@@ -1577,7 +1585,11 @@ async function streamCapturedUrl(request) {
     });
     const disposition = response.headers.get("content-disposition") || "";
     const contentType = response.headers.get("content-type") || "";
-    const total = Number.parseInt(response.headers.get("content-length") || "0", 10) || 0;
+    const contentLength = Number(response.headers.get("content-length"));
+    const encoding = response.headers.get("content-encoding");
+    // Fetch decodes HTTP compression; its byte stream can be larger than the
+    // compressed Content-Length. Let ADM count those bytes as they arrive.
+    const total = (!encoding || encoding.toLowerCase() === "identity") && Number.isSafeInteger(contentLength) && contentLength > 0 ? contentLength : 0;
     if (!response.ok) throw new Error(`${kind}_http_${response.status}`);
     if (/text\/html|application\/xhtml/i.test(contentType) && !/attachment|filename=/i.test(disposition)) {
       throw new Error(`${kind}_not_a_file_response`);
@@ -1588,35 +1600,10 @@ async function streamCapturedUrl(request) {
       detail: `expected_bytes=${total} content_type=${contentType.slice(0, 120)} file=${fileName}`,
     });
 
-    // POST-generated files need the regular destination/analysis dialog. Probe
-    // once to learn the server-provided filename, then let the native engine
-    // repeat the exact request after the user confirms where to save it.
-    if (method === "POST") {
-      await response.body?.cancel().catch(() => {});
-      const cookieHeader = await cookieHeaderFor([url, request.pageUrl]);
-      await bridgePost("/v1/download", {
-        url,
-        fileName,
-        pageUrl: request.pageUrl || url,
-        title: fileName,
-        thumbnail: null,
-        mediaKind: null,
-        expectedSize: total || null,
-        duration: null,
-        cookieHeader: cookieHeader || null,
-        userAgent: globalThis.navigator?.userAgent || null,
-        requestMethod: "POST",
-        requestBody: request.body || null,
-        requestContentType: request.contentType || "application/x-www-form-urlencoded;charset=UTF-8",
-        startImmediately: false,
-      });
-      await diagnostic(`${kind}.prehook.handed_off`, state, {
-        status: response.status,
-        detail: `method=POST file=${fileName} expected_bytes=${total}`,
-      });
-      return { ok: true, kind, handedOff: true };
-    }
-
+    // Keep the successful response, including POST-generated archives. The
+    // staging workflow opens the regular destination dialog after transfer,
+    // without issuing another request to generate the same file again.
+    if (!response.body) throw new Error("response_stream_unavailable");
     const begin = await bridgePost("/v1/blob/begin", {
       fileName,
       total,
@@ -1627,9 +1614,8 @@ async function streamCapturedUrl(request) {
     });
     uploadId = begin?.uploadId || null;
     if (!uploadId) throw new Error("blob_begin_failed");
-    if (!response.body) throw new Error("response_stream_unavailable");
 
-    const reader = response.body.getReader();
+    reader = response.body.getReader();
     let chunks = 0;
     while (true) {
       const { value, done } = await reader.read();
@@ -1645,6 +1631,7 @@ async function streamCapturedUrl(request) {
       if (done) break;
     }
     await bridgePost("/v1/blob/end", { uploadId });
+    completed = true;
     await diagnostic(`${kind}.prehook.completed`, state, {
       status: response.status,
       bytes: state.bytes,
@@ -1658,8 +1645,16 @@ async function streamCapturedUrl(request) {
       error: String(error),
       detail: uploadId ? `upload_id=${uploadId}` : "upload_not_started",
     });
-    throw error;
+    // Once POST has been sent, even a network/bridge failure cannot prove that
+    // the server did not process it. Never automatically submit it again.
+    throw Object.assign(new Error(error?.message || String(error)), { replay: !postStarted });
   } finally {
+    if (reader) {
+      if (!completed) await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    } else {
+      await response?.body?.cancel().catch(() => {});
+    }
     release(url);
   }
 }
@@ -1760,9 +1755,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   streamCapturedUrl(request)
     .then(reply)
     .catch((error) => {
-      // The MAIN-world hook replays the original navigation when takeover fails.
-      // Keeping fallback there preserves the site's exact click semantics.
-      reply({ ok: false, error: String(error) });
+      // GET can fall back to navigation. A consumed POST must not be replayed.
+      reply({ ok: false, error: String(error), replay: error?.replay !== false });
     });
   return true;
 });

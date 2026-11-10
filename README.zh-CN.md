@@ -11,8 +11,8 @@
 | Windows x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-windows-x64-portable.zip) |
 | Linux x64 | [Portable tar.gz](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64-portable.tar.gz) · [AppImage](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64.AppImage) |
 | macOS x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-macos-x64-portable.zip) |
-| Chrome | [0.3.209 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.209.zip) |
-| Edge | [0.3.209 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.209.zip) |
+| Chrome | [0.3.210 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.210.zip) |
+| Edge | [0.3.210 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.210.zip) |
 | Firefox | [0.3.209 XPI](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.209.xpi) |
 
 ![Downloads](assets/screenshots/downloads.png)
@@ -33,13 +33,19 @@
 - Apocalipse Link：计算机之间经过身份验证的 TLS 文件传输。
 - 网站凭据保存在系统安全凭据库中；界面支持葡萄牙语、英语和简体中文。
 
-## 0.8.14 版本
+## 0.8.15 版本
+
+Chrome/Edge 0.3.210 修复通过 POST 表单生成的文件下载，例如 UUP Dump ZIP 压缩包：将已收到的响应流式传入 ADM，并保留保存位置选择，不再丢弃文件或重复请求网站。发送前若 ADM 不可用，浏览器可继续处理；POST 发送后的失败不会自动重发表单。经过 HTTP 压缩的响应按解码后的实际字节数计算。
+
+Firefox 继续提供 **Mozilla 签名的 0.3.209 XPI**。此签名版本尚未包含 0.3.210 的 POST 修复。
+
+### 保留的修复
 
 集成 Xtreme 0.2.6：入站 ED2K 握手应答公布实际监听的 TCP 端口，不再填零。UPnP 发现尝试本机 IPv4 地址，并在统一截止时间内重试丢失的 SSDP 请求。顶部状态区分 TCP 接入连接与已完成的 ED2K 握手，登录日志也记录这些计数。保留 0.8.13 的 UPnP/登录顺序修复。TCP 端口测试或映射成功本身不保证高 ID，仍需服务器确认协议结果。
 
 修复 UPnP 与 ED2K 登录的先后顺序：此前发现失败时，不再让登录与后台端口转发并行竞争。如果低 ID 登录后才确认 TCP 端口已转发，仅重新登录一次，让服务器再次测试端口。保留服务器实际返回的 ID、取消操作及服务器故障切换；UPnP 转发成功本身并不保证高 ID。
 
-Chrome/Edge 0.3.209 优先选择已有媒体数据的播放器，结合主视频面积、播放和音频状态判断，而不只依据屏幕位置，避免选择空播放器或重叠预览。录制沿用当前播放位置，不回到开头；视频已经播放时，不再等待另一次 `play()`。即使页面 CSS 覆盖显示样式，隐藏按钮也保持隐藏。
+Chrome/Edge 0.3.210 优先选择已有媒体数据的播放器，结合主视频面积、播放和音频状态判断，而不只依据屏幕位置，避免选择空播放器或重叠预览。录制沿用当前播放位置，不回到开头；视频已经播放时，不再等待另一次 `play()`。即使页面 CSS 覆盖显示样式，隐藏按钮也保持隐藏。
 
 包含用户提供的 Mozilla 签名 Firefox 0.3.209 XPI，已检查加密签名、内部哈希及源码一致性。Chrome、Edge 和 Firefox 均包含 0.3.209 的播放器和录制修改。
 
@@ -63,13 +69,13 @@ Xtreme 0.2.6 保留 0.2.5 对种子端口自动选择的修复：先保留 UDP/u
 
 修复紧凑窗口中标题与种子控件重叠的问题。三种语言下，顶部操作按钮均可在空间不足时自动换行。
 
-下载对话框不再显示步骤编号，最多显示 **9 个最近使用的文件夹**，默认路径排在首位。发布包包含 **Mozilla 签名的 Firefox 0.3.209 扩展**，以及 Chrome/Edge 0.3.209。
+下载对话框不再显示步骤编号，最多显示 **9 个最近使用的文件夹**，默认路径排在首位。发布包包含 **Mozilla 签名的 Firefox 0.3.209 扩展**，以及 Chrome/Edge 0.3.210。
 
 下载工具栏、添加下载窗口及已完成下载的操作中提供**转换文件**。可选择本地文件或已下载的文件。FFprobe 按实际内容和轨道识别文件，即使扩展名不正确。内嵌封面不视为视频。仅有音轨的 MP4 只提供音频格式；无音轨的视频只提供视频格式。同时含有音视频时，会检查全部视频帧，确认全为黑屏后才按音频处理；长文件分析可能需要较长时间。
 
 输出格式：PNG、无损 WebP、JPEG、TIFF、BMP；FLAC、WAV、MP3、M4A、Opus、Ogg；MP4、MKV、无损 MKV、WebM。实际列表取决于已安装的 FFmpeg 编码器。支持音轨选择、进度和取消。保留原文件，另存新文件，不覆盖已有文件。无损编码无法恢复已损失的细节；JPEG 和有损格式采用高质量设置。识别到的动态图像按视频处理，以保留全部帧。
 
-请在**设置 → 工具**中安装 **FFmpeg 和 FFprobe**。下载对话框高度随内容调整，高级选项始终显示，空间足够时采用两列。保留扩展提供的缩略图，无法显示的图像尝试 YouTube 备用缩略图。Chrome/Edge：**0.3.209**；Firefox 继续提供已签名的 **0.3.209** XPI。
+请在**设置 → 工具**中安装 **FFmpeg 和 FFprobe**。下载对话框高度随内容调整，高级选项始终显示，空间足够时采用两列。保留扩展提供的缩略图，无法显示的图像尝试 YouTube 备用缩略图。Chrome/Edge：**0.3.210**；Firefox 继续提供已签名的 **0.3.209** XPI。
 
 打开**添加下载**时，窗口会自动增高，为表单、线程设置和高级选项提供更多空间。关闭对话框后恢复原来的窗口大小和位置；小屏幕上仍可滚动。
 
@@ -77,7 +83,7 @@ ED2K 的**预览**按钮在首个分块通过 MD4 校验后启用：最多 **9,7
 
 自动重试在重新检查期间保留当前进程已验证的预览映射。检查结果仍可撤销无效分块；重启程序或手动恢复需要重新验证。如果所有来源都缺少剩余分块，下载会保持未完成状态，保存已有数据并重试。
 
-此版本还修复了 HTTP 锁清理、删除普通下载时的续传标识清理、Xtreme 监听器关闭和加密缓存并发写入。ADM **0.8.14**、Xtreme **0.2.6**、Chrome/Edge **0.3.209**、Firefox **0.3.209**。
+此版本还修复了 HTTP 锁清理、删除普通下载时的续传标识清理、Xtreme 监听器关闭和加密缓存并发写入。ADM **0.8.15**、Xtreme **0.2.6**、Chrome/Edge **0.3.210**、Firefox **0.3.209**。
 
 ## 构建与贡献
 

@@ -32,7 +32,7 @@
     const saved = pending.get(event.data.requestId);
     if (!saved) return;
     pending.delete(event.data.requestId);
-    if (!event.data.result?.ok && saved.form.isConnected) replay(saved.form, saved.submitter);
+    if (!event.data.result?.ok && event.data.result?.replay !== false && saved.form.isConnected) replay(saved.form, saved.submitter);
   });
 
   document.addEventListener("submit", (event) => {

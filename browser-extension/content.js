@@ -2322,7 +2322,9 @@
         source: "apocalipse-extension",
         type: "pre-download-result",
         requestId: data.requestId,
-        result: { ok: false, error: String(error) },
+        // The worker may already have sent a POST before its message channel
+        // closed. An uncertain result must not resubmit the form automatically.
+        result: { ok: false, error: String(error), replay: String(data.method || "GET").toUpperCase() !== "POST" },
       }, "*");
     });
   });

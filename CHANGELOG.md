@@ -1,4 +1,12 @@
-# Apocalipse Download Manager — Chrome/Edge 0.3.209 · Firefox 0.3.209
+# Apocalipse Download Manager — Chrome/Edge 0.3.210 · Firefox 0.3.209
+
+## 0.8.15 — 2026-11-10
+
+- Chrome/Edge 0.3.210 transfere diretamente a resposta do formulário POST para o ADM, preservando a escolha do destino e eliminando o segundo pedido que provocava HTTP 429 nos ZIPs do UUP Dump.
+- Verifica o ADM antes de enviar o POST e permite fallback para o navegador nessa situação; após o envio, falhas não repetem automaticamente o formulário.
+- Usa o tamanho decodificado para respostas HTTP comprimidas e libera o leitor do stream ao concluir ou falhar.
+- Mantém Xtreme 0.2.6 e o Firefox 0.3.209 assinado sem alterações; o XPI assinado anterior não contém a nova correção de POST.
+
 
 ## 0.8.14 — 2026-11-08
 
