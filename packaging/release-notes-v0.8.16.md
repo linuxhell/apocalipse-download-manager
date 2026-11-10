@@ -5,6 +5,6 @@
 - Show “Finalizing file…” while a known-length non-live, non-torrent download has all bytes but the backend is still active. Completion still requires the backend's successful result.
 - Add accessible progress information and Portuguese, English and Chinese translations.
 - Controlled Linux before/after Nibiru tests recorded 13.6% and 6.0% less total time in two synthetic scenarios, with every payload checked. These are not IDM comparisons or evidence of higher Internet/torrent/ed2k throughput.
-- Keep Chrome/Edge 0.3.210 and the unchanged Mozilla-signed Firefox 0.3.209 extension.
+- Keep Chrome/Edge/Firefox 0.3.210, including the Mozilla-signed Firefox package from the updated main branch.
 
 See docs/IDM-HTTP-INTEGRATION-2026-11-10.md for source pinning and validation.
