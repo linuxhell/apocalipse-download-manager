@@ -1,5 +1,12 @@
 # Apocalipse Download Manager — Chrome/Edge 0.3.210 · Firefox 0.3.209
 
+## 0.8.16 — 2026-11-10
+
+- Fixa Nibiru Xtreme 0.2.7 na biblioteca e no backend empacotado: elimina o GET descartável de um byte no início HTTP e permite ajuda entre conexões em trechos já atribuídos, com fronteiras de blocos e retomada preservadas.
+- Mostra “Finalizando arquivo…” quando todos os bytes de uma transferência de tamanho conhecido chegaram, mas o backend ainda está ativo. Só a confirmação do backend marca conclusão; gravações ao vivo e torrents não usam essa inferência.
+- Inclui informação acessível no progresso e traduções em português, inglês e chinês.
+- Documenta os ganhos medidos em fixtures locais e seus limites: não comprova superioridade geral sobre o IDM nem aceleração de torrent/ed2k. Mantém as extensões Chrome/Edge 0.3.210 e Firefox 0.3.209 assinado.
+
 ## 0.8.15 — 2026-11-10
 
 - Chrome/Edge 0.3.210 transfere diretamente a resposta do formulário POST para o ADM, preservando a escolha do destino e eliminando o segundo pedido que provocava HTTP 429 nos ZIPs do UUP Dump.

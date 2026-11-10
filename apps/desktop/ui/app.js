@@ -9,6 +9,7 @@ const catalogs = {
     clearTorrentStoreConfirm: "Delete every saved .torrent file in data/torrents that isn't used by an active or queued torrent?",
     torrentStoreCleared: "Removed {count} .torrent file(s) from data/torrents.",
     networkWaiting: "Waiting for network",
+    finalizing: "Finalizing file…",
     networkWaitingHint: "The connection changed or went offline. This task will resume automatically when a network interface is available.",
     downloads: "Downloads",
     media: "Media",
@@ -224,6 +225,7 @@ const catalogs = {
     clearTorrentStoreConfirm: "Apagar todos os arquivos .torrent salvos em data/torrents que não estejam em uso por um torrent ativo ou na fila?",
     torrentStoreCleared: "{count} arquivo(s) .torrent removido(s) de data/torrents.",
     networkWaiting: "Aguardando rede",
+    finalizing: "Finalizando arquivo…",
     networkWaitingHint: "A conexão mudou ou ficou offline. Esta tarefa será retomada automaticamente quando uma interface de rede estiver disponível.",
     downloads: "Downloads",
     media: "Mídia",
@@ -439,6 +441,7 @@ const catalogs = {
     clearTorrentStoreConfirm: "是否删除 data/torrents 中未被任何活动或排队种子使用的所有 .torrent 文件？",
     torrentStoreCleared: "已从 data/torrents 删除 {count} 个 .torrent 文件。",
     networkWaiting: "等待网络",
+    finalizing: "正在完成文件…",
     networkWaitingHint: "网络连接已更改或断开。可用网络接口恢复后，此任务会自动继续。",
     downloads: "下载",
     media: "媒体",
@@ -1068,6 +1071,7 @@ function renderDownloads(force = false) {
     info.append(titleLine);
     const progress = document.createElement("div");
     progress.className = "task-progress";
+    const finalizing = isDownloadFinalizing(task, isTorrent(task));
     const bar = document.createElement("i");
     const hasReportedPercent = task.progress_percent !== null
       && task.progress_percent !== undefined
@@ -1079,6 +1083,12 @@ function renderDownloads(force = false) {
         ? Math.min(100, (task.received / task.total) * 100)
         : 0;
     bar.style.width = `${percent}%`;
+    progress.setAttribute("role", "progressbar");
+    progress.setAttribute("aria-label", task.display_title || String(task.destination));
+    progress.setAttribute("aria-valuemin", "0");
+    progress.setAttribute("aria-valuemax", "100");
+    progress.setAttribute("aria-valuenow", String(percent));
+    if (finalizing) progress.setAttribute("aria-valuetext", t("finalizing"));
     const details = document.createElement("small");
     const speed = speedSamples.get(task.id)?.speed || 0;
     const uploadSpeed = task.state === "downloading" ? Number(task.upload_speed) || 0 : 0;
@@ -1123,6 +1133,7 @@ function renderDownloads(force = false) {
         ? t("networkWaiting")
         : /\.recording(?: \(\d+\))?\.webm$/i.test(task.destination) && stateKey(task.state) === "downloading"
           ? t("recordingActive")
+          : finalizing ? t("finalizing")
           : stateName(task.state),
     });
     if (typeof task.state === "object") {
