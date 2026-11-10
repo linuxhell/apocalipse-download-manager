@@ -33,7 +33,9 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.8.15
+## Versão 0.8.16
+
+Inclui Nibiru Xtreme 0.2.7 com redistribuição de caudas entre conexões HTTP e início sem o GET descartável de um byte. A interface mostra “Finalizando arquivo…” até a confirmação do backend. A [análise e integração](docs/IDM-HTTP-INTEGRATION-2026-11-10.md) registra os ganhos locais e seus limites; não comprova aceleração de torrent/ed2k ou superioridade geral sobre o IDM.
 
 Chrome/Edge 0.3.210 corrige o download de arquivos gerados por formulários POST, como os ZIPs do UUP Dump: transfere a resposta já recebida para o ADM e mantém a escolha do destino, sem descartar o arquivo nem repetir o pedido ao site. Se o ADM estiver indisponível antes do envio, o navegador pode assumir; falhas após o POST não o repetem automaticamente. Respostas HTTP comprimidas usam o tamanho real dos dados decodificados.
 
@@ -41,7 +43,7 @@ Inclui o XPI **Firefox 0.3.210 assinado pela Mozilla**, com a mesma correção d
 
 ### Correções preservadas
 
-Inclui Xtreme 0.2.6: respostas ao handshake ED2K anunciam a porta TCP realmente aberta, em vez de zero. A descoberta UPnP tenta os endereços IPv4 locais e repete solicitações SSDP perdidas no mesmo prazo. O cabeçalho separa conexões TCP recebidas de negociações ED2K concluídas, e o log de login inclui esses contadores. Mantém a correção de ordem entre UPnP e login da 0.8.13. Um encaminhamento ou teste TCP bem-sucedido não garante ID alto; o servidor confirma o resultado do protocolo.
+Preserva as correções do Xtreme 0.2.6: respostas ao handshake ED2K anunciam a porta TCP realmente aberta, em vez de zero. A descoberta UPnP tenta os endereços IPv4 locais e repete solicitações SSDP perdidas no mesmo prazo. O cabeçalho separa conexões TCP recebidas de negociações ED2K concluídas, e o log de login inclui esses contadores. Mantém a correção de ordem entre UPnP e login da 0.8.13. Um encaminhamento ou teste TCP bem-sucedido não garante ID alto; o servidor confirma o resultado do protocolo.
 
 Corrige a ordem entre UPnP e login ED2K: uma descoberta anterior sem resposta não libera o login enquanto outra busca tenta abrir as portas em segundo plano. Se o encaminhamento TCP só for confirmado após receber ID baixo, repete o login uma única vez para o servidor testar a porta novamente. Preserva o ID realmente retornado, o cancelamento e a conexão com outros servidores; UPnP confirmado sozinho não garante ID alto.
 
@@ -83,7 +85,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.15**, Xtreme **0.2.6**, Chrome/Edge **0.3.210**, Firefox **0.3.210**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.16**, Xtreme **0.2.7**, Chrome/Edge **0.3.210**, Firefox **0.3.210**.
 
 ## Compilar e contribuir
 
