@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod advanced_transports;
+mod appimage_portable;
 mod audio_conversion;
 mod file_conversion;
 
@@ -5598,14 +5599,22 @@ fn portable_data_directory<R: tauri::Runtime>(
     app: &tauri::App<R>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let executable = std::env::current_exe()?;
-    let directory = executable
-        .parent()
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, "executable_has_no_parent")
-        })?
-        .join("data");
-    fs::create_dir_all(&directory)?;
+    let image_data = appimage_portable::running_image_data(&executable);
     let legacy = app.path().app_data_dir()?;
+    let executable_directory = executable.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "executable_has_no_parent")
+    })?;
+    let preferred = image_data
+        .clone()
+        .unwrap_or_else(|| executable_directory.join("data"));
+    let directory = match fs::create_dir_all(&preferred) {
+        Ok(()) => preferred,
+        Err(_) if image_data.is_some() => {
+            fs::create_dir_all(&legacy)?;
+            legacy.clone()
+        }
+        Err(error) => return Err(error.into()),
+    };
     for name in ["queue.json", "settings.json"] {
         let source = legacy.join(name);
         let destination = directory.join(name);
@@ -15636,6 +15645,10 @@ fn main() {
                 // The portable package includes the native transfer engine.
                 let xtreme_dir = app_data.join("tools").join("nibiru-xtreme");
                 fs::create_dir_all(&xtreme_dir)?;
+                let executable = std::env::current_exe()?;
+                if appimage_portable::running_image_data(&executable).is_some() {
+                    appimage_portable::install_backend(&executable, &xtreme_dir)?;
+                }
                 initial_settings.xtreme_path = Some(xtreme_dir.join(if cfg!(windows) {
                     "nibiru-xtreme.exe"
                 } else {

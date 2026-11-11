@@ -107,13 +107,6 @@ jobs:
           print(json.dumps(report))
           PYVERIFY
 
-      - name: Build Linux AppImage
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          cd apps/desktop
-          npx --yes @tauri-apps/cli@2 build --bundles appimage
-
       - name: Build xtreme backend from the pinned source
         shell: bash
         env:
@@ -134,6 +127,23 @@ jobs:
           cp "$RUNNER_TEMP/xtreme-install/bin/$XTREME_BINARY" "dist/xtreme-backend/$XTREME_BINARY"
           chmod 755 "dist/xtreme-backend/$XTREME_BINARY"
           "dist/xtreme-backend/$XTREME_BINARY" --version
+
+      - name: Build and verify Linux AppImage with pinned backend
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p apps/desktop/src-tauri/binaries
+          install -m 755 dist/xtreme-backend/nibiru-xtreme apps/desktop/src-tauri/binaries/nibiru-xtreme-x86_64-unknown-linux-gnu
+          (cd apps/desktop && npx --yes @tauri-apps/cli@2 build --bundles appimage --config '{"bundle":{"externalBin":["binaries/nibiru-xtreme"]}}')
+          image="$(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "$image"
+          image="$(realpath "$image")"
+          verify_dir="$(mktemp -d)"
+          (cd "$verify_dir" && "$image" --appimage-extract >/dev/null)
+          cmp dist/xtreme-backend/nibiru-xtreme "$verify_dir/squashfs-root/usr/bin/nibiru-xtreme"
+          test "$(dist/xtreme-backend/nibiru-xtreme --version)" = "$("$verify_dir/squashfs-root/usr/bin/nibiru-xtreme" --version)"
+          rm -rf "$verify_dir"
 
       - name: Stage Windows portable
         if: runner.os == 'Windows'

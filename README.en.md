@@ -33,7 +33,9 @@ The thread slider is visible in the new-download dialog and takes priority over 
 - Apocalipse Link for authenticated TLS transfers between computers.
 - Per-site credentials in the operating system vault; Portuguese, English and Simplified Chinese interfaces.
 
-## Version 0.8.17
+## Version 0.8.18
+
+The AppImage includes the pinned Xtreme backend and stores mutable data outside its read-only mount. Engine installation preserves an existing version.
 
 Includes Nibiru Xtreme 0.2.8: reuses the first GET, honors 429/503 and Retry-After, temporarily learns origin caps and recovers interrupted ranges while keeping completed blocks. Reuses buffers and prepares sparse files on Windows. The slider overrides size defaults while honoring the selected maximum. See the [integration and limits](docs/MDM-HTTP-INTEGRATION-2026-11-10.md). Mozilla-signed Firefox 0.3.210 remains included.
 
@@ -85,7 +87,7 @@ ED2K **Preview** becomes available after the first MD4-verified part: up to **9,
 
 Automatic retries preserve the current process's verified preview map while rechecking. The fresh result can invalidate parts; restarting the app or resuming manually requires verification again. If no peer has the remaining parts, the download stays incomplete, retains partial data and retries.
 
-This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.17**, Xtreme **0.2.8**, Chrome/Edge **0.3.210**, Firefox **0.3.210**.
+This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.18**, Xtreme **0.2.8**, Chrome/Edge **0.3.210**, Firefox **0.3.210**.
 
 ## Build and contribute
 
