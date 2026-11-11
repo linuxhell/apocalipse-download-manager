@@ -1,12 +1,13 @@
 # Integração HTTP Nibiru 0.2.8 — ADM 0.8.17
 
 A biblioteca Rust e o backend empacotado usam a mesma revisão exata do motor,
+`f2ae7df1b48707e5246d7d40e75ae617c9732bb4`,
 fixada em `apps/desktop/src-tauri/Cargo.toml` e `Cargo.lock`. O CI extrai o commit
 do lockfile e instala esse executável, sem selecionar um release flutuante.
 
 O [PR do motor](https://github.com/linuxhell/nibiru-xtreme/pull/8) reúne a auditoria
 do Mister Download Manager e implementação própria. Consulte também
-[a arquitetura e seus limites](https://github.com/linuxhell/nibiru-xtreme/blob/audit/mdm-http-2026-11-10/docs/HTTP-0.2.8.md).
+[a arquitetura e seus limites](https://github.com/linuxhell/nibiru-xtreme/blob/f2ae7df1b48707e5246d7d40e75ae617c9732bb4/docs/HTTP-0.2.8.md).
 
 ## Comportamento
 
@@ -47,3 +48,8 @@ O ambiente local não tem GTK/WebKit de desenvolvimento. Os testes de core/CLI
 não substituem a validação desktop do CI. Ensaios sintéticos não provam
 superioridade universal sobre IDM/MDM, maior capacidade de Internet ou aceleração
 em torrent/ED2K.
+
+O ensaio controlado do motor registrou 120 execuções com hashes: arquivo pequeno
+de 94 ms para 51 ms; cenário limitado por conexão de 2,244 s para 1,182 s com
+máximo explícito de oito. A configuração e o limite do servidor influenciam o
+resultado; isso não multiplica a capacidade de um enlace já saturado.
