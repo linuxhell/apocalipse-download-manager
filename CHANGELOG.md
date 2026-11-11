@@ -1,5 +1,11 @@
 # Apocalipse Download Manager — Chrome/Edge/Firefox 0.3.210
 
+## 0.8.18 — 2026-11-11
+
+- Inclui o backend Xtreme fixado no AppImage e verifica seu conteúdo real no CI.
+- Guarda dados fora da montagem AppImage somente leitura e instala o backend atomicamente sem substituir uma versão existente.
+- Preserva Firefox 0.3.210 assinado e Xtreme 0.2.8.
+
 ## 0.8.17 — 2026-11-10
 
 - Integra Xtreme 0.2.8: primeiro GET aproveitado, recuperação limitada de 429/503 e corpos interrompidos, cache temporário de limites por origem e buffers reutilizados.

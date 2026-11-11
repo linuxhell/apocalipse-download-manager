@@ -33,7 +33,9 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.8.17
+## Versão 0.8.18
+
+No AppImage, inclui o backend Xtreme fixado e mantém os dados fora da montagem somente leitura. O motor é instalado sem substituir uma versão existente.
 
 Inclui Nibiru Xtreme 0.2.8: aproveita o primeiro GET, respeita 429/503 e Retry-After, aprende temporariamente limites por origem e recupera ranges interrompidos preservando blocos concluídos. Reutiliza buffers e prepara arquivos esparsos no Windows. O slider prevalece sobre o padrão por tamanho e respeita o máximo escolhido. Veja a [integração e limites](docs/MDM-HTTP-INTEGRATION-2026-11-10.md). Mantém Firefox 0.3.210 assinado pela Mozilla.
 
@@ -85,7 +87,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.17**, Xtreme **0.2.8**, Chrome/Edge **0.3.210**, Firefox **0.3.210**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.18**, Xtreme **0.2.8**, Chrome/Edge **0.3.210**, Firefox **0.3.210**.
 
 ## Compilar e contribuir
 
