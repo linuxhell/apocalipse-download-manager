@@ -9,7 +9,7 @@ repository.workspace = true
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-nibiru-xtreme = { git = "https://github.com/linuxhell/nibiru-xtreme", rev = "52d77572084819001973e4ff8cf3d61ec5e9292b", default-features = false, features = ["upnp"] }
+nibiru-xtreme = { git = "https://github.com/linuxhell/nibiru-xtreme", rev = "f2ae7df1b48707e5246d7d40e75ae617c9732bb4", default-features = false, features = ["upnp"] }
 apocalipse-core = { path = "../../../crates/apocalipse-core" }
 apocalipse-transport-lab = { path = "../../../experiments/transport-lab", features = ["moqt"] }
 anyhow.workspace = true

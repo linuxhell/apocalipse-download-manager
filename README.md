@@ -33,9 +33,9 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 - Apocalipse Link para transferências autenticadas com TLS entre computadores.
 - Credenciais por site no cofre seguro do sistema; interface em português, inglês e chinês simplificado.
 
-## Versão 0.8.16
+## Versão 0.8.17
 
-Inclui Nibiru Xtreme 0.2.7 com redistribuição de caudas entre conexões HTTP e início sem o GET descartável de um byte. A interface mostra “Finalizando arquivo…” até a confirmação do backend. A [análise e integração](docs/IDM-HTTP-INTEGRATION-2026-11-10.md) registra os ganhos locais e seus limites; não comprova aceleração de torrent/ed2k ou superioridade geral sobre o IDM.
+Inclui Nibiru Xtreme 0.2.8: aproveita o primeiro GET, respeita 429/503 e Retry-After, aprende temporariamente limites por origem e recupera ranges interrompidos preservando blocos concluídos. Reutiliza buffers e prepara arquivos esparsos no Windows. O slider prevalece sobre o padrão por tamanho e respeita o máximo escolhido. Veja a [integração e limites](docs/MDM-HTTP-INTEGRATION-2026-11-10.md). Mantém Firefox 0.3.210 assinado pela Mozilla.
 
 Chrome/Edge 0.3.210 corrige o download de arquivos gerados por formulários POST, como os ZIPs do UUP Dump: transfere a resposta já recebida para o ADM e mantém a escolha do destino, sem descartar o arquivo nem repetir o pedido ao site. Se o ADM estiver indisponível antes do envio, o navegador pode assumir; falhas após o POST não o repetem automaticamente. Respostas HTTP comprimidas usam o tamanho real dos dados decodificados.
 
@@ -85,7 +85,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.16**, Xtreme **0.2.7**, Chrome/Edge **0.3.210**, Firefox **0.3.210**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.17**, Xtreme **0.2.8**, Chrome/Edge **0.3.210**, Firefox **0.3.210**.
 
 ## Compilar e contribuir
 

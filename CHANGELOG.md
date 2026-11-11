@@ -1,5 +1,12 @@
 # Apocalipse Download Manager — Chrome/Edge/Firefox 0.3.210
 
+## 0.8.17 — 2026-11-10
+
+- Integra Xtreme 0.2.8: primeiro GET aproveitado, recuperação limitada de 429/503 e corpos interrompidos, cache temporário de limites por origem e buffers reutilizados.
+- Faz o slider prevalecer sobre o padrão por tamanho e prepara parciais esparsos no Windows, mantendo validação e publicação atômica.
+- Preserva Chrome/Edge e Firefox Mozilla-assinado 0.3.210, sem mudanças na extensão.
+- Documenta auditoria do MDM, comparação com hashes e limites de interpretação.
+
 ## 0.8.16 — 2026-11-10
 
 - Fixa Nibiru Xtreme 0.2.7 na biblioteca e no backend empacotado: elimina o GET descartável de um byte no início HTTP e permite ajuda entre conexões em trechos já atribuídos, com fronteiras de blocos e retomada preservadas.
