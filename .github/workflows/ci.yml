@@ -139,6 +139,16 @@ jobs:
           image="$(find target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
           test -n "$image"
           image="$(realpath "$image")"
+          # linuxdeploy rewrites ELF RPATHs, including sidecars. Restore the exact
+          # validated backend after dependency deployment, then compress only.
+          appdir="$(find target/release/bundle/appimage -maxdepth 1 -type d -name '*.AppDir' -print -quit)"
+          test -n "$appdir"
+          appdir="$(realpath "$appdir")"
+          install -m 755 dist/xtreme-backend/nibiru-xtreme "$appdir/usr/bin/nibiru-xtreme"
+          plugin="${XDG_CACHE_HOME:-$HOME/.cache}/tauri/linuxdeploy-plugin-appimage.AppImage"
+          test -x "$plugin"
+          LDAI_OUTPUT="$image.repacked" ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$plugin" --appimage-extract-and-run --appdir "$appdir"
+          mv "$image.repacked" "$image"
           verify_dir="$(mktemp -d)"
           (cd "$verify_dir" && "$image" --appimage-extract >/dev/null)
           cmp dist/xtreme-backend/nibiru-xtreme "$verify_dir/squashfs-root/usr/bin/nibiru-xtreme"
