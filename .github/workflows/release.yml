@@ -117,7 +117,7 @@ jobs:
           worker = manifest.pop("background", {}).get("service_worker")
           if not worker:
               raise SystemExit("Chromium background service worker is missing")
-          manifest["background"] = {"scripts": [worker]}
+          manifest["background"] = {"scripts": ["download-url-policy.js", worker]}
           manifest["browser_specific_settings"] = {
               "gecko": {
                   "id": "apocalipse-download-manager@linuxhell",

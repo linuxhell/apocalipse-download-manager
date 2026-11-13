@@ -1043,8 +1043,9 @@
     } catch {
       return { url: null, reason: "url_parse_failed" };
     }
+    if (globalThis.ADM_DOWNLOAD_URLS?.isMicrosoftUpdateFile(url)) return { url, reason: "microsoft_update_file" };
     if (anchor.hasAttribute("download")) return { url, reason: "download_attribute" };
-    const matchesExtension = /\.(?:7z|apk|bin|bz2|cab|deb|dmg|exe|gz|img|iso|msi|msix|pkg|rar|rpm|tar|tbz2|tgz|txz|xz|zip)(?:$|[?#])/i.test(url);
+    const matchesExtension = /\.(?:7z|apk|bin|bz2|cab|deb|dmg|exe|gz|img|iso|msi|msix|msu|pkg|rar|rpm|tar|tbz2|tgz|txz|xz|zip)(?:$|[?#])/i.test(url);
     return matchesExtension ? { url, reason: "known_extension" } : { url: null, reason: "unmatched_extension" };
   };
   const fileNameForUrl = (url) => {
@@ -1266,6 +1267,7 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     traceDiagnostic("click_handoff_started", "auto", { kind: "file", href: url }, clickTraceId);
+    const fileNameHint = globalThis.ADM_DOWNLOAD_URLS?.uupFileName(location.href, url) || null;
     void sendRuntimeMessageQuietly({
       type: "APOCALIPSE_DOWNLOAD",
       item: {
@@ -1273,7 +1275,8 @@
         requestUrls: [url],
         userAgent: navigator.userAgent,
         kind: "file",
-        title: fileNameForUrl(url),
+        fileName: fileNameHint,
+        title: fileNameHint || fileNameForUrl(url),
       },
     }).then((result) => {
       traceDiagnostic(result?.target === "desktop" ? "click_handoff_acknowledged" : "click_handoff_failed", "auto", {

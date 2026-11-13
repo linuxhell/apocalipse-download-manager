@@ -1,3 +1,4 @@
+if (typeof importScripts === "function") importScripts("download-url-policy.js");
 try { if (typeof importScripts === "function") importScripts("diagnostics-core.js", "diagnostics-worker.js"); }
 catch { console.warn("ADM diagnostics modules unavailable; download handling is preserved."); }
 
@@ -325,6 +326,7 @@ const recoveryFiles = [
   "diagnostics.js",
   "diagnostics-media-replay.js",
   "tiktok-identity.js",
+  "download-url-policy.js",
   "content.js",
 ];
 const captureLayerHealth = new Map();
@@ -711,6 +713,16 @@ const pageTitleStem = (title, pageUrl) => {
 };
 async function resolveBrowserDownloadFileName(item) {
   const original = fileNameFromPath(item?.filename) || "";
+  const downloadUrl = item?.finalUrl || item?.url;
+  const uupName = globalThis.ADM_DOWNLOAD_URLS?.uupFileName(item?.referrer, downloadUrl);
+  const opaqueId = (() => {
+    try { return new URL(downloadUrl).pathname.split("/").filter(Boolean).at(-1)?.toLowerCase(); }
+    catch { return null; }
+  })();
+  if (uupName && (!original || genericDownloadStem(original)
+    || original.replace(/\s+\(\d+\)$/, "").toLowerCase() === opaqueId)) {
+    return { fileName: uupName, changed: original !== uupName, source: "uup_file" };
+  }
   if (!original || !genericDownloadStem(original)) {
     return { fileName: original || null, changed: false, source: original ? "browser" : "none" };
   }
@@ -845,6 +857,7 @@ const eraseBrowserDownload = (id) => new Promise((resolve) => {
 });
 
 function isDisposableDownloadUrl(value) {
+  if (globalThis.ADM_DOWNLOAD_URLS?.isMicrosoftUpdateFile(value)) return false;
   try {
     const url = new URL(value);
     const token = url.pathname.split("/").filter(Boolean).at(-1) || "";

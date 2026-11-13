@@ -23,7 +23,11 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 
 1. Baixe o pacote portátil, extraia e abra o aplicativo. O pacote inclui Nibiru Xtreme, compilado da mesma revisão fixada usada pelo ADM.
 2. Para integração com o navegador, instale a extensão correspondente. No Chrome/Edge, extraia o ZIP e use **Carregar sem compactação** no modo de desenvolvedor. No Firefox, abra o XPI assinado pela Mozilla.
-3. Abra **Ferramentas** para instalar ou atualizar os motores necessários, como yt-dlp e FFmpeg. O AppImage não inclui o executável auxiliar Xtreme; instale-o nessa tela. No Linux, dê permissão de execução ao AppImage.
+3. Abra **Ferramentas** para instalar ou atualizar os motores necessários, como yt-dlp e FFmpeg. O AppImage também inclui o motor Xtreme e mantém os dados fora da montagem somente leitura. No Linux, dê permissão de execução ao AppImage.
+
+## Em teste — extensão 0.3.211
+
+Corrige a captura de arquivos `.msu` do UUP Dump mesmo quando a URL da Microsoft termina em um identificador, preservando o nome do arquivo e os parâmetros assinados. Chrome/Edge estão em teste; o pacote Firefox 0.3.211 precisa ser assinado pela Mozilla antes da publicação.
 
 ## Recursos
 

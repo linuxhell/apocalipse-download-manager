@@ -23,7 +23,11 @@
 
 1. 下载并解压便携包，然后启动程序。便携包包含 Nibiru Xtreme，其源代码版本与 ADM 使用的固定版本一致。
 2. 安装对应的浏览器扩展。Chrome/Edge：解压 ZIP，在开发者模式中选择**加载已解压的扩展程序**。Firefox：打开 Mozilla 签名的 XPI。
-3. 打开**工具**，安装或更新 yt-dlp、FFmpeg 等所需引擎。AppImage 不包含 Xtreme 可执行文件，请在此安装。在 Linux 上，先为 AppImage 添加执行权限。
+3. 打开**工具**，安装或更新 yt-dlp、FFmpeg 等所需引擎。AppImage 也包含 Xtreme 引擎，数据保存在只读挂载之外。在 Linux 上，先为 AppImage 添加执行权限。
+
+## 测试中 — 扩展 0.3.211
+
+修复 UUP Dump 的 `.msu` 捕获：即使 Microsoft 地址以不透明标识符结尾，也会保留文件名和签名参数。Chrome/Edge 版本正在测试；Firefox 0.3.211 必须经 Mozilla 签名后才能发布。
 
 ## 功能
 

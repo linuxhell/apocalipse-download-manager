@@ -23,7 +23,11 @@ The thread slider is visible in the new-download dialog and takes priority over 
 
 1. Download and extract the portable package, then launch the application. It includes Nibiru Xtreme built from the same pinned revision used by ADM.
 2. Install the matching browser extension. For Chrome/Edge, extract the ZIP and use **Load unpacked** in developer mode. For Firefox, open the Mozilla-signed XPI.
-3. Open **Tools** to install or update engines such as yt-dlp and FFmpeg. The AppImage does not bundle the Xtreme executable; install it there. On Linux, mark the AppImage executable.
+3. Open **Tools** to install or update engines such as yt-dlp and FFmpeg. The AppImage also bundles Xtreme and stores data outside its read-only mount. On Linux, mark the AppImage executable.
+
+## In testing — extension 0.3.211
+
+Fixes UUP Dump `.msu` capture when the Microsoft URL ends in an opaque ID, preserving the file name and signed parameters. Chrome/Edge are in testing; Firefox 0.3.211 requires Mozilla signing before publication.
 
 ## Features
 
