@@ -1,6 +1,6 @@
 # Apocalipse Download Manager — Chrome/Edge/Firefox 0.3.210
 
-## Em desenvolvimento — extensão 0.3.211
+## 0.8.19 — em preparação (extensão 0.3.211)
 
 - Captura arquivos `.msu` e endpoints Microsoft Update sem extensão na URL, abrindo a escolha normal de destino.
 - Preserva o nome de arquivo da página `getfile.php` do UUP Dump e distingue esses endpoints de links UUID de uso único, mantendo os parâmetros assinados.
