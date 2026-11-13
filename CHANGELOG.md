@@ -1,10 +1,10 @@
-# Apocalipse Download Manager — Chrome/Edge/Firefox 0.3.210
+# Apocalipse Download Manager — Chrome/Edge/Firefox 0.3.211
 
-## 0.8.19 — em preparação (extensão 0.3.211)
+## 0.8.19 — 2026-11-13
 
 - Captura arquivos `.msu` e endpoints Microsoft Update sem extensão na URL, abrindo a escolha normal de destino.
 - Preserva o nome de arquivo da página `getfile.php` do UUP Dump e distingue esses endpoints de links UUID de uso único, mantendo os parâmetros assinados.
-- Carrega a mesma política no worker Chromium, no background Firefox e na recuperação de abas. Firefox 0.3.211 ainda requer assinatura Mozilla antes da publicação.
+- Carrega a mesma política no worker Chromium, no background Firefox e na recuperação de abas. Inclui Firefox 0.3.211 assinado pela Mozilla, com conteúdo e assinatura conferidos.
 
 ## 0.8.18 — 2026-11-11
 
