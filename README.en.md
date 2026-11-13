@@ -23,7 +23,11 @@ The thread slider is visible in the new-download dialog and takes priority over 
 
 1. Download and extract the portable package, then launch the application. It includes Nibiru Xtreme built from the same pinned revision used by ADM.
 2. Install the matching browser extension. For Chrome/Edge, extract the ZIP and use **Load unpacked** in developer mode. For Firefox, open the Mozilla-signed XPI.
-3. Open **Tools** to install or update engines such as yt-dlp and FFmpeg. The AppImage does not bundle the Xtreme executable; install it there. On Linux, mark the AppImage executable.
+3. Open **Tools** to install or update engines such as yt-dlp and FFmpeg. The AppImage also bundles Xtreme and stores data outside its read-only mount. On Linux, mark the AppImage executable.
+
+## Version 0.8.19
+
+Fixes UUP Dump `.msu` capture when the Microsoft URL ends in an opaque ID, preserving the file name and signed parameters. Chrome/Edge and Firefox 0.3.211 include the fix. The user-supplied Firefox XPI is Mozilla-signed; its contents and signature have been verified.
 
 ## Features
 
@@ -87,7 +91,7 @@ ED2K **Preview** becomes available after the first MD4-verified part: up to **9,
 
 Automatic retries preserve the current process's verified preview map while rechecking. The fresh result can invalidate parts; restarting the app or resuming manually requires verification again. If no peer has the remaining parts, the download stays incomplete, retains partial data and retries.
 
-This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.18**, Xtreme **0.2.8**, Chrome/Edge **0.3.210**, Firefox **0.3.210**.
+This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.19**, Xtreme **0.2.8**, Chrome/Edge **0.3.211**, Firefox **0.3.211**.
 
 ## Build and contribute
 
