@@ -28,7 +28,7 @@ test('Facebook extractor parse failures expose a localized recording fallback', 
 
 // Execute the real content script and its installed click handler. Only browser
 // APIs/DOM geometry are mocked; URL selection and the outgoing payload are real.
-function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false, shadow = false, clipping = false, theme = "void", extraVideos = [], redditAttributes = {}, redditPostPresent = true, messageHook = null } = {}) {
+function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false, shadow = false, clipping = false, theme = "void", extraVideos = [], redditAttributes = {}, redditPostPresent = true, redditPlayerAttributes = {}, mediaState = {}, recordingClass = null, messageHook = null } = {}) {
   const sent = [], fetched = [], appended = [], listeners = [];
   const timers = new Map();
   let nextTimer = 0;
@@ -44,13 +44,15 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
     querySelector: selector => selector.includes('a[href') && permalink ? { href: permalink } : null,
     querySelectorAll: () => [], closest: selector => selector.includes('article') ? post : null,
     addEventListener() {}, removeEventListener() {},
+    ...mediaState,
   };
   const videos = [video, ...extraVideos.map(extra => ({ ...video, dataset: {}, ...extra }))];
   const postAttributes = { permalink, 'post-title': 'Exact Reddit post title', ...redditAttributes };
   const redditPost = { getAttribute: name => postAttributes[name] ?? null };
-  const player = { closest: selector => selector === 'shreddit-post' && redditPostPresent ? redditPost : null };
+  const player = { getAttribute: name => redditPlayerAttributes[name] ?? null,
+    closest: selector => selector === 'shreddit-post' && redditPostPresent ? redditPost : selector === 'shreddit-player' ? player : null };
   player.shadowRoot = { host: player, querySelectorAll: selector => selector === 'video' || selector === 'video,audio' ? [video] : [] };
-  if (shadow) video.getRootNode = () => player.shadowRoot;
+  if (shadow) { video.getRootNode = () => player.shadowRoot; post.getRootNode = () => player.shadowRoot; }
   const element = tag => ({ tagName: tag.toUpperCase(), style: { setProperty(name, value) { this[name] = value; } }, dataset: {}, offsetWidth: 80,
     addEventListener(type, handler) { this[type] = handler; }, remove() { this.removed = true; } });
   const document = {
@@ -64,7 +66,7 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
   };
   const context = vm.createContext({
     URL, Blob, Uint8Array, crypto: webcrypto, console, Date, document, location,
-    ...(recordable ? { MediaRecorder: class {
+    ...(recordable ? { MediaRecorder: recordingClass || class {
       static isTypeSupported() { return true; }
       constructor() { this.state = 'inactive'; }
       start() { this.state = 'recording'; }
@@ -105,14 +107,17 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
   vm.runInContext(readFileSync(join(__dirname, '../browser-extension/tiktok-identity.js'), 'utf8'), context);
   vm.runInContext(script.replace(/\}\)\(\);\s*$/, 'globalThis.testHooks = { installOverlays, collect, titleInfoFor, activeOverlays, waitForRecordingPlayback: typeof waitForRecordingPlayback === "function" ? waitForRecordingPlayback : null };\n})();'), context);
   context.testHooks.installOverlays();
-  const button = appended.find(node => node.className === 'apocalipse-media-download');
+  const button = appended.find(node => node.className === 'apocalipse-media-download'
+    && context.ApocalipseTikTokIdentity.videoFor(node) === video)
+    || appended.find(node => node.className === 'apocalipse-media-download');
   assert.ok(button, 'the actual overlay must be installed');
   return {
-    sent, fetched, location, video, appended,
+    sent, fetched, location, video, appended, player,
     setRedditAttributes: attributes => Object.assign(postAttributes, attributes),
     activePlayers: () => Array.from(context.testHooks.activeOverlays.keys()),
     button,
-    recordButton: appended.find(node => node.className === 'apocalipse-media-download apocalipse-media-record'),
+    recordButton: button[Symbol.for('apocalipse.recordButton')]
+      || appended.find(node => node.className === 'apocalipse-media-download apocalipse-media-record'),
     refresh: () => context.testHooks.installOverlays(),
     waitForPlayback: ms => context.testHooks.waitForRecordingPlayback(video, ms),
     fireTimeout: ms => {
@@ -597,6 +602,7 @@ test('Reddit standalone player never inherits the address bar post when multiple
 
 test('Reddit unresolved feed player keeps Download hidden until its own identity becomes available', () => {
   const p = page({ url: 'https://www.reddit.com/r/UFOB/', shadow: true,
+    mediaState: { readyState: 4, videoWidth: 480, videoHeight: 360 },
     source: 'blob:https://www.reddit.com/current', recordable: true });
   assert.equal(p.button.hidden, true);
   assert.equal(p.recordButton.hidden, false);
@@ -671,6 +677,127 @@ test('Reddit changing posts during thumbnail capture cancels the stale handoff',
   p.video.poster = '';
   await p.click();
   assert.equal(p.downloads().length, 0);
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, 'https://www.reddit.com/comments/def456/');
+});
+
+
+const zeroVideoBox = () => ({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 });
+
+test('Reddit diagnostic regression: one visible empty player plus two zero-box videos keeps post Download', async () => {
+  for (const redditPostPresent of [false, true]) {
+    const url = 'https://www.reddit.com/r/UFOB/comments/1xwx0jm/revisiting_1000_uap096/';
+    const p = page({ url, shadow: true, redditPostPresent, source: '', recordable: true,
+      mediaState: { readyState: 0, videoWidth: 0, videoHeight: 0, duration: NaN, paused: false },
+      extraVideos: [
+        { currentSrc: '', src: '', getBoundingClientRect: zeroVideoBox },
+        { currentSrc: 'https://v.redd.it/hidden/DASH_720.mp4', src: '', getBoundingClientRect: zeroVideoBox },
+      ] });
+    assert.equal(p.button.hidden, false, 'hidden implementation videos cannot suppress the dedicated post');
+    assert.equal(p.recordButton.hidden, true, 'an empty player has no frames to record');
+    await p.click();
+    assert.equal(p.downloads()[0]?.item.url, url);
+    assert.equal(p.downloads()[0].item.pageExtractor, true);
+    assert.equal(p.downloads()[0].item.audioUrl, null);
+    assert.ok(!p.sent.some(m => m.type === 'APOCALIPSE_RECENT_TAB_MEDIA'));
+  }
+});
+
+test('Reddit empty player does not call play or start an eight-second recording timeout', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/abc123/post/', shadow: true,
+    redditPostPresent: false, source: '', recordable: true,
+    mediaState: { readyState: 0, videoWidth: 0, videoHeight: 0, duration: NaN } });
+  let playCalls = 0;
+  p.video.play = () => { playCalls++; return new Promise(() => {}); };
+  await p.recordButton.click({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(playCalls, 0);
+  assert.equal(p.hasTimeout(8000), false);
+  assert.equal(p.sent.filter(m => m.type === 'APOCALIPSE_BLOB_BEGIN').length, 0);
+});
+
+test('Reddit Record becomes available only after the player has a source and decoded frames', () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/abc123/post/', shadow: true,
+    redditPostPresent: false, source: '', recordable: true,
+    mediaState: { readyState: 0, videoWidth: 0, videoHeight: 0 } });
+  assert.equal(p.recordButton.hidden, true);
+  p.video.currentSrc = p.video.src = 'blob:https://www.reddit.com/loaded';
+  p.refresh();
+  assert.equal(p.recordButton.hidden, true);
+  Object.assign(p.video, { readyState: 4, videoWidth: 480, videoHeight: 360 });
+  p.refresh();
+  assert.equal(p.button.hidden, false);
+  assert.equal(p.recordButton.hidden, false);
+  p.video.currentSrc = p.video.src = '';
+  p.refresh();
+  assert.equal(p.recordButton.hidden, true);
+});
+
+test('Reddit player post-id resolves the owning post when the address bar points to another post', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/other/address_bar/', shadow: true,
+    redditPostPresent: false, redditPlayerAttributes: { 'post-id': 't3_def456' },
+    source: '', recordable: true });
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, 'https://www.reddit.com/comments/def456/');
+});
+
+test('Reddit fallback still rejects two sized players when the second is scrolled offscreen', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/abc123/page/', shadow: true,
+    redditPostPresent: false, source: '', recordable: true,
+    extraVideos: [{ currentSrc: '', src: '', getBoundingClientRect: () => ({ left: 20, top: 2000, right: 500, bottom: 2360, width: 480, height: 360 }) }] });
+  assert.equal(p.button.hidden, true);
+  await p.click();
+  assert.equal(p.downloads().length, 0);
+});
+
+
+test('Reddit loaded player records chunks and finalizes through the bridge without restarting playback', async () => {
+  class Recorder {
+    static isTypeSupported() { return true; }
+    constructor() { this.state = 'inactive'; }
+    start() {
+      this.state = 'recording';
+      this.ondataavailable?.({ data: new Blob(['synthetic-reddit-video-chunk'], { type: 'video/webm' }) });
+    }
+    stop() { this.state = 'inactive'; void this.onstop?.(); }
+  }
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/abc123/post/', shadow: true,
+    redditPostPresent: false, source: 'blob:https://www.reddit.com/loaded', recordable: true,
+    recordingClass: Recorder, mediaState: { readyState: 4, videoWidth: 480, videoHeight: 360, paused: false, currentTime: 12 } });
+  let playCalls = 0, stopped = false;
+  p.video.play = () => { playCalls++; throw new Error('must not restart playing video'); };
+  const tracks = [{ kind: 'video', stop() { stopped = true; }, addEventListener() {} }];
+  p.video.captureStream = () => ({ getTracks: () => tracks });
+  const event = { preventDefault() {}, stopPropagation() {} };
+  assert.equal(p.recordButton.hidden, false);
+  await p.recordButton.click(event);
+  assert.equal(playCalls, 0);
+  assert.equal(p.video.currentTime, 12);
+  await p.recordButton.click(event);
+  await new Promise(setImmediate);
+  const chunk = p.sent.find(m => m.type === 'APOCALIPSE_BLOB_CHUNK');
+  assert.ok(chunk);
+  assert.equal(Buffer.from(chunk.request.data, 'hex').toString(), 'synthetic-reddit-video-chunk');
+  assert.equal(p.sent.filter(m => m.type === 'APOCALIPSE_BLOB_BEGIN').length, 1);
+  assert.equal(p.sent.filter(m => m.type === 'APOCALIPSE_BLOB_END').length, 1);
+  assert.ok(p.sent.some(m => m.eventName === 'recording_completed'));
+  assert.equal(stopped, true);
+});
+
+test('Reddit conflicting owning-post and player identities never download the address bar post', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/page123/page/', shadow: true,
+    redditAttributes: { id: 't3_abc123' }, redditPlayerAttributes: { 'post-id': 't3_def456' },
+    source: 'blob:https://www.reddit.com/current', recordable: true });
+  assert.equal(p.button.hidden, true);
+  await p.click();
+  assert.equal(p.downloads().length, 0);
+});
+
+test('Reddit follows a slotted player to its owning post instead of using the unrelated page URL', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/page123/page/', shadow: true,
+    redditPostPresent: false, source: '', recordable: true });
+  const owningPost = { getAttribute: name => name === 'id' ? 't3_def456' : null };
+  p.video.assignedSlot = { closest: selector => selector === 'shreddit-post' ? owningPost : null };
+  p.refresh();
   await p.click();
   assert.equal(p.downloads()[0]?.item.url, 'https://www.reddit.com/comments/def456/');
 });

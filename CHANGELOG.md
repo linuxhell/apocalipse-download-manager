@@ -1,6 +1,14 @@
-# Apocalipse Download Manager — Chrome/Edge 0.3.212 em desenvolvimento; Firefox assinado 0.3.211
+# Apocalipse Download Manager — Chrome/Edge 0.3.213 em desenvolvimento; Firefox assinado 0.3.211
 
-## Em desenvolvimento — extensão 0.3.212
+## Em desenvolvimento — extensão 0.3.213
+
+- Corrige a alternativa de download do Reddit quando há um player principal e vídeos auxiliares de tamanho zero; players de outros posts com tamanho de layout continuam impedindo associação ambígua ao endereço da página.
+- Reconhece `post-id` no player e no post, atravessa slots e rejeita identidades conflitantes.
+- Só oferece gravação do Reddit quando o elemento tem fonte e quadros decodificados. Cliques obsoletos em players vazios são rejeitados antes de chamar `play()` ou abrir a sessão de gravação.
+- Registra o motivo da resolução e a prontidão de gravação mesmo quando não há clique em Baixar; limita a sondagem TikTok às páginas TikTok.
+- Inclui regressões do diagnóstico de 16/11/2026 às 13:33 e do envio de chunks de gravação simulados. Firefox 0.3.213 ainda requer assinatura Mozilla.
+
+## Extensão de teste 0.3.212
 
 - Resolve vídeos do Reddit pelo `permalink`, `content-href` ou fullname do próprio post, inclusive em Shadow DOM; usa a página de um post para um player avulso somente quando ele é o único da página.
 - Mantém Baixar oculto quando o player Reddit tem apenas `blob:` sem identidade resolvida; atualiza as ações quando os metadados aparecem e registra a resolução no diagnóstico do clique.

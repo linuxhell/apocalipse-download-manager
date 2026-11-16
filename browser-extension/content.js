@@ -50,16 +50,19 @@
     });
     return [...found];
   };
-  const redditPostFor = element => {
+  const redditAncestorFor = (element, selector) => {
     if (!isRedditPage()) return null;
     let node = element;
-    while (node) {
-      const post = node.closest?.("shreddit-post");
-      if (post) return post;
-      node = node.getRootNode?.()?.host || null;
+    const seen = new Set();
+    while (node && !seen.has(node) && seen.size < 128) {
+      seen.add(node);
+      const match = node.closest?.(selector);
+      if (match) return match;
+      node = node.assignedSlot || node.parentElement || node.getRootNode?.()?.host || null;
     }
     return null;
   };
+  const redditPostFor = element => redditAncestorFor(element, "shreddit-post");
   const redditPostLink = value => {
     if (!value) return null;
     try {
@@ -70,29 +73,51 @@
     } catch {}
     return null;
   };
-  const redditUrlFor = element => {
-    if (!isRedditPage() || element?.tagName !== "VIDEO") return null;
+  const redditResolutionFor = element => {
+    const result = { url: null, reason: "reddit_identity_unresolved", postFound: false, playerFound: false };
+    if (!isRedditPage() || element?.tagName !== "VIDEO") return result;
     const post = redditPostFor(element);
-    if (post) {
-      // Reddit does not always expose `permalink`. Keep alternatives bound to
-      // this player's owning post; a feed or related card must not inherit the
-      // address bar's post. A fullname also protects against stale link metadata
-      // while Reddit recycles a card for another post.
-      const postId = post.getAttribute?.("id")?.match(/^t3_([a-z0-9]+)$/i)?.[1]?.toLowerCase();
-      for (const name of ["permalink", "content-href"]) {
-        const link = redditPostLink(post.getAttribute?.(name));
-        if (link && (!postId || link.postId === postId)) return link.url;
-      }
-      return postId ? new URL(`/comments/${postId}/`, location.href).href : null;
+    const player = redditAncestorFor(element, "shreddit-player");
+    result.postFound = Boolean(post); result.playerFound = Boolean(player);
+    const owners = [post, player].filter(Boolean);
+    const postIds = new Set();
+    for (const owner of owners) {
+      const fullname = owner.getAttribute?.("id")?.match(/^t3_([a-z0-9]+)$/i)?.[1];
+      const explicit = owner.getAttribute?.("post-id")?.match(/^(?:t3_)?([a-z0-9]+)$/i)?.[1];
+      for (const id of [fullname, explicit]) if (id) postIds.add(id.toLowerCase());
     }
-    // A standalone post viewer can mount its player outside shreddit-post.
-    // Only use the dedicated page for one unambiguous player, never a feed or
-    // a page with additional buffered/recommended videos (including shadows).
+    if (postIds.size > 1) return { ...result, reason: "reddit_conflicting_post_ids" };
+    const postId = [...postIds][0];
+    let explicitLink = false;
+    for (const owner of owners) {
+      for (const name of ["permalink", "content-href"]) {
+        const value = owner.getAttribute?.(name);
+        if (value) explicitLink = true;
+        const link = redditPostLink(value);
+        if (link && (!postId || link.postId === postId)) return { ...result, url: link.url, reason: "reddit_owning_post_link" };
+      }
+    }
+    if (postId) return { ...result, url: new URL(`/comments/${postId}/`, location.href).href, reason: "reddit_owning_post_id" };
+    // An invalid explicit owner link is evidence against using the page URL.
+    if (explicitLink) return { ...result, reason: "reddit_invalid_owner_link" };
+    // Reddit keeps zero-box implementation/standby videos mounted alongside
+    // its visible player. Ignore those for this dedicated-post fallback, but
+    // keep sized offscreen videos as competing posts: scrolling a feed must
+    // never rebind its sole visible recommendation to the address bar's post.
     const page = redditPostLink(location.href);
-    if (!page) return null;
+    if (!page) return { ...result, reason: "reddit_not_a_post_page" };
     const players = queryMediaElements("video");
-    return players.length === 1 && players[0] === element ? page.url : null;
+    const boxed = players.filter(video => {
+      const rect = video.getBoundingClientRect?.();
+      return rect && rect.width > 0 && rect.height > 0;
+    });
+    return { ...result, players: players.length, boxedPlayers: boxed.length,
+      url: boxed.length === 1 && boxed[0] === element ? page.url : null,
+      reason: boxed.length === 1 && boxed[0] === element ? "reddit_single_boxed_post_player" : "reddit_ambiguous_post_players" };
   };
+  const redditUrlFor = element => redditResolutionFor(element).url;
+  const redditRecordingReady = element => Boolean((element.currentSrc || element.src || element.srcObject)
+    && Number(element.readyState) >= 2 && Number(element.videoWidth) > 0 && Number(element.videoHeight) > 0);
   let mainHookReady = false;
   const pingMainHook = () => {
     try {
@@ -713,7 +738,8 @@
     }
     return "";
   };
-  const tikTokUrlFor = (element) => globalThis.ApocalipseTikTokIdentity?.resolve(element) || null;
+  const tikTokUrlFor = (element) => /(^|\.)tiktok\.com$/i.test(location.hostname)
+    ? globalThis.ApocalipseTikTokIdentity?.resolve(element) || null : null;
   const facebookUrlFor = (element) => {
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
     if (isFacebookMediaUrl(location.href)) return location.href;
@@ -1402,6 +1428,7 @@
     if (platform === "generic") return;
     const player = globalThis.ADM_DIAG?.player?.(element) || {};
     const rect = element.getBoundingClientRect?.() || {};
+    const reddit = platform === "reddit" ? redditResolutionFor(element) : null;
     const payload = {
       platform,
       scanId: socialScanId,
@@ -1422,6 +1449,10 @@
       },
       datasetButton: Boolean(element.dataset?.apocalipseButton),
       overlayActive: activeOverlays.has(element),
+      ...(reddit ? { resolved: Boolean(reddit.url), resolverReason: reddit.reason,
+        postFound: reddit.postFound, playerFound: reddit.playerFound,
+        players: reddit.players ?? null, boxedPlayers: reddit.boxedPlayers ?? null,
+        recordingReady: redditRecordingReady(element) } : {}),
       ...detail,
     };
     const signature = JSON.stringify({ ...payload, scanId: 0 });
@@ -1701,10 +1732,10 @@
             .find((value) => value && isTikTokVideoUrl(value)) || null
           : null;
         const socialPageUrl = facebookPageUrl || tikTokPageUrl || redditUrlFor(element);
-        if (isRedditPage()) trace("reddit.identity", "download", {
-          postFound: Boolean(redditPostFor(element)), permalinkFound: Boolean(socialPageUrl),
-          players: queryMediaElements("video").length,
-        });
+        if (isRedditPage()) {
+          const { url: _url, reason: resolverReason, ...observation } = redditResolutionFor(element);
+          trace("reddit.identity", "download", { ...observation, resolverReason, permalinkFound: Boolean(socialPageUrl) });
+        }
         const liveSource = String(element.currentSrc || element.src || "");
         const liveBlobUrl = /^blob:/i.test(liveSource) ? liveSource : null;
         const liveHttpUrl = /^https?:/i.test(liveSource) ? liveSource : null;
@@ -1912,6 +1943,12 @@
             refreshRecordLabels();
             return;
           }
+          if (isRedditPage() && !redditRecordingReady(element)) {
+            trace("recording_start_rejected", "record", { reason: "reddit_player_has_no_frames" });
+            record.title = recordingLabels().unavailable;
+            position();
+            return;
+          }
           let startupStream = null;
           previousLoop = element.loop;
           recordPhase = "starting";
@@ -2095,7 +2132,8 @@
           const liveHttpMedia = /^https?:/i.test(String(element.currentSrc || element.src || ""));
           const recordingBusy = ["starting", "recording", "uploading"].includes(recordPhase);
           recordButton.hidden = sponsoredHomeVideo || outsideVisibleArea
-            || (liveHttpMedia && !isFacebookVideo && !recordingBusy);
+            || (liveHttpMedia && !isFacebookVideo && !recordingBusy)
+            || (isRedditPage() && !redditRecordingReady(element) && !recordingBusy);
         }
       };
       document.documentElement.append(button);
