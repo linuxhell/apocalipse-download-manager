@@ -1,4 +1,41 @@
-# Apocalipse Download Manager — Chrome/Edge/Firefox 0.3.211
+# Apocalipse Download Manager 0.8.20 — Chrome/Edge/Firefox 0.3.216
+
+## 0.8.20 — 2026-11-16
+
+- Reconhece as playlists Reddit no formato `/link/<post>/asset/<mídia>/HLSPlaylist.m3u8` na resolução do player, na associação de rede e na verificação do worker, mantendo o formato curto anterior.
+- Preserva o caminho e todos os parâmetros da URL assinada. Identifica mídias concorrentes pelo asset, sem agrupar incorretamente todas as URLs cujo primeiro segmento é `link`.
+- Registra o resultado e o motivo da verificação HLS. Inclui regressões do formato fornecido pelo usuário, com assinatura fictícia nos testes.
+- O validador foi exercitado com a playlist real (HTTP 200), sua playlist de vídeo e prefixo MP4 real (HTTP 206): duração 19,933 s e trilha de vídeo verificadas, URL assinada preservada.
+- Download confirmado pelo usuário na extensão 0.3.216. Inclui Firefox 0.3.216 assinado pela Mozilla, com payload equivalente ao pacote validado e assinatura conferida.
+- Publicação do ADM 0.8.20 para Windows, Linux e macOS; motor Xtreme 0.2.8 preservado.
+
+## Extensão de teste 0.3.215
+
+- Reconhece playlists HLS no filtro de mídia e aceita os hosts exatos de vídeo Reddit; guarda os manifestos por aba e navegação, inclusive com extensão `.m3u8`, preservando URLs assinadas.
+- Para um player Blob sem URL exposta no componente, verifica a playlist mestre nativa recente: exige um único player carregado com tamanho de layout, um único identificador de mídia na janela de reprodução e compatibilidade da duração com uma playlist de vídeo analisada pelo worker.
+- Vincula o resultado à fonte, página e duração do player. Invalida a associação em mudanças de fonte/metadados e rejeita respostas tardias, playlists antigas e fontes concorrentes.
+- Inclui regressões do diagnóstico de 16/11/2026 às 14:06, da associação assíncrona e do filtro/validador HLS. Preserva a gravação existente; Firefox 0.3.215 ainda requer assinatura Mozilla.
+
+## Extensão de teste 0.3.214
+
+- Prioriza a mídia do player Reddit selecionado. Usa o manifesto HLS fornecido pelo próprio elemento/componente ou o HLS do identificador nativo `v.redd.it`, preservando URLs HLS assinadas e evitando faixas DASH de vídeo isoladas.
+- Impede que um vídeo em comentário use o `post-id` da publicação principal para baixar uma imagem. Uma mídia ainda não identificada permanece indisponível para download até haver evidência do player; a gravação continua condicionada à reprodução carregada.
+- Aplica a mesma resolução ao botão sobre o vídeo e à lista do popup, valida origens e rejeita pistas de mídia conflitantes. Nenhuma resposta recente arbitrária da aba é usada.
+- Inclui regressões de post com imagem e vídeo separado, metadados do componente, troca de player e manifesto HLS assinado. Firefox 0.3.214 ainda requer assinatura Mozilla.
+
+## Extensão de teste 0.3.213
+
+- Corrige a alternativa de download do Reddit quando há um player principal e vídeos auxiliares de tamanho zero; players de outros posts com tamanho de layout continuam impedindo associação ambígua ao endereço da página.
+- Reconhece `post-id` no player e no post, atravessa slots e rejeita identidades conflitantes.
+- Só oferece gravação do Reddit quando o elemento tem fonte e quadros decodificados. Cliques obsoletos em players vazios são rejeitados antes de chamar `play()` ou abrir a sessão de gravação.
+- Registra o motivo da resolução e a prontidão de gravação mesmo quando não há clique em Baixar; limita a sondagem TikTok às páginas TikTok.
+- Inclui regressões do diagnóstico de 16/11/2026 às 13:33 e do envio de chunks de gravação simulados. Firefox 0.3.213 ainda requer assinatura Mozilla.
+
+## Extensão de teste 0.3.212
+
+- Resolve vídeos do Reddit pelo `permalink`, `content-href` ou fullname do próprio post, inclusive em Shadow DOM; usa a página de um post para um player avulso somente quando ele é o único da página.
+- Mantém Baixar oculto quando o player Reddit tem apenas `blob:` sem identidade resolvida; atualiza as ações quando os metadados aparecem e registra a resolução no diagnóstico do clique.
+- Preserva o encaminhamento da página completa ao extrator, sem associar faixas de áudio ou vídeo de outros posts. O Firefox 0.3.212 gerado para teste ainda requer assinatura Mozilla.
 
 ## 0.8.19 — 2026-11-13
 

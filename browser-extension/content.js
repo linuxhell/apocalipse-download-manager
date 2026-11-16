@@ -50,27 +50,211 @@
     });
     return [...found];
   };
-  const redditPostFor = element => {
+  const redditAncestorFor = (element, selector) => {
     if (!isRedditPage()) return null;
     let node = element;
-    while (node) {
-      const post = node.closest?.("shreddit-post");
-      if (post) return post;
-      node = node.getRootNode?.()?.host || null;
+    const seen = new Set();
+    while (node && !seen.has(node) && seen.size < 128) {
+      seen.add(node);
+      const match = node.closest?.(selector);
+      if (match) return match;
+      node = node.assignedSlot || node.parentElement || node.getRootNode?.()?.host || null;
     }
     return null;
   };
-  const redditUrlFor = element => {
-    if (element?.tagName !== "VIDEO") return null;
-    const permalink = redditPostFor(element)?.getAttribute?.("permalink");
-    if (!permalink) return null;
+  const redditPostFor = element => redditAncestorFor(element, "shreddit-post");
+  const redditPostLink = value => {
+    if (!value) return null;
     try {
-      const url = new URL(permalink, location.href);
+      const url = new URL(value, location.href);
+      const postId = url.pathname.match(/^\/(?:r\/[^/]+\/|(?:user|u)\/[^/]+\/)?comments\/([a-z0-9]+)(?:\/|$)/i)?.[1];
       if (/^https?:$/.test(url.protocol) && /(^|\.)reddit\.com$/i.test(url.hostname)
-        && /^\/r\/[^/]+\/comments\/[^/]+(?:\/|$)/.test(url.pathname)) return url.href;
+        && !url.username && !url.password && postId) return { url: url.href, postId: postId.toLowerCase() };
     } catch {}
     return null;
   };
+  const redditPlayerMediaFor = (element, player) => {
+    const select = values => {
+      const media = [];
+      for (const value of values) {
+        if (!value || typeof value !== "string") continue;
+        try {
+          const url = new URL(value);
+          if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.port) continue;
+          const parts = url.pathname.split("/").filter(Boolean);
+          const linkedHls = url.pathname.match(/^\/link\/[a-z0-9]+\/asset\/([a-z0-9]+)\/[a-z0-9_.-]+\.m3u8$/i);
+          if (url.hostname === "v.redd.it" && linkedHls) {
+            // Linked assets use signed path/query context. Keep the complete
+            // captured URL rather than rebuilding the old short-ID endpoint.
+            media.push({ key: linkedHls[1], url: url.href, explicitHls: true });
+          } else if (url.hostname === "v.redd.it" && /^[a-z0-9]+$/i.test(parts[0] || "")
+            && (parts.length === 1 || (parts.length === 2 && /\.(?:mp4|mpd|m3u8)$/i.test(parts[1])))) {
+            media.push({ key: parts[0], url: /\.m3u8$/i.test(url.pathname)
+              ? url.href : `https://v.redd.it/${parts[0]}/HLSPlaylist.m3u8`, explicitHls: /\.m3u8$/i.test(url.pathname) });
+          } else if (url.hostname === "packaged-media.redd.it" && /\.m3u8$/i.test(url.pathname)) {
+            media.push({ key: `${url.origin}${url.pathname}`, url: url.href, explicitHls: true });
+          }
+        } catch {}
+      }
+      if (!media.length) return null;
+      if (new Set(media.map(item => item.key)).size !== 1) return { url: null, reason: "reddit_ambiguous_player_media" };
+      // Use a supplied HLS URL verbatim, including signatures. For a native
+      // v.redd.it video ID, its HLS playlist includes audio; a DASH MP4 alone
+      // is commonly just the silent video track.
+      const selected = media.find(item => item.explicitHls) || media[0];
+      return { url: selected.url, pageExtractor: false, route: "hls", requestUrls: [selected.url], reason: "reddit_exact_player_media" };
+    };
+    const live = select([element.currentSrc || element.src]);
+    if (live) return live;
+    const sources = select([...(element.querySelectorAll?.("source") || [])].slice(0, 20).map(source => source.src));
+    if (sources) return sources;
+    const hints = ["src", "hls-url", "dash-url", "video-url"].map(name => player?.getAttribute?.(name));
+    const packaged = player?.getAttribute?.("packaged-media-json");
+    if (packaged && packaged.length <= 65536) {
+      try {
+        const visit = (value, depth = 0) => {
+          if (depth > 5 || hints.length >= 100) return;
+          if (typeof value === "string") hints.push(value);
+          else if (value && typeof value === "object") Object.values(value).slice(0, 40).forEach(item => visit(item, depth + 1));
+        };
+        visit(JSON.parse(packaged));
+      } catch {}
+    }
+    return select(hints);
+  };
+  const redditHlsBindings = new WeakMap();
+  const redditHlsChecks = new WeakMap();
+  const redditHlsEpochs = new WeakMap();
+  const redditHlsWatched = new WeakSet();
+  const redditSoloLoadedPlayer = element => {
+    const loaded = queryMediaElements("video").filter(video => {
+      const rect = video.getBoundingClientRect?.();
+      return video.isConnected && rect?.width > 0 && rect?.height > 0
+        && redditRecordingReady(video);
+    });
+    return loaded.length === 1 && loaded[0] === element;
+  };
+  const redditRecentMaster = element => {
+    if (!redditSoloLoadedPlayer(element)) return null;
+    const now = performance.now?.();
+    if (!Number.isFinite(now)) return null;
+    const windowMs = Math.max(3000, (Math.min(5, Math.max(0, Number(element.currentTime) || 0)) + 3) * 1000);
+    const candidates = performance.getEntriesByType("resource").filter(entry => {
+      const floor = Math.max(now - windowMs, redditHlsEpochs.get(element)?.floor ?? 0);
+      if (!Number.isFinite(entry.startTime) || entry.startTime < floor || entry.startTime > now) return false;
+      try {
+        const url = new URL(entry.name);
+        return url.protocol === "https:" && url.hostname === "v.redd.it" && !url.username && !url.password && !url.port
+          && /^\/(?:link\/[a-z0-9]+\/asset\/)?[a-z0-9]+\/HLSPlaylist\.m3u8$/i.test(url.pathname);
+      } catch { return false; }
+    });
+    const ids = new Set(candidates.map(entry => new URL(entry.name).pathname
+      .match(/^\/(?:link\/[a-z0-9]+\/asset\/)?([a-z0-9]+)\/HLSPlaylist\.m3u8$/i)?.[1]));
+    return ids.size === 1 ? candidates.at(-1)?.name || null : null;
+  };
+  const redditVerifiedHlsFor = element => {
+    const source = String(element.currentSrc || element.src || "");
+    const now = performance.now?.();
+    if (Number.isFinite(now)) {
+      const previous = redditHlsEpochs.get(element);
+      const floor = previous?.page === location.href
+        ? previous.source === source ? previous.floor : previous.seenAt
+        : Math.max(0, now - 8000);
+      redditHlsEpochs.set(element, { source, page: location.href, floor, seenAt: now });
+    }
+    if (!/^blob:/i.test(source) || !redditRecordingReady(element)) return null;
+    if (!redditHlsWatched.has(element)) {
+      redditHlsWatched.add(element);
+      for (const event of ["emptied", "loadstart", "loadedmetadata"]) element.addEventListener?.(event, () => {
+        redditHlsBindings.delete(element); redditHlsChecks.delete(element);
+        const at = performance.now?.();
+        if (event !== "loadedmetadata" && Number.isFinite(at)) redditHlsEpochs.set(element, {
+          source: String(element.currentSrc || element.src || ""), page: location.href, floor: at, seenAt: at,
+        });
+      });
+    }
+    const cached = redditHlsBindings.get(element);
+    if (cached && cached.source === source && cached.page === location.href
+      && Math.abs(cached.duration - element.duration) <= 0.5 && redditSoloLoadedPlayer(element)) return cached.media;
+    redditHlsBindings.delete(element);
+    if (element.paused || element.ended || !Number.isFinite(element.duration) || element.duration <= 0) return null;
+    const url = redditRecentMaster(element);
+    if (!url) return null;
+    const previous = redditHlsChecks.get(element);
+    if (previous?.source === source && previous.url === url && performance.now() - previous.at < 10000) return null;
+    const snapshot = { source, url, page: location.href, duration: element.duration, at: performance.now() };
+    redditHlsChecks.set(element, snapshot);
+    void sendRuntimeMessageQuietly({ type: "APOCALIPSE_VERIFY_REDDIT_HLS", url, duration: element.duration }).then(result => {
+      traceDiagnostic("reddit.hls_verification", "download", { resolved: Boolean(result?.ok),
+        reason: result?.reason || "worker_verification_unavailable", duration: result?.duration ?? null,
+        expectedDuration: snapshot.duration });
+      if (redditHlsChecks.get(element) !== snapshot || !result?.ok || result.url !== url
+        || !element.isConnected || source !== String(element.currentSrc || element.src || "")
+        || snapshot.page !== location.href || Math.abs(snapshot.duration - element.duration) > 0.5
+        || !redditSoloLoadedPlayer(element) || redditRecentMaster(element) !== url) return;
+      const media = { url, pageExtractor: false, route: "hls", requestUrls: result.requestUrls || [url],
+        reason: "reddit_verified_playback_hls" };
+      redditHlsBindings.set(element, { ...snapshot, media });
+      traceDiagnostic("reddit.hls_bound", "download", { reason: media.reason, duration: element.duration, candidate: url });
+      installOverlays();
+    });
+    return null;
+  };
+  const redditResolutionFor = element => {
+    const result = { url: null, pageExtractor: true, route: "post", reason: "reddit_identity_unresolved", postFound: false, playerFound: false };
+    if (!isRedditPage() || element?.tagName !== "VIDEO") return result;
+    const post = redditPostFor(element);
+    const player = redditAncestorFor(element, "shreddit-player");
+    result.postFound = Boolean(post); result.playerFound = Boolean(player);
+    const comment = redditAncestorFor(element, "shreddit-comment") || redditAncestorFor(element, ".thing.comment");
+    result.commentFound = Boolean(comment);
+    // The page's post-id also appears on comment players. It does not identify
+    // that player's media: the parent post can be an image while its comments
+    // contain videos. Prefer media bound to this exact player on any Reddit page.
+    const media = redditPlayerMediaFor(element, player);
+    if (media) return { ...result, ...media };
+    const verifiedHls = redditVerifiedHlsFor(element);
+    if (verifiedHls) return { ...result, ...verifiedHls };
+    if (comment) return { ...result, pageExtractor: false, route: "unresolved", reason: "reddit_comment_media_unresolved" };
+    const owners = [post, player].filter(Boolean);
+    const postIds = new Set();
+    for (const owner of owners) {
+      const fullname = owner.getAttribute?.("id")?.match(/^t3_([a-z0-9]+)$/i)?.[1];
+      const explicit = owner.getAttribute?.("post-id")?.match(/^(?:t3_)?([a-z0-9]+)$/i)?.[1];
+      for (const id of [fullname, explicit]) if (id) postIds.add(id.toLowerCase());
+    }
+    if (postIds.size > 1) return { ...result, reason: "reddit_conflicting_post_ids" };
+    const postId = [...postIds][0];
+    let explicitLink = false;
+    for (const owner of owners) {
+      for (const name of ["permalink", "content-href"]) {
+        const value = owner.getAttribute?.(name);
+        if (value) explicitLink = true;
+        const link = redditPostLink(value);
+        if (link && (!postId || link.postId === postId)) return { ...result, url: link.url, reason: "reddit_owning_post_link" };
+      }
+    }
+    if (postId) return { ...result, url: new URL(`/comments/${postId}/`, location.href).href, reason: "reddit_owning_post_id" };
+    // An invalid explicit owner link is evidence against using the page URL.
+    if (explicitLink) return { ...result, reason: "reddit_invalid_owner_link" };
+    // Reddit keeps zero-box implementation/standby videos mounted alongside
+    // its visible player. Ignore those for this dedicated-post fallback, but
+    // keep sized offscreen videos as competing posts: scrolling a feed must
+    // never rebind its sole visible recommendation to the address bar's post.
+    const page = redditPostLink(location.href);
+    if (!page) return { ...result, reason: "reddit_not_a_post_page" };
+    const players = queryMediaElements("video");
+    const boxed = players.filter(video => {
+      const rect = video.getBoundingClientRect?.();
+      return rect && rect.width > 0 && rect.height > 0;
+    });
+    return { ...result, players: players.length, boxedPlayers: boxed.length,
+      url: boxed.length === 1 && boxed[0] === element ? page.url : null,
+      reason: boxed.length === 1 && boxed[0] === element ? "reddit_single_boxed_post_player" : "reddit_ambiguous_post_players" };
+  };
+  const redditUrlFor = element => redditResolutionFor(element).url;
+  const redditRecordingReady = element => Boolean((element.currentSrc || element.src || element.srcObject)
+    && Number(element.readyState) >= 2 && Number(element.videoWidth) > 0 && Number(element.videoHeight) > 0);
   let mainHookReady = false;
   const pingMainHook = () => {
     try {
@@ -691,7 +875,8 @@
     }
     return "";
   };
-  const tikTokUrlFor = (element) => globalThis.ApocalipseTikTokIdentity?.resolve(element) || null;
+  const tikTokUrlFor = (element) => /(^|\.)tiktok\.com$/i.test(location.hostname)
+    ? globalThis.ApocalipseTikTokIdentity?.resolve(element) || null : null;
   const facebookUrlFor = (element) => {
     if (!/(^|\.)facebook\.com$/i.test(location.hostname)) return null;
     if (isFacebookMediaUrl(location.href)) return location.href;
@@ -876,15 +1061,17 @@
       const facebookUrl = isFacebookMediaUrl(candidateFacebookUrl) ? candidateFacebookUrl : null;
       const tikTokUrl = tikTokUrlFor(element);
       const context = playerContext(element);
+      const reddit = redditResolutionFor(element);
       if (facebookUrl) {
         add(facebookUrl, "video", element, undefined, {
           pageExtractor: true,
           previewUrl: absolute(element.currentSrc || element.src),
           ...context,
         });
-      } else if (redditUrlFor(element)) {
-        add(redditUrlFor(element), "video", element, undefined, {
-          pageExtractor: true, previewUrl: absolute(element.currentSrc || element.src), ...context,
+      } else if (reddit.url) {
+        add(reddit.url, "video", element, undefined, {
+          pageExtractor: reddit.pageExtractor, requestUrls: reddit.requestUrls || [],
+          previewUrl: absolute(element.currentSrc || element.src), ...context,
         });
       } else if (tikTokUrl) {
         add(tikTokUrl, "video", element, undefined, {
@@ -1380,6 +1567,7 @@
     if (platform === "generic") return;
     const player = globalThis.ADM_DIAG?.player?.(element) || {};
     const rect = element.getBoundingClientRect?.() || {};
+    const reddit = platform === "reddit" ? redditResolutionFor(element) : null;
     const payload = {
       platform,
       scanId: socialScanId,
@@ -1400,6 +1588,11 @@
       },
       datasetButton: Boolean(element.dataset?.apocalipseButton),
       overlayActive: activeOverlays.has(element),
+      ...(reddit ? { resolved: Boolean(reddit.url), resolverReason: reddit.reason,
+        postFound: reddit.postFound, playerFound: reddit.playerFound,
+        commentFound: reddit.commentFound, route: reddit.route,
+        players: reddit.players ?? null, boxedPlayers: reddit.boxedPlayers ?? null,
+        recordingReady: redditRecordingReady(element) } : {}),
       ...detail,
     };
     const signature = JSON.stringify({ ...payload, scanId: 0 });
@@ -1602,8 +1795,9 @@
       const url = isFacebookVideo ? facebookUrlFor(element) || location.href : tikTokUrl || downloadUrlFor(element);
       const liveMediaUrl = element.currentSrc || element.src || "";
       const hasDirectHttpMedia = /^https?:/i.test(liveMediaUrl);
-      const downloadReady = () => Boolean((downloadUrlFor(element) && /^https?:/.test(downloadUrlFor(element)))
-        || /^blob:/i.test(String(element.currentSrc || element.src || '')));
+      const downloadReady = () => isRedditPage() ? Boolean(redditUrlFor(element))
+        : Boolean((downloadUrlFor(element) && /^https?:/.test(downloadUrlFor(element)))
+          || /^blob:/i.test(String(element.currentSrc || element.src || '')));
       const canDownload = isRedditPage() ? Boolean(redditUrlFor(element))
         : Boolean((url && /^https?:/.test(url)) || /^blob:/i.test(liveMediaUrl));
       // A direct HTTP media URL belongs in the download path. Cross-origin
@@ -1677,12 +1871,17 @@
           ? [typeof resolved === "string" ? resolved : resolved?.url, tikTokUrlFor(element)]
             .find((value) => value && isTikTokVideoUrl(value)) || null
           : null;
-        const socialPageUrl = facebookPageUrl || tikTokPageUrl || redditUrlFor(element);
+        const reddit = isRedditPage() ? redditResolutionFor(element) : null;
+        const socialPageUrl = facebookPageUrl || tikTokPageUrl || (reddit?.pageExtractor ? reddit.url : null);
+        if (isRedditPage()) {
+          const { url: _url, requestUrls: _requests, reason: resolverReason, ...observation } = reddit;
+          trace("reddit.identity", "download", { ...observation, resolverReason, permalinkFound: Boolean(socialPageUrl) });
+        }
         const liveSource = String(element.currentSrc || element.src || "");
         const liveBlobUrl = /^blob:/i.test(liveSource) ? liveSource : null;
         const liveHttpUrl = /^https?:/i.test(liveSource) ? liveSource : null;
         const networkMediaUrl = socialVideo ? null : recentNetworkMediaUrl();
-        const capturedSocialMedia = socialVideo && !socialPageUrl
+        const capturedSocialMedia = socialVideo && !socialPageUrl && !isRedditPage()
           ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null)
           : null;
         const inspectedSocialMedia = capturedSocialMedia?.media?.length
@@ -1758,7 +1957,7 @@
 
         // A resolved HLS manifest is more authoritative than incidental network
         // traffic or a generic HTTP source exposed by the player.
-        let currentUrl = isRedditPage() ? redditUrlFor(element) : socialVideo
+        let currentUrl = isRedditPage() ? reddit.url : socialVideo
           ? (socialPageUrl || browserVideoMedia || liveHttpUrl)
           : (resolved?.url || resolved || liveHttpUrl || networkMediaUrl || (isYouTubeVideo ? location.href : null));
         const facebookPlayableUrl = isFacebookVideo && currentUrl && (
@@ -1806,7 +2005,7 @@
         const companionAudioUrl = !extractorPageSelected && socialVideo ? browserAudioMedia : null;
         const ambiguousSocialTrack = Boolean(socialVideo && !extractorPageSelected && !companionAudioUrl
           && !/\.(?:m3u8|mpd)(?:$|[?#])/i.test(currentUrl));
-        const requestUrls = extractorPageSelected ? [] : socialVideo ? [currentUrl] : [...new Set([
+        const requestUrls = extractorPageSelected ? [] : isRedditPage() ? reddit.requestUrls || [currentUrl] : socialVideo ? [currentUrl] : [...new Set([
           ...(resolved?.requestUrls?.length ? resolved.requestUrls : (/\.m3u8(?:$|[?#])/i.test(String(currentUrl)) ? hlsForPage().candidates : [])),
           ...(directFacebookMedia && /^https?:/i.test(directFacebookMedia) ? [directFacebookMedia] : []),
         ])];
@@ -1833,6 +2032,14 @@
           candidate: currentUrl,
         });
         const thumbnail = await captureThumbnailFor(element, "video");
+        if (isRedditPage() && (!element.isConnected || clickSource !== String(element.currentSrc || element.src || "")
+          || clickPage !== location.href || currentUrl !== redditUrlFor(element))) {
+          trace("overlay_download_player_changed", "download", { reddit: true });
+          button.textContent = "!";
+          button.title = "O vídeo mudou. Clique novamente no vídeo atual.";
+          setTimeout(restoreDownloadLabel, 2500);
+          return;
+        }
         chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, pageExtractor: Boolean(socialPageUrl), audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: resolved?.mediaKind || element.tagName.toLowerCase(), title: facebookPageUrl || isRedditPage() ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail } }, (result) => {
           const failed = chrome.runtime.lastError || !result?.ok;
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
@@ -1875,6 +2082,12 @@
             record.disabled = true;
             recordPhase = "uploading";
             refreshRecordLabels();
+            return;
+          }
+          if (isRedditPage() && !redditRecordingReady(element)) {
+            trace("recording_start_rejected", "record", { reason: "reddit_player_has_no_frames" });
+            record.title = recordingLabels().unavailable;
+            position();
             return;
           }
           let startupStream = null;
@@ -2060,7 +2273,8 @@
           const liveHttpMedia = /^https?:/i.test(String(element.currentSrc || element.src || ""));
           const recordingBusy = ["starting", "recording", "uploading"].includes(recordPhase);
           recordButton.hidden = sponsoredHomeVideo || outsideVisibleArea
-            || (liveHttpMedia && !isFacebookVideo && !recordingBusy);
+            || (liveHttpMedia && !isFacebookVideo && !recordingBusy)
+            || (isRedditPage() && !redditRecordingReady(element) && !recordingBusy);
         }
       };
       document.documentElement.append(button);
