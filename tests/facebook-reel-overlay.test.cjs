@@ -952,3 +952,32 @@ test('Reddit source replacement rejects an in-flight verification and old source
   assert.equal(p.button.hidden, true);
   assert.equal(p.sent.filter(m => m.type === 'APOCALIPSE_VERIFY_REDDIT_HLS').length, 1);
 });
+
+
+const linkedRedditMaster = 'https://v.redd.it/link/1xwx0jm/asset/eu9esac1sz1i1/HLSPlaylist.m3u8?f=hd%2CsubsAll%2ChlsSpecOrder%2Cvp9&v=1&a=1797442758%2Csynthetic%3D%3D';
+
+test('Reddit linked-asset master is verified and handed off with every signed parameter unchanged', async () => {
+  const p = blobHlsPage({ network: [{ url: linkedRedditMaster, startTime: 8845 }] });
+  await new Promise(setImmediate);
+  assert.equal(p.button.hidden, false);
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, linkedRedditMaster);
+  assert.deepEqual(Array.from(p.downloads()[0].item.requestUrls), [linkedRedditMaster]);
+  assert.equal(p.downloads()[0].item.pageExtractor, false);
+});
+
+test('Reddit linked-asset HLS in component metadata keeps the full link and asset path', async () => {
+  const p = page({ url: 'https://www.reddit.com/comments/1xwx0jm/', shadow: true, redditComment: true,
+    redditPlayerAttributes: { src: linkedRedditMaster }, source: 'blob:https://www.reddit.com/current', recordable: true });
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, linkedRedditMaster);
+  assert.equal(p.downloads()[0].item.pageExtractor, false);
+});
+
+test('Reddit two different linked assets from the same post are competing media identities', async () => {
+  const other = linkedRedditMaster.replace('eu9esac1sz1i1', 'anotherasset123');
+  const p = blobHlsPage({ network: [{ url: linkedRedditMaster, startTime: 8845 }, { url: other, startTime: 8850 }] });
+  await new Promise(setImmediate);
+  assert.equal(p.button.hidden, true);
+  assert.ok(!p.sent.some(m => m.type === 'APOCALIPSE_VERIFY_REDDIT_HLS'));
+});

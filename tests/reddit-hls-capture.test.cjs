@@ -91,3 +91,25 @@ test('Reddit verification accepts only native master URLs requested from a Reddi
   ]) assert.equal((await w.send({ type: 'APOCALIPSE_VERIFY_REDDIT_HLS', url, duration: 19.933333 }, sender)).ok, false);
   assert.ok(!w.fetched.some(x => x.includes('HLSPlaylist')));
 });
+
+
+test('Reddit worker accepts the linked asset master and resolves child URLs inside its asset path', async () => {
+  const w = worker();
+  const url = 'https://v.redd.it/link/1xwx0jm/asset/eu9esac1sz1i1/HLSPlaylist.m3u8?f=hd%2Cvp9&a=synthetic%3D%3D';
+  const result = await w.send({ type: 'APOCALIPSE_VERIFY_REDDIT_HLS', url, duration: 19.933333 });
+  assert.equal(result.ok, true);
+  assert.equal(result.reason, 'video_duration_verified');
+  assert.equal(result.url, url);
+  assert.deepEqual(Array.from(result.requestUrls), [url, 'https://v.redd.it/link/1xwx0jm/asset/eu9esac1sz1i1/HLS_720.m3u8']);
+  assert.ok(w.fetched.includes(url));
+});
+
+test('Reddit worker rejects malformed linked asset routes', async () => {
+  const w = worker();
+  for (const url of [
+    'https://v.redd.it/link/abc123/asset/HLSPlaylist.m3u8',
+    'https://v.redd.it/link/abc123/asset/def456/extra/HLSPlaylist.m3u8',
+    'https://v.redd.it/link/abc123/asset/def456/CMAF_AUDIO_128.m3u8',
+    'https://v.redd.it.evil.example/link/abc123/asset/def456/HLSPlaylist.m3u8',
+  ]) assert.equal((await w.send({ type: 'APOCALIPSE_VERIFY_REDDIT_HLS', url, duration: 19.933333 })).ok, false);
+});

@@ -82,7 +82,12 @@
           const url = new URL(value);
           if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.port) continue;
           const parts = url.pathname.split("/").filter(Boolean);
-          if (url.hostname === "v.redd.it" && /^[a-z0-9]+$/i.test(parts[0] || "")
+          const linkedHls = url.pathname.match(/^\/link\/[a-z0-9]+\/asset\/([a-z0-9]+)\/[a-z0-9_.-]+\.m3u8$/i);
+          if (url.hostname === "v.redd.it" && linkedHls) {
+            // Linked assets use signed path/query context. Keep the complete
+            // captured URL rather than rebuilding the old short-ID endpoint.
+            media.push({ key: linkedHls[1], url: url.href, explicitHls: true });
+          } else if (url.hostname === "v.redd.it" && /^[a-z0-9]+$/i.test(parts[0] || "")
             && (parts.length === 1 || (parts.length === 2 && /\.(?:mp4|mpd|m3u8)$/i.test(parts[1])))) {
             media.push({ key: parts[0], url: /\.m3u8$/i.test(url.pathname)
               ? url.href : `https://v.redd.it/${parts[0]}/HLSPlaylist.m3u8`, explicitHls: /\.m3u8$/i.test(url.pathname) });
@@ -140,10 +145,11 @@
       try {
         const url = new URL(entry.name);
         return url.protocol === "https:" && url.hostname === "v.redd.it" && !url.username && !url.password && !url.port
-          && /^\/[a-z0-9]+\/HLSPlaylist\.m3u8$/i.test(url.pathname);
+          && /^\/(?:link\/[a-z0-9]+\/asset\/)?[a-z0-9]+\/HLSPlaylist\.m3u8$/i.test(url.pathname);
       } catch { return false; }
     });
-    const ids = new Set(candidates.map(entry => new URL(entry.name).pathname.split("/")[1]));
+    const ids = new Set(candidates.map(entry => new URL(entry.name).pathname
+      .match(/^\/(?:link\/[a-z0-9]+\/asset\/)?([a-z0-9]+)\/HLSPlaylist\.m3u8$/i)?.[1]));
     return ids.size === 1 ? candidates.at(-1)?.name || null : null;
   };
   const redditVerifiedHlsFor = element => {
@@ -179,6 +185,9 @@
     const snapshot = { source, url, page: location.href, duration: element.duration, at: performance.now() };
     redditHlsChecks.set(element, snapshot);
     void sendRuntimeMessageQuietly({ type: "APOCALIPSE_VERIFY_REDDIT_HLS", url, duration: element.duration }).then(result => {
+      traceDiagnostic("reddit.hls_verification", "download", { resolved: Boolean(result?.ok),
+        reason: result?.reason || "worker_verification_unavailable", duration: result?.duration ?? null,
+        expectedDuration: snapshot.duration });
       if (redditHlsChecks.get(element) !== snapshot || !result?.ok || result.url !== url
         || !element.isConnected || source !== String(element.currentSrc || element.src || "")
         || snapshot.page !== location.href || Math.abs(snapshot.duration - element.duration) > 0.5

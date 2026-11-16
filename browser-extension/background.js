@@ -1097,12 +1097,15 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     const duration = Number(message.duration);
     const senderHost = (() => { try { return new URL(sender.url || sender.tab?.url || "").hostname; } catch { return ""; } })();
     if (!/(^|\.)reddit\.com$/i.test(senderHost) || url.protocol !== "https:" || url.hostname !== "v.redd.it"
-      || url.username || url.password || url.port || !/^\/[a-z0-9]+\/HLSPlaylist\.m3u8$/i.test(url.pathname)
+      || url.username || url.password || url.port || !/^\/(?:link\/[a-z0-9]+\/asset\/)?[a-z0-9]+\/HLSPlaylist\.m3u8$/i.test(url.pathname)
       || !Number.isFinite(duration) || duration <= 0) { reply({ ok: false }); return; }
     hlsDuration(message.url).then(item => reply({ ok: item.mediaKind === "video"
       && Number.isFinite(item.duration) && Math.abs(item.duration - duration) <= 0.5,
+      reason: item.mediaKind !== "video" ? "video_track_not_verified"
+        : !Number.isFinite(item.duration) ? "playlist_duration_unavailable"
+        : Math.abs(item.duration - duration) > 0.5 ? "playlist_duration_mismatch" : "video_duration_verified",
       url: message.url, duration: item.duration, requestUrls: item.requestUrls }))
-      .catch(() => reply({ ok: false }));
+      .catch(() => reply({ ok: false, reason: "playlist_verification_failed" }));
     return true;
   }
   if (message?.type === "APOCALIPSE_RECENT_TAB_MEDIA") {
