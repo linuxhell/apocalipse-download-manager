@@ -1,4 +1,10 @@
-# Apocalipse Download Manager — Chrome/Edge/Firefox 0.3.211
+# Apocalipse Download Manager — Chrome/Edge 0.3.212 em desenvolvimento; Firefox assinado 0.3.211
+
+## Em desenvolvimento — extensão 0.3.212
+
+- Resolve vídeos do Reddit pelo `permalink`, `content-href` ou fullname do próprio post, inclusive em Shadow DOM; usa a página de um post para um player avulso somente quando ele é o único da página.
+- Mantém Baixar oculto quando o player Reddit tem apenas `blob:` sem identidade resolvida; atualiza as ações quando os metadados aparecem e registra a resolução no diagnóstico do clique.
+- Preserva o encaminhamento da página completa ao extrator, sem associar faixas de áudio ou vídeo de outros posts. O Firefox 0.3.212 gerado para teste ainda requer assinatura Mozilla.
 
 ## 0.8.19 — 2026-11-13
 

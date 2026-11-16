@@ -28,7 +28,7 @@ test('Facebook extractor parse failures expose a localized recording fallback', 
 
 // Execute the real content script and its installed click handler. Only browser
 // APIs/DOM geometry are mocked; URL selection and the outgoing payload are real.
-function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false, shadow = false, clipping = false, theme = "void", extraVideos = [] } = {}) {
+function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false, shadow = false, clipping = false, theme = "void", extraVideos = [], redditAttributes = {}, redditPostPresent = true, messageHook = null } = {}) {
   const sent = [], fetched = [], appended = [], listeners = [];
   const timers = new Map();
   let nextTimer = 0;
@@ -46,8 +46,9 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
     addEventListener() {}, removeEventListener() {},
   };
   const videos = [video, ...extraVideos.map(extra => ({ ...video, dataset: {}, ...extra }))];
-  const redditPost = { getAttribute: name => name === 'permalink' ? permalink : name === 'post-title' ? 'Exact Reddit post title' : null };
-  const player = { closest: selector => selector === 'shreddit-post' ? redditPost : null };
+  const postAttributes = { permalink, 'post-title': 'Exact Reddit post title', ...redditAttributes };
+  const redditPost = { getAttribute: name => postAttributes[name] ?? null };
+  const player = { closest: selector => selector === 'shreddit-post' && redditPostPresent ? redditPost : null };
   player.shadowRoot = { host: player, querySelectorAll: selector => selector === 'video' || selector === 'video,audio' ? [video] : [] };
   if (shadow) video.getRootNode = () => player.shadowRoot;
   const element = tag => ({ tagName: tag.toUpperCase(), style: { setProperty(name, value) { this[name] = value; } }, dataset: {}, offsetWidth: 80,
@@ -58,7 +59,7 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
     createElement: element, addEventListener() {}, elementFromPoint: () => video,
     querySelector: selector => selector === 'video' ? video : null,
     querySelectorAll: selector => selector === 'shreddit-player' && shadow ? [player]
-      : selector === 'video' || selector === 'video,audio' ? (shadow ? [] : videos)
+      : selector === 'video' || selector === 'video,audio' ? (shadow ? videos.slice(1) : videos)
       : selector === '.apocalipse-media-download' ? appended.filter(node => !node.removed && String(node.className).includes('apocalipse-media-download')) : [],
   };
   const context = vm.createContext({
@@ -70,7 +71,7 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
       stop() { this.state = 'inactive'; void this.onstop?.(); }
     } } : {}),
     navigator: { language: 'pt-BR', userAgent: 'Synthetic browser' },
-    innerHeight: 800, scrollX: 0, scrollY: 0,
+    innerWidth: 1200, innerHeight: 800, scrollX: 0, scrollY: 0,
     ...(clipping ? { getComputedStyle: () => ({ overflowX: "visible", overflowY: "auto" }) } : {}),
     addEventListener(type, handler) { if (type === "scroll") listeners.push({ scroll: handler }); }, removeEventListener() {}, postMessage() {},
     setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
@@ -89,6 +90,7 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
         onMessage: { addListener(handler) { listeners.push(handler); } },
         sendMessage(message, callback) {
           sent.push(message);
+          messageHook?.(message, { video, postAttributes });
           const result = message.type === 'APOCALIPSE_RECENT_TAB_MEDIA' ? { media: network }
             : message.type === 'APOCALIPSE_BLOB_BEGIN' ? { uploadId: 'synthetic-upload' }
               : message.type === 'APOCALIPSE_SELECT_HLS' ? { url: message.urls[0], requestUrls: message.urls }
@@ -107,6 +109,7 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
   assert.ok(button, 'the actual overlay must be installed');
   return {
     sent, fetched, location, video, appended,
+    setRedditAttributes: attributes => Object.assign(postAttributes, attributes),
     activePlayers: () => Array.from(context.testHooks.activeOverlays.keys()),
     button,
     recordButton: appended.find(node => node.className === 'apocalipse-media-download apocalipse-media-record'),
@@ -548,4 +551,126 @@ test('visible media stays available inside layout wrappers without a clipping bo
   assert.ok(controls.every(node => !node.hidden));
   p.scrollTo(-700);
   assert.ok(controls.every(node => node.hidden));
+});
+
+
+test('Reddit post without permalink uses its own content-href even on a different post page', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/other/address_bar_post/', shadow: true,
+    redditAttributes: { 'content-href': '/r/UFOB/comments/target/current_player/' },
+    source: 'blob:https://www.reddit.com/current', recordable: true });
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, 'https://www.reddit.com/r/UFOB/comments/target/current_player/');
+  assert.equal(p.downloads()[0].item.pageExtractor, true);
+  assert.equal(p.downloads()[0].item.audioUrl, null);
+  assert.equal(p.fetched.length, 0);
+});
+
+test('Reddit post fullname resolves its own extractor page when permalink metadata is absent', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/other/address_bar_post/', shadow: true,
+    redditAttributes: { id: 't3_abc123' }, source: 'blob:https://www.reddit.com/current', recordable: true });
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, 'https://www.reddit.com/comments/abc123/');
+  assert.ok(p.scan().some(item => item.url === 'https://www.reddit.com/comments/abc123/' && item.pageExtractor));
+});
+
+test('Reddit standalone shadow player uses a dedicated post page only when it is the sole player', async () => {
+  const url = 'https://www.reddit.com/r/UFOB/comments/1xwx0jm/revisiting_1000_uap096/';
+  const p = page({ url, shadow: true, redditPostPresent: false, source: 'blob:https://www.reddit.com/current', recordable: true });
+  assert.equal(p.button.hidden, false);
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, url);
+  assert.equal(p.downloads()[0].item.pageExtractor, true);
+  assert.deepEqual(Array.from(p.downloads()[0].item.requestUrls), []);
+  assert.equal(p.fetched.length, 0);
+});
+
+test('Reddit standalone player never inherits the address bar post when multiple players exist', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/abc123/page_post/', shadow: true,
+    redditPostPresent: false, source: 'blob:https://www.reddit.com/current', recordable: true,
+    extraVideos: [{ currentSrc: 'blob:https://www.reddit.com/other' }] });
+  assert.equal(p.button.hidden, true);
+  p.refresh();
+  assert.equal(p.button.hidden, true);
+  await p.click();
+  assert.equal(p.downloads().length, 0);
+});
+
+test('Reddit unresolved feed player keeps Download hidden until its own identity becomes available', () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/', shadow: true,
+    source: 'blob:https://www.reddit.com/current', recordable: true });
+  assert.equal(p.button.hidden, true);
+  assert.equal(p.recordButton.hidden, false);
+  p.refresh();
+  assert.equal(p.button.hidden, true);
+  p.setRedditAttributes({ permalink: '/r/UFOB/comments/abc123/now_resolved/' });
+  p.refresh();
+  assert.equal(p.button.hidden, false);
+  p.setRedditAttributes({ permalink: null });
+  p.refresh();
+  assert.equal(p.button.hidden, true);
+});
+
+test('Reddit invalid owner URLs do not fall back to another post in the address bar', async () => {
+  for (const permalink of ['https://reddit.com.evil.test/r/UFOB/comments/abc123/', 'https://example.com/r/UFOB/comments/abc123/', 'javascript:alert(1)', '/r/UFOB/']) {
+    const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/other/page_post/', permalink, shadow: true,
+      source: 'blob:https://www.reddit.com/current', recordable: true });
+    assert.equal(p.button.hidden, true, permalink);
+    await p.click();
+    assert.equal(p.downloads().length, 0, permalink);
+  }
+});
+
+test('Reddit post-id identity is re-read after a player is recycled for another post', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/', shadow: true,
+    redditAttributes: { id: 't3_abc123' }, source: 'blob:https://www.reddit.com/first', recordable: true });
+  p.setRedditAttributes({ id: 't3_def456' });
+  p.video.currentSrc = p.video.src = 'blob:https://www.reddit.com/second';
+  p.refresh();
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, 'https://www.reddit.com/comments/def456/');
+});
+
+
+test('Reddit post fullname takes precedence over stale permalink metadata after recycling', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/', shadow: true,
+    permalink: '/r/UFOB/comments/abc123/stale_post/', redditAttributes: { id: 't3_def456' },
+    source: 'blob:https://www.reddit.com/current', recordable: true });
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, 'https://www.reddit.com/comments/def456/');
+});
+
+test('Reddit standalone feed player cannot use a subreddit as an extractor page', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/', shadow: true, redditPostPresent: false,
+    source: 'blob:https://www.reddit.com/current', recordable: true });
+  assert.equal(p.button.hidden, true);
+  await p.click();
+  assert.equal(p.downloads().length, 0);
+});
+
+test('Reddit short comments routes work while malformed fullnames cannot create a post identity', async () => {
+  const p = page({ url: 'https://old.reddit.com/comments/abc123/', shadow: true,
+    redditPostPresent: false, source: 'blob:https://www.reddit.com/current', recordable: true });
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, 'https://old.reddit.com/comments/abc123/');
+  for (const id of ['t1_abc123', 't3_abc123/../../other', 'abc123', 't3_']) {
+    const invalid = page({ url: 'https://www.reddit.com/r/UFOB/', shadow: true, redditAttributes: { id },
+      source: 'blob:https://www.reddit.com/current', recordable: true });
+    assert.equal(invalid.button.hidden, true, id);
+    await invalid.click();
+    assert.equal(invalid.downloads().length, 0, id);
+  }
+});
+
+
+test('Reddit changing posts during thumbnail capture cancels the stale handoff', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/', shadow: true,
+    redditAttributes: { id: 't3_abc123' }, source: 'blob:https://www.reddit.com/current', recordable: true,
+    messageHook(message, { postAttributes }) {
+      if (message.type === 'APOCALIPSE_CAPTURE_VISIBLE_THUMBNAIL') postAttributes.id = 't3_def456';
+    } });
+  p.video.poster = '';
+  await p.click();
+  assert.equal(p.downloads().length, 0);
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, 'https://www.reddit.com/comments/def456/');
 });

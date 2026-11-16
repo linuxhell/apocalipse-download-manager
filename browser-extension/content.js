@@ -60,16 +60,38 @@
     }
     return null;
   };
-  const redditUrlFor = element => {
-    if (element?.tagName !== "VIDEO") return null;
-    const permalink = redditPostFor(element)?.getAttribute?.("permalink");
-    if (!permalink) return null;
+  const redditPostLink = value => {
+    if (!value) return null;
     try {
-      const url = new URL(permalink, location.href);
+      const url = new URL(value, location.href);
+      const postId = url.pathname.match(/^\/(?:r\/[^/]+\/|(?:user|u)\/[^/]+\/)?comments\/([a-z0-9]+)(?:\/|$)/i)?.[1];
       if (/^https?:$/.test(url.protocol) && /(^|\.)reddit\.com$/i.test(url.hostname)
-        && /^\/r\/[^/]+\/comments\/[^/]+(?:\/|$)/.test(url.pathname)) return url.href;
+        && !url.username && !url.password && postId) return { url: url.href, postId: postId.toLowerCase() };
     } catch {}
     return null;
+  };
+  const redditUrlFor = element => {
+    if (!isRedditPage() || element?.tagName !== "VIDEO") return null;
+    const post = redditPostFor(element);
+    if (post) {
+      // Reddit does not always expose `permalink`. Keep alternatives bound to
+      // this player's owning post; a feed or related card must not inherit the
+      // address bar's post. A fullname also protects against stale link metadata
+      // while Reddit recycles a card for another post.
+      const postId = post.getAttribute?.("id")?.match(/^t3_([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+      for (const name of ["permalink", "content-href"]) {
+        const link = redditPostLink(post.getAttribute?.(name));
+        if (link && (!postId || link.postId === postId)) return link.url;
+      }
+      return postId ? new URL(`/comments/${postId}/`, location.href).href : null;
+    }
+    // A standalone post viewer can mount its player outside shreddit-post.
+    // Only use the dedicated page for one unambiguous player, never a feed or
+    // a page with additional buffered/recommended videos (including shadows).
+    const page = redditPostLink(location.href);
+    if (!page) return null;
+    const players = queryMediaElements("video");
+    return players.length === 1 && players[0] === element ? page.url : null;
   };
   let mainHookReady = false;
   const pingMainHook = () => {
@@ -1602,8 +1624,9 @@
       const url = isFacebookVideo ? facebookUrlFor(element) || location.href : tikTokUrl || downloadUrlFor(element);
       const liveMediaUrl = element.currentSrc || element.src || "";
       const hasDirectHttpMedia = /^https?:/i.test(liveMediaUrl);
-      const downloadReady = () => Boolean((downloadUrlFor(element) && /^https?:/.test(downloadUrlFor(element)))
-        || /^blob:/i.test(String(element.currentSrc || element.src || '')));
+      const downloadReady = () => isRedditPage() ? Boolean(redditUrlFor(element))
+        : Boolean((downloadUrlFor(element) && /^https?:/.test(downloadUrlFor(element)))
+          || /^blob:/i.test(String(element.currentSrc || element.src || '')));
       const canDownload = isRedditPage() ? Boolean(redditUrlFor(element))
         : Boolean((url && /^https?:/.test(url)) || /^blob:/i.test(liveMediaUrl));
       // A direct HTTP media URL belongs in the download path. Cross-origin
@@ -1678,11 +1701,15 @@
             .find((value) => value && isTikTokVideoUrl(value)) || null
           : null;
         const socialPageUrl = facebookPageUrl || tikTokPageUrl || redditUrlFor(element);
+        if (isRedditPage()) trace("reddit.identity", "download", {
+          postFound: Boolean(redditPostFor(element)), permalinkFound: Boolean(socialPageUrl),
+          players: queryMediaElements("video").length,
+        });
         const liveSource = String(element.currentSrc || element.src || "");
         const liveBlobUrl = /^blob:/i.test(liveSource) ? liveSource : null;
         const liveHttpUrl = /^https?:/i.test(liveSource) ? liveSource : null;
         const networkMediaUrl = socialVideo ? null : recentNetworkMediaUrl();
-        const capturedSocialMedia = socialVideo && !socialPageUrl
+        const capturedSocialMedia = socialVideo && !socialPageUrl && !isRedditPage()
           ? await chrome.runtime.sendMessage({ type: "APOCALIPSE_RECENT_TAB_MEDIA" }).catch(() => null)
           : null;
         const inspectedSocialMedia = capturedSocialMedia?.media?.length
@@ -1833,6 +1860,14 @@
           candidate: currentUrl,
         });
         const thumbnail = await captureThumbnailFor(element, "video");
+        if (isRedditPage() && (!element.isConnected || clickSource !== String(element.currentSrc || element.src || "")
+          || clickPage !== location.href || currentUrl !== redditUrlFor(element))) {
+          trace("overlay_download_player_changed", "download", { reddit: true });
+          button.textContent = "!";
+          button.title = "O vídeo mudou. Clique novamente no vídeo atual.";
+          setTimeout(restoreDownloadLabel, 2500);
+          return;
+        }
         chrome.runtime.sendMessage({ type: "APOCALIPSE_DOWNLOAD", item: { traceId: actionId, url: currentUrl, pageExtractor: Boolean(socialPageUrl), audioUrl: companionAudioUrl, ambiguousSocialTrack, duration: resolved?.duration || null, requestUrls: [...requestUrls, ...(companionAudioUrl ? [companionAudioUrl] : [])], userAgent: navigator.userAgent, kind: resolved?.mediaKind || element.tagName.toLowerCase(), title: facebookPageUrl || isRedditPage() ? titleFor(element) : (isFacebookVideo ? facebookDownloadTitle(currentUrl) : document.title), thumbnail } }, (result) => {
           const failed = chrome.runtime.lastError || !result?.ok;
           trace(failed ? "overlay_download_failed" : "overlay_download_handed_off", "download", { target: result?.target || "none", error: result?.error || chrome.runtime.lastError?.message || "none", candidates: requestUrls.length });
