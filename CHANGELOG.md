@@ -1,12 +1,13 @@
-# Apocalipse Download Manager — Chrome/Edge 0.3.216 em desenvolvimento; Firefox assinado 0.3.211
+# Apocalipse Download Manager 0.8.20 — Chrome/Edge/Firefox 0.3.216
 
-## Em desenvolvimento — extensão 0.3.216
+## 0.8.20 — 2026-11-16
 
 - Reconhece as playlists Reddit no formato `/link/<post>/asset/<mídia>/HLSPlaylist.m3u8` na resolução do player, na associação de rede e na verificação do worker, mantendo o formato curto anterior.
 - Preserva o caminho e todos os parâmetros da URL assinada. Identifica mídias concorrentes pelo asset, sem agrupar incorretamente todas as URLs cujo primeiro segmento é `link`.
 - Registra o resultado e o motivo da verificação HLS. Inclui regressões do formato fornecido pelo usuário, com assinatura fictícia nos testes.
 - O validador foi exercitado com a playlist real (HTTP 200), sua playlist de vídeo e prefixo MP4 real (HTTP 206): duração 19,933 s e trilha de vídeo verificadas, URL assinada preservada.
-- Firefox 0.3.216 ainda requer assinatura Mozilla.
+- Download confirmado pelo usuário na extensão 0.3.216. Inclui Firefox 0.3.216 assinado pela Mozilla, com payload equivalente ao pacote validado e assinatura conferida.
+- Publicação do ADM 0.8.20 para Windows, Linux e macOS; motor Xtreme 0.2.8 preservado.
 
 ## Extensão de teste 0.3.215
 
