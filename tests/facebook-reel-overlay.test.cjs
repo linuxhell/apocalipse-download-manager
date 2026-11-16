@@ -28,7 +28,7 @@ test('Facebook extractor parse failures expose a localized recording fallback', 
 
 // Execute the real content script and its installed click handler. Only browser
 // APIs/DOM geometry are mocked; URL selection and the outgoing payload are real.
-function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false, shadow = false, clipping = false, theme = "void", extraVideos = [], redditAttributes = {}, redditPostPresent = true, redditPlayerAttributes = {}, mediaState = {}, recordingClass = null, messageHook = null } = {}) {
+function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false, shadow = false, clipping = false, theme = "void", extraVideos = [], redditAttributes = {}, redditPostPresent = true, redditPlayerAttributes = {}, redditComment = false, mediaState = {}, recordingClass = null, messageHook = null } = {}) {
   const sent = [], fetched = [], appended = [], listeners = [];
   const timers = new Map();
   let nextTimer = 0;
@@ -50,7 +50,8 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
   const postAttributes = { permalink, 'post-title': 'Exact Reddit post title', ...redditAttributes };
   const redditPost = { getAttribute: name => postAttributes[name] ?? null };
   const player = { getAttribute: name => redditPlayerAttributes[name] ?? null,
-    closest: selector => selector === 'shreddit-post' && redditPostPresent ? redditPost : selector === 'shreddit-player' ? player : null };
+    closest: selector => selector === 'shreddit-comment' && redditComment ? {}
+      : selector === 'shreddit-post' && redditPostPresent ? redditPost : selector === 'shreddit-player' ? player : null };
   player.shadowRoot = { host: player, querySelectorAll: selector => selector === 'video' || selector === 'video,audio' ? [video] : [] };
   if (shadow) { video.getRootNode = () => player.shadowRoot; post.getRootNode = () => player.shadowRoot; }
   const element = tag => ({ tagName: tag.toUpperCase(), style: { setProperty(name, value) { this[name] = value; } }, dataset: {}, offsetWidth: 80,
@@ -487,18 +488,18 @@ test('generic feed suppression never engages on Facebook, Instagram or TikTok, w
 });
 
 
-test('Reddit shadow video appears in popup and Download sends its post, not a silent track', async () => {
+test('Reddit shadow video uses the exact native video HLS instead of a silent DASH track', async () => {
   const p = page({ url: 'https://www.reddit.com/r/UFOs/', shadow: true,
     permalink: '/r/UFOs/comments/abc123/exact_post/', source: 'https://v.redd.it/exact/DASH_720.mp4' });
-  const expected = 'https://www.reddit.com/r/UFOs/comments/abc123/exact_post/';
-  assert.ok(p.scan().find(item => item.url === expected && item.pageExtractor));
+  const expected = 'https://v.redd.it/exact/HLSPlaylist.m3u8';
+  assert.ok(p.scan().find(item => item.url === expected && item.pageExtractor === false));
   await p.click();
   const item = p.downloads()[0].item;
   assert.equal(item.url, expected);
-  assert.equal(item.pageExtractor, true);
+  assert.equal(item.pageExtractor, false);
   assert.equal(item.title, "Exact Reddit post title");
   assert.equal(item.audioUrl, null);
-  assert.equal(item.requestUrls.length, 0);
+  assert.deepEqual(Array.from(item.requestUrls), [expected]);
 });
 
 test('Reddit MSE shadow video keeps Record and sends the permalink before reading blobs', async () => {
@@ -800,4 +801,87 @@ test('Reddit follows a slotted player to its owning post instead of using the un
   p.refresh();
   await p.click();
   assert.equal(p.downloads()[0]?.item.url, 'https://www.reddit.com/comments/def456/');
+});
+
+
+test('Reddit comment video never downloads its parent image post', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/1xwx0jm/revisiting_1000_uap096/',
+    shadow: true, redditComment: true, redditPostPresent: false,
+    redditPlayerAttributes: { 'post-id': 't3_1xwx0jm' },
+    source: 'https://v.redd.it/commentvideo123/DASH_720.mp4?source=fallback', recordable: true });
+  await p.click();
+  const item = p.downloads()[0]?.item;
+  assert.equal(item?.url, 'https://v.redd.it/commentvideo123/HLSPlaylist.m3u8');
+  assert.equal(item.pageExtractor, false);
+  assert.equal(item.ambiguousSocialTrack, false);
+  assert.equal(item.audioUrl, null);
+  assert.deepEqual(Array.from(item.requestUrls), [item.url]);
+  assert.ok(!p.downloads().some(m => m.item.url.includes('/comments/1xwx0jm/')));
+});
+
+test('Reddit MSE comment uses only the media identity of its own player component', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/imagepost/title/', shadow: true,
+    redditComment: true, redditPostPresent: false,
+    redditPlayerAttributes: { 'post-id': 't3_imagepost', src: 'https://v.redd.it/owncomment123' },
+    source: 'blob:https://www.reddit.com/current', recordable: true,
+    network: [{ url: 'https://v.redd.it/unrelated/HLSPlaylist.m3u8', contentType: 'application/vnd.apple.mpegurl' }] });
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, 'https://v.redd.it/owncomment123/HLSPlaylist.m3u8');
+  assert.equal(p.downloads()[0].item.pageExtractor, false);
+  assert.ok(!p.sent.some(m => m.type === 'APOCALIPSE_RECENT_TAB_MEDIA'));
+});
+
+test('Reddit preserves a signed HLS URL from the exact player', async () => {
+  const url = 'https://v.redd.it/owncomment123/HLSPlaylist.m3u8?a=synthetic&f=hd';
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/imagepost/title/', shadow: true,
+    redditComment: true, source: url, recordable: true });
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, url);
+  assert.equal(p.downloads()[0].item.pageExtractor, false);
+});
+
+test('Reddit packaged component metadata resolves one exact native video and ignores the JPEG preview', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/imagepost/title/', shadow: true,
+    redditComment: true, source: 'blob:https://www.reddit.com/current', recordable: true,
+    redditPlayerAttributes: { 'packaged-media-json': JSON.stringify({ playback: { hls: 'https://v.redd.it/owncomment123/HLSPlaylist.m3u8' }, preview: 'https://preview.redd.it/923ltg54fs1i1.jpeg' }) } });
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, 'https://v.redd.it/owncomment123/HLSPlaylist.m3u8');
+});
+
+test('Reddit unresolved comment never inherits the parent post or an arbitrary recent response', async () => {
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/imagepost/title/', shadow: true,
+    redditComment: true, redditPostPresent: false, redditPlayerAttributes: { 'post-id': 't3_imagepost' },
+    source: 'blob:https://www.reddit.com/current', recordable: true,
+    network: [{ url: 'https://v.redd.it/unrelated/HLSPlaylist.m3u8' }] });
+  assert.equal(p.button.hidden, true);
+  await p.click();
+  assert.equal(p.downloads().length, 0);
+});
+
+test('Reddit comment rejects conflicting component media IDs and image or lookalike media sources', async () => {
+  for (const attributes of [
+    { src: 'https://preview.redd.it/923ltg54fs1i1.jpeg' },
+    { src: 'https://v.redd.it.evil.test/owncomment123/HLSPlaylist.m3u8' },
+    { src: 'https://user:secret@v.redd.it/owncomment123/HLSPlaylist.m3u8' },
+    { src: 'https://v.redd.it/owncomment123', 'hls-url': 'https://v.redd.it/othercomment456/HLSPlaylist.m3u8' },
+  ]) {
+    const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/imagepost/title/', shadow: true,
+      redditComment: true, redditPlayerAttributes: attributes, source: 'blob:https://www.reddit.com/current', recordable: true });
+    assert.equal(p.button.hidden, true);
+    await p.click();
+    assert.equal(p.downloads().length, 0);
+  }
+});
+
+test('Reddit recycled comment re-reads its own component source on each click', async () => {
+  const attrs = { src: 'https://v.redd.it/firstcomment123' };
+  const p = page({ url: 'https://www.reddit.com/r/UFOB/comments/imagepost/title/', shadow: true,
+    redditComment: true, redditPlayerAttributes: attrs, source: 'blob:https://www.reddit.com/first', recordable: true });
+  await p.click();
+  attrs.src = 'https://v.redd.it/secondcomment456';
+  p.video.currentSrc = p.video.src = 'blob:https://www.reddit.com/second';
+  p.refresh();
+  await p.click();
+  assert.deepEqual(p.downloads().map(m => m.item.url), [
+    'https://v.redd.it/firstcomment123/HLSPlaylist.m3u8', 'https://v.redd.it/secondcomment456/HLSPlaylist.m3u8' ]);
 });

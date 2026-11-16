@@ -73,12 +73,64 @@
     } catch {}
     return null;
   };
+  const redditPlayerMediaFor = (element, player) => {
+    const select = values => {
+      const media = [];
+      for (const value of values) {
+        if (!value || typeof value !== "string") continue;
+        try {
+          const url = new URL(value);
+          if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.port) continue;
+          const parts = url.pathname.split("/").filter(Boolean);
+          if (url.hostname === "v.redd.it" && /^[a-z0-9]+$/i.test(parts[0] || "")
+            && (parts.length === 1 || (parts.length === 2 && /\.(?:mp4|mpd|m3u8)$/i.test(parts[1])))) {
+            media.push({ key: parts[0], url: /\.m3u8$/i.test(url.pathname)
+              ? url.href : `https://v.redd.it/${parts[0]}/HLSPlaylist.m3u8`, explicitHls: /\.m3u8$/i.test(url.pathname) });
+          } else if (url.hostname === "packaged-media.redd.it" && /\.m3u8$/i.test(url.pathname)) {
+            media.push({ key: `${url.origin}${url.pathname}`, url: url.href, explicitHls: true });
+          }
+        } catch {}
+      }
+      if (!media.length) return null;
+      if (new Set(media.map(item => item.key)).size !== 1) return { url: null, reason: "reddit_ambiguous_player_media" };
+      // Use a supplied HLS URL verbatim, including signatures. For a native
+      // v.redd.it video ID, its HLS playlist includes audio; a DASH MP4 alone
+      // is commonly just the silent video track.
+      const selected = media.find(item => item.explicitHls) || media[0];
+      return { url: selected.url, pageExtractor: false, route: "hls", requestUrls: [selected.url], reason: "reddit_exact_player_media" };
+    };
+    const live = select([element.currentSrc || element.src]);
+    if (live) return live;
+    const sources = select([...(element.querySelectorAll?.("source") || [])].slice(0, 20).map(source => source.src));
+    if (sources) return sources;
+    const hints = ["src", "hls-url", "dash-url", "video-url"].map(name => player?.getAttribute?.(name));
+    const packaged = player?.getAttribute?.("packaged-media-json");
+    if (packaged && packaged.length <= 65536) {
+      try {
+        const visit = (value, depth = 0) => {
+          if (depth > 5 || hints.length >= 100) return;
+          if (typeof value === "string") hints.push(value);
+          else if (value && typeof value === "object") Object.values(value).slice(0, 40).forEach(item => visit(item, depth + 1));
+        };
+        visit(JSON.parse(packaged));
+      } catch {}
+    }
+    return select(hints);
+  };
   const redditResolutionFor = element => {
-    const result = { url: null, reason: "reddit_identity_unresolved", postFound: false, playerFound: false };
+    const result = { url: null, pageExtractor: true, route: "post", reason: "reddit_identity_unresolved", postFound: false, playerFound: false };
     if (!isRedditPage() || element?.tagName !== "VIDEO") return result;
     const post = redditPostFor(element);
     const player = redditAncestorFor(element, "shreddit-player");
     result.postFound = Boolean(post); result.playerFound = Boolean(player);
+    const comment = redditAncestorFor(element, "shreddit-comment") || redditAncestorFor(element, ".thing.comment");
+    result.commentFound = Boolean(comment);
+    // The page's post-id also appears on comment players. It does not identify
+    // that player's media: the parent post can be an image while its comments
+    // contain videos. Prefer media bound to this exact player on any Reddit page.
+    const media = redditPlayerMediaFor(element, player);
+    if (media) return { ...result, ...media };
+    if (comment) return { ...result, pageExtractor: false, route: "unresolved", reason: "reddit_comment_media_unresolved" };
     const owners = [post, player].filter(Boolean);
     const postIds = new Set();
     for (const owner of owners) {
@@ -924,15 +976,17 @@
       const facebookUrl = isFacebookMediaUrl(candidateFacebookUrl) ? candidateFacebookUrl : null;
       const tikTokUrl = tikTokUrlFor(element);
       const context = playerContext(element);
+      const reddit = redditResolutionFor(element);
       if (facebookUrl) {
         add(facebookUrl, "video", element, undefined, {
           pageExtractor: true,
           previewUrl: absolute(element.currentSrc || element.src),
           ...context,
         });
-      } else if (redditUrlFor(element)) {
-        add(redditUrlFor(element), "video", element, undefined, {
-          pageExtractor: true, previewUrl: absolute(element.currentSrc || element.src), ...context,
+      } else if (reddit.url) {
+        add(reddit.url, "video", element, undefined, {
+          pageExtractor: reddit.pageExtractor, requestUrls: reddit.requestUrls || [],
+          previewUrl: absolute(element.currentSrc || element.src), ...context,
         });
       } else if (tikTokUrl) {
         add(tikTokUrl, "video", element, undefined, {
@@ -1451,6 +1505,7 @@
       overlayActive: activeOverlays.has(element),
       ...(reddit ? { resolved: Boolean(reddit.url), resolverReason: reddit.reason,
         postFound: reddit.postFound, playerFound: reddit.playerFound,
+        commentFound: reddit.commentFound, route: reddit.route,
         players: reddit.players ?? null, boxedPlayers: reddit.boxedPlayers ?? null,
         recordingReady: redditRecordingReady(element) } : {}),
       ...detail,
@@ -1731,9 +1786,10 @@
           ? [typeof resolved === "string" ? resolved : resolved?.url, tikTokUrlFor(element)]
             .find((value) => value && isTikTokVideoUrl(value)) || null
           : null;
-        const socialPageUrl = facebookPageUrl || tikTokPageUrl || redditUrlFor(element);
+        const reddit = isRedditPage() ? redditResolutionFor(element) : null;
+        const socialPageUrl = facebookPageUrl || tikTokPageUrl || (reddit?.pageExtractor ? reddit.url : null);
         if (isRedditPage()) {
-          const { url: _url, reason: resolverReason, ...observation } = redditResolutionFor(element);
+          const { url: _url, requestUrls: _requests, reason: resolverReason, ...observation } = reddit;
           trace("reddit.identity", "download", { ...observation, resolverReason, permalinkFound: Boolean(socialPageUrl) });
         }
         const liveSource = String(element.currentSrc || element.src || "");
@@ -1816,7 +1872,7 @@
 
         // A resolved HLS manifest is more authoritative than incidental network
         // traffic or a generic HTTP source exposed by the player.
-        let currentUrl = isRedditPage() ? redditUrlFor(element) : socialVideo
+        let currentUrl = isRedditPage() ? reddit.url : socialVideo
           ? (socialPageUrl || browserVideoMedia || liveHttpUrl)
           : (resolved?.url || resolved || liveHttpUrl || networkMediaUrl || (isYouTubeVideo ? location.href : null));
         const facebookPlayableUrl = isFacebookVideo && currentUrl && (
@@ -1864,7 +1920,7 @@
         const companionAudioUrl = !extractorPageSelected && socialVideo ? browserAudioMedia : null;
         const ambiguousSocialTrack = Boolean(socialVideo && !extractorPageSelected && !companionAudioUrl
           && !/\.(?:m3u8|mpd)(?:$|[?#])/i.test(currentUrl));
-        const requestUrls = extractorPageSelected ? [] : socialVideo ? [currentUrl] : [...new Set([
+        const requestUrls = extractorPageSelected ? [] : isRedditPage() ? reddit.requestUrls || [currentUrl] : socialVideo ? [currentUrl] : [...new Set([
           ...(resolved?.requestUrls?.length ? resolved.requestUrls : (/\.m3u8(?:$|[?#])/i.test(String(currentUrl)) ? hlsForPage().candidates : [])),
           ...(directFacebookMedia && /^https?:/i.test(directFacebookMedia) ? [directFacebookMedia] : []),
         ])];

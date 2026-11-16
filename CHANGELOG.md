@@ -1,6 +1,13 @@
-# Apocalipse Download Manager — Chrome/Edge 0.3.213 em desenvolvimento; Firefox assinado 0.3.211
+# Apocalipse Download Manager — Chrome/Edge 0.3.214 em desenvolvimento; Firefox assinado 0.3.211
 
-## Em desenvolvimento — extensão 0.3.213
+## Em desenvolvimento — extensão 0.3.214
+
+- Prioriza a mídia do player Reddit selecionado. Usa o manifesto HLS fornecido pelo próprio elemento/componente ou o HLS do identificador nativo `v.redd.it`, preservando URLs HLS assinadas e evitando faixas DASH de vídeo isoladas.
+- Impede que um vídeo em comentário use o `post-id` da publicação principal para baixar uma imagem. Uma mídia ainda não identificada permanece indisponível para download até haver evidência do player; a gravação continua condicionada à reprodução carregada.
+- Aplica a mesma resolução ao botão sobre o vídeo e à lista do popup, valida origens e rejeita pistas de mídia conflitantes. Nenhuma resposta recente arbitrária da aba é usada.
+- Inclui regressões de post com imagem e vídeo separado, metadados do componente, troca de player e manifesto HLS assinado. Firefox 0.3.214 ainda requer assinatura Mozilla.
+
+## Extensão de teste 0.3.213
 
 - Corrige a alternativa de download do Reddit quando há um player principal e vídeos auxiliares de tamanho zero; players de outros posts com tamanho de layout continuam impedindo associação ambígua ao endereço da página.
 - Reconhece `post-id` no player e no post, atravessa slots e rejeita identidades conflitantes.
