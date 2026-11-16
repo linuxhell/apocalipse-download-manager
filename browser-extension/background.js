@@ -13,7 +13,7 @@ let lastShortcutMode = "normal";
 let diagnosticOutbox = [];
 const recentFileResponses = [];
 const recentMediaResponses = [];
-// HLS manifests served without a .m3u8 extension (identified by Content-Type).
+// HLS manifests identified by Content-Type or URL, scoped to the current tab.
 const recentHlsManifests = [];
 const thumbnailDataCache = new Map();
 const tabNavigationEpochs = new Map();
@@ -243,16 +243,19 @@ if (chrome.webRequest?.onResponseStarted) {
     const requestHost = (() => { try { return new URL(details.url).hostname.toLowerCase(); } catch { return ""; } })();
     const initiatorHost = (() => { try { return new URL(details.initiator || "").hostname.toLowerCase(); } catch { return ""; } })();
     const siteKey = host => host.split('.').slice(-2).join('.');
-    const socialHost = /(?:^|\.)(?:tiktok\.com|tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com|facebook\.com|fbcdn\.net|fbsbx\.com|instagram\.com|cdninstagram\.com|soundcloud\.com|sndcdn\.com)$/i.test(requestHost);
+    const socialHost = /(?:^|\.)(?:tiktok\.com|tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com|facebook\.com|fbcdn\.net|fbsbx\.com|instagram\.com|cdninstagram\.com|soundcloud\.com|sndcdn\.com)$/i.test(requestHost)
+      || requestHost === "v.redd.it" || requestHost === "packaged-media.redd.it";
     const sameSiteHost = Boolean(requestHost && initiatorHost && siteKey(requestHost) === siteKey(initiatorHost));
-    const mediaResponse = /^(?:video|audio)\//i.test(contentType)
+    const hlsResponse = /^(?:application\/(?:vnd\.apple\.mpegurl|x-mpegurl)|audio\/(?:x-)?mpegurl)\b/i.test(contentType)
+      || /\.m3u8(?:$|[?#])/i.test(details.url);
+    const mediaResponse = hlsResponse || /^(?:video|audio)\//i.test(contentType)
       || /(?:\/video\/tos\/|\/aweme\/v1\/play\/|mime_type=video|\.mp4(?:$|[?]))/i.test(details.url);
     const capturedMedia = mediaResponse && (socialHost || sameSiteHost);
     void globalThis.ADM_DIAG_WORKER?.network(details, capturedMedia,
       capturedMedia ? "accepted_by_capture_filter" : mediaResponse ? "host_not_in_capture_filter" : "not_classified_as_media");
-    if (/^(?:application\/(?:vnd\.apple\.mpegurl|x-mpegurl)|audio\/(?:x-)?mpegurl)\b/i.test(contentType)
-      && !/\.m3u8(?:$|[?#])/i.test(details.url)) {
-      recentHlsManifests.push({ tabId: details.tabId, url: details.url.split("#")[0] + "#adm.m3u8", capturedAt: Date.now() });
+    if (hlsResponse) {
+      const url = /\.m3u8(?:$|[?#])/i.test(details.url) ? details.url : details.url.split("#")[0] + "#adm.m3u8";
+      recentHlsManifests.push({ tabId: details.tabId, frameId: details.frameId, url, capturedAt: Date.now() });
       recentHlsManifests.splice(0, Math.max(0, recentHlsManifests.length - 100));
     }
     if (capturedMedia) {
@@ -1087,6 +1090,20 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       .map((item) => item.url))].slice(-10);
     reply({ urls });
     return;
+  }
+  if (message?.type === "APOCALIPSE_VERIFY_REDDIT_HLS") {
+    let url;
+    try { url = new URL(message.url); } catch { reply({ ok: false }); return; }
+    const duration = Number(message.duration);
+    const senderHost = (() => { try { return new URL(sender.url || sender.tab?.url || "").hostname; } catch { return ""; } })();
+    if (!/(^|\.)reddit\.com$/i.test(senderHost) || url.protocol !== "https:" || url.hostname !== "v.redd.it"
+      || url.username || url.password || url.port || !/^\/[a-z0-9]+\/HLSPlaylist\.m3u8$/i.test(url.pathname)
+      || !Number.isFinite(duration) || duration <= 0) { reply({ ok: false }); return; }
+    hlsDuration(message.url).then(item => reply({ ok: item.mediaKind === "video"
+      && Number.isFinite(item.duration) && Math.abs(item.duration - duration) <= 0.5,
+      url: message.url, duration: item.duration, requestUrls: item.requestUrls }))
+      .catch(() => reply({ ok: false }));
+    return true;
   }
   if (message?.type === "APOCALIPSE_RECENT_TAB_MEDIA") {
     const tabId = Number.isInteger(message.tabId) ? message.tabId : sender.tab?.id;

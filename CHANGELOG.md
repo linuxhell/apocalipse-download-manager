@@ -1,6 +1,13 @@
-# Apocalipse Download Manager — Chrome/Edge 0.3.214 em desenvolvimento; Firefox assinado 0.3.211
+# Apocalipse Download Manager — Chrome/Edge 0.3.215 em desenvolvimento; Firefox assinado 0.3.211
 
-## Em desenvolvimento — extensão 0.3.214
+## Em desenvolvimento — extensão 0.3.215
+
+- Reconhece playlists HLS no filtro de mídia e aceita os hosts exatos de vídeo Reddit; guarda os manifestos por aba e navegação, inclusive com extensão `.m3u8`, preservando URLs assinadas.
+- Para um player Blob sem URL exposta no componente, verifica a playlist mestre nativa recente: exige um único player carregado com tamanho de layout, um único identificador de mídia na janela de reprodução e compatibilidade da duração com uma playlist de vídeo analisada pelo worker.
+- Vincula o resultado à fonte, página e duração do player. Invalida a associação em mudanças de fonte/metadados e rejeita respostas tardias, playlists antigas e fontes concorrentes.
+- Inclui regressões do diagnóstico de 16/11/2026 às 14:06, da associação assíncrona e do filtro/validador HLS. Preserva a gravação existente; Firefox 0.3.215 ainda requer assinatura Mozilla.
+
+## Extensão de teste 0.3.214
 
 - Prioriza a mídia do player Reddit selecionado. Usa o manifesto HLS fornecido pelo próprio elemento/componente ou o HLS do identificador nativo `v.redd.it`, preservando URLs HLS assinadas e evitando faixas DASH de vídeo isoladas.
 - Impede que um vídeo em comentário use o `post-id` da publicação principal para baixar uma imagem. Uma mídia ainda não identificada permanece indisponível para download até haver evidência do player; a gravação continua condicionada à reprodução carregada.

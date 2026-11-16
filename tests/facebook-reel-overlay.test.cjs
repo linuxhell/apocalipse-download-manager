@@ -28,9 +28,10 @@ test('Facebook extractor parse failures expose a localized recording fallback', 
 
 // Execute the real content script and its installed click handler. Only browser
 // APIs/DOM geometry are mocked; URL selection and the outgoing payload are real.
-function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false, shadow = false, clipping = false, theme = "void", extraVideos = [], redditAttributes = {}, redditPostPresent = true, redditPlayerAttributes = {}, redditComment = false, mediaState = {}, recordingClass = null, messageHook = null } = {}) {
+function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https://video.fbcdn.net/track.mp4?bytestart=0&byteend=999', permalink = null, network = [], readableBlob = false, recordable = false, shadow = false, clipping = false, theme = "void", extraVideos = [], redditAttributes = {}, redditPostPresent = true, redditPlayerAttributes = {}, redditComment = false, mediaState = {}, recordingClass = null, nowMs = 0, messageHook = null } = {}) {
   const sent = [], fetched = [], appended = [], listeners = [];
   const timers = new Map();
+  const clock = { now: nowMs };
   let nextTimer = 0;
   const location = new URL(url);
   const rect = { left: 20, top: 40, right: 500, bottom: 600, width: 480, height: 560 };
@@ -80,7 +81,7 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
     setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
     clearTimeout(id) { timers.delete(id); }, setInterval: () => 1, clearInterval() {},
     MutationObserver: class { observe() {} },
-    performance: { getEntriesByType: () => network.map(item => ({ name: item.url })), getEntriesByName: () => [] },
+    performance: { now: () => clock.now, getEntriesByType: () => network.map(item => ({ ...item, name: item.url })), getEntriesByName: () => [] },
     fetch: async target => {
       fetched.push(target);
       if (!readableBlob) throw new Error('synthetic unreadable blob');
@@ -93,11 +94,11 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
         onMessage: { addListener(handler) { listeners.push(handler); } },
         sendMessage(message, callback) {
           sent.push(message);
-          messageHook?.(message, { video, postAttributes });
-          const result = message.type === 'APOCALIPSE_RECENT_TAB_MEDIA' ? { media: network }
+          const injected = messageHook?.(message, { video, postAttributes });
+          const result = injected ?? (message.type === 'APOCALIPSE_RECENT_TAB_MEDIA' ? { media: network }
             : message.type === 'APOCALIPSE_BLOB_BEGIN' ? { uploadId: 'synthetic-upload' }
               : message.type === 'APOCALIPSE_SELECT_HLS' ? { url: message.urls[0], requestUrls: message.urls }
-              : { ok: true, target: 'desktop' };
+              : { ok: true, target: 'desktop' });
           if (callback) callback(result);
           return Promise.resolve(result);
         },
@@ -113,7 +114,7 @@ function page({ url = 'https://www.facebook.com/reel/123456789', source = 'https
     || appended.find(node => node.className === 'apocalipse-media-download');
   assert.ok(button, 'the actual overlay must be installed');
   return {
-    sent, fetched, location, video, appended, player,
+    sent, fetched, location, video, appended, player, setNow: value => { clock.now = value; },
     setRedditAttributes: attributes => Object.assign(postAttributes, attributes),
     activePlayers: () => Array.from(context.testHooks.activeOverlays.keys()),
     button,
@@ -884,4 +885,70 @@ test('Reddit recycled comment re-reads its own component source on each click', 
   await p.click();
   assert.deepEqual(p.downloads().map(m => m.item.url), [
     'https://v.redd.it/firstcomment123/HLSPlaylist.m3u8', 'https://v.redd.it/secondcomment456/HLSPlaylist.m3u8' ]);
+});
+
+
+const playingRedditBlob = { readyState: 4, videoWidth: 220, videoHeight: 480, duration: 19.933333, currentTime: 0.2, paused: false };
+const redditMaster = 'https://v.redd.it/commentvideo123/HLSPlaylist.m3u8?a=signed';
+function blobHlsPage(options = {}) {
+  return page({ url: 'https://www.reddit.com/r/UFOB/comments/imagepost/title/', shadow: true,
+    redditComment: true, redditPostPresent: false, source: 'blob:https://www.reddit.com/current',
+    recordable: true, mediaState: { ...playingRedditBlob }, nowMs: 9070,
+    network: [{ url: redditMaster, startTime: 8845 }],
+    messageHook: m => m.type === 'APOCALIPSE_VERIFY_REDDIT_HLS' ? { ok: true, url: m.url, requestUrls: [m.url] } : undefined,
+    ...options });
+}
+
+test('Reddit diagnostic 14:06: Blob playback binds its recent master after worker verification', async () => {
+  const p = blobHlsPage({ extraVideos: [
+    { currentSrc: '', src: '', getBoundingClientRect: zeroVideoBox },
+    { currentSrc: 'https://v.redd.it/standby/DASH_720.mp4', src: '', getBoundingClientRect: zeroVideoBox },
+  ] });
+  assert.equal(p.button.hidden, true);
+  await new Promise(setImmediate);
+  assert.equal(p.button.hidden, false);
+  assert.equal(p.recordButton.hidden, false);
+  await p.click();
+  assert.equal(p.downloads()[0]?.item.url, redditMaster);
+  assert.equal(p.downloads()[0].item.pageExtractor, false);
+  assert.equal(p.downloads()[0].item.ambiguousSocialTrack, false);
+});
+
+test('Reddit HLS duration rejection leaves Record available and Download unavailable', async () => {
+  const p = blobHlsPage({ messageHook: m => m.type === 'APOCALIPSE_VERIFY_REDDIT_HLS' ? { ok: false, url: m.url } : undefined });
+  await new Promise(setImmediate);
+  assert.equal(p.button.hidden, true);
+  assert.equal(p.recordButton.hidden, false);
+});
+
+test('Reddit stale or competing master playlists cannot bind to a Blob player', async () => {
+  for (const network of [
+    [{ url: redditMaster, startTime: 1000 }],
+    [{ url: redditMaster, startTime: 8845 }, { url: 'https://v.redd.it/othercomment456/HLSPlaylist.m3u8', startTime: 8850 }],
+  ]) {
+    const p = blobHlsPage({ network });
+    await new Promise(setImmediate);
+    assert.equal(p.button.hidden, true);
+    assert.ok(!p.sent.some(m => m.type === 'APOCALIPSE_VERIFY_REDDIT_HLS'));
+  }
+});
+
+test('Reddit concurrent loaded players prevent network playlist association', async () => {
+  const p = blobHlsPage({ extraVideos: [{ ...playingRedditBlob, currentSrc: 'blob:https://www.reddit.com/other' }] });
+  await new Promise(setImmediate);
+  assert.equal(p.button.hidden, true);
+  assert.ok(!p.sent.some(m => m.type === 'APOCALIPSE_VERIFY_REDDIT_HLS'));
+});
+
+test('Reddit source replacement rejects an in-flight verification and old source requests', async () => {
+  let finish;
+  const p = blobHlsPage({ messageHook: m => m.type === 'APOCALIPSE_VERIFY_REDDIT_HLS' ? new Promise(resolve => { finish = () => resolve({ ok: true, url: m.url }); }) : undefined });
+  assert.ok(finish);
+  p.setNow(9500);
+  p.video.currentSrc = p.video.src = 'blob:https://www.reddit.com/new';
+  finish();
+  await new Promise(setImmediate);
+  p.refresh();
+  assert.equal(p.button.hidden, true);
+  assert.equal(p.sent.filter(m => m.type === 'APOCALIPSE_VERIFY_REDDIT_HLS').length, 1);
 });
