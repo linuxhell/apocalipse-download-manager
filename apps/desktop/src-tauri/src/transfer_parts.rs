@@ -167,7 +167,10 @@ pub fn snapshot(task: &DownloadTask) -> PartsSnapshot {
         }
         return PartsSnapshot::unavailable("unavailable", total);
     }
-    if matches!(task.state, DownloadState::Queued | DownloadState::Inspecting) {
+    if matches!(
+        task.state,
+        DownloadState::Queued | DownloadState::Inspecting
+    ) {
         return PartsSnapshot::unavailable("unavailable", total);
     }
     let mut part = task.destination.as_os_str().to_owned();

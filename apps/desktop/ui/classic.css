@@ -139,6 +139,7 @@ button:not(.primary):not(#add):not(nav button):not(.window-controls button):not(
 .download-row.has-thumbnail { grid-template-columns: 18px 46px minmax(0, 1fr) max-content 26px; }
 .download-info { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 4px 12px; min-width: 0; }
 .task-title-line, .download-info > .task-progress { grid-column: 1 / -1; min-width: 0; }
+.task-title-line { min-height: 20px; line-height: 20px; }
 .task-title-line strong { flex: 1 1 0; min-width: 0; }
 .task-title-line .download-state { max-width: 45%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .download-info > small { min-width: 0; max-width: 100%; }

@@ -44,7 +44,7 @@ window.layoutScenario=(theme,language,page,long,thumbnail)=>{
   downloads=['downloading','paused','completed',{failed:{message:'network_waiting_for_reconnect'}},'downloading'].map((state,i)=>({
     id:'layout-'+i,state,source:page==='torrents'?'magnet:?xt=urn:btih:example':'https://example.com/file',
     destination:'/Downloads/'+title+(page==='recordings'?'.recording.webm':'.iso'),display_title:title,
-    received:i===4?4000:2440,total:page==='recordings'?null:4000,
+    received:i===4||state==='completed'?4000:2440,total:page==='recordings'?null:4000,
     thumbnail:thumbnail?'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=':null,
     torrent_seeders:page==='torrents'?12345:null,torrent_leechers:6789,torrent_eta:'123456 s',resume_supported:true
   }));
@@ -79,7 +79,7 @@ let browser, page;
           if(bar.width<80 || bar.x<info.x-1 || bar.right>info.right+1) failures.push('progress outside its own area');
           if(actions.right>bounds.right+1 || actions.x<info.right-1) failures.push('actions overlap or overflow');
           if(name.clientWidth<20 || getComputedStyle(name).textOverflow!=='ellipsis') failures.push('filename cannot be read or truncated safely');
-          if(Math.abs(bounds.height-baseline[i].height)>1 || Math.abs(bar.width-baseline[i].bar)>1) failures.push('long name changes row or progress geometry');
+          if(Math.abs(bounds.height-baseline[i].height)>1 || Math.abs(bar.width-baseline[i].bar)>1) failures.push('long name changes row '+i+': height '+baseline[i].height+'→'+bounds.height+', progress '+baseline[i].bar+'→'+bar.width);
           if(row.scrollWidth>row.clientWidth+1) failures.push('row has horizontal overflow');
           const folder=row.querySelector('.task-folder-action svg');
           if(getComputedStyle(folder).fill!=='rgb(246, 200, 74)') failures.push('folder lost its yellow color');
