@@ -1153,13 +1153,14 @@ function renderDownloads(force = false) {
       button.className = "task-action";
       button.textContent = label;
       button.dataset.command = command;
+      if (command === "reveal_download") button.classList.add("task-folder-action");
       button.title = label;
       button.setAttribute("aria-label", label);
       const icons = {
         pause_download: '<path d="M8 5v14M16 5v14"/>',
         resume_download: '<path d="m8 5 11 7-11 7z"/>',
         stop_recording: '<path d="M6 6h12v12H6z"/>',
-        reveal_download: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+        reveal_download: '<path d="M3 8V6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v1"/><path d="M3 9h18l-2 11H5L3 9Z"/>',
       };
       if (icons[command]) {
         button.classList.add("task-icon-action");
@@ -1326,6 +1327,7 @@ function renderDownloads(force = false) {
     status.append(taskDetails);
     row.prepend(select, icon, info);
     row.append(status);
+    row.append(createTransferParts(task, { invoke, language: locale, formatBytes }));
     const scenicDetails = document.createElement("div");
     scenicDetails.className = "task-scenic-details";
     const detailValues = [[t("taskDestination"), task.destination.replace(/[\\/][^\\/]*$/, "")],
@@ -1370,6 +1372,7 @@ function updateSelectionControls() {
 
 function translate() {
   document.documentElement.lang = locale;
+  window.renderAdmThemes?.();
   document
     .querySelectorAll("[data-i18n]")
     .forEach((element) => (element.textContent = t(element.dataset.i18n)));
@@ -1639,19 +1642,6 @@ document.querySelector("#export-logs").onclick = async (event) => {
 };
 document.querySelector("#clear-logs").onclick = async () => { await invoke("clear_general_log"); await refreshLogEvents(); };
 
-const darkModeToggle = document.querySelector("#dark-mode");
-const applyColorMode = (dark) => {
-  document.documentElement.dataset.mode = dark ? "dark" : "light";
-  darkModeToggle.checked = Boolean(dark);
-  try { localStorage.setItem("apocalipse.mode", dark ? "dark" : "light"); } catch {}
-};
-darkModeToggle.checked = document.documentElement.dataset.mode === "dark";
-darkModeToggle.onchange = () => {
-  applyColorMode(darkModeToggle.checked);
-  invoke("set_dark_mode", { enabled: darkModeToggle.checked }).catch((error) => reportUiError("main", "dark-mode-save", error, "WARN"));
-};
-// settings.json is the source of truth; localStorage only avoids a flash.
-invoke("get_dark_mode").then((saved) => applyColorMode(Boolean(saved))).catch((error) => reportUiError("main", "dark-mode-load", error, "WARN"));
 document.querySelector("#open-link-window").onclick = () => {
   invoke("open_link_window").catch((error) => window.alert(String(error)));
   invoke("record_ui_diagnostic", { level: "INFO", event: "link_window_requested", detail: "source=navigation" }).catch(() => {});

@@ -171,7 +171,7 @@ test('normal injection and recovery load the URL policy before the content handl
 test('Firefox classic background captures MSU through onCreated without onDeterminingFilename', async () => {
   for (const workflow of ['ci.yml', 'release.yml']) {
     assert.match(readFileSync(join(__dirname, '../.github/workflows', workflow), 'utf8'),
-      /manifest\["background"\] = \{"scripts": \["download-url-policy\.js", worker\]\}/);
+      /manifest\["background"\] = \{"scripts": \["themes\.js", "download-url-policy\.js", worker\]\}/);
   }
   const w = worker({ firefox: true });
   await w.determine({ id: 11, url: signed, filename: id, referrer: pageUrl });

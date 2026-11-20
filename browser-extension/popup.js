@@ -157,6 +157,7 @@ const directBridgeHealth = async (token) => {
     if (!response.ok) throw new Error(`bridge_http_${response.status}`);
     const payload = await response.json().catch(() => ({}));
     if (payload?.ok === false) throw new Error("bridge_health_failed");
+    await globalThis.syncPopupDesktopTheme?.(payload);
     return payload;
   } finally { clearTimeout(timeout); }
 };

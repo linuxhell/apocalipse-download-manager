@@ -1,3 +1,4 @@
+try { if (typeof importScripts === "function") importScripts("themes.js"); } catch {}
 if (typeof importScripts === "function") importScripts("download-url-policy.js");
 try { if (typeof importScripts === "function") importScripts("diagnostics-core.js", "diagnostics-worker.js"); }
 catch { console.warn("ADM diagnostics modules unavailable; download handling is preserved."); }
@@ -313,7 +314,15 @@ async function bridgeRequest(path, options = {}, suppliedToken = null) {
       throw new Error(typeof body.error === "string" ? body.error : `bridge_http_${response.status}`);
     }
     bridgeConnected = true;
-    return response.json();
+    const result = await response.json();
+    if (path === "/v1/health" && typeof result?.theme === "string" && globalThis.ADM_THEMES) {
+      const theme = globalThis.ADM_THEMES.resolve(result.theme).id;
+      try {
+        const stored = await chrome.storage.local.get({ desktopTheme: "white" });
+        if (stored.desktopTheme !== theme) await chrome.storage.local.set({ desktopTheme: theme });
+      } catch {} // Appearance storage never blocks download handoff.
+    }
+    return result;
   } catch (error) {
     bridgeConnected = false;
     throw error;
@@ -325,6 +334,7 @@ function ensureHeartbeat() {
 }
 
 const recoveryFiles = [
+  "themes.js",
   "diagnostics-core.js",
   "diagnostics.js",
   "diagnostics-media-replay.js",
@@ -1346,7 +1356,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (stored.language !== language) {
           await chrome.storage.local.set({ language });
         }
-        reply({ language });
+        reply({ language, theme: result?.theme });
       })
       .catch((error) => reply({ error: String(error) }));
     return true;

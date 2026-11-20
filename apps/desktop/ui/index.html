@@ -6,6 +6,7 @@
 <meta content="width=device-width,initial-scale=1" name="viewport"/>
 <title>Apocalipse Download Manager</title>
 <link href="classic.css" rel="stylesheet"/>
+<script src="themes.js"></script>
 <script src="color-mode.js"></script>
 </head>
 <body data-page="downloads">
@@ -50,7 +51,7 @@
 
 
 
-<section class="settings-page" hidden id="settings-panel"><div class="settings-tabs" role="tablist"><button class="active" data-settings-tab="general" role="tab" type="button"><span data-i18n="settingsGeneral">General</span></button><button data-settings-tab="language" role="tab" type="button"><span data-i18n="language">Language</span></button><button data-settings-tab="tools" role="tab" type="button"><span data-i18n="tools">Tools</span></button><button data-settings-tab="network" role="tab" type="button"><span data-i18n="settingsNetwork">Network and proxy</span></button><button data-settings-tab="extension" role="tab" type="button"><span data-i18n="settingsExtension">Browser extension</span></button></div><div class="settings-body"><div class="pane" data-pane="general"><label class="setting-toggle"><input id="dark-mode" type="checkbox"/><span><b data-i18n="darkMode">Dark mode</b><small data-i18n="darkModeHint">Near-black surfaces with light text. Progress colours stay the same.</small></span></label><label class="setting-toggle">
+<section class="settings-page" hidden id="settings-panel"><div class="settings-tabs" role="tablist"><button class="active" data-settings-tab="general" role="tab" type="button"><span data-i18n="settingsGeneral">General</span></button><button data-settings-tab="themes" role="tab" type="button"><span data-themes-label>Themes</span></button><button data-settings-tab="language" role="tab" type="button"><span data-i18n="language">Language</span></button><button data-settings-tab="tools" role="tab" type="button"><span data-i18n="tools">Tools</span></button><button data-settings-tab="network" role="tab" type="button"><span data-i18n="settingsNetwork">Network and proxy</span></button><button data-settings-tab="extension" role="tab" type="button"><span data-i18n="settingsExtension">Browser extension</span></button></div><div class="settings-body"><div class="pane" data-pane="general"><label class="setting-toggle">
 <input id="autostart" type="checkbox"/>
 <span><b data-i18n="startWithSystem">Start with the system</b><small data-i18n="startHidden">Open hidden in the system tray</small></span>
 </label><section class="pairing-settings">
@@ -84,7 +85,7 @@
 <input id="connections" max="16" min="1" type="range" value="8"/>
 </label>
 <button data-i18n="defaults" id="default-limits" type="button">Default</button>
-</div></div><div class="pane" data-pane="language" hidden><section class="appearance-card">
+</div></div><div class="pane" data-pane="themes" hidden><section class="appearance-card theme-settings"><h2 data-themes-label>Themes</h2><p id="theme-description"></p><div id="theme-choices" class="theme-choices" role="group" aria-labelledby="theme-description"></div><p id="theme-save-status" role="status" aria-live="polite"></p></section></div><div class="pane" data-pane="language" hidden><section class="appearance-card">
 <h2 data-i18n="chooseLanguage">Choose language</h2>
 <p data-i18n="languageHint">The entire application and tray menu use the selected language.</p>
 <div class="language-choices">
@@ -496,6 +497,8 @@
 </div>
 </dialog>
 <script src="file-converter.js"></script>
+<script src="transfer-parts.js"></script>
+<script src="theme-settings.js"></script>
 <script src="app.js"></script>
 <script src="diagnostics-panel.js"></script>
 </body>

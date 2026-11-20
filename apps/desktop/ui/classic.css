@@ -3,7 +3,7 @@
 @font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("assets/fonts/inter-latin-wght-normal.woff2") format("woff2-variations"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 /* Apocalipse Download Manager — classic layout: white surface, black text.
    The only colours are the progress bars (blue, red when failed, green when
-   completed). There are no themes. */
+   completed). Complete palettes are applied before paint by themes.js. */
 :root {
   color-scheme: light;
   font-family: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
@@ -128,6 +128,50 @@ button:not(.primary):not(#add):not(nav button):not(.window-controls button):not(
 .task-details summary:hover { background: var(--hover); }
 .task-details[open] .task-details-body { position: absolute; right: 0; top: 26px; z-index: 20; width: 340px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .task-details-body small { word-break: break-all; }
+
+/* A bounded filename area, a separate progress row and protected action columns. */
+.download-row {
+  grid-template-columns: 18px minmax(0, 1fr) max-content 26px;
+  min-height: 68px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+.download-row.has-thumbnail { grid-template-columns: 18px 46px minmax(0, 1fr) max-content 26px; }
+.download-info { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 4px 12px; min-width: 0; }
+.task-title-line, .download-info > .task-progress { grid-column: 1 / -1; min-width: 0; }
+.task-title-line strong { flex: 1 1 0; min-width: 0; }
+.task-title-line .download-state { max-width: 45%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.download-info > small { min-width: 0; max-width: 100%; }
+.task-transfer-rates { min-width: 0; text-align: right; }
+.task-primary-actions { max-width: 130px; flex-wrap: wrap; }
+.task-folder-action svg { fill: #f6c84a; stroke: #73500b; stroke-width: 1.5; width: 21px; height: 21px; }
+.task-parts { grid-column: 1 / -1; min-width: 0; color: var(--muted); font-size: 12px; }
+.task-parts > summary { width: fit-content; padding: 5px 0 1px 24px; cursor: pointer; }
+.task-parts-body { padding: 12px 14px; margin: 7px 0 0 24px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); }
+.parts-map { display: grid; grid-template-columns: repeat(64, minmax(0, 1fr)); gap: 3px; margin: 10px 0; }
+.parts-map > span { height: 15px; background: var(--track); border-radius: 2px; }
+.parts-map > span[data-complete="true"] { background: var(--green); }
+.parts-map > span[data-partial="true"] { background: var(--blue); }
+.parts-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 11px; }
+.parts-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.parts-legend i { width: 8px; height: 8px; background: var(--track); border-radius: 2px; }
+.parts-legend i[data-kind="complete"] { background: var(--green); }
+.parts-legend i[data-kind="partial"] { background: var(--blue); }
+.parts-caption { display: block; font-size: 11px; margin-top: 8px; overflow-wrap: anywhere; }
+.theme-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 14px; margin: 20px 0; max-width: 1000px; }
+button.theme-choice { display: flex; flex-direction: column; text-align: left; gap: 5px; padding: 12px !important; border: 1px solid var(--line-strong) !important; background: var(--surface) !important; color: var(--text) !important; border-radius: 10px !important; position: relative; }
+button.theme-choice[aria-pressed="true"] { outline: 2px solid var(--strong); outline-offset: 3px; }
+.theme-choice small { color: var(--muted); font-weight: 400; }
+.theme-choice-preview { display: grid; grid-template-columns: minmax(0, 1fr) 24px; align-items: center; gap: 14px; background: var(--surface-2); border-radius: 6px; padding: 12px; width: 100%; margin-bottom: 7px; }
+.theme-preview-line { background: var(--strong); color: var(--on-strong); padding: 5px 8px; border-radius: 5px; font-size: 12px; text-align: center; }
+.theme-preview-folder { width: 22px; height: 16px; background: #f6c84a; border: 1px solid #73500b; border-radius: 2px 4px 4px 4px; position: relative; }
+.theme-preview-folder::before { content: ""; position: absolute; width: 10px; height: 4px; background: #f6c84a; border: 1px solid #73500b; border-bottom: 0; border-radius: 3px 3px 0 0; left: -1px; top: -5px; }
+.theme-preview-progress { grid-column: 1 / -1; height: 5px; border-radius: 4px; background: linear-gradient(to right, var(--blue) 62%, var(--track) 62%); }
+html[data-theme] .download-info > small { color: var(--muted); }
+html[data-theme] .download-row:hover, html[data-theme] .window-controls button:hover { background: var(--hover); }
+html[data-theme] body.ed2k-window { --ed2k-bg: var(--surface); }
+html[data-theme] .about-creator-photo { border-color: var(--line); }
+@media (max-width: 1050px) { .parts-map { grid-template-columns: repeat(32, minmax(0, 1fr)); } }
 .task-details-body .task-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .task-details-body .task-action { border: 1px solid var(--line-strong); }
 .task-scenic-details { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
@@ -456,3 +500,8 @@ dialog .close:focus-visible { outline: 2px solid var(--line-strong); outline-off
   #add-dialog .add-dialog-grid:has(:is(#torrent-inspection, #media-inspection):not([hidden])) > .advanced-download { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); }
   #add-dialog .add-dialog-grid:has(:is(#torrent-inspection, #media-inspection):not([hidden])) .advanced-mirrors { grid-column: auto; }
 }
+
+/* Palette rules follow legacy mode selectors. */
+:root[data-theme] .download-info > small { color: var(--muted); }
+:root[data-theme] .download-row:hover, :root[data-theme] .window-controls button:hover { background: var(--hover); }
+:root[data-theme] .about-creator-photo { border-color: var(--line); }
