@@ -53,9 +53,10 @@ window.layoutScenario=(theme,language,page,long,thumbnail)=>{
 };
 `;
 
+let browser, page;
 (async()=>{
-  const browser=await chromium.launch({headless:true});
-  const page=await browser.newPage({viewport:{width:980,height:620}});
+  browser=await chromium.launch({headless:true});
+  page=await browser.newPage({viewport:{width:980,height:620}});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto(pathToFileURL(fixture).href);
   for (const name of ['themes.js','color-mode.js','download-progress.js','transfer-parts.js']) await page.addScriptTag({path:path.join(ui,name)});
@@ -113,4 +114,10 @@ window.layoutScenario=(theme,language,page,long,thumbnail)=>{
   fs.writeFileSync(path.join(out,'report.json'),JSON.stringify({cases:report.length,report,errors},null,2));
   await browser.close();fs.rmSync(temporary,{recursive:true,force:true});
   console.log(`${report.length} layout scenarios passed; 10 theme screenshots and theme-picker interaction verified.`);
-})().catch(error=>{console.error(error);process.exitCode=1;});
+})().catch(async error=>{
+  console.error(error);
+  fs.writeFileSync(path.join(out,'failure.txt'),String(error.stack||error));
+  try { await page?.screenshot({path:path.join(out,'failure.png'),timeout:5000}); } catch {}
+  try { await browser?.close(); } catch {}
+  process.exit(1);
+});

@@ -86,7 +86,11 @@ fn decode_blocks(hex: &str, count: usize) -> Option<Vec<bool>> {
         .chunks_exact(2)
         .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok())
         .collect::<Option<Vec<_>>>()?;
-    Some((0..count).map(|i| bytes[i / 8] & (1 << (i % 8)) != 0).collect())
+    Some(
+        (0..count)
+            .map(|i| bytes[i / 8] & (1 << (i % 8)) != 0)
+            .collect(),
+    )
 }
 
 fn aggregate(total: u64, block: u64, done: &[bool]) -> Option<PartsSnapshot> {
@@ -100,14 +104,24 @@ fn aggregate(total: u64, block: u64, done: &[bool]) -> Option<PartsSnapshot> {
         .map(|(index, flags)| {
             let first = index * group;
             let start = first as u64 * block;
-            let end = ((first + flags.len()) as u64).saturating_mul(block).min(total);
+            let end = ((first + flags.len()) as u64)
+                .saturating_mul(block)
+                .min(total);
             let confirmed = flags
                 .iter()
                 .enumerate()
                 .filter(|(_, finished)| **finished)
-                .map(|(offset, _)| total.saturating_sub((first + offset) as u64 * block).min(block))
+                .map(|(offset, _)| {
+                    total
+                        .saturating_sub((first + offset) as u64 * block)
+                        .min(block)
+                })
                 .sum();
-            PartCell { start, end, confirmed }
+            PartCell {
+                start,
+                end,
+                confirmed,
+            }
         })
         .collect();
     Some(PartsSnapshot {
@@ -125,9 +139,19 @@ pub fn snapshot(task: &DownloadTask) -> PartsSnapshot {
     let source = task.source.to_ascii_lowercase();
     let destination = task.destination.to_string_lossy().to_ascii_lowercase();
     if task.is_live || destination.contains(".recording") {
-        return PartsSnapshot::unavailable("sequential", total);
+        let reason = if task.state == DownloadState::Completed {
+            "recording_completed"
+        } else {
+            "sequential"
+        };
+        return PartsSnapshot::unavailable(reason, total);
     }
-    if source.starts_with("magnet:") || source.split(['?', '#']).next().is_some_and(|s| s.ends_with(".torrent")) {
+    if source.starts_with("magnet:")
+        || source
+            .split(['?', '#'])
+            .next()
+            .is_some_and(|s| s.ends_with(".torrent"))
+    {
         return PartsSnapshot::unavailable("torrent_unavailable", total);
     }
     if total == 0 {
@@ -135,9 +159,15 @@ pub fn snapshot(task: &DownloadTask) -> PartsSnapshot {
     }
     if task.state == DownloadState::Completed {
         // Publication is confirmed by the task, not inferred from received >= total.
-        if fs::metadata(&task.destination).ok().is_some_and(|m| m.len() == total) {
+        if fs::metadata(&task.destination)
+            .ok()
+            .is_some_and(|m| m.len() == total)
+        {
             return aggregate(total, total, &[true]).unwrap();
         }
+        return PartsSnapshot::unavailable("unavailable", total);
+    }
+    if matches!(task.state, DownloadState::Queued | DownloadState::Inspecting) {
         return PartsSnapshot::unavailable("unavailable", total);
     }
     let mut part = task.destination.as_os_str().to_owned();
@@ -156,16 +186,29 @@ pub fn snapshot(task: &DownloadTask) -> PartsSnapshot {
             && total.div_ceil(journal.block) <= MAX_PARTS
             && origin.as_deref() == Some(journal.origin.as_str())
             && (journal.etag.is_some() || journal.modified.is_some())
-            && fs::metadata(Path::new(&part)).ok().is_some_and(|m| m.len() == total)
+            && fs::metadata(Path::new(&part))
+                .ok()
+                .is_some_and(|m| m.len() == total)
         {
-            if let Some(done) = decode_blocks(&journal.done, total.div_ceil(journal.block) as usize) {
+            if let Some(done) = decode_blocks(&journal.done, total.div_ceil(journal.block) as usize)
+            {
                 if let Some(snapshot) = aggregate(total, journal.block, &done) {
-                    if snapshot.cells.iter().map(|cell| cell.confirmed).sum::<u64>() <= task.received {
+                    if snapshot
+                        .cells
+                        .iter()
+                        .map(|cell| cell.confirmed)
+                        .sum::<u64>()
+                        <= task.received
+                    {
                         return snapshot;
                     }
                 }
             }
         }
+        return PartsSnapshot::unavailable("unavailable", total);
+    }
+    // Do not fall back to a leftover native checkpoint for a current Xtreme task.
+    if task.xtreme_gid.is_some() {
         return PartsSnapshot::unavailable("unavailable", total);
     }
     let dir = chunk_directory(&task.destination);
@@ -178,10 +221,18 @@ pub fn snapshot(task: &DownloadTask) -> PartsSnapshot {
             && journal.identity.total == total
             && journal.chunk_size > 0
             && total.div_ceil(journal.chunk_size) <= MAX_PARTS
-            && fs::metadata(partial_path(&task.destination)).ok().is_some_and(|m| m.len() == total)
+            && fs::metadata(partial_path(&task.destination))
+                .ok()
+                .is_some_and(|m| m.len() == total)
         {
             if let Some(snapshot) = aggregate(total, journal.chunk_size, &journal.completed) {
-                if snapshot.cells.iter().map(|cell| cell.confirmed).sum::<u64>() <= task.received {
+                if snapshot
+                    .cells
+                    .iter()
+                    .map(|cell| cell.confirmed)
+                    .sum::<u64>()
+                    <= task.received
+                {
                     return snapshot;
                 }
             }
@@ -199,7 +250,13 @@ mod tests {
         let flags = decode_blocks("05", 3).unwrap();
         let map = aggregate(25, 10, &flags).unwrap();
         assert_eq!(map.completed_count, 2);
-        assert_eq!(map.cells.iter().map(|cell| cell.confirmed).collect::<Vec<_>>(), vec![10, 0, 5]);
+        assert_eq!(
+            map.cells
+                .iter()
+                .map(|cell| cell.confirmed)
+                .collect::<Vec<_>>(),
+            vec![10, 0, 5]
+        );
         assert!(decode_blocks("zz", 3).is_none());
         assert!(decode_blocks("0", 3).is_none());
         assert!(aggregate(25, 0, &flags).is_none());
@@ -211,7 +268,10 @@ mod tests {
         let flags: Vec<_> = (0..10_000).map(|i| i % 3 == 0).collect();
         let map = aggregate(99_995, 10, &flags).unwrap();
         assert!(map.cells.len() <= MAP_CELLS);
-        assert_eq!(map.cells.iter().map(|cell| cell.confirmed).sum::<u64>(), 33_335);
+        assert_eq!(
+            map.cells.iter().map(|cell| cell.confirmed).sum::<u64>(),
+            33_335
+        );
     }
 
     #[test]
@@ -233,9 +293,13 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let destination = directory.path().join("file");
         let mut task = DownloadTask::new("https://example.com/file?token=new", &destination);
+        task.state = DownloadState::Downloading;
         task.total = Some(25);
         task.received = 15;
-        fs::File::create(directory.path().join("file.nibiru-http.part")).unwrap().set_len(25).unwrap();
+        fs::File::create(directory.path().join("file.nibiru-http.part"))
+            .unwrap()
+            .set_len(25)
+            .unwrap();
         let path = directory.path().join("file.nibiru-http.part.json");
         let origin = format!("{:x}", Sha256::digest(b"https://example.com/file"));
         let mut record = serde_json::json!({"version":1,"total":25,"block":10,"origin":origin,"done":"05","etag":"v1","modified":null});

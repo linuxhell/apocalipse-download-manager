@@ -8669,13 +8669,17 @@ fn get_dark_mode(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 fn effective_ui_theme(settings: &UserSettings) -> String {
-    settings.ui_theme.clone().unwrap_or_else(|| {
-        if settings.dark_mode { "black" } else { "white" }.to_owned()
-    })
+    settings
+        .ui_theme
+        .clone()
+        .unwrap_or_else(|| if settings.dark_mode { "black" } else { "white" }.to_owned())
 }
 
 fn theme_is_dark(theme: &str) -> bool {
-    matches!(theme, "black" | "obsidian" | "sapphire" | "amethyst" | "emerald" | "copper")
+    matches!(
+        theme,
+        "black" | "obsidian" | "sapphire" | "amethyst" | "emerald" | "copper"
+    )
 }
 
 #[tauri::command]
@@ -8692,8 +8696,16 @@ fn set_ui_theme(
 ) -> Result<(), String> {
     if !matches!(
         theme.as_str(),
-        "white" | "black" | "obsidian" | "sapphire" | "amethyst" | "emerald"
-            | "copper" | "porcelain" | "pearl" | "sand"
+        "white"
+            | "black"
+            | "obsidian"
+            | "sapphire"
+            | "amethyst"
+            | "emerald"
+            | "copper"
+            | "porcelain"
+            | "pearl"
+            | "sand"
     ) {
         return Err("unsupported_theme".to_owned());
     }
@@ -8723,7 +8735,11 @@ fn set_dark_mode(
     state: State<'_, AppState>,
     enabled: bool,
 ) -> Result<(), String> {
-    set_ui_theme(app, state, if enabled { "black" } else { "white" }.to_owned())
+    set_ui_theme(
+        app,
+        state,
+        if enabled { "black" } else { "white" }.to_owned(),
+    )
 }
 
 #[tauri::command]
@@ -8731,11 +8747,17 @@ async fn get_transfer_parts(
     state: State<'_, AppState>,
     id: DownloadId,
 ) -> Result<transfer_parts::PartsSnapshot, String> {
-    let task = state.queue.lock().map_err(|e| e.to_string())?
-        .iter().find(|task| task.id == id).cloned()
+    let task = state
+        .queue
+        .lock()
+        .map_err(|e| e.to_string())?
+        .iter()
+        .find(|task| task.id == id)
+        .cloned()
         .ok_or_else(|| "unknown_download".to_owned())?;
     tauri::async_runtime::spawn_blocking(move || transfer_parts::snapshot(&task))
-        .await.map_err(|e| e.to_string())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
