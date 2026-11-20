@@ -25,9 +25,9 @@ The thread slider is visible in the new-download dialog and takes priority over 
 2. Install the matching browser extension. For Chrome/Edge, extract the ZIP and use **Load unpacked** in developer mode. For Firefox, open the Mozilla-signed XPI.
 3. Open **Tools** to install or update engines such as yt-dlp and FFmpeg. The AppImage also bundles Xtreme and stores data outside its read-only mount. On Linux, mark the AppImage executable.
 
-## Version 0.8.20
+## Version 0.8.21
 
-Fixes Reddit video downloads when player media differs from the post image, including signed HLS playlist URLs. Chrome, Edge and Firefox use extension 0.3.216, with successful download confirmed by the user. Includes Mozilla-signed Firefox and ADM builds for Windows, Linux and macOS.
+Adds **Settings > Themes** with eight new palettes alongside White and Black, automatically synchronizing the extension’s Download/Record buttons. Keeps folder icons yellow, supports Portuguese, English and Simplified Chinese, contains long filenames, and displays confirmed file parts in a collapsible panel within the current window. Includes Chrome/Edge 0.3.217, Mozilla-signed Firefox 0.3.217, and ADM for Windows, Linux and Intel macOS.
 
 ## Features
 
@@ -91,7 +91,7 @@ ED2K **Preview** becomes available after the first MD4-verified part: up to **9,
 
 Automatic retries preserve the current process's verified preview map while rechecking. The fresh result can invalidate parts; restarting the app or resuming manually requires verification again. If no peer has the remaining parts, the download stays incomplete, retains partial data and retries.
 
-This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.20**, Xtreme **0.2.8**, Chrome/Edge **0.3.216**, Firefox **0.3.216**.
+This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.21**, Xtreme **0.2.8**, Chrome/Edge **0.3.217**, Firefox **0.3.217**.
 
 ## Build and contribute
 

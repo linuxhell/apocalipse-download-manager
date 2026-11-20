@@ -4,7 +4,7 @@ button { position: relative; overflow: hidden; isolation: isolate; cursor: point
 button::after { content: ""; position: absolute; inset: 50%; border-radius: 999px; background: color-mix(in srgb, var(--p-accent, #25d9ef) 38%, transparent); opacity: 0; pointer-events: none; transform: translate(-50%, -50%) scale(0); }
 button.apocalipse-click-feedback { animation: apocalipse-extension-press .34s cubic-bezier(.2, .8, .2, 1); }
 button.apocalipse-click-feedback::after { animation: apocalipse-extension-wave .34s ease-out; }
-@keyframes apocalipse-extension-press { 0% { transform: scale(1); } 42% { transform: scale(.94); filter: brightness(1.2); } 100% { transform: scale(1); } }
+@keyframes apocalipse-extension-press { 0% { transform: scale(1); } 42% { transform: scale(.94); filter: brightness(1.03); } 100% { transform: scale(1); } }
 @keyframes apocalipse-extension-wave { 0% { opacity: .8; transform: translate(-50%, -50%) scale(0); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(5); } }
 button:disabled { cursor: default; }
 @media (prefers-reduced-motion: reduce) { button.apocalipse-click-feedback { animation-duration: .12s; } button.apocalipse-click-feedback::after { animation: none; } }
@@ -88,3 +88,16 @@ article img,.audio-icon,.preview img,#requested-media img{background:#e8e8e8}
 
 /* Black outline around the popup. */
 body::after { content: ""; position: fixed; inset: 0; border: 1px solid #000; pointer-events: none; z-index: 2147483647; }
+
+/* The same complete palette as the paired desktop; no translucent text surfaces. */
+:root[data-theme] { color-scheme: light dark; }
+:root[data-mode="dark"] { color-scheme: dark; }
+:root[data-mode="light"] { color-scheme: light; }
+body::after { border-color: var(--p-line); }
+main { scrollbar-color: var(--p-muted) var(--p-bg); }
+article img, .audio-icon, .preview img, #requested-media img { background: var(--p-surface-2); }
+.audio-icon { color: var(--p-text); }
+#bridge-dot { background: var(--p-error); }
+#bridge-dot.connected { background: var(--p-success); }
+input[type="checkbox"] { accent-color: var(--p-accent); }
+article .media-select:checked { accent-color: var(--p-accent); }

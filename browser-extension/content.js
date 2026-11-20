@@ -3,6 +3,7 @@
   let shortcutKeys = { force: "Shift", bypass: "Alt" };
   const heldShortcutKeys = new Set();
   let interfaceLanguage = "en";
+  let desktopTheme = "white";
   let refreshOverlayLanguages = () => {};
   const extensionContextActive = () => {
     try { return Boolean(chrome?.runtime?.id); } catch { return false; }
@@ -18,15 +19,20 @@
       return Promise.resolve(null);
     }
   };
-  chrome.storage.local.get({ forceShortcut: "Shift", bypassShortcut: "Alt", language: "en" }, (value) => {
+  chrome.storage.local.get({ forceShortcut: "Shift", bypassShortcut: "Alt", language: "en", desktopTheme: "white" }, (value) => {
     shortcutKeys = { force: value.forceShortcut, bypass: value.bypassShortcut };
     interfaceLanguage = value.language || "en";
+    desktopTheme = value.desktopTheme || "white";
     refreshOverlayLanguages();
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes.forceShortcut) shortcutKeys.force = changes.forceShortcut.newValue;
     if (changes.bypassShortcut) shortcutKeys.bypass = changes.bypassShortcut.newValue;
+    if (changes.desktopTheme) {
+      desktopTheme = changes.desktopTheme.newValue || "white";
+      refreshOverlayLanguages();
+    }
     if (changes.language) {
       interfaceLanguage = changes.language.newValue || "en";
       refreshOverlayLanguages();
@@ -1190,9 +1196,9 @@
       clearTimeout(timer);
     }
   };
-  // Overlay buttons are always white with black text and a black outline.
-  const overlayThemeColors = () => "#ffffff";
-  const overlayThemeForeground = () => "#111111";
+  // Only palette identifiers cross the authenticated bridge; page CSS is never accepted.
+  const overlayThemeColors = () => globalThis.ADM_THEMES?.resolve(desktopTheme).colors.accent || "#ffffff";
+  const overlayThemeForeground = () => globalThis.ADM_THEMES?.resolve(desktopTheme).colors.on || "#111111";
   const clockLabel = (seconds) => {
     const value = Math.max(0, Math.floor(seconds));
     return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
@@ -2376,7 +2382,7 @@
     document.addEventListener(event, scheduleOverlays, true);
   }
   const style = document.createElement("style");
-  style.textContent = ".apocalipse-media-download[hidden]{display:none!important}.apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:2px solid #111!important;border-radius:8px!important;padding:8px 11px!important;background:var(--apocalipse-accent,#ffffff)!important;color:var(--apocalipse-foreground,#111)!important;font:700 13px system-ui!important;box-shadow:0 3px 12px #0006!important;cursor:pointer!important;overflow:hidden!important;isolation:isolate!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download::after{content:\"\"!important;position:absolute!important;inset:50%!important;border-radius:999px!important;background:color-mix(in srgb,var(--apocalipse-accent,#ffffff) 42%,transparent)!important;opacity:0!important;pointer-events:none!important;transform:translate(-50%,-50%) scale(0)!important}.apocalipse-media-download.apocalipse-click-feedback{animation:apocalipse-overlay-press .34s cubic-bezier(.2,.8,.2,1)!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:apocalipse-overlay-wave .34s ease-out!important}@keyframes apocalipse-overlay-press{0%{transform:scale(1)}42%{transform:scale(.92);filter:brightness(1.3)}100%{transform:scale(1)}}@keyframes apocalipse-overlay-wave{0%{opacity:.85;transform:translate(-50%,-50%) scale(0)}100%{opacity:0;transform:translate(-50%,-50%) scale(5)}}.apocalipse-media-download:hover{background:var(--apocalipse-accent,#ffffff)!important;filter:brightness(1.08)!important;box-shadow:0 3px 14px #000a!important}.apocalipse-media-download:disabled{cursor:wait!important;opacity:.85!important}.apocalipse-media-record{color:var(--apocalipse-foreground,#111)!important;background:var(--apocalipse-accent,#ffffff)!important}@media (prefers-reduced-motion:reduce){.apocalipse-media-download.apocalipse-click-feedback{animation-duration:.12s!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:none!important}}";
+  style.textContent = ".apocalipse-media-download[hidden]{display:none!important}.apocalipse-media-download{position:absolute!important;z-index:2147483647!important;border:2px solid var(--apocalipse-foreground,#111)!important;border-radius:8px!important;padding:8px 11px!important;background:var(--apocalipse-accent,#ffffff)!important;color:var(--apocalipse-foreground,#111)!important;font:700 13px system-ui!important;box-shadow:0 3px 12px #0006!important;cursor:pointer!important;overflow:hidden!important;isolation:isolate!important;transition:border-color .15s,background .15s,box-shadow .15s!important}.apocalipse-media-download::after{content:\"\"!important;position:absolute!important;inset:50%!important;border-radius:999px!important;background:color-mix(in srgb,var(--apocalipse-accent,#ffffff) 42%,transparent)!important;opacity:0!important;pointer-events:none!important;transform:translate(-50%,-50%) scale(0)!important}.apocalipse-media-download.apocalipse-click-feedback{animation:apocalipse-overlay-press .34s cubic-bezier(.2,.8,.2,1)!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:apocalipse-overlay-wave .34s ease-out!important}@keyframes apocalipse-overlay-press{0%{transform:scale(1)}42%{transform:scale(.92);filter:brightness(1.03)}100%{transform:scale(1)}}@keyframes apocalipse-overlay-wave{0%{opacity:.85;transform:translate(-50%,-50%) scale(0)}100%{opacity:0;transform:translate(-50%,-50%) scale(5)}}.apocalipse-media-download:hover{background:var(--apocalipse-accent,#ffffff)!important;filter:brightness(1.08)!important;box-shadow:0 3px 14px #000a!important}.apocalipse-media-download:disabled{cursor:wait!important;opacity:.85!important}.apocalipse-media-record{color:var(--apocalipse-foreground,#111)!important;background:var(--apocalipse-accent,#ffffff)!important}@media (prefers-reduced-motion:reduce){.apocalipse-media-download.apocalipse-click-feedback{animation-duration:.12s!important}.apocalipse-media-download.apocalipse-click-feedback::after{animation:none!important}}";
   document.documentElement.append(style);
   const restartOverlayButtonFeedback = (button) => {
     if (!button || button.disabled) return;
@@ -2404,9 +2410,11 @@
     if (!extensionContextActive()) return clearInterval(appearanceSyncTimer);
     if (!activeOverlays.size) return;
     sendRuntimeMessageQuietly({ type: "APOCALIPSE_SYNC_DESKTOP_APPEARANCE" }).then((result) => {
-      if (!result?.language) return;
-      const changed = result.language !== interfaceLanguage;
-      interfaceLanguage = result.language;
+      if (!result) return;
+      const changed = (result.language && result.language !== interfaceLanguage)
+        || (result.theme && result.theme !== desktopTheme);
+      if (result.language) interfaceLanguage = result.language;
+      if (result.theme) desktopTheme = result.theme;
       if (changed) refreshOverlayLanguages();
     }).catch(() => {});
   }, 2000);

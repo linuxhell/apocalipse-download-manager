@@ -1,4 +1,13 @@
-# Apocalipse Download Manager 0.8.20 — Chrome/Edge/Firefox 0.3.216
+# Apocalipse Download Manager 0.8.21 — Chrome/Edge/Firefox 0.3.217
+
+## 0.8.21 — 2026-11-20
+
+- Adiciona Configurações → Temas com oito novas paletas completas, além de branco e preto. Texto, botões, estados, superfícies e barras usam pares coordenados com contraste verificado; a pasta mantém amarelo em todas as paletas.
+- Salva a escolha em settings.json, restaura antes da primeira pintura e sincroniza as janelas auxiliares e a extensão pareada. Baixar e Gravar sobre os vídeos acompanham o tema sem precisar abrir o popup.
+- Inclui português, inglês e chinês simplificado para temas, estados e legendas do mapa.
+- Separa nome, barra de progresso, metadados e ações para impedir que nomes longos cortem as linhas de Downloads, Torrents e Gravações.
+- Adiciona um painel de partes recolhível na lista, sem alterar as dimensões da janela. Mostra os blocos confirmados pelos checkpoints dos motores nativo e Xtreme, agrupados em até 128 células. Não inventa posições a partir da porcentagem total nem mapas de peças não expostos pelo motor de torrent.
+- Inclui Chrome/Edge 0.3.217 e Firefox 0.3.217 assinado pela Mozilla, com conteúdo equivalente ao pacote validado e assinatura conferida. ADM 0.8.21 para Windows, Linux e macOS Intel.
 
 ## 0.8.20 — 2026-11-16
 

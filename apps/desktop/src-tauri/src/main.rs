@@ -13,6 +13,7 @@ mod prepared_preview;
 mod runtime_health;
 mod thumbnail_cache;
 mod tiktok_preview;
+mod transfer_parts;
 mod transfer_speed;
 mod xtreme;
 
@@ -456,6 +457,8 @@ struct UserSettings {
     language: String,
     #[serde(default)]
     dark_mode: bool,
+    #[serde(default)]
+    ui_theme: Option<String>,
     #[serde(default = "default_true")]
     save_torrent_metadata: bool,
 }
@@ -559,6 +562,7 @@ impl Default for UserSettings {
             link_quic_local_ips: Vec::new(),
             language: default_language(),
             dark_mode: false,
+            ui_theme: None,
             save_torrent_metadata: true,
         }
     }
@@ -8664,34 +8668,96 @@ fn get_dark_mode(state: State<'_, AppState>) -> Result<bool, String> {
         .dark_mode)
 }
 
+fn effective_ui_theme(settings: &UserSettings) -> String {
+    settings
+        .ui_theme
+        .clone()
+        .unwrap_or_else(|| if settings.dark_mode { "black" } else { "white" }.to_owned())
+}
+
+fn theme_is_dark(theme: &str) -> bool {
+    matches!(
+        theme,
+        "black" | "obsidian" | "sapphire" | "amethyst" | "emerald" | "copper"
+    )
+}
+
+#[tauri::command]
+fn get_ui_theme(state: State<'_, AppState>) -> Result<String, String> {
+    let settings = state.settings.lock().map_err(|error| error.to_string())?;
+    Ok(effective_ui_theme(&settings))
+}
+
+#[tauri::command]
+fn set_ui_theme(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    theme: String,
+) -> Result<(), String> {
+    if !matches!(
+        theme.as_str(),
+        "white"
+            | "black"
+            | "obsidian"
+            | "sapphire"
+            | "amethyst"
+            | "emerald"
+            | "copper"
+            | "porcelain"
+            | "pearl"
+            | "sand"
+    ) {
+        return Err("unsupported_theme".to_owned());
+    }
+    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
+    let mut next = settings.clone();
+    next.dark_mode = theme_is_dark(&theme);
+    next.ui_theme = Some(theme.clone());
+    save_settings(&state, &next)?;
+    *settings = next;
+    drop(settings);
+    // All webviews receive the palette; native chrome receives its light/dark mode.
+    if let Some(window) = app.get_webview_window("apocalipse-ed2k-kad") {
+        let _ = window.set_theme(Some(if theme_is_dark(&theme) {
+            tauri::Theme::Dark
+        } else {
+            tauri::Theme::Light
+        }));
+    }
+    let _ = app.emit("apocalipse-theme-changed", &theme);
+    let _ = app.emit("apocalipse-mode-changed", theme_is_dark(&theme));
+    Ok(())
+}
+
 #[tauri::command]
 fn set_dark_mode(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     enabled: bool,
 ) -> Result<(), String> {
-    let mut settings = state.settings.lock().map_err(|error| error.to_string())?;
-    settings.dark_mode = enabled;
-    save_settings(&state, &settings)?;
-    drop(settings);
-    if let Some(window) = app.get_webview_window("apocalipse-ed2k-kad") {
-        window
-            .set_theme(Some(if enabled {
-                tauri::Theme::Dark
-            } else {
-                tauri::Theme::Light
-            }))
-            .map_err(|e| e.to_string())?;
-    }
-    app.emit("apocalipse-mode-changed", enabled)
-        .map_err(|e| e.to_string())?;
-    diagnostic_log(
-        &state,
-        "INFO",
-        "application.dark_mode_changed",
-        &format!("enabled={enabled}"),
-    );
-    Ok(())
+    set_ui_theme(
+        app,
+        state,
+        if enabled { "black" } else { "white" }.to_owned(),
+    )
+}
+
+#[tauri::command]
+async fn get_transfer_parts(
+    state: State<'_, AppState>,
+    id: DownloadId,
+) -> Result<transfer_parts::PartsSnapshot, String> {
+    let task = state
+        .queue
+        .lock()
+        .map_err(|e| e.to_string())?
+        .iter()
+        .find(|task| task.id == id)
+        .cloned()
+        .ok_or_else(|| "unknown_download".to_owned())?;
+    tauri::async_runtime::spawn_blocking(move || transfer_parts::snapshot(&task))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -14411,18 +14477,18 @@ fn handle_bridge_connection(app: &tauri::AppHandle, mut stream: TcpStream) {
             "bridge.health",
             "extension heartbeat authenticated",
         );
-        let language = {
+        let (language, theme) = {
             let settings = state
                 .settings
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            settings.language.clone()
+            (settings.language.clone(), effective_ui_theme(&settings))
         };
         bridge_response(
             &mut stream,
             "200 OK",
             origin,
-            &serde_json::json!({ "ok": true, "language": language }).to_string(),
+            &serde_json::json!({ "ok": true, "language": language, "theme": theme }).to_string(),
         );
     } else if first.starts_with("GET /v1/activate ") {
         diagnostic_log(
@@ -15921,6 +15987,9 @@ fn main() {
             check_file_conflict,
             remove_existing_file,
             get_dark_mode,
+            get_ui_theme,
+            set_ui_theme,
+            get_transfer_parts,
             set_dark_mode,
             get_application_language,
             get_log_editor,

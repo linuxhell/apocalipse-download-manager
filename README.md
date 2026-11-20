@@ -25,9 +25,9 @@ O slider de threads fica visível na janela de novo download. Seu valor prevalec
 2. Para integração com o navegador, instale a extensão correspondente. No Chrome/Edge, extraia o ZIP e use **Carregar sem compactação** no modo de desenvolvedor. No Firefox, abra o XPI assinado pela Mozilla.
 3. Abra **Ferramentas** para instalar ou atualizar os motores necessários, como yt-dlp e FFmpeg. O AppImage também inclui o motor Xtreme e mantém os dados fora da montagem somente leitura. No Linux, dê permissão de execução ao AppImage.
 
-## Versão 0.8.20
+## Versão 0.8.21
 
-Corrige o download de vídeos Reddit quando a mídia do player difere da imagem do post, incluindo playlists HLS com URLs assinadas. Chrome, Edge e Firefox usam a extensão 0.3.216, com download confirmado pelo usuário. Inclui Firefox assinado pela Mozilla e ADM para Windows, Linux e macOS.
+Adiciona **Configurações > Temas** com oito novas paletas, além de branco e preto, e sincronização automática dos botões Baixar/Gravar da extensão. Mantém a pasta amarela, oferece português, inglês e chinês simplificado, protege as linhas contra nomes longos e mostra partes confirmadas em um painel recolhível na janela atual. Inclui Chrome/Edge 0.3.217, Firefox 0.3.217 assinado pela Mozilla e ADM para Windows, Linux e macOS Intel.
 
 ## Recursos
 
@@ -91,7 +91,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.20**, Xtreme **0.2.8**, Chrome/Edge **0.3.216**, Firefox **0.3.216**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.21**, Xtreme **0.2.8**, Chrome/Edge **0.3.217**, Firefox **0.3.217**.
 
 ## Compilar e contribuir
 

@@ -246,6 +246,20 @@ jobs:
         run: |
           for file in browser-extension/*.js apps/desktop/ui/*.js; do node --check "$file"; done
           node --test tests/*.test.cjs
+      - name: Verify real task rows, themes and fixed-window part panels
+        shell: bash
+        run: |
+          npm install --prefix "$RUNNER_TEMP/adm-ui-layout" --no-audit --no-fund playwright@1.62.1
+          "$RUNNER_TEMP/adm-ui-layout/node_modules/.bin/playwright" install --with-deps chromium
+          NODE_PATH="$RUNNER_TEMP/adm-ui-layout/node_modules" node scripts/check-ui-layout.cjs
+      - name: Upload UI layout evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adm-ui-layout-evidence
+          path: test-results/ui-layout/
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Package Chrome, Edge and unsigned Firefox
         shell: bash
         run: |
@@ -267,7 +281,7 @@ jobs:
           worker = manifest.pop("background", {}).get("service_worker")
           if not worker:
               raise SystemExit("Chromium background service worker is missing")
-          manifest["background"] = {"scripts": ["download-url-policy.js", worker]}
+          manifest["background"] = {"scripts": ["themes.js", "download-url-policy.js", worker]}
           manifest["browser_specific_settings"] = {
               "gecko": {
                   "id": "apocalipse-download-manager@linuxhell",

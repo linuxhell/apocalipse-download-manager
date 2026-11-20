@@ -21,3 +21,6 @@ html[data-mode=dark] body.ed2k-window{--ed2k-bg:#000}
 .ed2k-setting label.ed2k-inline input{width:auto}.ed2k-setting select{padding:8px 10px;border:1px solid var(--line-strong);border-radius:5px}.ed2k-setting p{font-size:12px;color:var(--muted)}
 
 .ed2k-save-directory{display:flex;align-items:end;gap:12px;margin-bottom:12px}.ed2k-save-directory label{flex:1;min-width:0}.ed2k-save-directory input{width:100%;box-sizing:border-box}.ed2k-save-directory button{height:36px}
+
+html[data-theme] body.ed2k-window { --ed2k-bg: var(--surface); }
+html[data-theme] .ed2k-indicators [data-online=true] { color: var(--green); }
