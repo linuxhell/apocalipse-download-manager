@@ -1,6 +1,6 @@
 # Apocalipse Download Manager
 
-0.8.22 审核中：使用 Nibiru Xtreme 0.2.9 修复未选种子文件仍被创建的问题，并减少直接 HTTP 下载的请求开销。参见[审计、测量和限制](docs/AUDIT-2026-11-25.md)。
+0.8.22：使用 Nibiru Xtreme 0.2.9 修复未选种子文件仍被创建的问题，并减少直接 HTTP 下载的请求开销。参见[审计、测量和限制](docs/AUDIT-2026-11-25.md)。
 
 [Português](README.md) · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
@@ -13,9 +13,9 @@
 | Windows x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-windows-x64-portable.zip) |
 | Linux x64 | [Portable tar.gz](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64-portable.tar.gz) · [AppImage](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64.AppImage) |
 | macOS x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-macos-x64-portable.zip) |
-| Chrome | [0.3.210 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.210.zip) |
-| Edge | [0.3.210 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.210.zip) |
-| Firefox | [0.3.210 XPI](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.210.xpi) |
+| Chrome | [0.3.217 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.217.zip) |
+| Edge | [0.3.217 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.217.zip) |
+| Firefox | [0.3.217 XPI](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.217.xpi) |
 
 ![Downloads](assets/screenshots/downloads.png)
 
@@ -93,7 +93,7 @@ ED2K 的**预览**按钮在首个分块通过 MD4 校验后启用：最多 **9,7
 
 自动重试在重新检查期间保留当前进程已验证的预览映射。检查结果仍可撤销无效分块；重启程序或手动恢复需要重新验证。如果所有来源都缺少剩余分块，下载会保持未完成状态，保存已有数据并重试。
 
-此版本还修复了 HTTP 锁清理、删除普通下载时的续传标识清理、Xtreme 监听器关闭和加密缓存并发写入。ADM **0.8.21**、Xtreme **0.2.8**、Chrome/Edge **0.3.217**、Firefox **0.3.217**。
+此版本还修复了 HTTP 锁清理、删除普通下载时的续传标识清理、Xtreme 监听器关闭和加密缓存并发写入。ADM **0.8.22**、Xtreme **0.2.9**、Chrome/Edge **0.3.217**、Firefox **0.3.217**。
 
 ## 构建与贡献
 

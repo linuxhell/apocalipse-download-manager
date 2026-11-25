@@ -1,6 +1,6 @@
 # Apocalipse Download Manager
 
-Em revisão para 0.8.22: respeita arquivos desmarcados de torrents com Nibiru Xtreme 0.2.9 e reduz a quantidade de pedidos em downloads diretos. Consulte a [auditoria, medições e limites](docs/AUDIT-2026-11-25.md).
+Versão 0.8.22: respeita arquivos desmarcados de torrents com Nibiru Xtreme 0.2.9 e reduz a quantidade de pedidos em downloads diretos. Consulte a [auditoria, medições e limites](docs/AUDIT-2026-11-25.md).
 
 [Português](README.md) · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
@@ -13,9 +13,9 @@ Gerenciador de downloads livre e portátil para Windows, Linux e macOS x64.
 | Windows x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-windows-x64-portable.zip) |
 | Linux x64 | [Portable tar.gz](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64-portable.tar.gz) · [AppImage](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64.AppImage) |
 | macOS x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-macos-x64-portable.zip) |
-| Chrome | [0.3.210 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.210.zip) |
-| Edge | [0.3.210 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.210.zip) |
-| Firefox | [0.3.210 XPI](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.210.xpi) |
+| Chrome | [0.3.217 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.217.zip) |
+| Edge | [0.3.217 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.217.zip) |
+| Firefox | [0.3.217 XPI](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.217.xpi) |
 
 ![Downloads](assets/screenshots/downloads.png)
 
@@ -93,7 +93,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.21**, Xtreme **0.2.8**, Chrome/Edge **0.3.217**, Firefox **0.3.217**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.22**, Xtreme **0.2.9**, Chrome/Edge **0.3.217**, Firefox **0.3.217**.
 
 ## Compilar e contribuir
 

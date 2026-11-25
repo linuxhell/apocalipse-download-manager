@@ -1,6 +1,6 @@
-# Apocalipse Download Manager 0.8.21 — Chrome/Edge/Firefox 0.3.217
+# Apocalipse Download Manager 0.8.22 — Chrome/Edge/Firefox 0.3.217
 
-## 0.8.22 — em revisao
+## 0.8.22 — 2026-11-25
 
 - Atualiza o motor fixado para Nibiru Xtreme 0.2.9, com gravacao seletiva de torrents e pedidos HTTP de ate 128 MiB, mantendo buffers de 4 MiB.
 - Exige a capacidade de selecao correta antes de enviar um torrent parcial a um motor externo; mostra orientacao nos tres idiomas.

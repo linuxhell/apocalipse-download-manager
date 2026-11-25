@@ -1,6 +1,6 @@
 # Apocalipse Download Manager
 
-Under review for 0.8.22: respect excluded torrent files using Nibiru Xtreme 0.2.9 and reduce direct HTTP request overhead. See the [audit, measurements and limits](docs/AUDIT-2026-11-25.md).
+Version 0.8.22: respect excluded torrent files using Nibiru Xtreme 0.2.9 and reduce direct HTTP request overhead. See the [audit, measurements and limits](docs/AUDIT-2026-11-25.md).
 
 [Português](README.md) · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
@@ -13,9 +13,9 @@ Free, portable download manager for Windows, Linux and macOS x64.
 | Windows x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-windows-x64-portable.zip) |
 | Linux x64 | [Portable tar.gz](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64-portable.tar.gz) · [AppImage](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-linux-x64.AppImage) |
 | macOS x64 | [Portable ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-download-manager-macos-x64-portable.zip) |
-| Chrome | [0.3.210 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.210.zip) |
-| Edge | [0.3.210 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.210.zip) |
-| Firefox | [0.3.210 XPI](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.210.xpi) |
+| Chrome | [0.3.217 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-chrome-0.3.217.zip) |
+| Edge | [0.3.217 ZIP](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-edge-0.3.217.zip) |
+| Firefox | [0.3.217 XPI](https://github.com/linuxhell/apocalipse-download-manager/releases/latest/download/apocalipse-firefox-0.3.217.xpi) |
 
 ![Downloads](assets/screenshots/downloads.png)
 
@@ -93,7 +93,7 @@ ED2K **Preview** becomes available after the first MD4-verified part: up to **9,
 
 Automatic retries preserve the current process's verified preview map while rechecking. The fresh result can invalidate parts; restarting the app or resuming manually requires verification again. If no peer has the remaining parts, the download stays incomplete, retains partial data and retries.
 
-This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.21**, Xtreme **0.2.8**, Chrome/Edge **0.3.217**, Firefox **0.3.217**.
+This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.22**, Xtreme **0.2.9**, Chrome/Edge **0.3.217**, Firefox **0.3.217**.
 
 ## Build and contribute
 
