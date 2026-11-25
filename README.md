@@ -1,5 +1,7 @@
 # Apocalipse Download Manager
 
+Em revisão para 0.8.22: respeita arquivos desmarcados de torrents com Nibiru Xtreme 0.2.9 e reduz a quantidade de pedidos em downloads diretos. Consulte a [auditoria, medições e limites](docs/AUDIT-2026-11-25.md).
+
 [Português](README.md) · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
 Gerenciador de downloads livre e portátil para Windows, Linux e macOS x64.

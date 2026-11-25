@@ -1,5 +1,7 @@
 # Apocalipse Download Manager
 
+0.8.22 审核中：使用 Nibiru Xtreme 0.2.9 修复未选种子文件仍被创建的问题，并减少直接 HTTP 下载的请求开销。参见[审计、测量和限制](docs/AUDIT-2026-11-25.md)。
+
 [Português](README.md) · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
 适用于 Windows、Linux 和 macOS x64 的自由开源便携下载管理器。

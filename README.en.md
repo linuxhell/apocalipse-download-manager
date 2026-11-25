@@ -1,5 +1,7 @@
 # Apocalipse Download Manager
 
+Under review for 0.8.22: respect excluded torrent files using Nibiru Xtreme 0.2.9 and reduce direct HTTP request overhead. See the [audit, measurements and limits](docs/AUDIT-2026-11-25.md).
+
 [Português](README.md) · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
 Free, portable download manager for Windows, Linux and macOS x64.

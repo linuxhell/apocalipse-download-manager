@@ -2790,7 +2790,12 @@ fn inspect_torrent_bytes(data: &[u8]) -> Result<TorrentInspection, String> {
         })
         .collect();
     Ok(TorrentInspection {
-        total_size: torrent.total_length,
+        total_size: torrent
+            .files
+            .iter()
+            .filter(|file| !file.pad)
+            .map(|file| file.length)
+            .sum(),
         name: torrent.name,
         files,
         torrent_path: None,
@@ -7029,11 +7034,10 @@ async fn run_xtreme_download(
             }
         }
     };
-    let backend_xtreme = true;
     diagnostic_log(&state,"INFO","xtreme.task_started",&format!("task={id} gid={gid} engine={kind:?} connections={} listen_port=6881-6999 dht_listen_port=6881-6999",connections.min(16)));
-    state.diagnostics.record(if is_bittorrent{"torrent.engine_selected"}else{"http.engine_selected"},"INFO",None,Some(&id.to_string()),serde_json::json!({"engine":"xtreme-rpc","backend":if backend_xtreme{"nibiru-xtreme"}else{"xtreme"},"connections":connections.min(16),"kind":format!("{kind:?}"),"maxConnectionPerServer":connections.min(16),"split":connections.min(16),"listenPort":"6881-6999","dhtListenPort":"6881-6999","fileAllocation":if is_bittorrent{"none"}else{"trunc"}}));
+    state.diagnostics.record(if is_bittorrent{"torrent.engine_selected"}else{"http.engine_selected"},"INFO",None,Some(&id.to_string()),serde_json::json!({"engine":"xtreme-rpc","backend":"nibiru-xtreme","connections":connections.min(16),"kind":format!("{kind:?}"),"maxConnectionPerServer":connections.min(16),"split":connections.min(16),"listenPort":"6881-6999","dhtListenPort":"6881-6999","fileAllocation":if is_bittorrent{"none"}else{"trunc"}}));
 
-    let measure_xtreme_speed = !is_bittorrent && backend_xtreme;
+    let measure_xtreme_speed = !is_bittorrent;
     let mut speed_window = transfer_speed::TransferSpeed::default();
     let mut last_at = Instant::now();
     let transfer_started_at = startup_started_at;
@@ -11372,6 +11376,13 @@ fn enqueue_download_impl(
     let diagnostic_trace = context.as_ref().and_then(|c| c.trace_id.clone());
     inspect_url(url.clone())?;
     let kind = classify_url(&url).ok_or_else(|| "unsupported_url".to_owned())?;
+    if matches!(kind, DownloadKind::Torrent | DownloadKind::Magnet)
+        && torrent_selection
+            .as_ref()
+            .is_some_and(|files| files.is_empty() || files.contains(&0))
+    {
+        return Err("invalid_torrent_selection".to_owned());
+    }
     let download_dir = match destination_directory.filter(|path| !path.trim().is_empty()) {
         Some(path) => {
             let path = PathBuf::from(path);
@@ -11420,11 +11431,9 @@ fn enqueue_download_impl(
     let mut task = DownloadTask::new(&url, download_dir.join(&file_name));
     let mut request_identity = None;
     task.format_selection = format_selection.filter(|value| !value.trim().is_empty());
-    task.torrent_selection = torrent_selection
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|index| *index > 0)
-        .collect();
+    task.torrent_selection = torrent_selection.unwrap_or_default();
+    task.torrent_selection.sort_unstable();
+    task.torrent_selection.dedup();
     task.mirrors = mirrors
         .unwrap_or_default()
         .into_iter()
