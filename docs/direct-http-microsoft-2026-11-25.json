@@ -1,0 +1,216 @@
+{
+  "date": "2026-11-25",
+  "system": "Linux x64",
+  "source": {
+    "host": "software.download.prss.microsoft.com",
+    "name": "Windows11_Client_x64_pt-br_26300_9457.iso",
+    "size_bytes": 8731574272,
+    "etag": "\"0x6C61DB7EE31BC11DB6F893DE54413A5DEFB04F480C94261E775AD9128A9449FA\"",
+    "last_modified": "Tue, 29 Sep 2026 23:10:52 GMT",
+    "signed_url_sha256": "c8b0baf15f2a804e00ecde174db7e7c12037d7c8afc3a753bbab09bdf37f2851"
+  },
+  "rows": [
+    {
+      "run": {
+        "engine": "nibiru",
+        "started_utc": "2026-11-25T16:09:38.008577+00:00",
+        "size_bytes": 8731574272,
+        "elapsed_seconds": 97.08521471699987,
+        "mib_per_second": 85.77081638304197,
+        "mb_per_second": 89.93721955966461,
+        "mbit_per_second": 719.4977564773169,
+        "sha256": "d9ac87c1e9e47e0eb34eed443e5691c31781074e67608a51aee50d7c7039f684",
+        "round": 1,
+        "profile": "iso-baseline",
+        "native_metrics": {
+          "first_reported_progress_ms": 6182,
+          "http.segmented_metrics": {
+            "ranges": 288,
+            "http1_ranges": 0,
+            "http2_ranges": 288,
+            "header_wait_us_sum": 194328851,
+            "body_wait_us_sum": 1267167556,
+            "storage_wait_us_sum": 5256056
+          },
+          "http.range_handoffs": {
+            "count": 0
+          },
+          "http.download_completed": {
+            "bytes": 8731574272,
+            "elapsed_ms": 97070,
+            "workers": 16,
+            "transfer_ms": 97050,
+            "finalize_ms": 19,
+            "sync_ms": 18,
+            "close_ms": 0,
+            "destination_cleanup_ms": 0,
+            "rename_ms": 0,
+            "checkpoint_wait_ms": 0,
+            "checkpoint_count": 0,
+            "checkpoint_sync_ms_sum": 0,
+            "adaptive_target_at_end": 16
+          }
+        }
+      },
+      "binary": {
+        "sha256": "2d3a0071cc2da9c0c4171f1ca68157b4663cbcdd35c4ce7b78e0af2f079a54fe"
+      }
+    },
+    {
+      "run": {
+        "engine": "nibiru",
+        "started_utc": "2026-11-25T16:13:25.437513+00:00",
+        "size_bytes": 8731574272,
+        "elapsed_seconds": 96.42297715000018,
+        "mib_per_second": 86.35989440614347,
+        "mb_per_second": 90.5549126368163,
+        "mbit_per_second": 724.4393010945304,
+        "sha256": "d9ac87c1e9e47e0eb34eed443e5691c31781074e67608a51aee50d7c7039f684",
+        "native_metrics": {
+          "first_reported_progress_ms": 6846,
+          "http.segmented_metrics": {
+            "ranges": 114,
+            "http1_ranges": 0,
+            "http2_ranges": 114,
+            "header_wait_us_sum": 47605378,
+            "body_wait_us_sum": 1392922325,
+            "storage_wait_us_sum": 5536090
+          },
+          "http.range_handoffs": {
+            "count": 0
+          },
+          "http.download_completed": {
+            "bytes": 8731574272,
+            "elapsed_ms": 96365,
+            "workers": 16,
+            "transfer_ms": 96332,
+            "finalize_ms": 32,
+            "sync_ms": 32,
+            "close_ms": 0,
+            "destination_cleanup_ms": 0,
+            "rename_ms": 0,
+            "checkpoint_wait_ms": 0,
+            "checkpoint_count": 0,
+            "checkpoint_sync_ms_sum": 0,
+            "adaptive_target_at_end": 16
+          }
+        },
+        "round": 1,
+        "profile": "iso-range128"
+      },
+      "binary": {
+        "sha256": "693808175caabffb7ea22329a69ca9c16513bd9e6d424918af4ea0b1ecd21502",
+        "version": "nibiru-xtreme 0.2.8"
+      }
+    },
+    {
+      "run": {
+        "engine": "nibiru",
+        "started_utc": "2026-11-25T16:17:10.255510+00:00",
+        "size_bytes": 8731574272,
+        "elapsed_seconds": 102.87854089899997,
+        "mib_per_second": 80.94086533726241,
+        "mb_per_second": 84.87264881188527,
+        "mbit_per_second": 678.9811904950822,
+        "sha256": "d9ac87c1e9e47e0eb34eed443e5691c31781074e67608a51aee50d7c7039f684",
+        "native_metrics": {
+          "first_reported_progress_ms": 6381,
+          "http.segmented_metrics": {
+            "ranges": 115,
+            "http1_ranges": 115,
+            "http2_ranges": 0,
+            "header_wait_us_sum": 144460609,
+            "body_wait_us_sum": 1409555753,
+            "storage_wait_us_sum": 2462966
+          },
+          "http.range_handoffs": {
+            "count": 1
+          },
+          "http.download_completed": {
+            "bytes": 8731574272,
+            "elapsed_ms": 102846,
+            "workers": 16,
+            "transfer_ms": 102787,
+            "finalize_ms": 58,
+            "sync_ms": 58,
+            "close_ms": 0,
+            "destination_cleanup_ms": 0,
+            "rename_ms": 0,
+            "checkpoint_wait_ms": 0,
+            "checkpoint_count": 0,
+            "checkpoint_sync_ms_sum": 0,
+            "adaptive_target_at_end": 16
+          }
+        },
+        "round": 1,
+        "profile": "iso-http1"
+      },
+      "binary": {
+        "sha256": "693808175caabffb7ea22329a69ca9c16513bd9e6d424918af4ea0b1ecd21502",
+        "version": "nibiru-xtreme 0.2.8"
+      }
+    },
+    {
+      "run": {
+        "engine": "nibiru",
+        "started_utc": "2026-11-25T16:23:11.114671+00:00",
+        "size_bytes": 8731574272,
+        "elapsed_seconds": 96.89395122099995,
+        "mib_per_second": 85.94012340365022,
+        "mb_per_second": 90.11475083810592,
+        "mbit_per_second": 720.9180067048474,
+        "sha256": "d9ac87c1e9e47e0eb34eed443e5691c31781074e67608a51aee50d7c7039f684",
+        "native_metrics": {
+          "first_reported_progress_ms": 6684,
+          "http.segmented_metrics": {
+            "ranges": 90,
+            "http1_ranges": 0,
+            "http2_ranges": 90,
+            "header_wait_us_sum": 30709020,
+            "body_wait_us_sum": 686797048,
+            "storage_wait_us_sum": 7363294
+          },
+          "http.range_handoffs": {
+            "count": 1
+          },
+          "http.download_completed": {
+            "bytes": 8731574272,
+            "elapsed_ms": 96870,
+            "workers": 8,
+            "transfer_ms": 96837,
+            "finalize_ms": 32,
+            "sync_ms": 32,
+            "close_ms": 0,
+            "destination_cleanup_ms": 0,
+            "rename_ms": 0,
+            "checkpoint_wait_ms": 0,
+            "checkpoint_count": 0,
+            "checkpoint_sync_ms_sum": 0,
+            "adaptive_target_at_end": 8
+          }
+        },
+        "round": 1,
+        "profile": "iso-eight"
+      },
+      "binary": {
+        "sha256": "693808175caabffb7ea22329a69ca9c16513bd9e6d424918af4ea0b1ecd21502",
+        "version": "nibiru-xtreme 0.2.8"
+      }
+    }
+  ],
+  "user_reported_idm": {
+    "seconds": 93,
+    "connections": 16,
+    "provenance": "User message; different machine/network, not an experimental comparator.",
+    "connection_profiles": [
+      8,
+      16
+    ]
+  },
+  "scope": "One full-file run per profile; version strings were 0.2.8 before the version bump. Baseline HTTP source equals main; candidate changes max range 32 to 128 MiB. These measurements do not establish IDM parity.",
+  "user_reported_adm": {
+    "seconds": 84,
+    "connections": 8,
+    "provenance": "User report on their Windows machine; version/hash not supplied; not measured by the Linux harness."
+  }
+}

@@ -31,7 +31,7 @@ const catalogs = {
     aiStatusProposed: "Awaiting approval", aiStatusTesting: "Testing", aiStatusSaved: "Saved", aiStatusConfirmed: "Confirmed", aiStatusRejected: "Did not work",
     toolsPageDescription: "Manage the engines used for media, transfers, conversion and preview.",
     settingsDescription: "Configure appearance, integrations, network and application behavior.",
-    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", xtremeBackend: "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", torrentDestinationUpdateRequired: "Update Nibiru Xtreme to 0.2.3 or newer under Settings → Tools to use the correct torrent destination.", toolUpdateInUse: "The tool is in use. Stop downloads, recordings and conversions that use it, then try again. The previous files were preserved.", mediaPlayer: "mpv / media player",
+    toolbox: "TOOLBOX", update: "Update", downloadTool: "Download", downloadingTool: "Downloading…", toolDownloaded: "downloaded", xtremeBackend: "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent and magnet)", toolUpdated: "updated", toolCurrent: "already current", manualUpdateRequired: "Manual update required", torrentDestinationUpdateRequired: "Update Nibiru Xtreme to 0.2.3 or newer under Settings → Tools to use the correct torrent destination.", torrentSelectionUpdateRequired: "Update Nibiru Xtreme under Settings → Tools to keep unselected torrent files off disk.", toolUpdateInUse: "The tool is in use. Stop downloads, recordings and conversions that use it, then try again. The previous files were preserved.", mediaPlayer: "mpv / media player",
     about: "About", aboutDescription: "About the creator.", aboutCreator: "Creator: Juliano - Brazil", aboutPause: "Pause", aboutPlay: "Play", aboutStop: "Stop", aboutVolume: "Volume", facebookRecordingFallback: "The Facebook extractor failed to read this Reel. Update yt-dlp or try capturing its link again. Recording is available as an alternative.",
     addDownload: "Add download",
     downloadSpeed: "DOWNLOAD SPEED",
@@ -247,7 +247,7 @@ const catalogs = {
     aiStatusProposed: "Aguardando aprovação", aiStatusTesting: "Em teste", aiStatusSaved: "Guardada", aiStatusConfirmed: "Confirmada", aiStatusRejected: "Não funcionou",
     toolsPageDescription: "Gerencie os motores usados para mídia, transferências, conversão e pré-visualização.",
     settingsDescription: "Configure aparência, integrações, rede e comportamento do aplicativo.",
-    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", xtremeBackend: "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", torrentDestinationUpdateRequired: "Atualize o Nibiru Xtreme para 0.2.3 ou superior em Configurações → Ferramentas para usar o destino correto do torrent.", toolUpdateInUse: "A ferramenta está em uso. Pare os downloads, gravações e conversões que a utilizam e tente novamente. Os arquivos anteriores foram preservados.", mediaPlayer: "mpv / reprodutor de mídia",
+    toolbox: "CAIXA DE FERRAMENTAS", update: "Atualizar", downloadTool: "Baixar", downloadingTool: "Baixando…", toolDownloaded: "baixado", xtremeBackend: "Nibiru Xtreme (HTTP/HTTPS, FTP/SFTP, torrent e magnet)", toolUpdated: "atualizado", toolCurrent: "já está atualizado", manualUpdateRequired: "Atualização manual necessária", torrentDestinationUpdateRequired: "Atualize o Nibiru Xtreme para 0.2.3 ou superior em Configurações → Ferramentas para usar o destino correto do torrent.", torrentSelectionUpdateRequired: "Atualize o Nibiru Xtreme em Configurações → Ferramentas para respeitar os arquivos desmarcados do torrent.", toolUpdateInUse: "A ferramenta está em uso. Pare os downloads, gravações e conversões que a utilizam e tente novamente. Os arquivos anteriores foram preservados.", mediaPlayer: "mpv / reprodutor de mídia",
     about: "Sobre", aboutDescription: "Sobre o criador.", aboutCreator: "Criador: Juliano - Brasil", aboutPause: "Pausar", aboutPlay: "Tocar", aboutStop: "Parar", aboutVolume: "Volume", facebookRecordingFallback: "O extrator do Facebook falhou ao ler este Reel. Atualize o yt-dlp ou tente capturar o link novamente. Gravar está disponível como alternativa.",
     addDownload: "Adicionar download",
     downloadSpeed: "VELOCIDADE DE DOWNLOAD",
@@ -463,7 +463,7 @@ const catalogs = {
     aiStatusProposed: "等待批准", aiStatusTesting: "测试中", aiStatusSaved: "已保存", aiStatusConfirmed: "已确认", aiStatusRejected: "未解决",
     toolsPageDescription: "管理媒体、传输、转换和预览所使用的引擎。",
     settingsDescription: "配置外观、集成、网络和应用行为。",
-    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", xtremeBackend: "Nibiru Xtreme（HTTP/HTTPS、FTP/SFTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", torrentDestinationUpdateRequired: "请在设置 → 工具中将 Nibiru Xtreme 更新至 0.2.3 或更高版本，以使用正确的种子目标路径。", toolUpdateInUse: "工具正在使用中。请停止使用它的下载、录制和转换，然后重试。原有文件已保留。", mediaPlayer: "mpv / 媒体播放器",
+    toolbox: "工具箱", update: "更新", downloadTool: "下载", downloadingTool: "正在下载…", toolDownloaded: "已下载", xtremeBackend: "Nibiru Xtreme（HTTP/HTTPS、FTP/SFTP、种子和磁力链接）", toolUpdated: "已更新", toolCurrent: "已是最新版本", manualUpdateRequired: "需要手动更新", torrentDestinationUpdateRequired: "请在设置 → 工具中将 Nibiru Xtreme 更新至 0.2.3 或更高版本，以使用正确的种子目标路径。", torrentSelectionUpdateRequired: "请在设置 → 工具中更新 Nibiru Xtreme，以避免在磁盘上创建未选中的种子文件。", toolUpdateInUse: "工具正在使用中。请停止使用它的下载、录制和转换，然后重试。原有文件已保留。", mediaPlayer: "mpv / 媒体播放器",
     about: "关于", aboutDescription: "关于创作者。", aboutCreator: "创作者：Juliano - 巴西", aboutPause: "暂停", aboutPlay: "播放", aboutStop: "停止", aboutVolume: "音量", facebookRecordingFallback: "Facebook 提取器无法读取此 Reel。请更新 yt-dlp 或重新捕获链接。也可以选择录制。",
     addDownload: "添加下载",
     downloadSpeed: "下载速度",
@@ -1139,6 +1139,8 @@ function renderDownloads(force = false) {
     if (typeof task.state === "object") {
       state.title = failureMessage.endsWith("xtreme_torrent_destination_update_required")
         ? t("torrentDestinationUpdateRequired")
+        : failureMessage.endsWith("xtreme_torrent_selection_update_required")
+        ? t("torrentSelectionUpdateRequired")
         : failureMessage === "facebook_direct_download_unavailable_use_recording"
         ? t("facebookRecordingFallback")
         : failureMessage === "network_waiting_for_reconnect"
@@ -1766,6 +1768,7 @@ dialog.addEventListener("close", () => {
 });
 
 function resetMediaInspection() {
+  pendingTorrentMetadataPath = null;
   const panel = document.querySelector("#media-inspection");
   const thumbnail = document.querySelector("#media-thumbnail");
   panel.hidden = true;
@@ -2905,7 +2908,7 @@ document.querySelector("#enqueue").onclick = async () => {
           title: pendingTitle,
           thumbnail: pendingThumbnail,
           audioUrl: pendingAudioUrl,
-          expectedSize: torrentExpectedSize || pendingExpectedSize,
+          expectedSize: torrentExpectedSize ?? pendingExpectedSize,
           cookieHeader: pendingCookieHeader,
           userAgent: pendingUserAgent,
           requestMethod: pendingRequestMethod,

@@ -411,6 +411,21 @@ impl Endpoint {
         only_files: &[usize],
         download_limit: u64,
     ) -> Result<String, String> {
+        let torrent =
+            nibiru_xtreme::bittorrent::metainfo::Torrent::from_torrent_file(torrent_bytes)
+                .map_err(|error| error.to_string())?;
+        let mut selected = vec![only_files.is_empty(); torrent.files.len()];
+        for &index in only_files {
+            if index == 0 || index > selected.len() || torrent.files[index - 1].pad {
+                return Err("invalid_torrent_selection".into());
+            }
+            selected[index - 1] = true;
+        }
+        let partial = torrent
+            .files
+            .iter()
+            .zip(&selected)
+            .any(|(file, on)| !file.pad && !on);
         let name = destination
             .file_name()
             .and_then(|name| name.to_str())
@@ -425,6 +440,18 @@ impl Endpoint {
             .is_some_and(|features| features.iter().any(|feature| feature == "BitTorrent-Out"))
         {
             return Err("xtreme_torrent_destination_update_required".into());
+        }
+        if partial
+            && !version
+                .get("enabledFeatures")
+                .and_then(Value::as_array)
+                .is_some_and(|features| {
+                    features
+                        .iter()
+                        .any(|feature| feature == "BitTorrent-Selective-Storage")
+                })
+        {
+            return Err("xtreme_torrent_selection_update_required".into());
         }
         let directory = destination
             .parent()
@@ -726,12 +753,32 @@ mod torrent_destination_tests {
     use super::*;
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
-    async fn server(supported: bool) -> (Endpoint, tokio::task::JoinHandle<Vec<Value>>) {
+    fn torrent_bytes() -> Vec<u8> {
+        use nibiru_xtreme::bittorrent::metainfo::{build_info, Extras, Torrent};
+        let info = build_info(
+            "pack",
+            16_384,
+            &[
+                (&["metadata.nfo"], b"metadata"),
+                (&["movie.mkv"], b"movie"),
+                (&["subs.srt"], b"subs"),
+            ],
+        );
+        Torrent::from_info(&info, Extras::default())
+            .unwrap()
+            .to_torrent_file()
+    }
+
+    async fn server(
+        destination: bool,
+        selection: bool,
+        adds: bool,
+    ) -> (Endpoint, tokio::task::JoinHandle<Vec<Value>>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let task = tokio::spawn(async move {
             let mut requests = Vec::new();
-            for _ in 0..if supported { 2 } else { 1 } {
+            for _ in 0..if adds { 2 } else { 1 } {
                 let (stream, _) = listener.accept().await.unwrap();
                 let mut reader = BufReader::new(stream);
                 let mut length = 0;
@@ -749,7 +796,14 @@ mod torrent_destination_tests {
                 reader.read_exact(&mut body).await.unwrap();
                 let request: Value = serde_json::from_slice(&body).unwrap();
                 let result = if request["method"] == "nibiru.getVersion" {
-                    json!({"version":"0.2.3", "enabledFeatures":if supported { vec!["BitTorrent-Out"] } else {vec![]} })
+                    let mut features = Vec::new();
+                    if destination {
+                        features.push("BitTorrent-Out");
+                    }
+                    if selection {
+                        features.push("BitTorrent-Selective-Storage");
+                    }
+                    json!({"version":"0.2.9", "enabledFeatures":features})
                 } else {
                     json!("0123456789abcdef")
                 };
@@ -777,11 +831,11 @@ mod torrent_destination_tests {
 
     #[tokio::test]
     async fn torrent_rpc_uses_parent_and_the_exact_reserved_basename() {
-        let (endpoint, requests) = server(true).await;
+        let (endpoint, requests) = server(true, true, true).await;
         let root = tempfile::tempdir().unwrap();
         let destination = root.path().join("O Resgate (1)");
         endpoint
-            .add_bittorrent(b"metadata", &destination, &[2, 3], 123)
+            .add_bittorrent(&torrent_bytes(), &destination, &[2, 3], 123)
             .await
             .unwrap();
         let requests = requests.await.unwrap();
@@ -794,14 +848,37 @@ mod torrent_destination_tests {
 
     #[tokio::test]
     async fn unsupported_backend_cannot_silently_write_to_the_wrong_path() {
-        let (endpoint, requests) = server(false).await;
+        let (endpoint, requests) = server(false, false, false).await;
         assert_eq!(
             endpoint
-                .add_bittorrent(b"metadata", Path::new("Movie.mkv"), &[], 0)
+                .add_bittorrent(&torrent_bytes(), Path::new("Movie.mkv"), &[], 0)
                 .await
                 .unwrap_err(),
             "xtreme_torrent_destination_update_required"
         );
         assert_eq!(requests.await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn partial_selection_requires_a_backend_that_keeps_excluded_files_off_disk() {
+        let (endpoint, requests) = server(true, false, false).await;
+        assert_eq!(
+            endpoint
+                .add_bittorrent(&torrent_bytes(), Path::new("pack"), &[2], 0)
+                .await
+                .unwrap_err(),
+            "xtreme_torrent_selection_update_required"
+        );
+        assert_eq!(requests.await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn full_selection_remains_compatible_with_older_backends() {
+        let (endpoint, requests) = server(true, false, true).await;
+        endpoint
+            .add_bittorrent(&torrent_bytes(), Path::new("pack"), &[1, 2, 3], 0)
+            .await
+            .unwrap();
+        assert_eq!(requests.await.unwrap().len(), 2);
     }
 }
