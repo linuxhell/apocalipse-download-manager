@@ -25,6 +25,9 @@ pub struct TransferReport {
     pub multipath_negotiated: bool,
     pub additional_paths: usize,
     pub failed_paths: usize,
+    pub elapsed_ms: u64,
+    /// UDP counters include framing/retransmission: they are not file goodput.
+    pub paths: Vec<PathHealth>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -156,6 +159,62 @@ pub async fn serve_once(endpoint: &Endpoint, path: &Path, token: &str) -> Result
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PathHealth {
+    pub source: String,
+    pub established: bool,
+    pub attempts: u8,
+    pub recoveries: u8,
+    pub udp_received: u64,
+    pub udp_sent: u64,
+    pub rtt_us: u64,
+    pub lost_packets: u64,
+}
+struct TrackedPath {
+    ip: Option<IpAddr>,
+    path: Option<noq::Path>,
+    health: PathHealth,
+    next_try: tokio::time::Instant,
+}
+impl TrackedPath {
+    fn snapshot(&mut self) {
+        if let Some(path) = &self.path {
+            let stats = path.stats();
+            self.health.udp_received = stats.udp_rx.bytes;
+            self.health.udp_sent = stats.udp_tx.bytes;
+            self.health.rtt_us = stats.rtt.as_micros().min(u64::MAX as u128) as u64;
+            self.health.lost_packets = stats.lost_packets;
+            self.health.established = path.status().is_ok();
+        }
+    }
+}
+async fn open_path(connection: &Connection, remote: SocketAddr, ip: IpAddr) -> Result<noq::Path> {
+    ensure!(
+        !ip.is_unspecified() && !ip.is_multicast(),
+        "invalid source IP"
+    );
+    ensure!(
+        connection.is_multipath_enabled(),
+        "peer did not negotiate multipath"
+    );
+    let _probe = std::net::UdpSocket::bind(SocketAddr::new(ip, 0))
+        .context("source IP is not assigned locally")?;
+    Ok(tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            match connection
+                .open_path(FourTuple::new(remote, Some(ip)), PathStatus::Available)
+                .await
+            {
+                Ok(path) => break Ok::<_, noq::PathError>(path),
+                Err(noq::PathError::RemoteCidsExhausted) => {
+                    tokio::time::sleep(Duration::from_millis(20)).await
+                }
+                Err(error) => break Err(error),
+            }
+        }
+    })
+    .await??)
+}
 /// Adds validated network paths to this SAME QUIC connection.
 pub async fn add_paths(
     connection: &Connection,
@@ -163,39 +222,103 @@ pub async fn add_paths(
     local_ips: &[IpAddr],
 ) -> Result<usize> {
     ensure!(local_ips.len() <= 3, "at most three additional paths");
-    ensure!(
-        local_ips.is_empty() || connection.is_multipath_enabled(),
-        "peer did not negotiate multipath"
-    );
-    let mut count = 0;
     for ip in local_ips {
-        ensure!(
-            !ip.is_unspecified() && !ip.is_multicast(),
-            "invalid source IP"
-        );
-        // Reject addresses not assigned to this machine before asking the QUIC
-        // socket to select one (some platforms silently ignore source hints).
-        let _probe = std::net::UdpSocket::bind(SocketAddr::new(*ip, 0))
-            .context("source IP is not assigned locally")?;
-        tokio::time::timeout(Duration::from_secs(2), async {
+        open_path(connection, remote, *ip).await?;
+    }
+    Ok(local_ips.len())
+}
+
+struct Supervisor {
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
+    task: Option<tokio::task::JoinHandle<Vec<PathHealth>>>,
+}
+impl Drop for Supervisor {
+    fn drop(&mut self) {
+        if let Some(task) = &self.task {
+            task.abort();
+        }
+    }
+}
+impl Supervisor {
+    async fn start(connection: Connection, remote: SocketAddr, ips: &[IpAddr]) -> Self {
+        let mut paths = vec![TrackedPath {
+            ip: None,
+            path: connection.path(noq::PathId::ZERO),
+            health: PathHealth {
+                source: "primary".into(),
+                established: true,
+                attempts: 1,
+                recoveries: 0,
+                udp_received: 0,
+                udp_sent: 0,
+                rtt_us: 0,
+                lost_packets: 0,
+            },
+            next_try: tokio::time::Instant::now(),
+        }];
+        for ip in ips {
+            let path = open_path(&connection, remote, *ip).await.ok();
+            let established = path.is_some();
+            paths.push(TrackedPath {
+                ip: Some(*ip),
+                path,
+                health: PathHealth {
+                    source: ip.to_string(),
+                    established,
+                    attempts: 1,
+                    recoveries: 0,
+                    udp_received: 0,
+                    udp_sent: 0,
+                    rtt_us: 0,
+                    lost_packets: 0,
+                },
+                next_try: tokio::time::Instant::now() + Duration::from_secs(2),
+            });
+        }
+        let (stop, mut stopped) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(1));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
-                match connection
-                    .open_path(FourTuple::new(remote, Some(*ip)), PathStatus::Available)
-                    .await
-                {
-                    Ok(path) => break Ok::<_, noq::PathError>(path),
-                    // NEW_CONNECTION_ID can arrive after the TLS handshake completes.
-                    Err(noq::PathError::RemoteCidsExhausted) => {
-                        tokio::time::sleep(Duration::from_millis(20)).await
+                tokio::select! { _ = &mut stopped => break, _ = tick.tick() => {} }
+                for source in &mut paths {
+                    source.snapshot();
+                    if source.ip.is_none()
+                        || source.health.established
+                        || source.health.attempts >= 4
+                        || tokio::time::Instant::now() < source.next_try
+                    {
+                        continue;
                     }
-                    Err(error) => break Err(error),
+                    source.health.attempts += 1;
+                    source.next_try = tokio::time::Instant::now()
+                        + Duration::from_secs(1 << source.health.attempts);
+                    if let Ok(path) = open_path(&connection, remote, source.ip.unwrap()).await {
+                        source.path = Some(path);
+                        source.health.established = true;
+                        source.health.recoveries += 1;
+                    }
                 }
             }
-        })
-        .await??;
-        count += 1;
+            paths
+                .into_iter()
+                .map(|mut path| {
+                    path.snapshot();
+                    path.health
+                })
+                .collect()
+        });
+        Self {
+            stop: Some(stop),
+            task: Some(task),
+        }
     }
-    Ok(count)
+    async fn finish(mut self) -> Result<Vec<PathHealth>> {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        Ok(self.task.take().unwrap().await?)
+    }
 }
 
 pub async fn download(
@@ -242,14 +365,9 @@ pub async fn download_with_progress(
         endpoint.connect(remote, "apocalipse-link.local")?,
     )
     .await??;
-    let mut additional_paths = 0;
-    let mut failed_paths = 0;
-    for ip in local_ips {
-        match add_paths(&connection, remote, &[*ip]).await {
-            Ok(count) => additional_paths += count,
-            Err(_) => failed_paths += 1,
-        }
-    }
+    let started = std::time::Instant::now();
+    // Recovery runs beside the file stream and never pauses the primary path.
+    let supervisor = Supervisor::start(connection.clone(), remote, local_ips).await;
     let negotiated = connection.is_multipath_enabled();
     let (mut send, mut recv) = connection.open_bi().await?;
     write_json(
@@ -300,12 +418,17 @@ pub async fn download_with_progress(
             recv.read(&mut [0u8; 1]).await?.is_none(),
             "extra transfer bytes"
         );
+        let paths = supervisor.finish().await?;
+        let additional_paths = paths.iter().skip(1).filter(|p| p.established).count();
+        let failed_paths = local_ips.len().saturating_sub(additional_paths);
         Ok::<_, anyhow::Error>(TransferReport {
             bytes: header.bytes,
             sha256,
             multipath_negotiated: negotiated,
             additional_paths,
             failed_paths,
+            elapsed_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            paths,
         })
     }
     .await;
@@ -322,4 +445,49 @@ pub async fn download_with_progress(
         connection.close(1u8.into(), b"transfer failed");
     }
     outcome
+}
+
+#[cfg(all(test, not(windows)))]
+mod recovery_tests {
+    use super::*;
+    use futures_util::StreamExt;
+    #[tokio::test]
+    async fn abandoned_secondary_path_is_reopened_without_replacing_primary() {
+        tokio::time::timeout(Duration::from_secs(12), async {
+            let (server, cert) = server("127.0.0.1:0".parse().unwrap()).unwrap();
+            let remote = server.local_addr().unwrap();
+            let client = client("0.0.0.0:0".parse().unwrap(), cert).unwrap();
+            let (accepted, connected) = tokio::join!(
+                async { server.accept().await.unwrap().await.unwrap() },
+                async {
+                    client
+                        .connect(remote, "apocalipse-link.local")
+                        .unwrap()
+                        .await
+                        .unwrap()
+                }
+            );
+            let mut events = connected.path_events();
+            let supervisor =
+                Supervisor::start(connected.clone(), remote, &["127.0.0.2".parse().unwrap()]).await;
+            let path_id = loop {
+                if let Some(Ok(noq::PathEvent::Established { id, .. })) = events.next().await {
+                    if id != noq::PathId::ZERO {
+                        break id;
+                    }
+                }
+            };
+            connected.path(path_id).unwrap().close().unwrap();
+            tokio::time::sleep(Duration::from_millis(3200)).await;
+            let report = supervisor.finish().await.unwrap();
+            assert!(report[0].established);
+            assert!(report[1].established);
+            assert!(report[1].recoveries >= 1, "{report:?}");
+            assert!(report[1].attempts <= 4);
+            connected.close(0u8.into(), b"test");
+            accepted.close(0u8.into(), b"test");
+        })
+        .await
+        .unwrap();
+    }
 }

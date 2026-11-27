@@ -77,7 +77,7 @@ button:not(.primary):not(#add):not(nav button):not(.window-controls button):not(
 .tabs { display: flex; gap: 16px; }
 .tabs button { text-transform: none; border: 0; background: transparent; padding: 3px 0; color: var(--muted); border-bottom: 2px solid transparent; font-size: 13px; }
 .tabs button.active { color: var(--text); font-weight: 700; border-bottom-color: var(--strong); }
-.list-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.list-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; flex-wrap: wrap; }
 .list-actions input.history-search { width: 170px; flex: none; border: 0; border-bottom: 1px solid var(--faint); padding: 3px 0; background: transparent; outline: none; }
 .history-search:focus { border-bottom-color: var(--strong); }
 .list-action-button { border: 0; background: transparent; padding: 3px 2px; font-size: 12px; text-decoration: underline; display: inline-flex; align-items: center; gap: 5px; color: var(--text); }

@@ -1,6 +1,6 @@
 # Apocalipse Download Manager
 
-Version 0.8.22: respect excluded torrent files using Nibiru Xtreme 0.2.9 and reduce direct HTTP request overhead. See the [audit, measurements and limits](docs/AUDIT-2026-11-25.md).
+Version 0.9.0: transactional SQLite queue, Nibiru 0.3.0 with automatic HTTP/3, concurrency learning, IOCP/io_uring where available and BLAKE3-verified resume. QUIC Link adds path recovery and interface measurements. See [implementation, validation and limits](docs/UPGRADE-2026-11-27.md).
 
 [Português](README.md) · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
@@ -93,7 +93,7 @@ ED2K **Preview** becomes available after the first MD4-verified part: up to **9,
 
 Automatic retries preserve the current process's verified preview map while rechecking. The fresh result can invalidate parts; restarting the app or resuming manually requires verification again. If no peer has the remaining parts, the download stays incomplete, retains partial data and retries.
 
-This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.8.22**, Xtreme **0.2.9**, Chrome/Edge **0.3.217**, Firefox **0.3.217**.
+This release also fixes HTTP lock cleanup, resume identity removal when deleting normal downloads, Xtreme listener shutdown and concurrent encrypted-cache writes. ADM **0.9.0**, Xtreme **0.3.0**, Chrome/Edge **0.3.217**, Firefox **0.3.217**.
 
 ## Build and contribute
 

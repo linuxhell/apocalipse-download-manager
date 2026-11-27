@@ -222,6 +222,7 @@ fn host_rule_vault_account(pattern: &str) -> String {
 struct AppState {
     queue: Mutex<Vec<DownloadTask>>,
     queue_path: PathBuf,
+    queue_store: apocalipse_core::queue_store::QueueStore,
     workers: Mutex<HashMap<DownloadId, oneshot::Sender<()>>>,
     settings: Mutex<UserSettings>,
     settings_path: PathBuf,
@@ -5551,8 +5552,10 @@ fn read_json_state_file<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T
     }
 }
 
-fn load_queue(path: &Path) -> Vec<DownloadTask> {
-    let mut queue: Vec<DownloadTask> = read_json_state_file(path).unwrap_or_default();
+fn load_queue(
+    store: &apocalipse_core::queue_store::QueueStore,
+) -> Result<Vec<DownloadTask>, String> {
+    let mut queue = store.load().map_err(|error| error.to_string())?;
     let mut recovered = false;
     for task in &mut queue {
         if matches!(
@@ -5569,11 +5572,9 @@ fn load_queue(path: &Path) -> Vec<DownloadTask> {
         }
     }
     if recovered {
-        if let Ok(data) = serde_json::to_vec_pretty(&queue) {
-            let _ = write_file_atomically(path, &data);
-        }
+        store.save(&queue).map_err(|error| error.to_string())?;
     }
-    queue
+    Ok(queue)
 }
 
 fn restored_xtreme_task_map(queue: &[DownloadTask]) -> HashMap<DownloadId, String> {
@@ -5624,6 +5625,15 @@ fn portable_data_directory<R: tauri::Runtime>(
         }
         Err(error) => return Err(error.into()),
     };
+    let previous_database = legacy.join("queue.sqlite3");
+    let current_database = directory.join("queue.sqlite3");
+    if previous_database.is_file() && !current_database.exists() {
+        apocalipse_core::queue_store::QueueStore::copy_database(
+            &previous_database,
+            &current_database,
+        )
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    }
     for name in ["queue.json", "settings.json"] {
         let source = legacy.join(name);
         let destination = directory.join(name);
@@ -5636,13 +5646,10 @@ fn portable_data_directory<R: tauri::Runtime>(
 }
 
 fn save_queue(state: &AppState, queue: &[DownloadTask]) -> Result<(), String> {
-    let result = (|| {
-        if let Some(parent) = state.queue_path.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let data = serde_json::to_vec_pretty(queue).map_err(|error| error.to_string())?;
-        write_file_atomically(&state.queue_path, &data).map_err(|error| error.to_string())
-    })();
+    let result = state
+        .queue_store
+        .save(queue)
+        .map_err(|error| error.to_string());
     record_persistence_result(state, "queue", &result);
     state.diagnostics.record("queue.persisted", if result.is_ok() { "INFO" } else { "ERROR" }, None, None,
         serde_json::json!({"ok":result.is_ok(),"taskCount":queue.len(),"taskRefs":queue.iter().take(24).map(|t|t.id.to_string()).collect::<Vec<_>>(),"truncated":queue.len()>24}));
@@ -9625,27 +9632,36 @@ fn pick_executable(initial_path: Option<String>) -> Option<String> {
 }
 
 #[tauri::command]
+fn export_download_queue(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("JSON", &["json"])
+        .set_file_name("adm-downloads.json")
+        .save_file()
+    else {
+        return Ok(None);
+    };
+    let queue = state.queue.lock().map_err(|error| error.to_string())?;
+    state
+        .queue_store
+        .save(&queue)
+        .map_err(|error| error.to_string())?;
+    state
+        .queue_store
+        .export_json(&path)
+        .map_err(|error| error.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
 fn pick_url_list() -> Result<Vec<String>, String> {
     let Some(path) = rfd::FileDialog::new()
-        .add_filter("URL lists", &["txt", "csv"])
+        .add_filter("URL lists", &["txt", "csv", "json"])
         .pick_file()
     else {
         return Ok(Vec::new());
     };
     let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let mut urls = Vec::new();
-    for token in content
-        .split(|character: char| character.is_whitespace() || character == ',' || character == ';')
-    {
-        let value = token.trim_matches(['\"', '\'', '[', ']']);
-        if classify_url(value).is_some() && !urls.iter().any(|url| url == value) {
-            urls.push(value.to_owned());
-        }
-        if urls.len() >= 500 {
-            break;
-        }
-    }
-    Ok(urls)
+    apocalipse_core::queue_store::import_sources(&content).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -15756,7 +15772,10 @@ fn main() {
             let global_bandwidth_limiter = Arc::new(BandwidthLimiter::new(
                 initial_settings.global_bandwidth_limit,
             ));
-            let initial_queue = load_queue(&queue_path);
+            let queue_store =
+                apocalipse_core::queue_store::QueueStore::open(&queue_path, legacy_engine::migrate)
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+            let initial_queue = load_queue(&queue_store).map_err(std::io::Error::other)?;
             let initial_xtreme_tasks = restored_xtreme_task_map(&initial_queue);
             let ed2k_root = app_data.join("ed2k-kad");
             app.manage(
@@ -15766,6 +15785,7 @@ fn main() {
             app.manage(AppState {
                 queue: Mutex::new(initial_queue),
                 queue_path,
+                queue_store,
                 workers: Mutex::new(HashMap::new()),
                 settings: Mutex::new(initial_settings),
                 settings_path,
@@ -15922,6 +15942,7 @@ fn main() {
             pick_directory,
             pick_executable,
             pick_url_list,
+            export_download_queue,
             activate_main_window,
             set_download_dialog_expanded,
             file_conversion::inspect_conversion_file,

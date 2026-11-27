@@ -212,11 +212,16 @@ pub(super) fn download_link_file(
                 "INFO",
                 "link.quic_completed",
                 &format!(
-                    "bytes={} additional_paths={} failed_paths={} sha256={}",
-                    report.bytes, report.additional_paths, report.failed_paths, report.sha256
+                    "bytes={} additional_paths={} failed_paths={} sha256={} elapsed_ms={} paths={}",
+                    report.bytes,
+                    report.additional_paths,
+                    report.failed_paths,
+                    report.sha256,
+                    report.elapsed_ms,
+                    serde_json::to_string(&report.paths).unwrap_or_default()
                 ),
             );
-            let _ = reporter.app.emit("link-transport-used", serde_json::json!({"transport":"QUIC", "additionalPaths":report.additional_paths,"failedPaths":report.failed_paths}));
+            let _ = reporter.app.emit("link-transport-used", serde_json::json!({"transport":"QUIC", "additionalPaths":report.additional_paths,"failedPaths":report.failed_paths,"elapsedMs":report.elapsed_ms,"paths":report.paths}));
             Ok(())
         }
         Err(error) => {
