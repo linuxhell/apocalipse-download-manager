@@ -28,7 +28,7 @@ jobs:
     name: Publish clean release
     needs: validate
     # Never publish from a feature branch started by workflow_dispatch.
-    if: ${{ false }} # Wait for the engine's final HTTP/3 backoff regression.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
