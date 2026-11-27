@@ -7,7 +7,9 @@ use tokio::io::AsyncWriteExt;
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
-        Some("serve") if args.len() == 5 => {
+        Some(mode)
+            if mode == "serve" && args.len() == 5 || mode == "serve-many" && args.len() == 6 =>
+        {
             let token = std::env::var("ADM_LINK_LAB_TOKEN")
                 .context("set ADM_LINK_LAB_TOKEN to a random 32+ character token")?;
             let (endpoint, cert) = multipath::server(args[2].parse()?)?;
@@ -21,17 +23,36 @@ async fn main() -> Result<()> {
                 "Listening on {}; certificate saved. Share certificate and token securely.",
                 endpoint.local_addr()?
             );
-            tokio::time::timeout(
-                Duration::from_secs(600),
-                multipath::serve_once(&endpoint, Path::new(&args[3]), &token),
-            )
-            .await??;
+            let count = if mode == "serve-many" {
+                args[5].parse::<usize>()?
+            } else {
+                1
+            };
+            anyhow::ensure!((1..=100).contains(&count), "transfer count must be 1..100");
+            for _ in 0..count {
+                tokio::time::timeout(
+                    Duration::from_secs(600),
+                    multipath::serve_once(&endpoint, Path::new(&args[3]), &token),
+                )
+                .await??;
+            }
         }
-        Some("get") if args.len() >= 5 => {
+        Some(mode)
+            if mode == "get" && args.len() >= 5 || mode == "get-bound" && args.len() >= 6 =>
+        {
             let token = std::env::var("ADM_LINK_LAB_TOKEN").context("set ADM_LINK_LAB_TOKEN")?;
             let cert = tokio::fs::read(&args[3]).await?;
-            let endpoint = multipath::client("0.0.0.0:0".parse()?, cert)?;
-            let local_ips = args[5..]
+            let remote: std::net::SocketAddr = args[2].parse()?;
+            let bind = if mode == "get-bound" {
+                std::net::SocketAddr::new(args[5].parse()?, 0)
+            } else if remote.is_ipv6() {
+                "[::]:0".parse()?
+            } else {
+                "0.0.0.0:0".parse()?
+            };
+            let endpoint = multipath::client(bind, cert)?;
+            let offset = if mode == "get-bound" { 6 } else { 5 };
+            let local_ips = args[offset..]
                 .iter()
                 .map(|v| v.parse())
                 .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -39,7 +60,7 @@ async fn main() -> Result<()> {
                 Duration::from_secs(600),
                 multipath::download(
                     &endpoint,
-                    args[2].parse()?,
+                    remote,
                     &local_ips,
                     &token,
                     Path::new(&args[4]),
@@ -80,7 +101,7 @@ async fn main() -> Result<()> {
             println!("Captured {count} objects (raw archive; not an MP4)");
         }
         _ => bail!(
-            "usage:\n  serve <bind-ip:port> <selected-file> <new-certificate.der>\n  get <server-ip:port> <trusted-certificate.der> <new-output> [additional-local-ip ...]\n  dictionary-get <https-dictionary-url> <https-artifact-url> <expected-sha256> <new-output>\n  moqt-capture <https-relay-url> <broadcast> <track> <new-archive> <seconds> (requires --features moqt)"
+            "usage:\n  serve <bind-ip:port> <selected-file> <new-certificate.der>\n  serve-many <bind-ip:port> <selected-file> <new-certificate.der> <count>\n  get-bound <server-ip:port> <trusted-certificate.der> <new-output> <primary-local-ip> [additional-local-ip ...]\n  get <server-ip:port> <trusted-certificate.der> <new-output> [additional-local-ip ...]\n  dictionary-get <https-dictionary-url> <https-artifact-url> <expected-sha256> <new-output>\n  moqt-capture <https-relay-url> <broadcast> <track> <new-archive> <seconds> (requires --features moqt)"
         ),
     }
     Ok(())

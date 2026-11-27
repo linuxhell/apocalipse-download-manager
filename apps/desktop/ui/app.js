@@ -213,7 +213,7 @@ const catalogs = {
     removeEditor: "Remove editor",
     openExternal: "Open in editor",
     exportRecording: "Export completed recording", outputFormat: "Output format", videoCodec: "Video codec", audioCodec: "Audio codec", export: "Export",
-    searchHistory: "Search downloads…", importList: "Import list", advancedOptions: "Advanced options", mirrorUrls: "Mirror URLs (one per line)", priority: "Priority", priorityHigh: "High", priorityNormal: "Normal", priorityLow: "Low", verifyIntegrity: "Verify SHA-256", integrityPrompt: "Optional expected SHA-256 (leave blank to calculate only):", integrityOk: "SHA-256 verified",
+    searchHistory: "Search downloads…", importList: "Import list", exportList: "Export list", advancedOptions: "Advanced options", mirrorUrls: "Mirror URLs (one per line)", priority: "Priority", priorityHigh: "High", priorityNormal: "Normal", priorityLow: "Low", verifyIntegrity: "Verify SHA-256", integrityPrompt: "Optional expected SHA-256 (leave blank to calculate only):", integrityOk: "SHA-256 verified",
   },
   "pt-BR": {
     archiveExtractor: "Extrator de arquivos (7-Zip / RAR / UnRAR / unar / bsdtar / tar)",
@@ -429,7 +429,7 @@ const catalogs = {
     removeEditor: "Remover editor",
     openExternal: "Abrir no editor",
     exportRecording: "Exportar gravação concluída", outputFormat: "Formato de saída", videoCodec: "Codec de vídeo", audioCodec: "Codec de áudio", export: "Exportar",
-    searchHistory: "Pesquisar downloads…", importList: "Importar lista", advancedOptions: "Opções avançadas", mirrorUrls: "URLs espelho (uma por linha)", priority: "Prioridade", priorityHigh: "Alta", priorityNormal: "Normal", priorityLow: "Baixa", verifyIntegrity: "Verificar SHA-256", integrityPrompt: "SHA-256 esperado opcional (deixe vazio apenas para calcular):", integrityOk: "SHA-256 verificado",
+    searchHistory: "Pesquisar downloads…", importList: "Importar lista", exportList: "Exportar lista", advancedOptions: "Opções avançadas", mirrorUrls: "URLs espelho (uma por linha)", priority: "Prioridade", priorityHigh: "Alta", priorityNormal: "Normal", priorityLow: "Baixa", verifyIntegrity: "Verificar SHA-256", integrityPrompt: "SHA-256 esperado opcional (deixe vazio apenas para calcular):", integrityOk: "SHA-256 verificado",
   },
   "zh-CN": {
     archiveExtractor: "压缩文件解压工具（7-Zip / RAR / UnRAR / unar / bsdtar / tar）",
@@ -645,7 +645,7 @@ const catalogs = {
     removeEditor: "移除编辑器",
     openExternal: "在编辑器中打开",
     exportRecording: "导出已完成的录制", outputFormat: "输出格式", videoCodec: "视频编码", audioCodec: "音频编码", export: "导出",
-    searchHistory: "搜索下载…", importList: "导入列表", advancedOptions: "高级选项", mirrorUrls: "镜像网址（每行一个）", priority: "优先级", priorityHigh: "高", priorityNormal: "普通", priorityLow: "低", verifyIntegrity: "验证 SHA-256", integrityPrompt: "可选的预期 SHA-256（留空则仅计算）：", integrityOk: "SHA-256 已验证",
+    searchHistory: "搜索下载…", importList: "导入列表", exportList: "导出列表", advancedOptions: "高级选项", mirrorUrls: "镜像网址（每行一个）", priority: "优先级", priorityHigh: "高", priorityNormal: "普通", priorityLow: "低", verifyIntegrity: "验证 SHA-256", integrityPrompt: "可选的预期 SHA-256（留空则仅计算）：", integrityOk: "SHA-256 已验证",
   },
 };
 window.apocalipseCatalogs = catalogs;
@@ -1457,6 +1457,12 @@ document.querySelector("#history-search").oninput = (event) => {
   historyQuery = event.target.value.trim().toLocaleLowerCase();
   selectedIds.clear();
   renderDownloads();
+};
+document.querySelector("#export-list").onclick = async (event) => {
+  const button = event.currentTarget; button.disabled = true;
+  try { await invoke("export_download_queue"); }
+  catch (error) { reportUiError("main", "export-list", error); }
+  finally { button.disabled = false; }
 };
 document.querySelector("#import-list").onclick = async (event) => {
   const button = event.currentTarget;

@@ -24,3 +24,10 @@ uuid.workspace = true
 zeroize.workspace = true
 
 tempfile = "3"
+rusqlite = { version = "0.43.0", features = ["bundled", "backup"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"

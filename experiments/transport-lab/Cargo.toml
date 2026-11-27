@@ -29,3 +29,6 @@ zstd = "0.13"
 tempfile = "3"
 moq-net = { version = "=0.3.8", optional = true }
 moq-tokio = { version = "=0.19.20", default-features = false, features = ["noq", "ring"], optional = true }
+
+[dev-dependencies]
+futures-util = "0.3"

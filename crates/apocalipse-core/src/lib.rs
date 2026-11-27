@@ -10,6 +10,7 @@ pub mod metalink;
 pub mod model;
 pub mod preview;
 pub mod private_cache;
+pub mod queue_store;
 pub mod signed_update;
 pub mod strategy;
 pub mod tools;

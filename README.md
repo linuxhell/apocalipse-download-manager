@@ -1,6 +1,6 @@
 # Apocalipse Download Manager
 
-Versão 0.8.22: respeita arquivos desmarcados de torrents com Nibiru Xtreme 0.2.9 e reduz a quantidade de pedidos em downloads diretos. Consulte a [auditoria, medições e limites](docs/AUDIT-2026-11-25.md).
+Versão 0.9.0: fila transacional em SQLite, Nibiru 0.3.0 com HTTP/3 automático, aprendizado de conexões, IOCP/io_uring quando disponíveis e retomada BLAKE3. QUIC Link ganha recuperação de caminhos e medições por interface. Veja [implementação, testes e limites](docs/UPGRADE-2026-11-27.md).
 
 [Português](README.md) · [English](README.en.md) · [简体中文](README.zh-CN.md)
 
@@ -93,7 +93,7 @@ O botão **Visualizar** do ED2K é habilitado após a primeira parte verificada 
 
 Uma nova tentativa automática conserva a prévia já verificada durante a conferência desta execução. O resultado da nova conferência pode invalidar partes; reiniciar o aplicativo ou retomar manualmente exige nova verificação. Se nenhum peer tiver as partes restantes, o download continuará incompleto, preservando o parcial e tentando novamente.
 
-Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.8.22**, Xtreme **0.2.9**, Chrome/Edge **0.3.217**, Firefox **0.3.217**.
+Esta versão também corrige a liberação de bloqueios HTTP, a remoção da identidade de retomada ao excluir downloads comuns, o encerramento dos listeners do Xtreme e gravações simultâneas no cache criptografado. ADM **0.9.0**, Xtreme **0.3.0**, Chrome/Edge **0.3.217**, Firefox **0.3.217**.
 
 ## Compilar e contribuir
 
