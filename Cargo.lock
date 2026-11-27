@@ -3854,7 +3854,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 [[package]]
 name = "nibiru-platform"
 version = "0.1.0"
-source = "git+https://github.com/linuxhell/nibiru-xtreme?rev=7675daa48c870c5e2156c29b45cc0e81b8f5ca9b#7675daa48c870c5e2156c29b45cc0e81b8f5ca9b"
+source = "git+https://github.com/linuxhell/nibiru-xtreme?rev=2731172807e60bb0a6a4af7efdc9aafb9f3b0013#2731172807e60bb0a6a4af7efdc9aafb9f3b0013"
 dependencies = [
  "windows-sys 0.61.2",
 ]
@@ -3862,7 +3862,7 @@ dependencies = [
 [[package]]
 name = "nibiru-xtreme"
 version = "0.3.0"
-source = "git+https://github.com/linuxhell/nibiru-xtreme?rev=7675daa48c870c5e2156c29b45cc0e81b8f5ca9b#7675daa48c870c5e2156c29b45cc0e81b8f5ca9b"
+source = "git+https://github.com/linuxhell/nibiru-xtreme?rev=2731172807e60bb0a6a4af7efdc9aafb9f3b0013#2731172807e60bb0a6a4af7efdc9aafb9f3b0013"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
